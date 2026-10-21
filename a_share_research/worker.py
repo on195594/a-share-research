@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from a_share_research import db, research
+from a_share_research import db, price, research
 
 log = logging.getLogger(__name__)
 
@@ -20,12 +20,12 @@ def main() -> None:
     )
     log.info("worker ready")
     while True:
-        row = conn.execute("SELECT id FROM runs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+        row = conn.execute("SELECT id, kind FROM runs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
         if row is None:
             time.sleep(2)
             continue
         log.info("run %s started", row["id"])
-        research.execute(conn, row["id"])
+        (price if row["kind"] == "price" else research).execute(conn, row["id"])
         log.info("run %s finished", row["id"])
 
 

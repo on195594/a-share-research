@@ -126,6 +126,11 @@ form.inline { display: inline; margin: 0; }
 .steps li.now { color: var(--ink); font-weight: 600; }
 .steps li.now::before { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
+/* price */
+.window { color: var(--muted); font-size: 14px; }
+.facts { padding-left: 20px; margin: 8px 0; }
+.facts li { margin-bottom: 4px; }
+
 /* report */
 .stub { background: var(--surface); margin: 8px -20px 0; padding: 4px 20px 16px; }
 .meta { color: var(--muted); font-size: 14px; }

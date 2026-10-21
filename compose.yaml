@@ -1,0 +1,14 @@
+services:
+  web:
+    image: a-share-research-web
+    build: .
+    container_name: a-share-research-web
+    restart: unless-stopped
+    env_file: .env.web  # PUBLIC_BASE_URL, SESSION_SECRET, GITHUB_*; never model/TuShare credentials
+    volumes:
+      - ${DATA_DIR:?set DATA_DIR to the production data directory}:/data
+    networks: [nginx-network]
+    ports: ["127.0.0.1:8620:8620"]
+networks:
+  nginx-network:
+    external: true

@@ -30,7 +30,8 @@ HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
 STATE_COOKIE = "oauth_state"
 SESSION_SECONDS = 8 * 3600
-STEPS = {"gather": "取资料", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改"}
+STEPS = {"gather": "取资料", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改",
+         "price": "计算价格参考"}
 CSP = ("default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; "
        "object-src 'none'; img-src 'self'")
 SECURITY_HEADERS = {
@@ -83,7 +84,6 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 conn = db.connect()
-OAUTH_STATES: dict[str, float] = {}
 
 
 # ---------- security ----------
@@ -158,15 +158,26 @@ def login(request: Request):
     return render(request, "login.html", None, dev_login=settings.dev_login)
 
 
+def _sign(message: str) -> str:
+    return hmac.new(settings.session_secret.encode(), b"oauth:" + message.encode(), hashlib.sha256).hexdigest()
+
+
+def new_state() -> str:
+    # Self-verifying (nonce.expiry.mac): no server-side table an anonymous client could fill.
+    message = f"{secrets.token_urlsafe(16)}.{int(time.time()) + 600}"
+    return f"{message}.{_sign(message)}"
+
+
+def state_ok(state: str, bound: str) -> bool:
+    message, _, mac = state.rpartition(".")
+    expiry = message.rpartition(".")[2]
+    return (bool(bound) and hmac.compare_digest(state, bound) and hmac.compare_digest(mac, _sign(message))
+            and expiry.isdigit() and int(expiry) > time.time())
+
+
 @app.get("/auth/github")
 def github_start():
-    now = time.time()
-    for state in [s for s, expiry in OAUTH_STATES.items() if expiry < now]:
-        OAUTH_STATES.pop(state)
-    if len(OAUTH_STATES) > 64:
-        return Response("登录请求过多，请稍后再试", status_code=429, media_type="text/plain")
-    state = secrets.token_urlsafe(24)
-    OAUTH_STATES[state] = now + 600
+    state = new_state()
     response = RedirectResponse("https://github.com/login/oauth/authorize?" + urlencode({
         "client_id": settings.github_client_id, "redirect_uri": settings.base_url + "/oauth_callback",
         "state": state, "allow_signup": "false",
@@ -177,9 +188,7 @@ def github_start():
 
 @app.get("/oauth_callback")
 def github_callback(request: Request, code: str = "", state: str = ""):
-    bound = request.cookies.get(STATE_COOKIE, "")
-    expiry = OAUTH_STATES.pop(state, 0) if state else 0
-    if not (code and bound and expiry > time.time() and hmac.compare_digest(state, bound)):
+    if not (code and state_ok(state, request.cookies.get(STATE_COOKIE, ""))):
         return Response("登录已过期，请重新登录", status_code=400, media_type="text/plain")
     try:
         token = requests.post("https://github.com/login/oauth/access_token", timeout=10, headers={
@@ -284,6 +293,8 @@ def run_page(request: Request, run_id: int):
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if run is None:
         return Response("Not Found", status_code=404, media_type="text/plain")
+    if run["kind"] == "price" and run["status"] == "done":
+        return RedirectResponse(f"/stock/{run['code']}#price", status_code=303)
     report = conn.execute("SELECT id FROM reports WHERE run_id = ?", (run_id,)).fetchone()
     if report and run["status"] in ("done", "failed"):
         return RedirectResponse(f"/reports/{report['id']}", status_code=303)
@@ -312,7 +323,7 @@ def report_page(request: Request, report_id: int):
     return render(request, "report.html", session, report=row, body=body, run=run,
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
-                  fin=[r for r in body["table"] if r["id"].startswith("T.")])
+                  fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]))
 
 
 @app.get("/stock/{code}")
@@ -322,4 +333,28 @@ def stock_page(request: Request, code: str):
     reports = conn.execute("SELECT * FROM reports WHERE code = ? ORDER BY id DESC", (code,)).fetchall()
     if not reports:
         return Response("Not Found", status_code=404, media_type="text/plain")
-    return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex)
+    return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
+                  price=latest_price(code))
+
+
+def latest_price(code: str) -> dict | None:
+    row = conn.execute("SELECT body FROM prices WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+    if row is None:
+        return None
+    body = json.loads(row["body"])
+    # Levels are only shown while valid; afterwards the reference is history, not an action line.
+    body["expired"] = datetime.now(db.SHANGHAI).date().isoformat() > body["expires"]
+    return body
+
+
+@app.post("/price")
+def start_price(request: Request, code: str = Form(""), request_id: str = Form(""), csrf: str = Form("")):
+    if not (session := current_session(request)):
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return Response("表单已过期，请返回重试", status_code=403, media_type="text/plain")
+    report = conn.execute("SELECT name FROM reports WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+    if report is None:
+        return Response("请先研究这家公司", status_code=404, media_type="text/plain")
+    run_id = db.create_run(conn, code, request_id or None, kind="price", name=report["name"])
+    return RedirectResponse(f"/runs/{run_id}", status_code=303)

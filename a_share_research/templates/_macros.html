@@ -35,3 +35,38 @@
 {% endfor %}
 </ul>
 {% endmacro %}
+
+{% macro price_block(p, code, csrf, request_id) %}
+<section id="price" class="price">
+  <h2>价格参考 <span class="muted small">程序计算，不调用模型</span></h2>
+  {% if p and not p.expired %}
+    {% set l = p.levels %}
+    <p class="window num">依据 {{ p.as_of }} 收盘 ━━ 后续 5 个交易日 ━━ 有效至 {{ p.expires }}</p>
+    <dl class="snapshot">
+      <div><dt>收盘</dt><dd class="num">{{ "%.2f"|format(l.close) }}<small>元</small></dd></div>
+      <div><dt>观察线</dt><dd class="num">{{ "%.2f"|format(l.trigger) }}<small>元</small></dd></div>
+      <div><dt>失效线</dt><dd class="num">{{ "%.2f"|format(l.stop) }}<small>元</small></dd></div>
+      <div><dt>距失效线</dt><dd class="num">{{ "%.2f"|format(l.distance) }}<small>%</small></dd></div>
+    </dl>
+    <ul class="facts">
+      <li>MA20 {{ "%.2f"|format(l.ma20) }} 元、MA60 {{ "%.2f"|format(l.ma60) }} 元，{{ "收盘、MA20、MA60 向上排列" if l.uptrend else "未向上排列" }}。</li>
+      <li>近 20 个交易日较沪深 300 价格涨幅差 {{ "%.2f"|format(l.relative) }} 个百分点（不是超额收益预测）。</li>
+      <li>观察线为近 20 日最高价 + 0.01；失效线为近 10 日最低价；距离不是最大损失承诺。</li>
+      {% if p.adjustments %}<li>已按 TuShare 复权因子前复权，除权日：{{ p.adjustments | join("、") }}；历史价格换算到最新口径，可能不是当时实际成交价。</li>{% endif %}
+    </ul>
+    <p class="muted small">{{ p.limits }}</p>
+  {% elif p %}
+    <p class="muted">上次价格参考依据 {{ p.as_of }} 收盘，已于 {{ p.expires }} 过期，不再显示价位。</p>
+  {% else %}
+    <p class="muted">还没有价格参考。</p>
+  {% endif %}
+  {% if not p or p.expired %}
+  <form method="post" action="/price" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <input type="hidden" name="code" value="{{ code }}">
+    <button class="btn secondary" type="submit">生成价格参考</button>
+  </form>
+  {% endif %}
+</section>
+{% endmacro %}

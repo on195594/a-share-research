@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% from "_macros.html" import research_form %}
+{% from "_macros.html" import research_form, price_block %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
 <section class="narrow">
   <h1>{{ reports[0].name }}</h1>
   <p class="code">{{ code }}</p>
+  {{ price_block(price, code, csrf, request_id) }}
   <h2>研究记录</h2>
   <ul class="list">
   {% for r in reports %}

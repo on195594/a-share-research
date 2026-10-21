@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-DATA = Path("data")
+DATA = Path(os.environ.get("DATA_DIR", "data"))  # production keeps data outside the code checkout
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY,
     request_id TEXT UNIQUE,
+    kind TEXT NOT NULL DEFAULT 'research',  -- research / price
     code TEXT NOT NULL,
     name TEXT,
     status TEXT NOT NULL DEFAULT 'queued',  -- queued / running / done / failed
@@ -47,6 +49,17 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reports_by_code ON reports(code, created_at);
+CREATE TABLE IF NOT EXISTS prices (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL UNIQUE REFERENCES runs(id),
+    code TEXT NOT NULL,
+    name TEXT,
+    as_of TEXT NOT NULL,
+    expires TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS prices_by_code ON prices(code, id);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     expires_at REAL NOT NULL
@@ -70,14 +83,16 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
-def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = None) -> int:
+def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = None,
+               kind: str = "research", name: str | None = None) -> int:
     """Insert a queued run; a repeated request_id returns the existing run."""
     if request_id:
         row = conn.execute("SELECT id FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row:
             return row["id"]
     cur = conn.execute(
-        "INSERT INTO runs (request_id, code, created_at) VALUES (?, ?, ?)", (request_id, code, now())
+        "INSERT INTO runs (request_id, kind, code, name, created_at) VALUES (?, ?, ?, ?, ?)",
+        (request_id, kind, code, name, now()),
     )
     return cur.lastrowid
 

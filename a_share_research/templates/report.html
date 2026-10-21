@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import items, research_form %}
+{% from "_macros.html" import items, research_form, price_block %}
 {% block title %}{{ report.name }} · 研究报告{% endblock %}
 {% block main %}
 <article class="report">
@@ -49,6 +49,8 @@
     </div>
     <p class="muted small">来源：TuShare 合并报表与财务指标。年度为年报口径，H1 为半年报。</p>
   </section>
+
+  {% if report.passed %}{{ price_block(price, report.code, csrf, request_id) }}{% endif %}
 
   <details class="about">
     <summary>研究范围与原文</summary>

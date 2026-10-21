@@ -1,0 +1,19 @@
+# systemd user unit. Runs a pinned release checkout, never the development tree.
+[Unit]
+Description=a-share-research worker
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/a-share-research-release
+EnvironmentFile=%h/a-share-research/.env
+Environment=DATA_DIR=%h/a-share-research-data
+ExecStart=%h/a-share-research-release/.venv/bin/python -m a_share_research.worker
+UMask=0077
+Restart=on-failure
+RestartSec=10
+MemoryMax=1G
+
+[Install]
+WantedBy=default.target
