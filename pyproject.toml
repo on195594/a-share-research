@@ -3,4 +3,14 @@ name = "a-share-research"
 version = "0.0.0"
 description = "Post-close A-share single-company research assistant"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "a-stock-lib[tushare] @ https://github.com/on195594/a-stock-lib/releases/download/v0.8.2/a_stock_lib-0.8.2-py3-none-any.whl#sha256=cae49d9d7e71605a5543c1db93a18fd4f305e910a3d5060fde9028ff2d5a324c",
+    "requests>=2.32",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true

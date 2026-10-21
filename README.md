@@ -6,4 +6,6 @@
 
 ## 运行
 
-尚未实现，随 M0–M2 补充。需要 Python ≥3.13 与 uv；凭据放在 `.env`（0600，不进 Git）。
+需要 Python ≥3.13、uv、Node.js、`pdftotext`（poppler-utils）和本机 pi 运行时。按 `.env.example` 建 `.env`（0600，不进 Git），然后 `uv sync`。
+
+命令行与网页入口随 M1–M2 补充。
