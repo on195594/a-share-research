@@ -107,6 +107,9 @@ a-stock-tracker 只作只读参考：可读它的代码、算法、提示词和�
 3. **M2 网页主流程**：输入 → 进度 → 报告 → 公司列表，手机可用，GitHub 登录。在本机非生产端口用真实数据走通。
 4. **M3 价格参考**：移植 a-stock-tracker 的 `price-reference-v2` 算法（5 个交易日有效期、过期隐藏价位），只算用户选的公司；前复权改用 TuShare 复权因子，不再从前收盘价推断除权。
 5. **M4 上线切换**（唯一需要授权的步骤）：在宿主机用 docker compose 启动新系统，切换域名与 Nginx，停止旧系统受理新请求。旧系统的数据、容器和代码原样保留，不迁移、不删除。
-   - 结果（2026-10-21）：v1.0.1 上线。stock.keyi.win 转发到 `a-share-research-web:8620`，worker 以 systemd 用户服务从 `~/a-share-research-release` 运行，数据在 `~/a-share-research-data`。旧接收器已停止并禁用，旧 Web 容器已移除（镜像 `a-stock-tracker:latest` 保留），旧代码和数据保留。回滚：在旧仓库用 docker compose 从该镜像重建 Web 容器，恢复 `~/nginx-backups/` 里的 stock.conf 并重载 Nginx，再启用旧接收器。
+   - 结果（2026-10-21）：v1.0.1 上线。后经部署改造，将 release 目录合并回 `a-share-research` 单一代码库，全面采用 Docker Compose 编排：
+     - 前端（`web`，监听 8620，Nginx 反代）与后端（`worker`，模型与行情处理）容器化分离部署；
+     - 数据保存在 `~/a-share-research-data`；
+     - 停用旧的宿主 systemd worker 服务与 release 独立目录。
 
 上线之后按实际需要：MCP 只读查询、金融股、初筛。

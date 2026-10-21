@@ -1,16 +1,37 @@
 services:
+  # 前端服务：FastAPI + Jinja 服务端 HTML、OAuth 认证、查询与任务提交
   web:
     image: a-share-research-web
-    build: .
+    build:
+      context: .
+      target: web
     container_name: a-share-research-web
     restart: unless-stopped
     labels:
       com.centurylinklabs.watchtower.enable: "false"  # locally built image; no registry to pull from
     env_file: .env.web  # PUBLIC_BASE_URL, SESSION_SECRET, GITHUB_*; never model/TuShare credentials
     volumes:
-      - ${DATA_DIR:?set DATA_DIR to the production data directory}:/data
-    networks: [nginx-network]
+      - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
+    networks:
+      - nginx-network
     ports: ["127.0.0.1:8620:8620"]
+
+  # 后端服务：异步任务 Worker，执行行情获取、PDF 财报抽取与模型推理
+  worker:
+    image: a-share-research-worker
+    build:
+      context: .
+      target: worker
+    container_name: a-share-research-worker
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"  # locally built image; no registry to pull from
+    env_file: .env  # TUSHARE_TOKEN, MODEL_PROVIDER, MODEL_ID, PI_*
+    volumes:
+      - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
+      - /home/lin/.local/share/pi:/home/lin/.local/share/pi:ro
+      - /home/lin/.pi:/home/lin/.pi
+
 networks:
   nginx-network:
     external: true

@@ -19,5 +19,13 @@ uv run pytest -q tests
 
 ## 部署
 
-- 网页：`DATA_DIR=<数据目录> docker compose up -d --build`，镜像不含模型与行情凭据，只监听 `127.0.0.1:8620`，由 Nginx 反代。
-- worker：在宿主机从固定版本目录运行（`git worktree add ~/a-share-research-release <tag>` 后在其中 `uv sync --frozen --no-dev`），用 `deploy/a-share-research-worker.service` 作为 systemd 用户服务；升级只切换这个目录，不从开发目录运行。
+项目采用 Docker Compose 进行前后端容器化分离部署，全部服务在本项目目录下统一编排：
+
+- **前端（web）**：FastAPI + Jinja 服务端 HTML、OAuth 认证与交互界面。镜像内不含模型与行情凭据，通过 `nginx-network` 接入宿主 Nginx 反向代理，监听 `127.0.0.1:8620`。配置由 `.env.web` 提供。
+- **后端（worker）**：后台研究任务执行器，负责 TuShare 行情抓取、PDF 财报抽取与 LLM 研报生成。挂载宿主 pi 运行时与认证信息，配置由 `.env` 提供。与前端通过共享的 SQLite 数据目录解耦通信，不暴露外部端口。
+
+启动与构建：
+```bash
+docker compose up -d --build
+```
+数据默认保存在 `/home/lin/a-share-research-data`（可通过 `DATA_DIR` 自定义）。
