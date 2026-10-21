@@ -8,4 +8,5 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY a_share_research ./a_share_research
 USER 1000:1000
 EXPOSE 8620
-CMD ["uvicorn", "a_share_research.web:app", "--host", "0.0.0.0", "--port", "8620", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# No access log: /oauth_callback query strings carry authorization codes; nginx logs paths only.
+CMD ["uvicorn", "a_share_research.web:app", "--host", "0.0.0.0", "--port", "8620", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-access-log"]
