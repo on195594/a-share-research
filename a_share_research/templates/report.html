@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import items, research_form %}
+{% block title %}{{ report.name }} · 研究报告{% endblock %}
+{% block main %}
+<article class="report">
+  <header class="stub">
+    <h1>{{ report.name }}</h1>
+    <p class="meta"><span class="code">{{ report.code }}</span> · 依据 {{ body.document.title }}（{{ body.document.announced }} 披露）· 研究于 {{ report.created_at[:16].replace("T", " ") }}</p>
+    {% if report.passed %}
+      <p class="conclusion">{{ body.summary }}</p>
+    {% else %}
+      <p class="notice caution" role="status">独立复核没有通过，不展示结论。下面只列出已通过原文核对、复核也未提出异议的事实。</p>
+    {% endif %}
+    {% if market %}
+    <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
+      {% for r in market %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}
+    </dl>
+    <p class="muted small">行情为 {{ body.market_date }} 收盘。</p>
+    {% endif %}
+  </header>
+  <hr class="perforation">
+
+  {% set content = body if report.passed else body.facts %}
+  <section class="risks">
+    <h2>主要风险与反证</h2>
+    {{ items(content.risks or [], rows, "可列出的风险") }}
+  </section>
+  <section>
+    <h2>业务</h2>
+    {{ items(content.business or [], rows, "可列出的业务事实") }}
+  </section>
+  <section>
+    <h2>财务</h2>
+    {{ items(content.financial or [], rows, "可列出的财务事实") }}
+  </section>
+
+  <section>
+    <h2>财务数据</h2>
+    {% set periods = fin[0]["values"].keys() | list if fin else [] %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="财务数据表">
+    <table>
+      <thead><tr><th scope="col">指标</th>{% for p in periods %}<th scope="col" class="num">{{ p[:4] }}{{ "" if p.endswith("12-31") else ("H1" if p.endswith("06-30") else p[5:]) }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for r in fin %}
+        <tr><th scope="row">{{ r.label }}<small>{{ r.unit }}</small></th>{% for p in periods %}<td class="num">{{ r["values"].get(p, "—") }}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="muted small">来源：TuShare 合并报表与财务指标。年度为年报口径，H1 为半年报。</p>
+  </section>
+
+  <details class="about">
+    <summary>研究范围与原文</summary>
+    <p>原文：<a href="{{ body.document.url }}" rel="noreferrer noopener">{{ body.document.title }}（PDF，巨潮资讯）</a>，读取了管理层讨论与分析第 {{ body.pages[0] }}–{{ body.pages[-1] }} 页。</p>
+    <p class="muted small">取得于 {{ body.document.retrieved_at[:16].replace("T", " ") }} · SHA-256 {{ body.document.sha256[:16] }}… · 模型调用 {{ body.calls }} 次</p>
+    {% if body.problems %}
+    <p>复核意见：</p>
+    <ul>{% for p in body.problems %}<li>{{ p.problem }}</li>{% endfor %}</ul>
+    {% endif %}
+  </details>
+
+  <div class="actions">
+    <a class="btn secondary" href="/stock/{{ report.code }}">公司档案</a>
+    {{ research_form(report.code[:6], csrf, request_id, "重新研究") }}
+  </div>
+</article>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_macros.html" import research_form %}
+{% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
+{% block main %}
+<section class="narrow">
+  <h1>{{ reports[0].name }}</h1>
+  <p class="code">{{ code }}</p>
+  <h2>研究记录</h2>
+  <ul class="list">
+  {% for r in reports %}
+    <li>
+      <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
+      <p>{% if r.passed %}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
+        <span class="muted">· 依据 {{ r.period[:4] }} 年报</span></p>
+    </li>
+  {% endfor %}
+  </ul>
+  <div class="actions">{{ research_form(code[:6], csrf, request_id, "重新研究", cls="btn") }}</div>
+</section>
+{% endblock %}

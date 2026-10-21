@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}登录 · 个股研究{% endblock %}
+{% block main %}
+<section class="narrow">
+  <h1>个股研究</h1>
+  <p>收盘后研究一家公司：结论、最强反证和每句话的原文出处。</p>
+  <div class="actions">
+    <a class="btn" href="/auth/github">用 GitHub 登录</a>
+    {% if dev_login %}
+    <form method="post" action="/auth/dev"><button class="btn secondary" type="submit">本机开发登录</button></form>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% macro research_form(code, csrf, request_id, label="重新研究", again=True, cls="link") %}
+<form method="post" action="/research" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="request_id" value="{{ request_id }}">
+  <input type="hidden" name="q" value="{{ code }}">
+  {% if again %}<input type="hidden" name="again" value="1">{% endif %}
+  <button class="{{ cls }}" type="submit">{{ label }}</button>
+</form>
+{% endmacro %}
+
+{% macro cites(item, rows) %}
+{% if item.cites %}
+<details class="source">
+  <summary>出处</summary>
+  <ul>
+  {% for c in item.cites %}
+    {% if c.ref %}
+      {% set r = rows.get(c.ref) %}
+      {% if r %}<li><span class="tag">财务表</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}<span class="num">{{ p }} {{ v }}</span>{% if not loop.last %}；{% endif %}{% endfor %}</li>{% endif %}
+    {% else %}
+      <li><span class="tag">第 {{ c.page }} 页</span><q>{{ c.quote }}</q></li>
+    {% endif %}
+  {% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro items(list, rows, label) %}
+<ul class="items">
+{% for item in list %}
+  <li><p>{{ item.text }}</p>{{ cites(item, rows) }}</li>
+{% else %}
+  <li class="muted">没有{{ label }}。</li>
+{% endfor %}
+</ul>
+{% endmacro %}

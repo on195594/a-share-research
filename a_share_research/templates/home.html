@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import research_form %}
+{% block main %}
+<section class="start">
+  <h1>研究一家公司</h1>
+  <form method="post" action="/research" class="search">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <label for="q">代码或简称</label>
+    <div class="row">
+      <input id="q" name="q" value="{{ q or '' }}" placeholder="600519 或 茅台" autocomplete="off" required>
+      <button class="btn" type="submit">开始研究</button>
+    </div>
+    <p class="hint">读取最新年报和财务数据，约 1–3 分钟。银行、保险、券商暂不支持。</p>
+  </form>
+
+  {% if error %}<p class="notice caution" role="alert">{{ error }}</p>{% endif %}
+  {% if choices %}
+  <ul class="choices">
+    {% for c in choices %}<li>{{ research_form(c.code, csrf, request_id, c.zwjc ~ " · " ~ c.code, again=False, cls="btn secondary") }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if recent %}
+  <div class="notice" role="status">
+    <p>今天已经研究过 {{ recent.name }}。</p>
+    <div class="actions">
+      <a class="btn" href="/reports/{{ recent.id }}">阅读报告</a>
+      {{ research_form(recent.code[:6], csrf, request_id, "仍要重新研究") }}
+    </div>
+  </div>
+  {% endif %}
+</section>
+
+{% if active %}
+<section>
+  <h2>进行中</h2>
+  <ul class="list">
+  {% for r in active %}
+    <li><a href="/runs/{{ r.id }}">{{ r.name or r.code }}</a>
+      <span class="muted">{{ steps.get(r.step, "排队中") if r.status == "running" else "排队中" }}</span></li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section>
+  <h2>研究过的公司</h2>
+  {% if companies %}
+  <ul class="list companies">
+  {% for c in companies %}
+    <li>
+      <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
+      <p>{% if c.passed %}{{ c.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
+        <span class="muted">· {{ c.period[:4] }} 年报 · 研究于 {{ c.created_at[:10] }}</span></p>
+    </li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import research_form %}
+{% block head %}{% if run.status in ("queued", "running") %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
+{% block title %}{{ run.name or run.code }} · 研究中{% endblock %}
+{% block main %}
+<section class="narrow">
+  <h1>{{ run.name or run.code }}</h1>
+  <p class="code">{{ run.code }}</p>
+  {% if run.status == "queued" %}
+    <p class="notice" role="status">排队中{% if ahead %}，前面还有 {{ ahead }} 家{% endif %}。页面会自动刷新。</p>
+  {% elif run.status == "running" %}
+    <ol class="steps" aria-label="研究进度">
+      {% set order = ["gather", "compose", "review", "repair"] %}
+      {% set current = order.index(run.step) if run.step in order else 0 %}
+      {% for key in order %}
+        {% if key != "repair" or run.step == "repair" %}
+        <li class="{{ 'done' if loop.index0 < current else ('now' if loop.index0 == current else '') }}"
+            {% if loop.index0 == current %}aria-current="step"{% endif %}>{{ steps[key] }}{% if loop.index0 == current %}<span class="muted">（进行中）</span>{% endif %}</li>
+        {% endif %}
+      {% endfor %}
+    </ol>
+    <p class="muted">已用 {{ elapsed // 60 }} 分 {{ elapsed % 60 }} 秒，页面每 4 秒自动刷新。可以离开，稍后在首页查看。</p>
+  {% else %}
+    <p class="notice caution" role="alert">没有完成：{{ run.error }}</p>
+    <div class="actions">
+      {{ research_form(run.code[:6], csrf, request_id, "重新研究", cls="btn") }}
+      <a class="link" href="/">返回首页</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

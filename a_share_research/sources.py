@@ -9,8 +9,6 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
-from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -18,12 +16,12 @@ from a_stock_lib.providers.tushare_financials import TushareFinancialProvider
 from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
 from a_stock_lib.providers.tushare_valuation import TushareValuationProvider
 
-SHANGHAI = ZoneInfo("Asia/Shanghai")
-DATA = Path("data")
+from a_share_research.db import DATA, SHANGHAI
 CNINFO = "https://www.cninfo.com.cn/new"
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://www.cninfo.com.cn/"})
 KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "第一季度报告": "03-31", "第三季度报告": "09-30"}
+PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.I)
 TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第一季度报告|第三季度报告)")
 
 
@@ -45,14 +43,14 @@ class Document:
 
 
 @cache
-def _stock_list() -> dict[str, dict]:
+def stock_list() -> dict[str, dict]:
     rows = SESSION.get(f"{CNINFO}/data/szse_stock.json", timeout=30).json()["stockList"]
     return {r["code"]: r for r in rows if r.get("category") == "A股"}
 
 
 def company(code: str) -> dict:
     """cninfo identity for a 6-digit code: {code, zwjc (short name), orgId, ...}."""
-    found = _stock_list().get(code[:6])
+    found = stock_list().get(code[:6])
     if not found:
         raise SourceError(f"{code} is not a listed A share on cninfo")
     return found
@@ -77,6 +75,8 @@ def reports(code: str, days: int = 550) -> list[Document]:
     by_period: dict[str, list[Document]] = {}
     for raw in rows:
         title = re.sub(r"<[^>]+>", "", raw.get("announcementTitle", ""))
+        if not PDF_PATH.fullmatch(raw.get("adjunctUrl", "")):
+            continue
         match = TITLE_RE.search(title)
         if raw.get("secCode") != code[:6] or not match or any(
             w in title for w in ("摘要", "英文", "English", "取消", "更正公告")
