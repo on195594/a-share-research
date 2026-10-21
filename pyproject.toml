@@ -1,0 +1,6 @@
+[project]
+name = "a-share-research"
+version = "0.0.0"
+description = "Post-close A-share single-company research assistant"
+requires-python = ">=3.13"
+dependencies = []
