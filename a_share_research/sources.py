@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -39,7 +40,8 @@ class Document:
     url: str
     sha256: str = ""
     retrieved_at: str = ""
-    pages: list[str] = field(default_factory=list, repr=False)
+    pages: list[str] = field(default_factory=list, repr=False)  # pdftotext -layout, shown to the model
+    raw_pages: list[str] = field(default_factory=list, repr=False)  # -raw keeps table cells contiguous
 
 
 @cache
@@ -110,17 +112,24 @@ def fetch(doc: Document) -> Document:
     pdf.parent.mkdir(parents=True, exist_ok=True)
     if not pdf.exists():
         pdf.write_bytes(payload)
-    text_cache = pdf.with_suffix(".pages.json")
-    if text_cache.exists():
-        doc.pages = json.loads(text_cache.read_text(encoding="utf-8"))
-    else:
-        text = subprocess.run(
-            ["pdftotext", "-layout", "-enc", "UTF-8", str(pdf), "-"],
-            capture_output=True, text=True, check=True, timeout=120,
-        ).stdout
-        doc.pages = text.split("\f")[:-1] if text.endswith("\f") else text.split("\f")
-        text_cache.write_text(json.dumps(doc.pages, ensure_ascii=False), encoding="utf-8")
+    doc.pages = _pages(pdf, "-layout")
+    doc.raw_pages = _pages(pdf, "-raw")
+    if len(doc.raw_pages) != len(doc.pages):
+        raise SourceError(f"{doc.url}: page count differs between text extractions")
     return doc
+
+
+def _pages(pdf: Path, mode: str) -> list[str]:
+    cache = pdf.with_suffix(f".{mode.lstrip('-')}.json")
+    if cache.exists():
+        return json.loads(cache.read_text(encoding="utf-8"))
+    text = subprocess.run(
+        ["pdftotext", mode, "-enc", "UTF-8", str(pdf), "-"],
+        capture_output=True, text=True, check=True, timeout=120,
+    ).stdout
+    pages = text.split("\f")[:-1] if text.endswith("\f") else text.split("\f")
+    cache.write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
+    return pages
 
 
 def _frame(result) -> pd.DataFrame:

@@ -13,10 +13,11 @@ log = logging.getLogger(__name__)
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     conn = db.connect()
-    # A run left 'running' by a previous worker cannot be resumed; the user can start it again.
+    # A web run left 'running' by a previous worker cannot be resumed; the user can start it again.
+    # Command-line runs (no request_id) belong to their own process and are left alone.
     conn.execute(
         "UPDATE runs SET status = 'failed', step = NULL, error = '研究中断（服务重启），请重新开始', finished_at = ?"
-        " WHERE status = 'running'", (db.now(),),
+        " WHERE status = 'running' AND request_id IS NOT NULL", (db.now(),),
     )
     log.info("worker ready")
     while True:

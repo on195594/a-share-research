@@ -60,7 +60,9 @@
   {% else %}
     <p class="muted">还没有价格参考。</p>
   {% endif %}
-  {% if not p or p.expired %}
+  {% if code[:2] not in ("60", "00") %}
+  <p class="muted small">价格参考只支持沪深主板股票（创业板、科创板、北交所涨跌幅规则不同）。</p>
+  {% elif not p or p.expired %}
   <form method="post" action="/price" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request_id" value="{{ request_id }}">

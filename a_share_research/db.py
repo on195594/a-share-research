@@ -84,15 +84,15 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 
 def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = None,
-               kind: str = "research", name: str | None = None) -> int:
+               kind: str = "research", name: str | None = None, status: str = "queued") -> int:
     """Insert a queued run; a repeated request_id returns the existing run."""
     if request_id:
         row = conn.execute("SELECT id FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row:
             return row["id"]
     cur = conn.execute(
-        "INSERT INTO runs (request_id, kind, code, name, created_at) VALUES (?, ?, ?, ?, ?)",
-        (request_id, kind, code, name, now()),
+        "INSERT INTO runs (request_id, kind, code, name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (request_id, kind, code, name, status, now()),
     )
     return cur.lastrowid
 

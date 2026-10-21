@@ -245,16 +245,16 @@ def home(request: Request):
                   request_id=uuid.uuid4().hex)
 
 
-def resolve(query: str) -> tuple[str | None, list[dict]]:
-    """A 6-digit code or a (partial) short name -> code, or candidate companies when ambiguous."""
+def resolve(query: str) -> tuple[dict | None, list[dict]]:
+    """A 6-digit code or a (partial) short name -> the company, or candidates when ambiguous."""
     query = re.sub(r"\s+", "", query).upper().removesuffix(".SH").removesuffix(".SZ").removesuffix(".BJ")
     stocks = sources.stock_list()
     if query in stocks:
-        return query, []
+        return stocks[query], []
     matches = [s for s in stocks.values() if query and query in s["zwjc"].replace(" ", "")]
     exact = [s for s in matches if s["zwjc"].replace(" ", "") == query]
     if len(exact) == 1 or len(matches) == 1:
-        return (exact or matches)[0]["code"], []
+        return (exact or matches)[0], []
     return None, matches[:10]
 
 
@@ -266,14 +266,15 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     if not csrf_ok(session, csrf):
         return Response("表单已过期，请返回首页重试", status_code=403, media_type="text/plain")
     try:
-        code, choices = resolve(q)
+        company, choices = resolve(q)
     except requests.RequestException:
         return render(request, "home.html", session, 503, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=q, error="暂时无法连接巨潮资讯核对公司，请稍后再试")
-    if code is None:
+    if company is None:
         error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=q, error=error, choices=choices)
+    code = company["code"]
     today = datetime.now(db.SHANGHAI).date().isoformat()
     recent = conn.execute(
         "SELECT * FROM reports WHERE code LIKE ? AND passed = 1 AND created_at >= ? ORDER BY id DESC LIMIT 1",
@@ -282,7 +283,7 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     if recent and not again:
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=code, recent=recent)
-    run_id = db.create_run(conn, code, request_id or None)
+    run_id = db.create_run(conn, code, request_id or None, name=company["zwjc"].replace(" ", ""))
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
@@ -298,8 +299,9 @@ def run_page(request: Request, run_id: int):
     report = conn.execute("SELECT id FROM reports WHERE run_id = ?", (run_id,)).fetchone()
     if report and run["status"] in ("done", "failed"):
         return RedirectResponse(f"/reports/{report['id']}", status_code=303)
-    ahead = conn.execute("SELECT COUNT(*) FROM runs WHERE status IN ('queued', 'running') AND id < ?",
-                         (run_id,)).fetchone()[0]
+    # Only web runs share the worker queue; command-line runs execute in their own process.
+    ahead = conn.execute("SELECT COUNT(*) FROM runs WHERE status IN ('queued', 'running') AND id < ?"
+                         " AND request_id IS NOT NULL", (run_id,)).fetchone()[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
                   request_id=uuid.uuid4().hex)
 

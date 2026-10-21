@@ -55,6 +55,7 @@ class Material:
     name: str
     doc: Document
     pages: dict[int, str]  # MD&A pages of the annual report, 1-based page numbers
+    raw_pages: dict[int, str]  # same pages in content-stream order, only for quote matching
     table: list[dict]
     market_date: str
 
@@ -135,7 +136,8 @@ def gather(code: str) -> Material:
     sources.fetch(annual)
     market = sources.valuation(code)
     return Material(
-        code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=mdna_pages(annual),
+        code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=(pages := mdna_pages(annual)),
+        raw_pages={n: annual.raw_pages[n - 1] for n in pages},
         table=financial_table(fin, market), market_date=str(market["trade_date"]),
     )
 
@@ -181,8 +183,10 @@ def _quote_found(cite: dict, material: Material) -> bool:
     page = cite.get("page")
     if len(quote) < 8 or not isinstance(page, int):
         return False
-    window = "".join(material.pages.get(p, "") for p in (page - 1, page, page + 1))
-    return quote in SQUASH.sub("", window)
+    return any(
+        quote in SQUASH.sub("", "".join(pages.get(p, "") for p in (page - 1, page, page + 1)))
+        for pages in (material.pages, material.raw_pages)
+    )
 
 
 def check(report: dict, material: Material) -> list[dict]:
@@ -384,7 +388,7 @@ def main() -> None:
     conn = db.connect()
     for code in args.codes or EVAL_SET:
         started = time.monotonic()
-        run_id = db.create_run(conn, code)
+        run_id = db.create_run(conn, code, status="running")  # never 'queued', so a worker cannot also pick it up
         execute(conn, run_id)
         run = conn.execute("SELECT status, error FROM runs WHERE id = ?", (run_id,)).fetchone()
         report = conn.execute("SELECT verdict, body FROM reports WHERE run_id = ?", (run_id,)).fetchone()
