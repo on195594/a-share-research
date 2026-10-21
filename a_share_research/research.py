@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
 MAX_CALLS = 6  # loop guard, not a cost limit
-EVAL_SET = "600519 000858 600900 601088 000333 002236 603606 600276 002594 600309 600036".split()
+EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 # (id, label, unit, statement, column, divisor)
 METRICS = [
     ("revenue", "营业总收入", "亿元", "income", "total_revenue", 1e8),

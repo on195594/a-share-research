@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from a_share_research.price import PriceError, compute
 
 DATA = json.loads((Path(__file__).parent / "data" / "600900-61d.json").read_text())

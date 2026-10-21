@@ -13,13 +13,14 @@ from pathlib import Path
 
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
 from a_stock_lib.providers.tushare_financials import TushareFinancialProvider
 from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
 from a_stock_lib.providers.tushare_valuation import TushareValuationProvider
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 from a_share_research.db import DATA, SHANGHAI
+
 CNINFO = "https://www.cninfo.com.cn/new"
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://www.cninfo.com.cn/"})
@@ -28,7 +29,7 @@ SESSION.mount("https://", HTTPAdapter(max_retries=Retry(
     total=3, backoff_factor=1, status_forcelist=(500, 502, 503, 504), allowed_methods=("GET", "POST"),
 )))
 KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "第一季度报告": "03-31", "第三季度报告": "09-30"}
-PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.I)
+PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.IGNORECASE)
 TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第一季度报告|第三季度报告)")
 
 
