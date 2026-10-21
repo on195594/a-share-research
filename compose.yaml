@@ -10,6 +10,8 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"  # locally built image; no registry to pull from
     env_file: .env.web  # PUBLIC_BASE_URL, SESSION_SECRET, GITHUB_*; never model/TuShare credentials
+    environment:
+      DATA_DIR: /data
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
     networks:
@@ -27,6 +29,8 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"  # locally built image; no registry to pull from
     env_file: .env  # TUSHARE_TOKEN, MODEL_PROVIDER, MODEL_ID, PI_*
+    environment:
+      DATA_DIR: /data
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
       - /home/lin/.local/share/pi:/home/lin/.local/share/pi:ro
