@@ -22,6 +22,23 @@ uv run pytest -q tests
 
 `.env.web` 只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 
+## 运行身份与材料重放
+
+新研究在 `runs.identity` 保存应用文件内容哈希、Python/Lib 版本及材料哈希，在 `calls.identity` 保存请求与实际模型、pi 版本、调用参数和完整提示词哈希。失败保留已知身份；旧记录的空值表示未知，不用当前版本回填。应用内容哈希也适用于没有 `.git` 的容器。
+
+`runs.material` 保存实际送入流程的财务表、行情时点、文档身份及两种顺序的原文页。重放复用该快照，仍执行相同的成文、检查、复核和修复流程，并保存为新任务；不重新取行情或下载文档。快照缺失、版本不支持、哈希或公司不一致时失败。
+
+在独立目录建立基线，按命令输出的任务 ID 重放，例如：
+
+```bash
+DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research
+DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research --replay 1
+```
+
+`--replay` 可接受多个 ID，不能同时指定公司代码。旧报告或范围外公司可能没有完整快照；它们保持原记录，不能用当前资料伪造历史输入。完整评估与已知缺陷见[实施计划](docs/implementation-plan.md)。
+
+新代码首次连接旧库时只增补 `runs.identity`、`runs.material`、`calls.identity` 三个可空文本列。历史读取和旧代码写入已在副本检查；生产数据和镜像的应用仍属于部署步骤。
+
 ## 部署
 
 项目采用 Docker Compose 进行前后端容器化分离部署，全部服务在本项目目录下统一编排：

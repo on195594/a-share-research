@@ -80,6 +80,19 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    # Serialize additive migration when web and worker first open the same older database.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for table, names in (("runs", ("identity", "material")), ("calls", ("identity",))):
+            existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for name in names:
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        conn.close()
+        raise
     return conn
 
 
@@ -103,11 +116,12 @@ def update_run(conn: sqlite3.Connection, run_id: int, **fields) -> None:
 
 
 def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=None,
-             seconds=None, error=None) -> None:
+             seconds=None, error=None, identity=None) -> None:
     conn.execute(
-        "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (run_id, step, prompt, response, json.dumps(usage) if usage else None, seconds, error, now()),
+        "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at, identity)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, step, prompt, response, json.dumps(usage) if usage else None, seconds, error, now(),
+         json.dumps(identity) if identity is not None else None),
     )
 
 

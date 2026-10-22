@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -59,6 +60,30 @@ class Material:
     table: list[dict]
     market_date: str
 
+    def snapshot(self) -> dict:
+        data = {
+            "code": self.code, "name": self.name,
+            "doc": {key: getattr(self.doc, key) for key in
+                    ("code", "name", "title", "period", "announced", "url", "sha256", "retrieved_at")},
+            "pages": self.pages, "raw_pages": self.raw_pages,
+            "table": self.table, "market_date": self.market_date,
+        }
+        return {"version": 1, "sha256": _material_hash(data), "data": data}
+
+    @classmethod
+    def from_snapshot(cls, snapshot: dict) -> Material:
+        if snapshot.get("version") != 1:
+            raise ResearchError("不支持的材料快照版本")
+        data = snapshot["data"]
+        if _material_hash(data) != snapshot["sha256"]:
+            raise ResearchError("材料快照哈希不匹配")
+        return cls(
+            code=data["code"], name=data["name"], doc=Document(**data["doc"]),
+            pages={int(n): text for n, text in data["pages"].items()},
+            raw_pages={int(n): text for n, text in data["raw_pages"].items()},
+            table=data["table"], market_date=data["market_date"],
+        )
+
     def prompt_block(self) -> str:
         rows = [
             f"[{r['id']}] {r['label']}（{r['unit']}）：" + "；".join(f"{p} {v}" for p, v in r["values"].items())
@@ -70,6 +95,22 @@ class Material:
             f"## 财务与行情表（程序从 TuShare 生成；行情为 {self.market_date} 收盘）\n" + "\n".join(rows)
             + f"\n\n## {self.doc.title}·管理层讨论与分析（原文，按页）\n{pages}"
         )
+
+
+def _material_hash(data: dict) -> str:
+    # Preserve input order too: page/row ordering affects the model prompt.
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, separators=(",", ":"),
+                                    allow_nan=False).encode()).hexdigest()
+
+
+def replay_material(conn, source_run: int) -> Material:
+    row = conn.execute("SELECT code, material FROM runs WHERE id = ?", (source_run,)).fetchone()
+    if row is None or row["material"] is None:
+        raise ResearchError(f"任务 {source_run} 没有完整材料快照，不能重放；不会重新取数补齐")
+    material = Material.from_snapshot(json.loads(row["material"]))
+    if material.code[:6] != row["code"][:6] or material.doc.code != material.code:
+        raise ResearchError("材料快照与任务公司不一致")
+    return material
 
 
 # ---------- gather ----------
@@ -274,10 +315,11 @@ class Runner:
         try:
             result = model.complete(prompt, timeout=600, max_tokens=16000)
         except Exception as exc:
-            db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: {exc}")
+            db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: {exc}",
+                        identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None))
             raise
         db.log_call(self.conn, self.run_id, step, prompt, response=result.text,
-                    usage=result.usage, seconds=result.seconds)
+                    usage=result.usage, seconds=result.seconds, identity=result.identity)
         log.info("run %s %s: %.0fs", self.run_id, step, result.seconds)
         return result.text
 
@@ -341,13 +383,20 @@ def _verified_facts(report: dict | None, problems: list[dict]) -> dict:
     }
 
 
-def execute(conn, run_id: int) -> None:
+def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     code = conn.execute("SELECT code FROM runs WHERE id = ?", (run_id,)).fetchone()["code"]
     db.update_run(conn, run_id, status="running", step="gather", started_at=db.now())
     runner = Runner(conn, run_id)
     try:
-        material = gather(code)
-        db.update_run(conn, run_id, code=material.code, name=material.name)
+        identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
+        db.update_run(conn, run_id, identity=json.dumps(identity))
+        material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
+        if material.code[:6] != code[:6]:
+            raise ResearchError("重放材料与目标公司不一致")
+        snapshot = material.snapshot()
+        identity["material_sha256"] = snapshot["sha256"]
+        db.update_run(conn, run_id, code=material.code, name=material.name,
+                      identity=json.dumps(identity), material=json.dumps(snapshot, ensure_ascii=False))
         report = compose(runner, material)
         problems: list[dict] = []
         # At most two repairs, so a repair spent on mechanical slips still leaves one for review findings.
@@ -384,12 +433,23 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Research one or more companies and store the reports.")
     parser.add_argument("codes", nargs="*", help="6-digit codes; default: the eval set")
+    parser.add_argument("--replay", type=int, nargs="+", metavar="RUN_ID",
+                        help="reuse complete material snapshots from this database; never fetch fresh data")
     args = parser.parse_args()
+    if args.codes and args.replay:
+        parser.error("codes and --replay cannot be combined")
     conn = db.connect()
-    for code in args.codes or EVAL_SET:
+    if args.replay:
+        try:
+            targets = [(replay_material(conn, run).code, run) for run in args.replay]
+        except (ResearchError, KeyError, TypeError, ValueError) as exc:
+            parser.error(str(exc))
+    else:
+        targets = [(code, None) for code in args.codes or EVAL_SET]
+    for code, replay_of in targets:
         started = time.monotonic()
         run_id = db.create_run(conn, code, status="running")  # never 'queued', so a worker cannot also pick it up
-        execute(conn, run_id)
+        execute(conn, run_id, replay_of=replay_of)
         run = conn.execute("SELECT status, error FROM runs WHERE id = ?", (run_id,)).fetchone()
         report = conn.execute("SELECT verdict, body FROM reports WHERE run_id = ?", (run_id,)).fetchone()
         body = json.loads(report["body"]) if report else {}
