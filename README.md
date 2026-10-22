@@ -37,7 +37,7 @@ DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.re
 
 `--replay` 可接受多个 ID，不能同时指定公司代码。旧报告或范围外公司可能没有完整快照；它们保持原记录，不能用当前资料伪造历史输入。完整评估与已知缺陷见[实施计划](docs/implementation-plan.md)。
 
-新代码首次连接旧库时只增补 `runs.identity`、`runs.material`、`calls.identity` 三个可空文本列。历史读取和旧代码写入已在副本检查；生产数据和镜像的应用仍属于部署步骤。
+新代码首次连接旧库时只增补 `runs.identity`、`runs.material`、`calls.identity` 三个可空文本列。历史读取和旧代码写入已在副本检查；2026-10-22 已部署到生产 worker，历史字段和值保持原样，真实生产研究及身份记录验收通过，详见[实施计划](docs/implementation-plan.md#3-i1研究运行身份)。
 
 ## 部署
 
