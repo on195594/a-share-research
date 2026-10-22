@@ -59,6 +59,10 @@ D0 文档已发布；2026-10-22 已完成 I1 实现、生产 worker 部署与线
 
 Claude Opus 5.5 复审及收尾复核均无阻断项，确认 Research 五项建议已处理。补充分开扩展加载错误与 tools/handlers 保护错误，两种真实失败条件均在本地验证。只读检查生产报告均有关联任务；非空原始页夹具与冻结的 `pdftotext -raw` 第 9 页逐字一致。上线仍须从干净提交构建并验证容器、备份且等待 worker 空闲，为 Web 和 worker 分别保留回退镜像；本次切换范围包括 Web，需明确部署授权。
 
+待部署候选已从干净提交 `4c130ee` 构建：`a-share-research-worker:review-4c130ee`（`sha256:df63104f…`）和 `a-share-research-web:review-4c130ee`（`sha256:fa6d4ebd…`）。两镜像应用哈希均为 `d39d016cf5907838ea9ffec9ca89f1cb2ec90cde50444f3982200696254b4796`，与已提交源码一致。Python 3.13.17 / Node 22.23.4 容器内区分了两类扩展错误，并以冻结材料重放任务 1 → 15：2 次调用约 61 秒、通过复核，材料及初次提示词一致，副本原有各表记录保持原值。候选 Web 在非生产端口完成手机尺寸的开发登录、首页、公司档案和新重放报告检查。
+
+首轮候选验收因测试把 pi 目录设为只读而失败：认证读取需要文件锁，独立无模型调用检查确认 `EROFS`；改为现有生产 Compose 的挂载方式后通过，失败任务和日志保留。未修改生产挂载或凭据配置、未切换服务。审查结论、完整镜像 ID、验证记录和失败证据归档于 `~/.local/share/a-share-research-evaluations/2026-10-22-r1/claude-review/`；此前 R1 生产部署记录继续有效。
+
 ## 4. I2：质量基线与升级比较
 
 Research 复用 `research.py` 的 `EVAL_SET`、现有确定性测试和真实材料；Skills 复用 `docs/agent-behavior-eval.md`、现有 capture 脚本和行为评估测试。Lib 继续按自己的测试和发版清单验证公共计算。
