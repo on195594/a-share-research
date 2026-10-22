@@ -41,7 +41,7 @@ DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.re
 
 新代码首次连接旧库时只增补 `runs.identity`、`runs.material`、`calls.identity` 三个可空文本列。历史读取和旧代码写入已在副本检查；2026-10-22 已部署到生产 worker，历史字段和值保持原样，真实生产研究及身份记录验收通过，详见[实施计划](docs/implementation-plan.md#3-i1研究运行身份)。
 
-上述部署是首次 R1 版本。本次 Claude 审查后的身份补充、诊断与重放页面修复已在本地验证，尚未切换生产 Web/worker。
+2026-10-22 经用户确认，Claude 审查后的身份补充、诊断与重放页面修复已部署到生产 Web 和 worker（代码 `4c130ee`）。生产长江电力任务 6 在 115 秒、4 次模型调用后通过复核，生成[报告 4](https://stock.keyi.win/reports/4)。历史数据保持原值，两个服务均保留回退镜像；公网登录页正常，未重新完成浏览器 GitHub OAuth 登录链路。部署与回退记录见[实施计划](docs/implementation-plan.md#3-i1研究运行身份)。
 
 ## 部署
 
