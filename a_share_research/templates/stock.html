@@ -11,6 +11,7 @@
   {% for r in reports %}
     <li>
       <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
+      {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
       <p>{% if r.passed %}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
         <span class="muted">· 依据 {{ r.period[:4] }} 年报</span></p>
     </li>

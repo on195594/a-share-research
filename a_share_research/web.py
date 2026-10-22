@@ -228,9 +228,21 @@ def logout(request: Request, csrf: str = Form("")):
 
 def latest_reports() -> list:
     return conn.execute(
-        "SELECT r.* FROM reports r JOIN (SELECT code, MAX(id) AS id FROM reports GROUP BY code) l ON r.id = l.id"
+        "SELECT r.* FROM reports r JOIN (SELECT p.code, MAX(p.id) AS id FROM reports p"
+        " JOIN runs u ON u.id = p.run_id WHERE json_extract(u.identity, '$.replay_of') IS NULL"
+        " GROUP BY p.code) l ON r.id = l.id"
         " ORDER BY r.id DESC"
     ).fetchall()
+
+
+def recent_report(code: str):
+    today = datetime.now(db.SHANGHAI).date().isoformat()
+    return conn.execute(
+        "SELECT r.* FROM reports r JOIN runs u ON u.id = r.run_id"
+        " WHERE r.code LIKE ? AND r.passed = 1 AND r.created_at >= ?"
+        " AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC LIMIT 1",
+        (code[:6] + ".%", today),
+    ).fetchone()
 
 
 def active_runs() -> list:
@@ -275,11 +287,7 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=q, error=error, choices=choices)
     code = company["code"]
-    today = datetime.now(db.SHANGHAI).date().isoformat()
-    recent = conn.execute(
-        "SELECT * FROM reports WHERE code LIKE ? AND passed = 1 AND created_at >= ? ORDER BY id DESC LIMIT 1",
-        (code + ".%", today),
-    ).fetchone()
+    recent = recent_report(code)
     if recent and not again:
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=code, recent=recent)
@@ -323,6 +331,7 @@ def report_page(request: Request, report_id: int):
     body = json.loads(row["body"])
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
     return render(request, "report.html", session, report=row, body=body, run=run,
+                  replay_of=json.loads(run["identity"] or "{}").get("replay_of"),
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]))
@@ -332,7 +341,10 @@ def report_page(request: Request, report_id: int):
 def stock_page(request: Request, code: str):
     if not (session := current_session(request)):
         return login_required()
-    reports = conn.execute("SELECT * FROM reports WHERE code = ? ORDER BY id DESC", (code,)).fetchall()
+    reports = conn.execute(
+        "SELECT r.*, json_extract(u.identity, '$.replay_of') AS replay_of FROM reports r"
+        " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
+    ).fetchall()
     if not reports:
         return Response("Not Found", status_code=404, media_type="text/plain")
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,

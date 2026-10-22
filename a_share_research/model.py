@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
+from functools import cache
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -33,8 +34,9 @@ class Completion:
     identity: dict
 
 
+@cache
 def application_identity() -> dict:
-    """Hash the shipped application, including dirty checkouts and images without Git."""
+    """Identify the application files at process startup, including images without Git."""
     package = SCRIPT.parent
     files = {str(path.relative_to(package)): hashlib.sha256(path.read_bytes()).hexdigest()
              for path in sorted(package.rglob("*"))
@@ -44,6 +46,9 @@ def application_identity() -> dict:
         "a_stock_lib_version": version("a-stock-lib"),
         "python_version": platform.python_version(),
     }
+
+
+application_identity()  # Imported Python code does not follow later worktree edits.
 
 
 def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000) -> Completion:
@@ -59,11 +64,14 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000) -> Comp
     identity = {
         "requested": {k: request[k] for k in ("provider", "model")},
         "actual": None, "pi_version": None, "parameters": None,
+        "node_version": None, "model_source": None, "extension": None,
+        "pi_infer_sha256": None,
         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
         "request_parameters": {k: request[k] for k in ("timeout", "max_tokens", "session_id")},
     }
     started = time.monotonic()
     try:
+        identity["pi_infer_sha256"] = hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
         if not request["provider"] or not request["model"]:
             raise ValueError("MODEL_PROVIDER and MODEL_ID are required")
         with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as file:
@@ -73,10 +81,15 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000) -> Comp
                 ["node", str(SCRIPT), file.name],
                 capture_output=True, text=True, timeout=timeout + 30,
             )
+        diagnostic = " ".join(proc.stderr.strip().splitlines()[-1:])
         if not proc.stdout.strip():
-            raise ValueError(f"pi exited {proc.returncode} without a response")
-        out = json.loads(proc.stdout.strip().splitlines()[-1])
-        identity.update({k: out.get(k) for k in ("pi_version", "parameters")})
+            raise ValueError(f"pi exited {proc.returncode} without a response: {diagnostic}")
+        try:
+            out = json.loads(proc.stdout.strip().splitlines()[-1])
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid pi response: {exc}; {diagnostic}") from exc
+        identity.update({k: out.get(k) for k in
+                         ("pi_version", "parameters", "node_version", "model_source", "extension")})
         if out.get("provider") or out.get("model"):
             identity["actual"] = {k: out.get(k) for k in ("provider", "model")}
         if proc.returncode != 0 or out.get("error"):

@@ -6,6 +6,7 @@
   <header class="stub">
     <h1>{{ report.name }}</h1>
     <p class="meta"><span class="code">{{ report.code }}</span> · 依据 {{ body.document.title }}（{{ body.document.announced }} 披露）· 研究于 {{ report.created_at[:16].replace("T", " ") }}</p>
+    {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
       <p class="conclusion">{{ body.summary }}</p>
     {% else %}

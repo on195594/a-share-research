@@ -412,6 +412,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "document": {k: getattr(material.doc, k) for k in ("title", "url", "announced", "sha256", "retrieved_at")},
             "pages": sorted(material.pages), "table": material.table, "market_date": material.market_date,
             "calls": runner.calls,
+            "replay_of": replay_of, "material_sha256": snapshot["sha256"],
         }
         if problems:
             body |= {"facts": _verified_facts(report, problems), "problems": problems}
