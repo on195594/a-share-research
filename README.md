@@ -2,7 +2,12 @@
 
 收盘后的 A 股个股研究助手：输入一家公司，几分钟后读到带原文出处的财报研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
 
-方向与里程碑见 [重构方案](docs/proposal.md)，开发约束见 [AGENTS.md](AGENTS.md)。
+本项目负责公司财报研究与阅读；`a-stock-agent-skills` 负责 Agent 投研、持仓与风险，两者独立运行并共用 `a-stock-lib`。报告只读复用接口仍在规划中。
+
+- 产品方向与现有流程：[重构方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
+- 三项目职责与协作：[项目契约](docs/project-contract.md)。
+- AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
+- 下一批工作、验收与回退：[实施计划](docs/implementation-plan.md)。
 
 ## 运行
 

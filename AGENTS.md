@@ -1,6 +1,6 @@
 # a-share-research 开发约束
 
-收盘后的 A 股个股研究助手，按 [重构方案](docs/proposal.md) 开发。方案管方向，代码管细节；本文件只放长期约束。
+收盘后的 A 股个股研究助手，产品与现有流程见 [重构方案](docs/proposal.md)，跨项目职责见 [项目契约](docs/project-contract.md)，后续工作见 [路线图](docs/roadmap.md)和[实施计划](docs/implementation-plan.md)。代码说明已实现能力，规划项按需求与验收条件推进；本文件只放长期约束。
 
 ## 授权
 
@@ -14,7 +14,7 @@
 
 ## 约束
 
-- `~/a-stock-tracker` 只读：可读代码、提示词和算法并移植，不 import、不读写它的数据库和研究目录，不在其工作树中运行任何东西（那里是线上接收器）。
+- `~/a-stock-tracker` 只作历史参考：可读代码、提示词和算法并移植，不 import、不读写它的数据库和研究目录，不在其工作树中运行任何东西。
 - 凭据只放 `.env`（权限 0600，不进 Git、不进镜像），只注入 worker；web 进程不持模型与行情凭据。
 - 源码在 `a_share_research/`，包绝对导入。行情与财务数据优先用 `a-stock-lib`，它没有的接口直接调 TuShare（不为此扩展 a-stock-lib）；模型只经 pi 运行时调用（单次、无工具）。
 - 生产/后台代码用 `logging`，不裸 `print`；不吞异常。
