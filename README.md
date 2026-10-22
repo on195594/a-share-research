@@ -22,10 +22,11 @@ uv run pytest -q tests
 项目采用 Docker Compose 进行前后端容器化分离部署，全部服务在本项目目录下统一编排：
 
 - **前端（web）**：FastAPI + Jinja 服务端 HTML、OAuth 认证与交互界面。镜像内不含模型与行情凭据，通过 `nginx-network` 接入宿主 Nginx 反向代理，监听 `127.0.0.1:8620`。配置由 `.env.web` 提供。
-- **后端（worker）**：后台研究任务执行器，负责 TuShare 行情抓取、PDF 财报抽取与 LLM 研报生成。挂载宿主 pi 运行时与认证信息，配置由 `.env` 提供。与前端通过共享的 SQLite 数据目录解耦通信，不暴露外部端口。
+- **后端（worker）**：后台研究任务执行器，负责 TuShare 行情抓取、PDF 财报抽取与 LLM 研报生成。挂载宿主 `~/.pi`（pi 托管安装与认证），`PI_RUNTIME` 留空时按 `~/.pi/agent/install/current-version` 找运行时。配置由 `.env` 提供。与前端通过共享的 SQLite 数据目录解耦通信，不暴露外部端口。
 
-启动与构建：
+发布：提交并推送 main 后在本目录执行（worker 有任务在跑时先等它空闲）：
 ```bash
 docker compose up -d --build
 ```
+镜像构建时复制代码，开发改动在重建前不影响线上；不要从有未提交改动的工作树重建。
 数据默认保存在 `/home/lin/a-share-research-data`（可通过 `DATA_DIR` 自定义）。

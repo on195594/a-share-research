@@ -33,7 +33,6 @@ services:
       DATA_DIR: /data
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
-      - /home/lin/.local/share/pi:/home/lin/.local/share/pi:ro
       - /home/lin/.pi:/home/lin/.pi
 
 networks:

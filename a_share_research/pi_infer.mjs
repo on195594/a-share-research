@@ -6,7 +6,10 @@ import { pathToFileURL } from "node:url";
 
 const request = JSON.parse(await readFile(process.argv[2], "utf8"));
 process.env.PI_OFFLINE = "1"; // use the installed catalog, never discover extra models
-const base = process.env.PI_RUNTIME;
+// Managed pi installs swap releases on upgrade; follow current-version unless PI_RUNTIME pins one.
+const install = join(process.env.PI_AGENT_DIR, "install");
+const base = process.env.PI_RUNTIME || join(install, "releases",
+  (await readFile(join(install, "current-version"), "utf8")).trim(), "node_modules/@earendil-works/pi-coding-agent");
 const load = name => import(pathToFileURL(join(base, "dist/core", name)).href);
 const { ModelRuntime } = await load("model-runtime.js");
 const runtime = await ModelRuntime.create({
