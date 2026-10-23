@@ -361,10 +361,10 @@ class Runner:
         self.conn, self.run_id, self.calls = conn, run_id, 0
         self.max_calls, self.deadline = max_calls, time.monotonic() + 1800
 
-    def call(self, step: str, prompt: str, *, messages=None, tools=None, deadline=None):
+    def call(self, step: str, prompt: str, *, messages=None, tools=None):
         if self.calls >= self.max_calls:
             raise ResearchError("模型调用次数超过上限")
-        timeout = int(min(600, (deadline or self.deadline) - time.monotonic()))
+        timeout = int(min(600, self.deadline - time.monotonic()))
         if timeout <= 0:
             raise ResearchError("研究超过整体时限，已保存取得的材料")
         self.calls += 1
@@ -450,6 +450,23 @@ def _verified_facts(report: dict | None, problems: list[dict]) -> dict:
     }
 
 
+def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
+    parents = conn.execute(
+        "SELECT r.id, r.body, r.passed, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
+        " WHERE r.code = ? AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
+        " AND json_type(u.request, '$.feedback') = 'object')) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
+        (code, parent_id, parent_id),
+    ).fetchall()
+    context = []
+    for parent in parents:
+        body = json.loads(parent["body"])
+        content = body if parent["passed"] else body.get("facts", {})
+        context.append({"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
+                        "basis": "report" if parent["passed"] else "facts",
+                        "claims_to_recheck": {k: content.get(k) for k in ("summary", "answer", *SECTIONS)}})
+    return context
+
+
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, request FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
@@ -464,19 +481,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         if replay_of is None:
             material.extra["question"] = request.get("question", "")
             material.extra["feedback"] = request.get("feedback")
-            context = []
-            parent_id = request.get("parent_report_id")
-            parents = conn.execute(
-                "SELECT r.id, r.body, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
-                " WHERE r.code = ? AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
-                " AND json_type(u.request, '$.feedback') = 'object')) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
-                (material.code, parent_id, parent_id),
-            ).fetchall()
-            for parent in parents:
-                content = json.loads(parent["body"])
-                context.append({"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
-                                "claims_to_recheck": {k: content.get(k) for k in ("summary", "answer", *SECTIONS)}})
-            material.extra["context"] = context
+            material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"))
         snapshot = material.snapshot()
         identity["material_sha256"] = snapshot["sha256"]
         db.update_run(conn, run_id, code=material.code, name=material.name,

@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from a_share_research import db, service
-from a_share_research.research import Material, check, financial_table, output_schema, _verified_facts
+from a_share_research.research import Material, check, financial_table, output_schema, _research_context, _verified_facts
 from a_share_research.research_tools import calculate
 from test_check import MATERIAL, report
 from test_financial_table import DATA
@@ -100,4 +100,35 @@ def test_idempotency_and_feedback_reference_real_report(tmp_path):
     feedback_id = service.submit(conn, MATERIAL.code, "feedback", parent_report_id=report_id,
                                  feedback={"location": "risks[0]", "text": "现金流是否受到财务公司成员存款影响？"})
     assert feedback_id != run_id
+    conn.close()
+
+
+def test_failed_report_feedback_uses_the_visible_fact_positions(tmp_path):
+    captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
+    facts = _verified_facts(captured["report"], captured["problems"])
+    conn = db.connect(tmp_path / "app.db")
+    run_id = db.create_run(conn, "603606.SH", status="failed")
+    db.save_report(conn, run_id, "603606.SH", "东方电缆", "2026-06-30", False, None,
+                   {"facts": facts, "problems": captured["problems"]})
+    report_id = conn.execute("SELECT id FROM reports").fetchone()[0]
+    service.submit(conn, "603606", "failed-feedback", parent_report_id=report_id,
+                   feedback={"location": "risks[1]", "text": "负债率上升能否全部解释为银行借款增加？"})
+    context = _research_context(conn, "603606.SH", report_id)
+    assert context[0]["basis"] == "facts"
+    assert context[0]["claims_to_recheck"]["risks"][1] == facts["risks"][1]
+    assert context[0]["claims_to_recheck"]["risks"] == captured["report"]["risks"][:2]
+    conn.close()
+
+
+def test_api_coverage_separates_subject_periods_and_preserves_report_gaps(tmp_path):
+    captured = json.loads((Path(__file__).parent / "data/600519-comparison.json").read_text())["coverage_capture"]
+    conn = db.connect(tmp_path / "app.db")
+    run_id = db.create_run(conn, MATERIAL.code, status="done")
+    body = report() | {"table": MATERIAL.table + captured["rows"], "gaps": captured["gaps"]}
+    db.save_report(conn, run_id, MATERIAL.code, MATERIAL.name, MATERIAL.doc.period, True, body["verdict"], body)
+    report_id = conn.execute("SELECT id FROM reports").fetchone()[0]
+    view = service.report_view(conn, report_id)
+    assert view["coverage"]["periods"] == ["2024-12-31", "2025-12-31"]
+    assert view["coverage"]["missing"] == captured["gaps"]
+    assert view["evidence"]["table"] == body["table"]
     conn.close()

@@ -4,9 +4,7 @@ import json
 import logging
 import re
 import time
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-
-import requests
+from decimal import Decimal, ROUND_HALF_UP
 
 from a_share_research import db, sources
 
@@ -165,7 +163,7 @@ class ResearchTools:
         return row
 
 
-def explore(runner, material):
+def explore(runner, material, *, budget_seconds: float = 900):
     from a_share_research.research import RULES, output_schema, _parse, compose
     toolkit = ResearchTools(material)
     prompt = f"""你是公司的投资研究员，自主选择最有价值的取证顺序，直接回答用户问题并写报告。
@@ -180,7 +178,7 @@ def explore(runner, material):
 # 定期披露目录
 {json.dumps(material.extra['catalog'], ensure_ascii=False)}"""
     messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
-    deadline = time.monotonic() + 900
+    deadline = time.monotonic() + budget_seconds
     traces = material.extra.setdefault("tools", [])
     stale = 0
     for turn in range(12):
@@ -188,7 +186,8 @@ def explore(runner, material):
             material.extra["gaps"].append("探索已到停止条件，回答仅依据已取得证据；未完成的取证仍未知。")
             break
         payload = json.dumps({"messages": messages, "tools": TOOLS}, ensure_ascii=False)
-        response = runner.call("explore", payload, messages=messages, tools=TOOLS, deadline=deadline)
+        # Stop starting exploration at its budget; let an in-flight model call finish within the run deadline.
+        response = runner.call("explore", payload, messages=messages, tools=TOOLS)
         messages.append(response.message)
         calls = [c for c in response.message["content"] if c["type"] == "toolCall"]
         if not calls:
@@ -204,9 +203,9 @@ def explore(runner, material):
                     raise ValueError(call["argumentsError"])
                 result, changed = toolkit.run(call["name"], call["arguments"])
                 any_new |= changed
-            except (ValueError, KeyError, TypeError, InvalidOperation, sources.SourceError, requests.RequestException) as exc:
+            except Exception as exc:
                 failed, result = True, {"error": str(exc)}
-                log.warning("run %s tool %s: %s", runner.run_id, call["name"], exc)
+                log.warning("run %s tool %s: %s", runner.run_id, call["name"], exc, exc_info=True)
                 gap = f"{call['name']}：{exc}"
                 if gap not in material.extra["gaps"]:
                     material.extra["gaps"].append(gap)

@@ -87,7 +87,7 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}
                             if (identity := json.loads(value or "null")) else None
                             for value in json.loads(row["call_identities"])],
-            "coverage": {"periods": sorted({p for r in evidence["table"] if not r["id"].startswith("C.")
+            "coverage": {"periods": sorted({p for r in evidence["table"] if r["id"].startswith("T.")
                                              for p in r["values"]}),
-                         "missing": extra.get("gaps", []),
+                         "missing": body.get("gaps", extra.get("gaps", [])),
                          "limits": "覆盖所列定期披露和财务数据；不含全部临时公告、新闻或账户事实。历史结果不自动刷新。"}}
