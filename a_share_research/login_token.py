@@ -5,8 +5,6 @@ web container) can run this, which already implies owner rights; nothing is expo
 Prints the value for the `session` cookie; logging out deletes it like any other session.
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import secrets

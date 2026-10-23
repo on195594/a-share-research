@@ -1,7 +1,5 @@
 """SQLite storage: runs, model calls and reports."""
 
-from __future__ import annotations
-
 import json
 import os
 import sqlite3
@@ -24,7 +22,10 @@ CREATE TABLE IF NOT EXISTS runs (
     error TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,
-    finished_at TEXT
+    finished_at TEXT,
+    identity TEXT,
+    material TEXT,
+    request TEXT
 );
 CREATE TABLE IF NOT EXISTS calls (
     id INTEGER PRIMARY KEY,
@@ -35,7 +36,8 @@ CREATE TABLE IF NOT EXISTS calls (
     usage TEXT,
     seconds REAL,
     error TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    identity TEXT
 );
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY,
@@ -80,19 +82,20 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
-    # Serialize additive migration when web and worker first open the same older database.
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        for table, names in (("runs", ("identity", "material", "request")), ("calls", ("identity",))):
-            existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-            for name in names:
-                if name not in existing:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        conn.close()
-        raise
+    migrations = [("runs", ("identity", "material", "request")), ("calls", ("identity",))]
+    if any(name not in {r["name"] for r in conn.execute(f"PRAGMA table_info({t})")} for t, names in migrations for name in names):
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table, names in migrations:
+                existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                for name in names:
+                    if name not in existing:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            conn.close()
+            raise
     return conn
 
 

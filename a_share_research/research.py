@@ -1,7 +1,5 @@
 """One company's financial-report research: gather → compose → check → review → (repair, at most twice) → save."""
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -9,6 +7,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from typing import Self
 
 import pandas as pd
 
@@ -73,7 +72,7 @@ class Material:
         return {"version": 2 if self.extra else 1, "sha256": _material_hash(data), "data": data}
 
     @classmethod
-    def from_snapshot(cls, snapshot: dict) -> Material:
+    def from_snapshot(cls, snapshot: dict) -> Self:
         if snapshot.get("version") not in (1, 2):
             raise ResearchError("不支持的材料快照版本")
         data = snapshot["data"]
@@ -244,14 +243,10 @@ def _quote_found(cite: dict, material: Material) -> bool:
     if len(quote) < 8 or not isinstance(page, int):
         return False
     source = cite.get("source", "D0")
-    if source == "D0":
-        candidates = (material.pages, material.raw_pages)
-    else:
-        document = material.extra.get("sources", {}).get(source, {})
-        candidates = tuple({int(k): v for k, v in document.get(key, {}).items()} for key in ("pages", "raw_pages"))
+    doc = {"pages": material.pages, "raw_pages": material.raw_pages} if source == "D0" else material.extra.get("sources", {}).get(source, {})
     return any(
-        quote in SQUASH.sub("", "".join(pages.get(p, "") for p in (page - 1, page, page + 1)))
-        for pages in candidates
+        quote in SQUASH.sub("", "".join(pages.get(p) or pages.get(str(p), "") for p in (page - 1, page, page + 1)))
+        for pages in (doc.get("pages", {}), doc.get("raw_pages", {}))
     )
 
 
@@ -267,7 +262,7 @@ def check(report: dict, material: Material) -> list[dict]:
         problems.append({"where": "summary", "problem": "summary 必须以结论词开头"})
     if REF_IN_TEXT.search(summary):
         problems.append({"where": "summary", "problem": "summary 中不要写出处编号"})
-    rows = {r["id"] for r in material.table}
+    rows = {r["id"]: r["values"] for r in material.table}
     all_cites = []
     sections = [*SECTIONS]
     if material.extra.get("question") or report.get("answer"):
@@ -296,7 +291,7 @@ def check(report: dict, material: Material) -> list[dict]:
                 if "ref" in cite:
                     if cite["ref"] not in rows:
                         problems.append({"where": where, "problem": f"表中没有 {cite['ref']}"})
-                    elif cite.get("period") and cite["period"] not in next(r["values"] for r in material.table if r["id"] == cite["ref"]):
+                    elif cite.get("period") and cite["period"] not in rows[cite["ref"]]:
                         problems.append({"where": where, "problem": "所引数据不含指定期间"})
                 elif not _quote_found(cite, material):
                     problems.append({"where": where, "problem": f"第 {cite.get('page')} 页找不到引文：{str(cite.get('quote', ''))[:60]}"})
@@ -347,7 +342,7 @@ RULES = """规则：
 - risks 按重要性列出最可能推翻“值得研究”判断的风险与反证，覆盖材料中与判断相关的重大不利变化，不设固定条数；结合新旧披露，区分仍存在、已缓解和待核实的风险。
 - business 说明公司靠什么赚钱、主要产品或地区、经营上的变化。
 - financial 解释表中最重要的变化；按证据的重要性决定篇幅，合并重复内容。
-- 面向普通投资者，用白话，每条一两句；text 和 summary 里不要写出处编号（如 T.revenue）或页码，出处只放在 cites 里。"""
+- 用清晰白话把事实、因果和反证讲透：简单事实简明扼要，复杂勾稽或具体问题按证据充分展开，不限句数；text 和 summary 里不要写出处编号（如 T.revenue）或页码，出处只放在 cites 里。"""
 
 
 def _parse(text: str) -> dict | None:
@@ -479,6 +474,17 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     code, request = run["code"], json.loads(run["request"] or "{}")
     db.update_run(conn, run_id, status="running", step="gather", started_at=db.now())
     runner = Runner(conn, run_id)
+    identity: dict = {}
+
+    def save_material(mat: Material, *, with_company: bool = True) -> str:
+        snapshot = mat.snapshot()
+        identity["material_sha256"] = snapshot["sha256"]
+        fields = {"identity": json.dumps(identity), "material": json.dumps(snapshot, ensure_ascii=False)}
+        if with_company:
+            fields |= {"code": mat.code, "name": mat.name}
+        db.update_run(conn, run_id, **fields)
+        return snapshot["sha256"]
+
     try:
         identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
         db.update_run(conn, run_id, identity=json.dumps(identity))
@@ -489,18 +495,14 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             material.extra["question"] = request.get("question", "")
             material.extra["feedback"] = request.get("feedback")
             material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"))
-        snapshot = material.snapshot()
-        identity["material_sha256"] = snapshot["sha256"]
-        db.update_run(conn, run_id, code=material.code, name=material.name,
-                      identity=json.dumps(identity), material=json.dumps(snapshot, ensure_ascii=False))
+        save_material(material)
         if replay_of is None:
             from a_share_research.research_tools import explore
             report = explore(runner, material)
-            snapshot = material.snapshot()
-            identity["material_sha256"] = snapshot["sha256"]
-            db.update_run(conn, run_id, identity=json.dumps(identity), material=json.dumps(snapshot, ensure_ascii=False))
+            material_sha256 = save_material(material)
         else:
             report = compose(runner, material)
+            material_sha256 = identity["material_sha256"]
         problems: list[dict] = []
         # At most two repairs, so a repair spent on mechanical slips still leaves one for review findings.
         for attempt in range(3):
@@ -513,7 +515,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         period = max([material.doc.period] + [p for r in material.table if r["id"].startswith("T.") for p in r["values"]])
         body = {
             "code": material.code, "name": material.name, "period": period,
-            "document": {k: getattr(material.doc, k) for k in ("title", "url", "announced", "sha256", "retrieved_at")},
+            "document": material.doc.info(),
             "pages": sorted(material.pages), "table": material.table, "market_date": material.market_date,
             "calls": runner.calls,
             "question": material.extra.get("question", ""), "parent_report_id": request.get("parent_report_id"),
@@ -523,7 +525,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "tool_calls": len(material.extra.get("tools", [])),
             "announcement_searches": material.extra.get("announcement_searches", []),
             "methods_used": material.extra.get("methods_used", []),
-            "replay_of": replay_of, "material_sha256": snapshot["sha256"],
+            "replay_of": replay_of, "material_sha256": material_sha256,
         }
         if problems:
             body |= {"facts": _verified_facts(report, problems), "problems": problems}
@@ -543,9 +545,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             log.exception("run %s failed", run_id)
         db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=str(exc) or type(exc).__name__)
         if "material" in locals():
-            snapshot = material.snapshot()
-            identity["material_sha256"] = snapshot["sha256"]
-            db.update_run(conn, run_id, material=json.dumps(snapshot, ensure_ascii=False), identity=json.dumps(identity))
+            save_material(material, with_company=False)
 
 
 def main() -> None:

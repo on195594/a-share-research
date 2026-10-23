@@ -1,7 +1,5 @@
 """Model completions and native tool messages through the pi runtime."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import os

@@ -3,8 +3,6 @@
 Holds no model or market credentials; the worker does all research.
 """
 
-from __future__ import annotations
-
 import hashlib
 import hmac
 import json
@@ -16,6 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Self
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -53,7 +52,7 @@ class Settings:
     github_user_id: str
 
     @classmethod
-    def from_env(cls) -> Settings:
+    def from_env(cls) -> Self:
         settings = cls(
             base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
             session_secret=os.environ.get("SESSION_SECRET", ""),
@@ -257,7 +256,9 @@ def recent_report(code: str):
 
 
 def active_runs() -> list:
-    return conn.execute("SELECT * FROM runs WHERE status IN ('queued', 'running') ORDER BY id").fetchall()
+    return conn.execute(
+        "SELECT id, code, name, status, step FROM runs WHERE status IN ('queued', 'running') ORDER BY id"
+    ).fetchall()
 
 
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
@@ -318,7 +319,10 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
 def run_page(request: Request, run_id: int):
     if not (session := current_session(request)):
         return login_required()
-    run = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+    run = conn.execute(
+        "SELECT id, kind, code, name, status, step, error, started_at, finished_at FROM runs WHERE id = ?",
+        (run_id,),
+    ).fetchone()
     if run is None:
         return not_found(request, session)
     if run["kind"] == "price" and run["status"] == "done":
@@ -347,7 +351,7 @@ def report_page(request: Request, report_id: int):
     row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
     if row is None:
         return not_found(request, session)
-    run = conn.execute("SELECT * FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
+    run = conn.execute("SELECT status, request, identity FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
     if not service.ready(run["status"], row["passed"]):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
@@ -359,13 +363,13 @@ def report_page(request: Request, report_id: int):
                           "business": "业务", "financial": "财务", "methods": "研究方法"}[section]
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
-    return render(request, "report.html", session, report=row, body=body, run=run,
+    return render(request, "report.html", session, report=row, body=body,
                   feedback=feedback, feedback_label=feedback_label,
-                  replay_of=json.loads(run["identity"] or "{}").get("replay_of"),
+                  replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]),
-                  followups=conn.execute("SELECT id, status, request FROM runs WHERE json_extract(request, '$.parent_report_id') = ? ORDER BY id DESC", (report_id,)).fetchall())
+                  followups=conn.execute("SELECT id, status FROM runs WHERE json_extract(request, '$.parent_report_id') = ? ORDER BY id DESC", (report_id,)).fetchall())
 
 
 @app.post("/reports/{report_id}/feedback")
@@ -376,8 +380,7 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
     if not csrf_ok(session, csrf):
         return message(request, session, "页面已过期", "请返回报告重新提交。", 403)
     try:
-        view = service.report_view(conn, report_id)
-        run_id = service.submit(conn, view["code"], request_id, name=view["name"], parent_report_id=report_id,
+        run_id = service.submit(conn, "", request_id, parent_report_id=report_id,
                                 feedback={"location": location, "text": text})
     except service.RequestError as exc:
         return message(request, session, "无法提交纠错", str(exc), exc.status)
@@ -465,8 +468,7 @@ def api_report(request: Request, report_id: int):
 @app.post("/api/reports/{report_id}/feedback", status_code=202)
 def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
     api_session(request)
-    view = service.report_view(conn, report_id)
-    run_id = service.submit(conn, view["code"], body.request_id, name=view["name"], parent_report_id=report_id,
+    run_id = service.submit(conn, "", body.request_id, parent_report_id=report_id,
                             feedback={"location": body.location, "text": body.text})
     return {"version": service.VERSION, "run_id": run_id}
 

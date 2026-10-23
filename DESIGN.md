@@ -11,7 +11,6 @@ colors:
   line: "#BCCDCF"
   caution: "#805500"
   caution-bg: "#FFF1D6"
-  error: "#99362B"
 typography:
   headline:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
@@ -60,7 +59,7 @@ components:
 
 ## Colors
 
-accent 用于主要动作与链接；background 是冷矿蓝全页底；surface 是报告头与出处的局部浅底；band 标明来源与日期。ink 承担正文与标题，muted 只用于代码、日期等辅助信息；line 分隔条目。caution 配 caution-bg 表达反证、失败与缺口，始终附文字标签；error 用于错误文字。禁止用红绿暗示涨跌或买卖；结论不用颜色区分好坏。文字对实际背景至少 4.5:1。
+accent 用于主要动作与链接；background 是冷矿蓝全页底；surface 是报告头与出处的局部浅底；band 标明来源与日期。ink 承担正文与标题，muted 只用于代码、日期等辅助信息；line 分隔条目。caution 配 caution-bg 表达反证、失败与缺口，始终附文字标签。禁止用红绿暗示涨跌或买卖；结论不用颜色区分好坏。文字对实际背景至少 4.5:1。
 
 ## Typography
 

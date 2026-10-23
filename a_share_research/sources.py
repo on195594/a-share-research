@@ -1,7 +1,5 @@
 """Official disclosures from cninfo and structured financials from TuShare."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import re
@@ -180,12 +178,11 @@ def _frame(result) -> pd.DataFrame:
 
 
 def financials(code: str, years: int = 4) -> dict[str, pd.DataFrame]:
-    """Income, balance sheet, cash flow and indicators for recent periods (TuShare)."""
+    """Income, cash flow and indicators for recent periods (TuShare)."""
     provider = TushareFinancialProvider()
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
     return {
         "income": _frame(provider.fetch_income_history(code, start_date=start)),
-        "balance": _frame(provider.fetch_balance_history(code, start_date=start)),
         "cashflow": _frame(provider.fetch_cashflow_history(code, start_date=start)),
         "indicator": _frame(provider.fetch_indicator_history(code, start_date=start)),
     }

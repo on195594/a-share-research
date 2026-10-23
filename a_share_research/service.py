@@ -17,14 +17,22 @@ class RequestError(ValueError):
 
 def submit(conn, code: str, request_id: str, *, name: str | None = None,
            question: str = "", parent_report_id: int | None = None, feedback: dict | None = None) -> int:
-    code = code[:6] if re.fullmatch(r"\d{6}(?:\.(?:SH|SZ|BJ))?", code) else ""
-    if not code or not 1 <= len(request_id) <= 128 or len(question) > 4000:
+    valid_code = code[:6] if re.fullmatch(r"\d{6}(?:\.(?:SH|SZ|BJ))?", code) else ""
+    if (not valid_code and (code or parent_report_id is None)) or not 1 <= len(request_id) <= 128 or len(question) > 4000:
         raise RequestError("需要 6 位公司代码、1–128 字请求编号；问题不超过 4000 字")
+    code = valid_code
     question = question.strip()
     if parent_report_id is not None:
-        parent = conn.execute("SELECT code, body FROM reports WHERE id = ?", (parent_report_id,)).fetchone()
+        parent = conn.execute(
+            "SELECT r.code, r.name, r.passed, r.body, u.status FROM reports r"
+            " JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (parent_report_id,),
+        ).fetchone()
         if parent is None:
             raise RequestError("原报告不存在", 404)
+        if not ready(parent["status"], parent["passed"]):
+            raise RequestError("报告尚未就绪或状态不一致", 409)
+        code = code or parent["code"][:6]
+        name = name or parent["name"]
         if parent["code"][:6] != code:
             raise RequestError("原报告与研究公司不一致")
         if feedback is not None:

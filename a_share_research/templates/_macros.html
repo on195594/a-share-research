@@ -18,7 +18,7 @@
     {% if c.ref %}
       {% set r = rows.get(c.ref) %}
       {% if r %}<li><span class="tag">{{ "程序计算" if r.calculation else "财务表" }}</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}{% if not c.period or c.period == p %}<span class="num">{{ '结果' if p == 'result' else p }} {{ v }}</span> {% endif %}{% endfor %}
-        {% if r.calculation %}<p>{{ r.calculation.formula | replace('left', r.calculation.inputs[0].value) | replace('right', r.calculation.inputs[1].value) }}；{% for value in r.calculation.inputs %}{{ value.label or rows[value.ref].label }}（{{ value.period }}）= {{ value.value }} {{ value.unit }}{% if not loop.last %}；{% endif %}{% endfor %}</p><p>{{ r.calculation.precision }}</p>{% endif %}
+        {% if r.calculation %}<p>{{ r.calculation.formula | replace('left', r.calculation.inputs[0].value) | replace('right', r.calculation.inputs[1].value) }}；{% for value in r.calculation.inputs %}{{ value.label or rows[value.ref].label }}（{{ value.source ~ '第' ~ value.page ~ '页·' if value.source and value.page else '' }}{{ value.period }}）= {{ value.value }} {{ value.unit }}{% if not loop.last %}；{% endif %}{% endfor %}</p><p>{{ r.calculation.precision }}</p>{% endif %}
       </li>{% endif %}
     {% else %}
       {% set source = sources.get(c.source or 'D0') %}

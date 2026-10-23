@@ -5,8 +5,6 @@ an observation line (20-day high + 0.01) and an invalidation line (10-day low); 
 next 5 trading sessions.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import os

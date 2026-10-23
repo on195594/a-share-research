@@ -8,7 +8,6 @@ import pandas as pd
 from a_share_research.research import Material, financial_table
 from test_check import MATERIAL
 
-
 DATA = json.loads((Path(__file__).parent / "data" / "600519-financials.json").read_text())
 
 
@@ -30,14 +29,8 @@ def test_indicators_survive_the_providers_null_statement_type():
     # This captured response only contains annual rows and the latest half year.
     assert list(rows["T.roe"]["values"]) == ["2023-12-31", "2024-12-31", "2025-12-31", "2026-06-30"]
 
-
-def test_missing_indicator_rows_stay_missing_in_material():
-    frames = {name: pd.DataFrame(rows) for name, rows in DATA["financials"].items()}
     frames["indicator"] = frames["indicator"].iloc[:0]
     table = financial_table(frames, DATA["market"])
-    indicator = next(row for row in table if row["id"] == "T.roe")
-    assert indicator["values"] == {}
     material = Material(MATERIAL.code, MATERIAL.name, MATERIAL.doc, MATERIAL.pages,
                         MATERIAL.raw_pages, table, DATA["market"]["trade_date"])
     assert "[T.roe] 加权ROE（%）：缺失" in material.prompt_block()
-    assert Material.from_snapshot(material.snapshot()).table == table

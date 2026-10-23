@@ -75,62 +75,6 @@
         "endpoint": "income"
       }
     ],
-    "balance": [
-      {
-        "ts_code": "600519.SH",
-        "ann_date": "2024-04-03",
-        "f_ann_date": "2024-04-03",
-        "end_date": "2023-12-31",
-        "report_type": "1",
-        "comp_type": "1",
-        "endpoint": "balancesheet"
-      },
-      {
-        "ts_code": "600519.SH",
-        "ann_date": "2024-04-03",
-        "f_ann_date": "2024-04-03",
-        "end_date": "2023-12-31",
-        "report_type": "1",
-        "comp_type": "1",
-        "endpoint": "balancesheet"
-      },
-      {
-        "ts_code": "600519.SH",
-        "ann_date": "2025-04-03",
-        "f_ann_date": "2025-04-03",
-        "end_date": "2024-12-31",
-        "report_type": "1",
-        "comp_type": "1",
-        "endpoint": "balancesheet"
-      },
-      {
-        "ts_code": "600519.SH",
-        "ann_date": "2026-04-17",
-        "f_ann_date": "2026-04-17",
-        "end_date": "2025-12-31",
-        "report_type": "1",
-        "comp_type": "1",
-        "endpoint": "balancesheet"
-      },
-      {
-        "ts_code": "600519.SH",
-        "ann_date": "2026-08-15",
-        "f_ann_date": "2026-08-15",
-        "end_date": "2026-06-30",
-        "report_type": "1",
-        "comp_type": "1",
-        "endpoint": "balancesheet"
-      },
-      {
-        "ts_code": "600519.SH",
-        "ann_date": "2026-08-15",
-        "f_ann_date": "2026-08-15",
-        "end_date": "2026-06-30",
-        "report_type": "1",
-        "comp_type": "1",
-        "endpoint": "balancesheet"
-      }
-    ],
     "cashflow": [
       {
         "ts_code": "600519.SH",

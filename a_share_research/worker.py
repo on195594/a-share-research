@@ -1,7 +1,5 @@
 """Run queued research one at a time; the only process holding model and market credentials."""
 
-from __future__ import annotations
-
 import logging
 import time
 

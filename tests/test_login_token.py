@@ -1,36 +1,44 @@
-import os
-import subprocess
 import sys
+import time
+
+import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
+
+from a_share_research import db, login_token
+from a_share_research.login_token import mint
 
 
-def test_minted_session_is_accepted_until_it_expires(tmp_path):
-    env = os.environ | {"DATA_DIR": str(tmp_path), "DEV_LOGIN": "1", "PUBLIC_BASE_URL": "http://127.0.0.1:8617",
-                        "SESSION_SECRET": "local-login-token-" * 3}
-    token = subprocess.run([sys.executable, "-m", "a_share_research.login_token", "--minutes", "1"],
-                           env=env, check=True, timeout=15, capture_output=True, text=True).stdout.strip()
-    subprocess.run([
-        sys.executable, "-c",
-        "import sys, time\n"
-        "from starlette.requests import Request\n"
-        "from a_share_research import web\n"
-        "request = Request({'type': 'http', 'headers': [(b'cookie', b'session=' + sys.argv[1].encode())]})\n"
-        "assert web.current_session(request) == web._hash(sys.argv[1])\n"
-        "from a_share_research.login_token import mint\n"
-        "from fastapi import HTTPException\n"
-        "agent = mint(web.conn, 1, agent=True)\n"
-        "agent_cookie = Request({'type': 'http', 'headers': [(b'cookie', b'session=' + agent.encode())]})\n"
-        "assert web.current_session(agent_cookie) is None\n"
-        "def bearer(token): return Request({'type': 'http', 'headers': [(b'authorization', b'Bearer ' + token.encode())]})\n"
-        "assert web.api_session(bearer(agent)) == 'agent:' + web._hash(agent)\n"
-        "for denied in (request, bearer(sys.argv[1])):\n"
-        "    try: web.api_session(denied)\n"
-        "    except HTTPException as exc: assert exc.status_code == 401\n"
-        "    else: raise AssertionError('browser sessions must not authorize API calls')\n"
-        "web.api_revoke(bearer(agent))\n"
-        "try: web.api_session(bearer(agent))\n"
-        "except HTTPException as exc: assert exc.status_code == 401\n"
-        "else: raise AssertionError('revoked token must fail')\n"
-        "web.conn.execute('UPDATE sessions SET expires_at = ?', (time.time() - 1,))\n"
-        "assert web.current_session(request) is None\n",
-        token,
-    ], env=env, check=True, timeout=15)
+def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    monkeypatch.setenv("DEV_LOGIN", "1")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "http://127.0.0.1:8617")
+    monkeypatch.setenv("SESSION_SECRET", "local-login-token-" * 3)
+    monkeypatch.setattr(sys, "argv", ["login_token", "--minutes", "1"])
+    login_token.main()
+    token = capsys.readouterr().out.strip()
+
+    monkeypatch.delitem(sys.modules, "a_share_research.web", raising=False)
+    from a_share_research import web
+
+    try:
+        agent = mint(web.conn, 1, agent=True)
+        cookie = lambda value: Request({"type": "http", "headers": [(b"cookie", f"session={value}".encode())]})
+        bearer = lambda value: Request({"type": "http", "headers": [(b"authorization", f"Bearer {value}".encode())]})
+
+        assert web.current_session(cookie(token)) == web._hash(token)
+        assert web.current_session(cookie(agent)) is None
+        assert web.api_session(bearer(agent)) == "agent:" + web._hash(agent)
+        for denied in (cookie(token), bearer(token)):
+            with pytest.raises(HTTPException) as exc:
+                web.api_session(denied)
+            assert exc.value.status_code == 401
+
+        web.api_revoke(bearer(agent))
+        with pytest.raises(HTTPException):
+            web.api_session(bearer(agent))
+
+        web.conn.execute("UPDATE sessions SET expires_at = ?", (time.time() - 1,))
+        assert web.current_session(cookie(token)) is None
+    finally:
+        web.conn.close()
