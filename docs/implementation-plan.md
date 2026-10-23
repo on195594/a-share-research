@@ -10,7 +10,7 @@
 | I1 | 研究运行身份、材料快照、CLI 重放 | Research | 已部署生产 |
 | I2 | 质量基线与模型/Skill 比较 | Research、Skills 各自维护 | Research 修复已部署；Skills `992f5a5` 获批合同下离线复算 8/8、追问组 4/4，已发布并激活 |
 | I3–I6 | 共用研究 API、自主补证与计算、追问与纠错 | Research | `e00f3ce` 已部署生产，评估非金融 10/10，线上纠错通过 |
-| R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | 源码已推送（Research `942a58d`、Skills `7340a21`）；**未部署生产、Skills 未激活** |
+| R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
 
 ### 下一批推进顺序
 
@@ -28,33 +28,36 @@ R3 已完成的验证：
 - 一次 11 家完整评估：非金融 **10/10**，银行按范围拒绝、零模型调用；75 次模型、127 次工具请求，单家 94–256 秒。之后发现自动上下文残留旧方法，修复后只补验茅台通过。
 - 本机隔离实例 390×844 走通登录→公司档案→方法出处→纠错→结果→退出，无整页横向溢出。
 
-上线还需要：用户授权后按[发布](#当前部署)切换生产镜像；Skills 激活按其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) 执行。GitHub 本人授权交换未验证。
+用户随后明确授权配对发布；2026-10-23 完成[上线与生产验收](#当前部署)。Skills 的安装身份、配置与回退由其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) 维护。GitHub 本人授权交换未验证。
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `e00f3ce`（2026-10-23 部署）。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
+入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `942a58d`（2026-10-23 部署），与 Skills 0.1.23 同时启用。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。本次采用既有已验收镜像；后续源码整理 `7eef561` 不在该镜像内。
 
 | 项目 | 状态 |
 |---|---|
-| 镜像 | `a-share-research-web:e00f3ce`、`a-share-research-worker:e00f3ce`（同为 `latest`） |
-| 应用内容哈希 | `bcd2c67b5b9616fbe1a235bb47e02f4b0d632119d769df147bb40988cdac84d8` |
+| 镜像 | `a-share-research-web:942a58d`（`sha256:c2cec73c…`）、`a-share-research-worker:942a58d`（`sha256:78739a1f…`），同为 `latest` |
+| 应用内容哈希 | `112beef9e4b4b1b5ba5a3263fe8b894cf9dc4adf4d6ed6cadc6101092e5082b2` |
 | 运行时 | Python 3.13.17、Node 22.23.4、pi 1.4.0、Lib 0.8.2；模型 `openai-codex/gpt-6.1-sol` |
-| 部署前备份 | `~/a-share-research-data/backup-pre-e00f3ce-20261023T081511Z.db`（0600） |
-| 线上验收 | 公网 API 对失败报告提交纠错（任务 16 → 报告 10）通过；历史报告可读；Web 无模型/行情凭据；验收令牌已撤销 |
+| 部署前备份 | `~/a-share-research-data/backup-pre-942a58d-20261023T101825Z.db`（0600） |
+| 线上验收 | 已安装 CLI 使用实际配置读取报告 11，再发起纠错任务 18 → [报告 12](https://stock.keyi.win/reports/12)：98 秒、4 次模型调用，通过核查，生成两条方法；390×844 网页沿关联任务读取同一结果并展开原文，无整页横向溢出 |
+| 数据与会话 | 原有 17 个任务、11 份报告、53 次调用及 3 条价格记录逐行摘要不变；未创建验收用账户库；Web 无模型/行情凭据；浏览器验收会话已退出撤销 |
+| Skills 连接 | `runtime.env`（0600）已配置公网 API 与 8 小时 Agent 令牌，其他配置保留；本次令牌到期时间为北京时间 2026-10-24 02:19，需 owner 续签；已有客户端会话需重载 Skill |
 
-发布方式见 [README](../README.md#部署)：只从已提交、已推送的 main 构建，worker 空闲时 `docker compose up -d --build`；生产切换需当次授权。
+发布证据在 `~/.local/share/a-share-research-evaluations/2026-10-23-paired-942a58d/`（目录 0700、文件 0600），包括镜像身份、备份摘要、安装与回退记录、生产结果及截图，不含令牌明文。复用 R3 的完整评估，本次只新增上述一条真实研究，没有重跑 11 家或新增模型审查。
+
+发布方式见 [README](../README.md#部署)：只从已提交、已推送的代码构建；采用已验证镜像时核对内容哈希，在队列空闲并备份后用 `docker compose up -d --no-build --no-deps web worker` 切换，避免混入后续工作区改动。生产切换需当次授权。
 
 ### 回退
 
-保留配对镜像 `a-share-research-web:4e85c14` 与 `a-share-research-worker:4e85c14`，与当前数据库和报告格式兼容。回退会恢复上一版研究行为及其已知问题，需当次生产操作授权：
+保留旧 Web/worker 镜像 `pre-r3-20261023` 供追溯，但不能直接回退运行：旧网页读取 `methods[i]` 反馈会报错，旧 worker 也不能正确处理方法反馈。可用的应急恢复镜像为 `a-share-research-web:readonly-r3-20261023`（`sha256:5e3ecb1c…`），使用已验证的新报告阅读代码，暂停研究写入。它已读取真实旧报告及方法反馈报告，五个研究/价格写入口均返回 503、任务数不变，退出与令牌撤销仍可用。恢复时停止 worker，暂不提供新研究；这不是恢复旧版完整研究行为。后续操作需当次生产授权：
 
 ```bash
 docker compose stop -t 30 web
 # 确认研究队列为空后：
 docker compose stop -t 30 worker
-docker tag a-share-research-web:4e85c14 a-share-research-web:latest
-docker tag a-share-research-worker:4e85c14 a-share-research-worker:latest
-docker compose up -d --no-build --no-deps web worker
+docker tag a-share-research-web:readonly-r3-20261023 a-share-research-web:latest
+docker compose up -d --no-build --no-deps web
 ```
 
 保留新增列和报告，不用部署前备份覆盖正常新增数据。
