@@ -26,7 +26,7 @@ METRICS = [
     ("revenue", "营业总收入", "亿元", "income", "total_revenue", 1e8),
     ("net_profit", "归母净利润", "亿元", "income", "n_income_attr_p", 1e8),
     ("op_cash", "经营活动现金流净额", "亿元", "cashflow", "n_cashflow_act", 1e8),
-    ("revenue_yoy", "营收同比", "%", "indicator", "or_yoy", 1),
+    ("revenue_yoy", "营业收入同比", "%", "indicator", "or_yoy", 1),
     ("profit_yoy", "归母净利同比", "%", "indicator", "netprofit_yoy", 1),
     ("core_profit_yoy", "扣非净利同比", "%", "indicator", "dt_netprofit_yoy", 1),
     ("gross_margin", "毛利率", "%", "indicator", "grossprofit_margin", 1),
@@ -86,7 +86,7 @@ class Material:
 
     def prompt_block(self) -> str:
         rows = [
-            f"[{r['id']}] {r['label']}（{r['unit']}）：" + "；".join(f"{p} {v}" for p, v in r["values"].items())
+            f"[{r['id']}] {r['label']}（{r['unit']}）：" + ("；".join(f"{p} {v}" for p, v in r["values"].items()) or "缺失")
             for r in self.table
         ]
         pages = "\n".join(f'<page n="{n}">\n{text}\n</page>' for n, text in self.pages.items())
@@ -115,9 +115,9 @@ def replay_material(conn, source_run: int) -> Material:
 
 # ---------- gather ----------
 
-def _latest_rows(frame: pd.DataFrame) -> pd.DataFrame:
+def _latest_rows(frame: pd.DataFrame, *, consolidated: bool) -> pd.DataFrame:
     frame = frame.copy()
-    if "report_type" in frame:
+    if consolidated:
         frame = frame[frame["report_type"].astype(str) == "1"]  # consolidated statements
     frame["end_date"] = frame["end_date"].astype(str)
     order = [c for c in ("ann_date", "f_ann_date") if c in frame]
@@ -125,7 +125,8 @@ def _latest_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
-    statements = {k: _latest_rows(v) for k, v in fin.items()}
+    # Indicators have no report_type; the provider keeps that common column null.
+    statements = {k: _latest_rows(v, consolidated=k != "indicator") for k, v in fin.items()}
     ends = sorted(statements["income"].index)
     annual = [e for e in ends if e.endswith("12-31")][-3:]
     periods = annual + ([ends[-1]] if ends[-1] > annual[-1] else [])
@@ -137,8 +138,7 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
             raw = frame[column].get(p) if column in frame else None
             if raw is not None and pd.notna(raw):
                 values[p] = f"{float(raw) / divisor:.2f}"
-        if values:
-            table.append({"id": f"T.{key}", "label": label, "unit": unit, "values": values})
+        table.append({"id": f"T.{key}", "label": label, "unit": unit, "values": values})
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
             table.append({"id": f"M.{key}", "label": label, "unit": unit,
@@ -288,7 +288,8 @@ RULES = """规则：
 - 只使用下面资料中的事实，不用外部知识，不猜测资料中没有的信息。
 - 不得自行计算任何数字（同比、比例、差额、换算都不行），只写表中或所引原文中已有的数字。
 - 每条论断都要有出处，论断中的数字必须出现在它所引的出处里。
-- risks 写 3–5 条最可能推翻“值得研究”判断的风险与反证，按重要性排序，优先财务表中的不利变化和管理层自述的风险。
+- 按字段口径解释数字：营业收入同比不代表营业总收入同比，不得把两者配成同口径的金额与增速。
+- risks 按重要性列出最可能推翻“值得研究”判断的风险与反证，优先财务表中的不利变化和管理层自述的风险。通常写 3–5 条，但不得为限制条数遗漏有依据的重大风险。
 - business 写 2–4 条：公司靠什么赚钱、主要产品或地区、经营上的变化。
 - financial 写 3–5 条：解释表中最重要的变化。
 - 面向普通投资者，用白话，每条一两句；text 和 summary 里不要写出处编号（如 T.revenue）或页码，出处只放在 cites 里。"""
@@ -354,6 +355,7 @@ def review(runner: Runner, material: Material, report: dict) -> list[dict]:
 def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict]) -> dict | None:
     prompt = f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请修正后输出完整的新报告。
 可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
+补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
 
 {RULES}
 

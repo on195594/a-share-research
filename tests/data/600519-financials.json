@@ -1,0 +1,249 @@
+{
+  "code": "600519",
+  "fetched_at": "2026-10-22T17:19:09.459279+08:00",
+  "lib_version": "0.8.2",
+  "market": {
+    "ts_code": "600519.SH",
+    "trade_date": "2026-10-22",
+    "close": 1318.49,
+    "pe": 20.0221,
+    "pe_ttm": 20.24,
+    "pb": 6.56,
+    "ps": 9.7621,
+    "ps_ttm": 9.6868,
+    "dv_ratio": 3.9237,
+    "dv_ttm": 3.9457,
+    "total_mv": 164822008.8784,
+    "circ_mv": 164822008.8784
+  },
+  "source": "TuShare via a-stock-lib providers; selected columns and report periods from the real response, values unchanged",
+  "financials": {
+    "income": [
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2024-04-03",
+        "f_ann_date": "2024-04-03",
+        "end_date": "2023-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "total_revenue": 150560330316.45,
+        "n_income_attr_p": 74734071550.75,
+        "endpoint": "income"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2025-04-03",
+        "f_ann_date": "2025-04-03",
+        "end_date": "2024-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "total_revenue": 174144069958.25,
+        "n_income_attr_p": 86228146421.62,
+        "endpoint": "income"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-04-17",
+        "f_ann_date": "2026-04-17",
+        "end_date": "2025-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "total_revenue": 172054171890.91,
+        "n_income_attr_p": 82320067101.68,
+        "endpoint": "income"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "f_ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "report_type": "1",
+        "comp_type": "1",
+        "total_revenue": 92278072083.21,
+        "n_income_attr_p": 44516880421.86,
+        "endpoint": "income"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "f_ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "report_type": "1",
+        "comp_type": "1",
+        "total_revenue": 92278072083.21,
+        "n_income_attr_p": 44516880421.86,
+        "endpoint": "income"
+      }
+    ],
+    "balance": [
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2024-04-03",
+        "f_ann_date": "2024-04-03",
+        "end_date": "2023-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "endpoint": "balancesheet"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2024-04-03",
+        "f_ann_date": "2024-04-03",
+        "end_date": "2023-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "endpoint": "balancesheet"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2025-04-03",
+        "f_ann_date": "2025-04-03",
+        "end_date": "2024-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "endpoint": "balancesheet"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-04-17",
+        "f_ann_date": "2026-04-17",
+        "end_date": "2025-12-31",
+        "report_type": "1",
+        "comp_type": "1",
+        "endpoint": "balancesheet"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "f_ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "report_type": "1",
+        "comp_type": "1",
+        "endpoint": "balancesheet"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "f_ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "report_type": "1",
+        "comp_type": "1",
+        "endpoint": "balancesheet"
+      }
+    ],
+    "cashflow": [
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2024-04-03",
+        "f_ann_date": "2024-04-03",
+        "end_date": "2023-12-31",
+        "comp_type": "1",
+        "report_type": "1",
+        "n_cashflow_act": 66593247721.09,
+        "endpoint": "cashflow"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2025-04-03",
+        "f_ann_date": "2025-04-03",
+        "end_date": "2024-12-31",
+        "comp_type": "1",
+        "report_type": "1",
+        "n_cashflow_act": 92463692168.43,
+        "endpoint": "cashflow"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-04-17",
+        "f_ann_date": "2026-04-17",
+        "end_date": "2025-12-31",
+        "comp_type": "1",
+        "report_type": "1",
+        "n_cashflow_act": 61522204989.35,
+        "endpoint": "cashflow"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "f_ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "comp_type": "1",
+        "report_type": "1",
+        "n_cashflow_act": 70690750119.06,
+        "endpoint": "cashflow"
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "f_ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "comp_type": "1",
+        "report_type": "1",
+        "n_cashflow_act": 70690750119.06,
+        "endpoint": "cashflow"
+      }
+    ],
+    "indicator": [
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2024-04-03",
+        "end_date": "2023-12-31",
+        "roe_waa": 34.19,
+        "netprofit_yoy": 19.1599,
+        "debt_to_assets": 17.9843,
+        "grossprofit_margin": 91.9649,
+        "or_yoy": 19.0119,
+        "dt_netprofit_yoy": 19.05,
+        "endpoint": "fina_indicator",
+        "f_ann_date": null,
+        "report_type": null,
+        "comp_type": null
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2025-04-03",
+        "end_date": "2024-12-31",
+        "roe_waa": 36.02,
+        "netprofit_yoy": 15.38,
+        "debt_to_assets": 19.0448,
+        "grossprofit_margin": 91.9312,
+        "or_yoy": 15.712,
+        "dt_netprofit_yoy": 15.37,
+        "endpoint": "fina_indicator",
+        "f_ann_date": null,
+        "report_type": null,
+        "comp_type": null
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-04-17",
+        "end_date": "2025-12-31",
+        "roe_waa": 32.53,
+        "netprofit_yoy": -4.5323,
+        "debt_to_assets": 16.4154,
+        "grossprofit_margin": 91.1796,
+        "or_yoy": -1.206,
+        "dt_netprofit_yoy": -4.58,
+        "endpoint": "fina_indicator",
+        "f_ann_date": null,
+        "report_type": null,
+        "comp_type": null
+      },
+      {
+        "ts_code": "600519.SH",
+        "ann_date": "2026-08-15",
+        "end_date": "2026-06-30",
+        "roe_waa": 16.75,
+        "netprofit_yoy": -1.9516,
+        "debt_to_assets": 15.1931,
+        "grossprofit_margin": 89.5552,
+        "or_yoy": 1.4699,
+        "dt_netprofit_yoy": -2.04,
+        "endpoint": "fina_indicator",
+        "f_ann_date": null,
+        "report_type": null,
+        "comp_type": null
+      }
+    ]
+  }
+}
