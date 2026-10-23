@@ -24,7 +24,7 @@ D0 文档已发布；2026-10-22 已完成 I1 实现、Claude 审查修复及生�
 
 | 顺序 | Owner 与工作 | 验收与进入条件 |
 |---|---|---|
-| 已完成 | Research：质量修复 `eb58294` 与验收会话 `708118f` 已部署 | 候选镜像实时研究、生产浏览器主流程与数据逐行核对通过，详见[当前部署](#当前部署)；GitHub 授权本身未验证 |
+| 已完成 | Research：质量修复、验收会话与易用性修复已部署（`87b3be4`） | 候选镜像实时研究、生产浏览器主流程与数据逐行核对通过，详见[当前部署](#当前部署)；GitHub 授权本身未验证 |
 | 已完成 | Skills：`992f5a5` 已发布并激活三个客户端及配套运行时 | 原行为验收与远端 CI 通过，审查修复 `3a1c067` 后 1,439 项本地检查通过；实际安装核对 9 个 Skill、3 个 CLI、25 个运行时文件、完整快照和 W1 门禁。旧入口与 Skill 内容保留，未触发回滚；现有会话需重新加载，长上下文和真实账户流程未验证 |
 | 1，条件触发 | Research / Skills：I3–I4 的首个只读报告消费流程 | 明确实际宿主、用户问题及报告后启动；一个真实问题能读取报告、展开原文并回答，错误/过期/缺证据及零写入边界通过。传输优先使用现有 CLI/API，MCP 仅按宿主需要增加 |
 
@@ -53,27 +53,26 @@ D0 文档已发布；2026-10-22 已完成 I1 实现、Claude 审查修复及生�
 
 ### 当前部署
 
-2026-10-23 经用户授权，生产 Web 与 worker 运行 `708118f`（含质量修复 `eb58294` 与免 GitHub 验收会话）。
+2026-10-23 经用户授权，生产 Web 与 worker 运行 `87b3be4`：在 `708118f`（质量修复 `eb58294` 与免 GitHub 验收会话）之上，按用户视角浏览器验收修复易用性问题。
 
 | 项目 | 已验证状态 |
 |---|---|
-| 镜像 | `a-share-research-web:708118f`（`sha256:3a19311f…`）；`a-share-research-worker:708118f`（`sha256:abe8725b…`） |
-| 应用内容哈希 | `802e92d1931915c891ed4c235840eeb74448339d5b474073f12b1f45292808d5`；源码、候选镜像、生产及任务 7 身份一致 |
+| 镜像 | `a-share-research-web:87b3be4`（`sha256:b24ee77f…`）；`a-share-research-worker:87b3be4`（`sha256:8cce2c7e…`） |
+| 应用内容哈希 | `1b7a9182acf8736856b4b13f56b7ab3a32d5b44580522717399378a74e785cc4`；源码与生产一致 |
 | 运行时 | Python 3.13.17、pi 1.4.0、Lib 0.8.2 |
-| 候选验证 | 候选 worker 在临时数据目录实时研究东方电缆：175 秒、5 次调用、两次修复后复核通过（此前风险删减失败路径） |
-| 切换与数据 | 队列空闲时在线备份 `backup-pre-708118f-20261023.db`；切换约 11 秒；原 6 任务、15 调用、4 报告、2 价格逐行不变；两个服务重启次数 0；Web 未注入模型或行情凭据 |
-| 浏览器验收 | 390×844 真实浏览器，经 `login_token` 会话：首页 → 提交“茅台” → 任务 7 进度页 → [报告 5](https://stock.keyi.win/reports/5)（74 秒、2 次调用、复核通过）→ 展开原文 → 公司档案与有效价格参考 → 退出后会话删除、私有页回到登录。首页、报告、档案无整页横向溢出 |
-| 指标修复 | 报告 5 显示营收/利润/扣非同比、毛利率、加权 ROE、负债率，值与本地候选核对一致（如 2025 加权 ROE 32.53%） |
+| 切换与数据 | 每次切换前队列空闲并在线备份（`backup-pre-708118f-20261023.db`、`backup-pre-87b3be4-20261023.db`）；原记录逐行不变；两个服务重启次数 0；Web 未注入模型或行情凭据 |
+| 浏览器验收 | 390×844 真实浏览器经 `login_token` 会话：茅台任务 7 → 报告 5、五粮液任务 10 → 报告 6（一次修复后通过）、比亚迪任务 12 → [报告 7](https://stock.keyi.win/reports/7)（66 秒、2 次调用）→ 展开原文 → 公司档案 → 新建价格参考（任务 13）→ 退出。各页无整页横向溢出 |
+| 本次修复 | 名称含银行/证券/保险/人寿/期货/信托的公司在首页直接说明不支持、不再排队（此前招商银行会生成失败任务）；财务表在手机上不再横向滚动；“出处”等触控目标 ≥44px；404、表单过期、OAuth 失败改为带“返回首页”的页面；样式表随内容哈希刷新缓存 |
 
-未验证：GitHub 授权本身（需本人账号）；本次未新建价格参考（茅台已有未过期价位，按钮按设计隐藏）。证据在 `~/.local/share/a-share-research-evaluations/2026-10-23-deploy-708118f/`。上一版（`4c130ee`）的部署证据在 `2026-10-22-r1/claude-review/deployment/`，可从 `git show 8ddac3f:docs/implementation-plan.md` 追溯。
+已知限制：名称不含关键词的金融公司（如 601318 中国平安）仍由 worker 在数秒内按 TuShare 公司类型拒绝，无模型调用。GitHub 授权本身未验证（需本人账号）。证据在 `~/.local/share/a-share-research-evaluations/2026-10-23-deploy-708118f/` 与 `2026-10-23-deploy-87b3be4/`；更早部署可从 `git show 8ddac3f:docs/implementation-plan.md` 追溯。
 
 ### 回退
 
 先确认 worker 空闲，再将保留的两个镜像恢复为 `latest`：
 
 ```bash
-docker tag a-share-research-web:rollback-pre-708118f-20261023 a-share-research-web:latest
-docker tag a-share-research-worker:rollback-pre-708118f-20261023 a-share-research-worker:latest
+docker tag a-share-research-web:rollback-pre-87b3be4-20261023 a-share-research-web:latest
+docker tag a-share-research-worker:rollback-pre-87b3be4-20261023 a-share-research-worker:latest
 docker compose up -d --no-build --no-deps web worker
 ```
 
