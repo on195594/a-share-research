@@ -32,14 +32,14 @@ R3 已完成的验证：
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `942a58d`（2026-10-23 部署），与 Skills 0.1.23 同时启用。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。本次采用既有已验收镜像；后续源码整理 `7eef561` 不在该镜像内。
+入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `ce7ef0e`（2026-10-23 部署），与 Skills 0.1.23 同时启用。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
 
 | 项目 | 状态 |
 |---|---|
-| 镜像 | `a-share-research-web:942a58d`（`sha256:c2cec73c…`）、`a-share-research-worker:942a58d`（`sha256:78739a1f…`），同为 `latest` |
-| 应用内容哈希 | `112beef9e4b4b1b5ba5a3263fe8b894cf9dc4adf4d6ed6cadc6101092e5082b2` |
+| 镜像 | `a-share-research-web:ce7ef0e`（`sha256:408cf390…`）、`a-share-research-worker:ce7ef0e`（`sha256:25971fec…`），同为 `latest`（上一版 `942a58d` 镜像保留供回退） |
+| 应用内容哈希 | `493cf12ca6c9c81401ac7159fb18a99acdd2a65b1909e1f385cf62499bf3e992` |
 | 运行时 | Python 3.13.17、Node 22.23.4、pi 1.4.0、Lib 0.8.2；模型 `openai-codex/gpt-6.1-sol` |
-| 部署前备份 | `~/a-share-research-data/backup-pre-942a58d-20261023T101825Z.db`（0600） |
+| 部署前备份 | `~/a-share-research-data/backup-pre-ce7ef0e-20261023T1112Z.db`（0600，及 `backup-pre-942a58d-20261023T101825Z.db`） |
 | 线上验收 | 已安装 CLI 使用实际配置读取报告 11，再发起纠错任务 18 → [报告 12](https://stock.keyi.win/reports/12)：98 秒、4 次模型调用，通过核查，生成两条方法；390×844 网页沿关联任务读取同一结果并展开原文，无整页横向溢出 |
 | 数据与会话 | 原有 17 个任务、11 份报告、53 次调用及 3 条价格记录逐行摘要不变；未创建验收用账户库；Web 无模型/行情凭据；浏览器验收会话已退出撤销 |
 | Skills 连接 | `runtime.env`（0600）已配置公网 API 与 8 小时 Agent 令牌，其他配置保留；本次令牌到期时间为北京时间 2026-10-24 02:19，需 owner 续签；已有客户端会话需重载 Skill |
