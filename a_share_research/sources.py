@@ -1,4 +1,4 @@
-"""Official periodic reports from cninfo and structured financials from TuShare."""
+"""Official disclosures from cninfo and structured financials from TuShare."""
 
 from __future__ import annotations
 
@@ -69,22 +69,33 @@ def company(code: str) -> dict:
     return found
 
 
-def reports(code: str, days: int = 550) -> list[Document]:
-    """Periodic reports announced in the last `days`, newest period first, one version per period."""
+def _query_announcements(code: str, days: int, query: str, category: str, max_pages: int) -> tuple[list[dict], dict]:
     org = company(code)
     end = datetime.now(SHANGHAI).date()
     rows = []
-    for page in range(1, 6):
-        data = SESSION.post(f"{CNINFO}/hisAnnouncement/query", timeout=30, data={
+    for page in range(1, max_pages + 1):
+        response = SESSION.post(f"{CNINFO}/hisAnnouncement/query", timeout=30, data={
             "stock": f"{code[:6]},{org['orgId']}", "tabName": "fulltext", "pageSize": "30",
-            "pageNum": str(page), "column": "", "plate": "", "searchkey": "", "secid": "",
-            "category": "category_ndbg_szsh;category_bndbg_szsh;category_sjdbg_szsh;category_yjdbg_szsh;",
+            "pageNum": str(page), "column": "", "plate": "", "searchkey": query, "secid": "",
+            "category": category,
             "seDate": f"{end - timedelta(days=days)}~{end}", "sortName": "", "sortType": "",
             "isHLtitle": "false",
-        }).json()
+        })
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict) or "announcements" not in data:
+            raise SourceError("巨潮公告目录返回格式异常")
         rows += data.get("announcements") or []
         if not data.get("hasMore"):
             break
+    return rows, {"since": str(end - timedelta(days=days)), "until": str(end), "query": query,
+                  "truncated": bool(data.get("hasMore")), "scanned": len(rows)}
+
+
+def reports(code: str, days: int = 550) -> list[Document]:
+    """Periodic reports announced in the last `days`, newest period first, one version per period."""
+    rows, _ = _query_announcements(code, days, "",
+        "category_ndbg_szsh;category_bndbg_szsh;category_sjdbg_szsh;category_yjdbg_szsh;", 5)
     by_period: dict[str, list[Document]] = {}
     for raw in rows:
         title = re.sub(r"<[^>]+>", "", raw.get("announcementTitle", ""))
@@ -108,6 +119,29 @@ def reports(code: str, days: int = 550) -> list[Document]:
         for docs in by_period.values()
     ]
     return sorted(chosen, key=lambda d: d.period, reverse=True)
+
+
+def announcement_document(raw: dict, code: str) -> Document | None:
+    """Keep official company PDFs; an event date is never a financial period."""
+    if raw.get("secCode") != code[:6] or not PDF_PATH.fullmatch(raw.get("adjunctUrl", "")):
+        return None
+    title = re.sub(r"<[^>]+>", "", raw.get("announcementTitle", ""))
+    match = TITLE_RE.search(title)
+    return Document(
+        code=to_tushare_stock_code(code), name=raw.get("secName", ""), title=title,
+        period=f"{match[1]}-{KINDS[match[2]]}" if match else "",
+        announced=datetime.fromtimestamp(raw["announcementTime"] / 1000, SHANGHAI).date().isoformat(),
+        url="https://static.cninfo.com.cn/" + raw["adjunctUrl"],
+    )
+
+
+def announcements(code: str, query: str = "", days: int = 180) -> tuple[list[Document], dict]:
+    """Search recent official announcements, including forecasts, flash reports and events."""
+    if not isinstance(query, str) or len(query) > 40 or type(days) is not int or not 1 <= days <= 550:
+        raise ValueError("公告关键词最多 40 字；回看范围为 1–550 天")
+    rows, coverage = _query_announcements(code, days, query, "", 3)
+    docs = [doc for raw in rows if (doc := announcement_document(raw, code)) is not None]
+    return sorted(docs, key=lambda d: d.announced, reverse=True), coverage
 
 
 def fetch(doc: Document) -> Document:

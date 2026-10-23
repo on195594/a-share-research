@@ -357,7 +357,7 @@ def report_page(request: Request, report_id: int):
     if feedback:
         section, _, index = feedback["location"].partition("[")
         feedback_label = {"summary": "一句话结论", "answer": "问题回答", "risks": "风险与反证",
-                          "business": "业务", "financial": "财务"}[section]
+                          "business": "业务", "financial": "财务", "methods": "研究方法"}[section]
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body, run=run,

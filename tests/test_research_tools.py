@@ -40,7 +40,7 @@ def test_captured_half_year_comparison_uses_prior_half_year():
 
 
 def test_output_contract_only_requests_feedback_for_a_real_feedback_task():
-    material = Material.from_snapshot(MATERIAL.snapshot())
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
     assert '"answer"' not in output_schema(material)
     material.extra["question"] = "最新财报改变了什么，利润与现金流是否一致？"
     assert '"answer"' in output_schema(material) and "纠错" not in output_schema(material)
@@ -55,7 +55,7 @@ def test_combined_review_location_excludes_the_flagged_fact():
 
 
 def test_multisource_and_calculation_replay_keeps_real_evidence():
-    material = Material.from_snapshot(MATERIAL.snapshot())
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
     material.extra = {"sources": {"D1": {"document": {"title": MATERIAL.doc.title}, "pages": MATERIAL.pages,
                                        "raw_pages": MATERIAL.raw_pages}}}
     calc = calculate(material.table, "经营现金流差额", "difference",

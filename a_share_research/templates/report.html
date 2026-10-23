@@ -5,7 +5,7 @@
 <article class="report">
   <header class="stub">
     <h1>{{ report.name }}</h1>
-    <p class="meta"><span class="code">{{ report.code }}</span> · 基础资料 {{ body.document.title }}{% if body.sources %}，另补读 {{ body.sources|length }} 份定期披露{% endif %} · 研究于 {{ report.created_at[:16].replace("T", " ") }}</p>
+    <p class="meta"><span class="code">{{ report.code }}</span> · 基础资料 {{ body.document.title }}{% if body.sources %}，另补读 {{ body.sources|length }} 份披露{% endif %} · 研究于 {{ report.created_at[:16].replace("T", " ") }}</p>
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
       <p class="conclusion">{{ body.summary }}</p>
@@ -61,6 +61,21 @@
     <p class="muted small">来源：TuShare 合并报表与财务指标，显示最近四个报告期。年度为年报口径，H1 为半年报；完整期间数据可在出处中查看。</p>
   </section>
 
+  {% if report.passed and body.methods %}
+  <section>
+    <h2>本次可复用的方法</h2>
+    <p class="muted">来自本次纠错核查，使用时仍须核对适用条件；可以通过下方纠错提出反证。</p>
+    {{ items(body.methods, rows, "研究方法", documents) }}
+  </section>
+  {% endif %}
+  {% if body.methods_used %}
+  <details>
+    <summary>参考过的历史方法</summary>
+    <p>以下只作为取证线索；本次结论以报告所引的新证据为准。</p>
+    {% for entry in body.methods_used %}<p>{{ entry.method.text }} <a href="/reports/{{ entry.report_id }}">查看来源报告</a></p>{% endfor %}
+  </details>
+  {% endif %}
+
   {% if report.passed %}{{ price_block(price, report.code, csrf, request_id) }}{% endif %}
 
   <details class="about">
@@ -72,7 +87,8 @@
     <p>复核意见：</p>
     <ul>{% for p in body.problems %}<li>{{ p.problem }}</li>{% endfor %}</ul>
     {% endif %}
-    <p>覆盖上述定期披露及财务数据，不含全部临时公告、新闻或账户事实。</p>
+    <p>覆盖上述已读取的披露及财务数据，不代表全部公告、新闻或账户事实。</p>
+    {% for search in body.announcement_searches or [] %}<p>公告检索：{{ search.code }}，{{ search.since }} 至 {{ search.until }}，{{ '关键词「' ~ search.query ~ '」' if search.query else '全部标题' }}。{% if search.truncated %}结果未列全，仍需缩小范围。{% endif %}</p>{% endfor %}
     {% if body.gaps %}<p>仍有缺口：</p><ul>{% for gap in body.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% endif %}
   </details>
 
@@ -95,7 +111,7 @@
         <label for="location">哪一处需要核查？</label>
         <select id="location" name="location" required>
           {% if report.passed %}<option value="summary">一句话结论</option>{% endif %}
-          {% for key, label in [('answer','问题回答'),('risks','风险与反证'),('business','业务'),('financial','财务')] %}
+          {% for key, label in [('answer','问题回答'),('risks','风险与反证'),('business','业务'),('financial','财务'),('methods','研究方法')] %}
           {% for item in content.get(key, []) %}<option value="{{ key }}[{{ loop.index0 }}]">{{ label }}第 {{ loop.index }} 条：{{ item.text[:45] }}…</option>{% endfor %}
           {% endfor %}
         </select>

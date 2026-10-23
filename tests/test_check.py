@@ -2,6 +2,7 @@
 
 from a_share_research.research import Material, check
 from a_share_research.sources import Document
+from copy import deepcopy
 
 MATERIAL = Material(
     code="600519.SH", name="贵州茅台",
@@ -33,7 +34,7 @@ def report(**changes):
         "business": [{"text": "销售费用增加主要因为广告宣传。", "cites": [SALES]}],
         "financial": [{"text": "销售费用同比增长28.62%，约72.53亿元。", "cites": [SALES_ROW]}],
     }
-    return base | changes
+    return deepcopy(base | changes)
 
 
 def test_valid_report_passes():

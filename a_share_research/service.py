@@ -31,7 +31,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
             body = json.loads(parent["body"])
             content = body if "summary" in body else body.get("facts", {})
-            match = re.fullmatch(r"(answer|risks|business|financial)\[(\d{1,4})\]", location)
+            match = re.fullmatch(r"(answer|risks|business|financial|methods)\[(\d{1,4})\]", location)
             valid = location == "summary" and bool(content.get("summary"))
             if match:
                 valid = int(match[2]) < len(content.get(match[1], []))
@@ -74,7 +74,8 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
     data = material["data"] if material else {}
     extra = data.get("extra", {})
     evidence = {"sources": extra.get("sources", {}), "table": body.get("table", []),
-                "market_date": body.get("market_date"), "material_sha256": body.get("material_sha256")}
+                "market_date": body.get("market_date"), "material_sha256": body.get("material_sha256"),
+                "methods_used": extra.get("methods_used", [])}
     evidence["sources"] = {"D0": {"document": data.get("doc", body.get("document")),
                                      "pages": data.get("pages", {})}, **evidence["sources"]}
     return {"version": VERSION, "id": row["id"], "run_id": row["run_id"], "code": row["code"],
@@ -90,4 +91,5 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
             "coverage": {"periods": sorted({p for r in evidence["table"] if r["id"].startswith("T.")
                                              for p in r["values"]}),
                          "missing": body.get("gaps", extra.get("gaps", [])),
-                         "limits": "覆盖所列定期披露和财务数据；不含全部临时公告、新闻或账户事实。历史结果不自动刷新。"}}
+                         "announcement_searches": extra.get("announcement_searches", []),
+                         "limits": "覆盖已读取的披露和财务数据；公告检索范围单独列出，不代表全部公告、新闻或账户事实。历史结果不自动刷新。"}}

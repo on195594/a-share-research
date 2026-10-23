@@ -100,7 +100,7 @@ class Material:
         )
         if self.extra:
             block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(
-                {k: self.extra.get(k) for k in ("question", "context", "gaps")}, ensure_ascii=False)
+                {k: self.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}, ensure_ascii=False)
             block += "\n\n# 补充资料（source 标识用于 cites）\n" + json.dumps(
                 {k: {"document": v["document"], "pages": v["pages"]}
                  for k, v in self.extra.get("sources", {}).items()}, ensure_ascii=False)
@@ -275,9 +275,14 @@ def check(report: dict, material: Material) -> list[dict]:
         problems.append({"where": "summary", "problem": "summary 中不要写出处编号"})
     rows = {r["id"] for r in material.table}
     all_cites = []
-    for section in (*SECTIONS, *(('answer',) if material.extra.get("question") or report.get("answer") else ())):
+    sections = [*SECTIONS]
+    if material.extra.get("question") or report.get("answer"):
+        sections.append("answer")
+    if material.extra.get("feedback") or "methods" in report:
+        sections.append("methods")
+    for section in sections:
         items = report.get(section)
-        if not isinstance(items, list) or not items:
+        if not isinstance(items, list) or (not items and section != "methods"):
             problems.append({"where": section, "problem": "该段缺失或为空"})
             continue
         for i, item in enumerate(items):
@@ -333,6 +338,10 @@ def output_schema(material: Material) -> str:
         schema += '\n另加 "answer": [{"text": "直接回答本次问题", "cites": [出处]}]，不得省略。'
     if material.extra.get("feedback"):
         schema += "\n本次是用户对关联原报告的纠错：在 answer 中核查是否成立，说明证据、根因与最小修正。"
+        schema += ('\n另加 "methods": [{"text": "由本次核查支持的可复用取证方法，说明适用条件、步骤及不适用边界", "cites": [出处]}]。'
+                   '只保留有依据的通用做法，不把公司事实泛化成规律；没有可复用方法就返回 []。'
+                   '若核查位置是 methods[i]，本次 methods 将替代该条历史方法：反馈不成立则重述仍成立的方法，失效且无适用替代时返回 []。'
+                   '这不改变投资政策、代码或原报告。')
     return schema
 
 RULES = """规则：
@@ -461,9 +470,13 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     for parent in parents:
         body = json.loads(parent["body"])
         content = body if parent["passed"] else body.get("facts", {})
+        claims = {k: content.get(k) for k in ("summary", "answer", "methods", *SECTIONS)}
+        # Retired methods must not return through automatic same-company context.
+        if parent["id"] != parent_id:
+            claims["methods"] = None
         context.append({"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
                         "basis": "report" if parent["passed"] else "facts",
-                        "claims_to_recheck": {k: content.get(k) for k in ("summary", "answer", *SECTIONS)}})
+                        "claims_to_recheck": claims})
     return context
 
 
@@ -514,6 +527,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                         for k, v in material.extra.get("sources", {}).items()},
             "gaps": material.extra.get("gaps", []) + (report.get("gaps", []) if report and isinstance(report.get("gaps", []), list) else []),
             "tool_calls": len(material.extra.get("tools", [])),
+            "announcement_searches": material.extra.get("announcement_searches", []),
+            "methods_used": material.extra.get("methods_used", []),
             "replay_of": replay_of, "material_sha256": snapshot["sha256"],
         }
         if problems:
@@ -523,6 +538,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                           error="复核未通过，只展示已核验的事实")
         else:
             body |= {k: report[k] for k in ("verdict", "summary", *SECTIONS)}
+            if material.extra.get("feedback"):
+                body["methods"] = report["methods"]
             body["answer"] = report.get("answer", [])
             db.save_report(conn, run_id, material.code, material.name, period, True,
                            report["verdict"], body)

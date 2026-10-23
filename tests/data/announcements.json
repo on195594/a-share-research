@@ -1,0 +1,90 @@
+{
+  "source": "https://www.cninfo.com.cn/new/hisAnnouncement/query",
+  "retrieved_at": "2026-10-23",
+  "items": [
+    {
+      "code": "600900",
+      "raw": {
+        "id": null,
+        "secCode": "600900",
+        "secName": "长江电力",
+        "orgId": "gssh0600900",
+        "announcementId": "1224931391",
+        "announcementTitle": "长江电力2025年度业绩快报公告",
+        "announcementTime": 1768320000000,
+        "adjunctUrl": "finalpage/2026-01-14/1224931391.PDF",
+        "adjunctSize": 108,
+        "adjunctType": "PDF",
+        "storageTime": null,
+        "columnId": "250401||251302",
+        "pageColumn": "SHZB",
+        "announcementType": "01010503||010113||012111",
+        "associateAnnouncement": null,
+        "important": null,
+        "batchNum": null,
+        "announcementContent": "",
+        "orgName": null,
+        "tileSecName": "长江电力",
+        "shortTitle": "长江电力2025年度业绩快报公告",
+        "announcementTypeName": null,
+        "secNameList": null
+      }
+    },
+    {
+      "code": "600519",
+      "raw": {
+        "id": null,
+        "secCode": "600519",
+        "secName": "贵州茅台",
+        "orgId": "gssh0600519",
+        "announcementId": "1225431263",
+        "announcementTitle": "贵州茅台重大事项公告",
+        "announcementTime": 1784304000000,
+        "adjunctUrl": "finalpage/2026-07-18/1225431263.PDF",
+        "adjunctSize": 67,
+        "adjunctType": "PDF",
+        "storageTime": null,
+        "columnId": "250401||251302",
+        "pageColumn": "SHZB",
+        "announcementType": "01010503||010113||012399",
+        "associateAnnouncement": null,
+        "important": null,
+        "batchNum": null,
+        "announcementContent": "",
+        "orgName": null,
+        "tileSecName": "贵州茅台",
+        "shortTitle": "贵州茅台重大事项公告",
+        "announcementTypeName": null,
+        "secNameList": null
+      }
+    },
+    {
+      "code": "603606",
+      "raw": {
+        "id": null,
+        "secCode": "603606",
+        "secName": "东方电缆",
+        "orgId": "9900023122",
+        "announcementId": "1225497464",
+        "announcementTitle": "东方电缆关于近期中标相关项目的提示性公告",
+        "announcementTime": 1787587200000,
+        "adjunctUrl": "finalpage/2026-08-25/1225497464.PDF",
+        "adjunctSize": 95,
+        "adjunctType": "PDF",
+        "storageTime": null,
+        "columnId": "250401||251302",
+        "pageColumn": "SHZB",
+        "announcementType": "01010503||010113||012327",
+        "associateAnnouncement": null,
+        "important": null,
+        "batchNum": null,
+        "announcementContent": "",
+        "orgName": null,
+        "tileSecName": "东方电缆",
+        "shortTitle": "东方电缆关于近期中标相关项目的提示性公告",
+        "announcementTypeName": null,
+        "secNameList": null
+      }
+    }
+  ]
+}

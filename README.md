@@ -1,6 +1,6 @@
 # a-share-research
 
-收盘后的 A 股个股研究助手：输入一家公司和可选问题，AI 自主补读定期披露、查询财务与程序计算，通常几分钟后读到带原文出处的研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
+收盘后的 A 股个股研究助手：输入一家公司和可选问题，AI 自主补读定期报告和临时公告、查询财务与程序计算，通常几分钟后读到带原文出处的研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
 
 本项目负责公司财报研究与阅读；`a-stock-agent-skills` 负责 Agent 投研、持仓与风险，两者独立运行并共用 `a-stock-lib`。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
@@ -50,7 +50,11 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.login_token --agent --m
 
 相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial` 的实际零基下标。报告的 `passed` 与任务状态一起判断，失败只返回核验事实，不能当成已通过的结论。
 
-材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖列出的官方定期报告和已取财务数据，不覆盖全部临时公告和新闻。追问/纠错保留原报告，新报告给出核查结果；已复核纠错会作为后续研究线索，但仍需核实。
+材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
+
+Skills 候选通过 `a-stock-cache research` 接入本 API，先复用旧报告，再按缺口发起追问；配置与使用见 [Skills 接入说明](https://github.com/on195594/a-stock-agent-skills/blob/master/skills/a-stock-research/references/research-service.md)，发布状态见实施计划。
+
+纠错报告的 `methods` 保存有引证、经本轮复核的方法；worker 可按问题关键词跨公司检索，原出处和参考记录随 `evidence.methods_used` 保存。它们只是待验证线索，当前事实仍需重新取证。针对 `methods[i]` 的新核查通过后，其方法结果替代该条历史检索项；返回空列表表示不再保留该方法。原报告不改写，失败核查不影响旧方法，也不自动修改 Skill、代码、账户或投资政策。
 
 CLI 同样支持问题：
 
