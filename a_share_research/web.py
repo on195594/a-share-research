@@ -260,12 +260,15 @@ def active_runs() -> list:
     return conn.execute("SELECT * FROM runs WHERE status IN ('queued', 'running') ORDER BY id").fetchall()
 
 
+def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
+    return render(request, "home.html", session, status, companies=latest_reports(), active=active_runs(), **context)
+
+
 @app.get("/")
 def home(request: Request):
     if not (session := current_session(request)):
         return login_required()
-    return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
-                  request_id=uuid.uuid4().hex)
+    return home_page(request, session, request_id=uuid.uuid4().hex)
 
 
 def resolve(query: str) -> tuple[dict | None, list[dict]]:
@@ -291,20 +294,18 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     try:
         company, choices = resolve(q)
     except requests.RequestException:
-        return render(request, "home.html", session, 503, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=q, question=question, error="暂时无法连接巨潮资讯核对公司，请稍后再试")
+        return home_page(request, session, 503, request_id=request_id, q=q, question=question,
+                         error="暂时无法连接巨潮资讯核对公司，请稍后再试")
     if company is None:
         error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
-        return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=q, question=question, error=error, choices=choices)
+        return home_page(request, session, request_id=request_id, q=q, question=question, error=error, choices=choices)
     if sources.FINANCIAL_NAME.search(company["zwjc"]):
-        return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=q, question=question, error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
+        return home_page(request, session, request_id=request_id, q=q, question=question,
+                         error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
     code = company["code"]
     recent = recent_report(code)
     if recent and not again and not question.strip() and not parent_report_id:
-        return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=code, recent=recent)
+        return home_page(request, session, request_id=request_id, q=code, recent=recent)
     try:
         run_id = service.submit(conn, code, request_id, name=company["zwjc"].replace(" ", ""),
                                 question=question, parent_report_id=parent_report_id)
@@ -346,12 +347,10 @@ def report_page(request: Request, report_id: int):
     row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
     if row is None:
         return not_found(request, session)
-    try:
-        service.report_view(conn, report_id)
-    except service.RequestError as exc:
-        return message(request, session, "报告尚未就绪", str(exc), exc.status)
-    body = json.loads(row["body"])
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
+    if not service.ready(run["status"], row["passed"]):
+        return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
+    body = json.loads(row["body"])
     feedback = json.loads(run["request"] or "{}").get("feedback")
     feedback_label = ""
     if feedback:

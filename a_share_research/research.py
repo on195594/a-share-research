@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
-MAX_CALLS = 6  # loop guard, not a cost limit
+MAX_CALLS = 18  # loop guard, not a cost limit: 12 exploration turns plus compose/review/repair
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 # (id, label, unit, statement, column, divisor)
 METRICS = [
@@ -64,8 +64,7 @@ class Material:
     def snapshot(self) -> dict:
         data = {
             "code": self.code, "name": self.name,
-            "doc": {key: getattr(self.doc, key) for key in
-                    ("code", "name", "title", "period", "announced", "url", "sha256", "retrieved_at")},
+            "doc": self.doc.info(),
             "pages": self.pages, "raw_pages": self.raw_pages,
             "table": self.table, "market_date": self.market_date,
         }
@@ -197,14 +196,9 @@ def gather(code: str) -> Material:
         code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=(pages := mdna_pages(annual)),
         raw_pages={n: annual.raw_pages[n - 1] for n in pages},
         table=table, market_date=str(market["trade_date"]),
-        extra={"catalog": {"D0" if d.url == annual.url else f"D{i + 1}": document_info(d)
+        extra={"catalog": {"D0" if d.url == annual.url else f"D{i + 1}": d.info()
                            for i, d in enumerate(docs)}, "sources": {}, "gaps": []},
     )
-
-
-def document_info(doc: Document) -> dict:
-    return {key: getattr(doc, key) for key in
-            ("code", "name", "title", "period", "announced", "url", "sha256", "retrieved_at")}
 
 
 # ---------- mechanical checks ----------
@@ -366,12 +360,12 @@ def _parse(text: str) -> dict | None:
 
 
 class Runner:
-    def __init__(self, conn, run_id: int, *, max_calls: int = MAX_CALLS):
+    def __init__(self, conn, run_id: int):
         self.conn, self.run_id, self.calls = conn, run_id, 0
-        self.max_calls, self.deadline = max_calls, time.monotonic() + 1800
+        self.deadline = time.monotonic() + 1800
 
     def call(self, step: str, prompt: str, *, messages=None, tools=None):
-        if self.calls >= self.max_calls:
+        if self.calls >= MAX_CALLS:
             raise ResearchError("模型调用次数超过上限")
         timeout = int(min(600, self.deadline - time.monotonic()))
         if timeout <= 0:
@@ -484,7 +478,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, request FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
     db.update_run(conn, run_id, status="running", step="gather", started_at=db.now())
-    runner = Runner(conn, run_id, max_calls=18)
+    runner = Runner(conn, run_id)
     try:
         identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
         db.update_run(conn, run_id, identity=json.dumps(identity))

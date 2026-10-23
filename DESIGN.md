@@ -15,11 +15,11 @@ colors:
 typography:
   headline:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
-    fontSize: 30px
+    fontSize: 28px
     fontWeight: 700
   title:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
-    fontSize: 22px
+    fontSize: 20px
     fontWeight: 700
   section:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
@@ -29,7 +29,7 @@ typography:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
     fontSize: 16px
     fontWeight: 400
-    lineHeight: 1.55
+    lineHeight: 1.6
   label:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
     fontSize: 14px
@@ -40,18 +40,18 @@ spacing:
   related: 8px
   group: 16px
   inset: 20px
-  section: 24px
+  section: 28px
   footer: 32px
 components:
   button-primary:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.surface}"
     rounded: "{rounded.action}"
-    padding: 12px 16px
+    padding: 10px 18px
   button-navigation:
     textColor: "{colors.accent}"
     rounded: "{rounded.action}"
-    padding: 12px
+    padding: 10px 4px
 ---
 
 # Design System: 窗口索引
@@ -64,7 +64,7 @@ accent 用于主要动作与链接；background 是冷矿蓝全页底；surface 
 
 ## Typography
 
-系统中文字体栈，不加载网页字体；数字用等宽数字（tabular-nums）。正文 16px、行高 1.6；辅助 14px；页面标题 28px；二级标题 20px。公司名与代码分开；标题和反证完整换行，不截断。
+系统中文字体栈，不加载网页字体；数字用等宽数字（tabular-nums）。正文 16px、行高 1.6；辅助 14px；页面标题 28px；二级标题 20px；结论与公司名 18px。公司名与代码分开；标题和反证完整换行，不截断。
 
 ## Layout
 

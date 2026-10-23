@@ -121,6 +121,16 @@ class ResearchTools:
         self.disclosure_cache = {material.code[:6]: dict(material.extra.get("catalog", {}))}
         self.financial_cache = {material.code[:6]: [r for r in material.table if not r["id"].startswith("C.")]}
 
+    def _register(self, doc: sources.Document) -> str:
+        """Catalog key for a document, adding it on first sight so read_disclosure can open it."""
+        catalog = self.material.extra["catalog"]
+        key = next((k for k, v in catalog.items() if v["url"] == doc.url), None)
+        if key is None:
+            key = f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
+            catalog[key] = doc.info()
+            self.documents[key] = doc
+        return key
+
     def run(self, name: str, args: dict) -> tuple[dict | list, bool]:
         if not isinstance(args, dict):
             raise ValueError("工具参数须为对象")
@@ -141,33 +151,17 @@ class ResearchTools:
         return value
 
     def disclosures(self, code: str):
-        from a_share_research.research import document_info
         code = self.code(code)
-        catalog = self.material.extra["catalog"]
         if code not in self.disclosure_cache:
-            found = {}
-            for doc in sources.reports(code):
-                key = next((k for k, v in catalog.items() if v["url"] == doc.url), None)
-                key = key or f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
-                catalog[key] = document_info(doc)
-                self.documents[key] = doc
-                found[key] = catalog[key]
-            self.disclosure_cache[code] = found
+            catalog = self.material.extra["catalog"]
+            self.disclosure_cache[code] = {key: catalog[key] for key in map(self._register, sources.reports(code))}
         return self.disclosure_cache[code]
 
     def announcements(self, code: str, query: str = "", days: int = 180):
-        from a_share_research.research import document_info
         code = self.code(code)
         docs, coverage = sources.announcements(code, query, days)
         catalog = self.material.extra["catalog"]
-        found = {}
-        for doc in docs:
-            key = next((k for k, v in catalog.items() if v["url"] == doc.url), None)
-            if key is None:
-                key = f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
-                catalog[key] = document_info(doc)
-                self.documents[key] = doc
-            found[key] = catalog[key]
+        found = {key: catalog[key] for key in map(self._register, docs)}
         self.material.extra.setdefault("announcement_searches", []).append({"code": code, **coverage})
         if coverage["truncated"]:
             self.material.extra["gaps"].append(f"{code} 公告检索超过90条，仅返回部分目录；请缩小关键词或时间范围。")
@@ -182,7 +176,6 @@ class ResearchTools:
         return found
 
     def read_disclosure(self, source: str, query: str = "", page: int = 1, count: int = 2):
-        from a_share_research.research import document_info
         if not isinstance(query, str) or len(query) > 120 or type(page) is not int or page < 1 or type(count) is not int or not 1 <= count <= 3:
             raise ValueError("关键词最多 120 字；页码须为正整数，一次最多三页")
         catalog = self.material.extra["catalog"]
@@ -201,10 +194,10 @@ class ResearchTools:
             self.material.pages.update(pages)
             self.material.raw_pages.update(raw_pages)
         else:
-            saved = self.material.extra["sources"].setdefault(source, {"document": document_info(doc), "pages": {}, "raw_pages": {}})
+            saved = self.material.extra["sources"].setdefault(source, {"document": doc.info(), "pages": {}, "raw_pages": {}})
             saved["pages"].update(pages)
             saved["raw_pages"].update(raw_pages)
-        return {"source": source, "document": document_info(doc), "total_pages": len(doc.pages),
+        return {"source": source, "document": doc.info(), "total_pages": len(doc.pages),
                 "matched_pages": hits[:60], "pages": pages}
 
     def financials(self, code: str):

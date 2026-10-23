@@ -1,8 +1,12 @@
 """Mechanical report checks, on excerpts and figures from 贵州茅台2025年年度报告 and TuShare."""
 
-from a_share_research.research import Material, check
-from a_share_research.sources import Document
+import json
 from copy import deepcopy
+
+import pytest
+
+from a_share_research.research import Material, ResearchError, check
+from a_share_research.sources import Document
 
 MATERIAL = Material(
     code="600519.SH", name="贵州茅台",
@@ -60,3 +64,14 @@ def test_years_and_months_are_not_checked_as_figures():
 def test_reference_ids_in_text_are_flagged():
     bad = report(summary="需要谨慎：营业总收入1720.54亿元（出处：T.revenue）。")
     assert [p["where"] for p in check(bad, MATERIAL)] == ["summary"]
+
+
+def test_snapshot_preserves_prompt_and_checks():
+    snapshot = json.loads(json.dumps(MATERIAL.snapshot(), ensure_ascii=False))
+    restored = Material.from_snapshot(snapshot)
+    assert restored.prompt_block() == MATERIAL.prompt_block()
+    assert restored.raw_pages == MATERIAL.raw_pages
+    assert check(report(), restored) == []
+    snapshot["data"]["table"].pop()
+    with pytest.raises(ResearchError, match="哈希"):
+        Material.from_snapshot(snapshot)

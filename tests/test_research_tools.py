@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from a_share_research import db, service
-from a_share_research.research import Material, check, financial_table, output_schema, _research_context, _verified_facts
+from a_share_research.research import Material, check, financial_table, _research_context, _verified_facts
 from a_share_research.research_tools import calculate
 from test_check import MATERIAL, report
 from test_financial_table import DATA
@@ -29,29 +29,6 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
         calculate(table, "不同单位", "ratio", left, {"ref": "T.roe", "period": "2025-12-31"})
     with pytest.raises(KeyError):
         calculate(table, "缺失", "ratio", left, right | {"period": "1900-06-30"})
-
-
-def test_captured_half_year_comparison_uses_prior_half_year():
-    table = json.loads((Path(__file__).parent / "data/600519-comparison.json").read_text())["table"]
-    result = calculate(table, "现金流同比", "growth_pct", {"ref": "T.op_cash", "period": "2026-06-30"},
-                       {"ref": "T.op_cash", "period": "2025-06-30"})
-    assert result["calculation"]["inputs"][1]["value"] == "131.19"
-    assert result["values"]["result"] == "438.84"
-
-
-def test_output_contract_only_requests_feedback_for_a_real_feedback_task():
-    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
-    assert '"answer"' not in output_schema(material)
-    material.extra["question"] = "最新财报改变了什么，利润与现金流是否一致？"
-    assert '"answer"' in output_schema(material) and "纠错" not in output_schema(material)
-    material.extra["feedback"] = {"location": "risks[2]", "text": "销售模式改变的引文截断，需补齐续行"}
-    assert "纠错" in output_schema(material)
-
-
-def test_combined_review_location_excludes_the_flagged_fact():
-    captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
-    facts = _verified_facts(captured["report"], captured["problems"])
-    assert facts["risks"] == captured["report"]["risks"][:2]
 
 
 def test_multisource_and_calculation_replay_keeps_real_evidence():

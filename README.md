@@ -7,7 +7,7 @@
 - 产品方向与现有流程：[重构方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
 - 三项目职责与协作：[项目契约](docs/project-contract.md)。
 - AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
-- 本批工作与验收：[推进顺序](docs/implementation-plan.md#下一批推进顺序)；生产版本与回退：[当前部署](docs/implementation-plan.md#当前部署)。
+- 当前批次与验收：[推进顺序](docs/implementation-plan.md#下一批推进顺序)；生产版本与回退：[当前部署](docs/implementation-plan.md#当前部署)。
 
 ## 运行
 
@@ -64,22 +64,14 @@ uv run --env-file .env python -m a_share_research.research 600519 --question '�
 
 ## 运行身份与材料重放
 
-新研究在 `runs.identity` 保存进程启动时的应用文件内容哈希、Python/Lib 版本及材料哈希，在 `calls.identity` 保存请求与运行时报告的模型、pi/Node 版本、调用参数和完整提示词哈希。每次调用另记桥接脚本哈希、模型来自 catalog 还是 extension；加载扩展时记录其入口路径和文件哈希，不代表已覆盖其全部依赖。失败保留已知身份及子进程诊断；旧记录的空值表示未知，不用当前版本回填。应用内容哈希也适用于没有 `.git` 的容器。
+每次研究在 `runs.identity` 记录应用文件内容哈希、Python/Lib 版本和材料哈希，在 `calls.identity` 记录模型、pi/Node 版本、调用参数和提示词哈希；未知一律留空，不用当前版本回填。`runs.material` 保存实际送入流程的财务表、行情时点、文档身份和原文页。
 
-`runs.material` 保存实际送入流程的财务表、行情时点、文档身份及两种顺序的原文页。重放复用该快照，执行成文、检查、复核和修复；新快照包含补证页与计算记录，重放不重新执行探索策略，并保存为新任务；不重新取行情或下载文档。快照缺失、版本不支持、哈希或公司不一致时失败。
-
-在独立目录建立基线，按命令输出的任务 ID 重放，例如：
+`--replay` 复用该快照重新执行成文、检查、复核和修复（不重新探索、不取数），保存为新任务；快照缺失、版本不支持、哈希或公司不一致时失败。重放报告在网页上标明来源，首页最新报告和“今日已研究”判断排除重放。
 
 ```bash
-DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research
-DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research --replay 1
+DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research          # 建基线（评估集）
+DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research --replay 1 # 按任务 ID 重放
 ```
-
-`--replay` 可接受多个 ID，不能同时指定公司代码。旧报告或范围外公司可能没有完整快照；它们保持原记录，不能用当前资料伪造历史输入。完整评估与已知缺陷见[实施计划](docs/implementation-plan.md)。
-
-重放报告保存来源任务和材料哈希，网页明确提示未刷新财报或行情；公司档案仍可查看它们，首页最新报告和“今日已研究”判断排除重放。此前已保存来源身份、但报告正文还没有标记的重放也适用。
-
-新代码首次连接旧库时只增补 `runs.identity`、`runs.material`、`runs.request`、`calls.identity` 可空文本列，旧身份保持为空。兼容性、生产运行和浏览器验证范围统一记录在[实施计划](docs/implementation-plan.md#3-i1研究运行身份)。
 
 ## 部署
 

@@ -50,6 +50,11 @@ class Document:
     pages: list[str] = field(default_factory=list, repr=False)  # pdftotext -layout, shown to the model
     raw_pages: list[str] = field(default_factory=list, repr=False)  # -raw keeps table cells contiguous
 
+    def info(self) -> dict:
+        """Identity fields stored with evidence; the page texts are kept separately."""
+        return {key: getattr(self, key) for key in
+                ("code", "name", "title", "period", "announced", "url", "sha256", "retrieved_at")}
+
 
 @cache
 def stock_list() -> dict[str, dict]:
@@ -98,20 +103,11 @@ def reports(code: str, days: int = 550) -> list[Document]:
         "category_ndbg_szsh;category_bndbg_szsh;category_sjdbg_szsh;category_yjdbg_szsh;", 5)
     by_period: dict[str, list[Document]] = {}
     for raw in rows:
-        title = re.sub(r"<[^>]+>", "", raw.get("announcementTitle", ""))
-        if not PDF_PATH.fullmatch(raw.get("adjunctUrl", "")):
-            continue
-        match = TITLE_RE.search(title)
-        if raw.get("secCode") != code[:6] or not match or any(
-            w in title for w in ("摘要", "英文", "English", "取消", "更正公告")
+        doc = announcement_document(raw, code)
+        if doc is None or not doc.period or any(
+            w in doc.title for w in ("摘要", "英文", "English", "取消", "更正公告")
         ):
             continue
-        doc = Document(
-            code=to_tushare_stock_code(code), name=raw.get("secName", ""), title=title,
-            period=f"{match[1]}-{KINDS[match[2]]}",
-            announced=datetime.fromtimestamp(raw["announcementTime"] / 1000, SHANGHAI).date().isoformat(),
-            url="https://static.cninfo.com.cn/" + raw["adjunctUrl"],
-        )
         by_period.setdefault(doc.period, []).append(doc)
     # A later or explicitly revised version supersedes the original.
     chosen = [

@@ -57,6 +57,11 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     return previous["id"]
 
 
+def ready(status: str, passed: int) -> bool:
+    """A report is final only when its run agrees: reviewed and done, or failed with verified facts."""
+    return (status, passed) in (("done", 1), ("failed", 0))
+
+
 def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
     # One SELECT gives a consistent task/report snapshot while a worker is saving a result.
     row = conn.execute(
@@ -66,8 +71,7 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
     ).fetchone()
     if row is None:
         raise RequestError("报告不存在", 404)
-    if not ((row["status"] == "done" and row["passed"] == 1)
-            or (row["status"] == "failed" and row["passed"] == 0)):
+    if not ready(row["status"], row["passed"]):
         raise RequestError("报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
     material = json.loads(row["material"] or "null")
