@@ -83,7 +83,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # Serialize additive migration when web and worker first open the same older database.
     conn.execute("BEGIN IMMEDIATE")
     try:
-        for table, names in (("runs", ("identity", "material")), ("calls", ("identity",))):
+        for table, names in (("runs", ("identity", "material", "request")), ("calls", ("identity",))):
             existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
             for name in names:
                 if name not in existing:

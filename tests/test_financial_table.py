@@ -27,6 +27,7 @@ def test_indicators_survive_the_providers_null_statement_type():
     assert rows["T.revenue"]["values"]["2025-12-31"] == "1720.54"
     assert rows["T.net_profit"]["values"]["2025-12-31"] == "823.20"
     assert rows["T.op_cash"]["values"]["2025-12-31"] == "615.22"
+    # This captured response only contains annual rows and the latest half year.
     assert list(rows["T.roe"]["values"]) == ["2023-12-31", "2024-12-31", "2025-12-31", "2026-06-30"]
 
 

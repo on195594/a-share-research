@@ -80,7 +80,7 @@ form.inline { display: inline; margin: 0; }
 /* start form */
 .search label { display: block; color: var(--muted); font-size: 14px; margin: 12px 0 6px; }
 .search .row { display: flex; gap: 8px; }
-.search input {
+.search input, .search textarea, .search select {
   flex: 1;
   min-width: 0;
   min-height: 48px;
@@ -92,8 +92,12 @@ form.inline { display: inline; margin: 0; }
   font: inherit;
   font-size: 18px;
 }
-.search input::placeholder { color: #5E7479; }
-.search input:focus { border-color: var(--accent); }
+.search textarea, .search select { display: block; width: 100%; margin-bottom: 12px; font-size: 16px; }
+.search textarea { resize: vertical; }
+.search select { text-overflow: ellipsis; }
+.search input::placeholder, .search textarea::placeholder { color: #5E7479; }
+.search input:focus, .search textarea:focus, .search select:focus { border-color: var(--accent); }
+.items > li > p { overflow-wrap: anywhere; }
 .hint { color: var(--muted); font-size: 14px; margin-top: 8px; }
 .choices { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 

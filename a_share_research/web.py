@@ -19,18 +19,19 @@ from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 import requests
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import FastAPI, Form, Request, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, sources
+from a_share_research import db, sources, service
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
 STATE_COOKIE = "oauth_state"
 SESSION_SECONDS = 8 * 3600
-STEPS = {"gather": "取资料", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改",
+STEPS = {"gather": "取资料", "explore": "补读披露与计算", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改",
          "price": "计算价格参考"}
 CSP = ("default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; "
        "object-src 'none'; img-src 'self'")
@@ -94,7 +95,7 @@ conn = db.connect()
 async def guard(request: Request, call_next):
     if request.headers.get("host", "").lower() != urlparse(settings.base_url).netloc.lower():
         return Response("Invalid Host header", status_code=403, media_type="text/plain")
-    if request.method not in ("GET", "HEAD") and not same_origin(request):
+    if request.method not in ("GET", "HEAD") and not request.url.path.startswith("/api/") and not same_origin(request):
         return Response("Cross-origin request refused", status_code=403, media_type="text/plain")
     response = await call_next(request)
     response.headers.update(SECURITY_HEADERS)
@@ -282,7 +283,7 @@ def resolve(query: str) -> tuple[dict | None, list[dict]]:
 
 @app.post("/research")
 def start_research(request: Request, q: str = Form(""), request_id: str = Form(""), csrf: str = Form(""),
-                   again: str = Form("")):
+                   again: str = Form(""), question: str = Form(""), parent_report_id: int | None = Form(None)):
     if not (session := current_session(request)):
         return login_required()
     if not csrf_ok(session, csrf):
@@ -291,20 +292,24 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
         company, choices = resolve(q)
     except requests.RequestException:
         return render(request, "home.html", session, 503, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=q, error="暂时无法连接巨潮资讯核对公司，请稍后再试")
+                      request_id=request_id, q=q, question=question, error="暂时无法连接巨潮资讯核对公司，请稍后再试")
     if company is None:
         error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=q, error=error, choices=choices)
+                      request_id=request_id, q=q, question=question, error=error, choices=choices)
     if sources.FINANCIAL_NAME.search(company["zwjc"]):
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
-                      request_id=request_id, q=q, error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
+                      request_id=request_id, q=q, question=question, error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
     code = company["code"]
     recent = recent_report(code)
-    if recent and not again:
+    if recent and not again and not question.strip() and not parent_report_id:
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=code, recent=recent)
-    run_id = db.create_run(conn, code, request_id or None, name=company["zwjc"].replace(" ", ""))
+    try:
+        run_id = service.submit(conn, code, request_id, name=company["zwjc"].replace(" ", ""),
+                                question=question, parent_report_id=parent_report_id)
+    except service.RequestError as exc:
+        return message(request, session, "无法提交研究", str(exc), exc.status)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
@@ -341,13 +346,137 @@ def report_page(request: Request, report_id: int):
     row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
     if row is None:
         return not_found(request, session)
+    try:
+        service.report_view(conn, report_id)
+    except service.RequestError as exc:
+        return message(request, session, "报告尚未就绪", str(exc), exc.status)
     body = json.loads(row["body"])
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
+    feedback = json.loads(run["request"] or "{}").get("feedback")
+    feedback_label = ""
+    if feedback:
+        section, _, index = feedback["location"].partition("[")
+        feedback_label = {"summary": "一句话结论", "answer": "问题回答", "risks": "风险与反证",
+                          "business": "业务", "financial": "财务"}[section]
+        if index:
+            feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body, run=run,
+                  feedback=feedback, feedback_label=feedback_label,
                   replay_of=json.loads(run["identity"] or "{}").get("replay_of"),
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
-                  fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]))
+                  fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]),
+                  followups=conn.execute("SELECT id, status, request FROM runs WHERE json_extract(request, '$.parent_report_id') = ? ORDER BY id DESC", (report_id,)).fetchall())
+
+
+@app.post("/reports/{report_id}/feedback")
+def submit_feedback(request: Request, report_id: int, location: str = Form(""), text: str = Form(""),
+                    request_id: str = Form(""), csrf: str = Form("")):
+    if not (session := current_session(request)):
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, "页面已过期", "请返回报告重新提交。", 403)
+    try:
+        view = service.report_view(conn, report_id)
+        run_id = service.submit(conn, view["code"], request_id, name=view["name"], parent_report_id=report_id,
+                                feedback={"location": location, "text": text})
+    except service.RequestError as exc:
+        return message(request, session, "无法提交纠错", str(exc), exc.status)
+    return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+
+# JSON clients authenticate only with namespaced bearer tokens, never ambient cookies.
+def api_session(request: Request) -> str:
+    header = request.headers.get("authorization", "")
+    if not header.startswith("Bearer "):
+        raise HTTPException(401, "需要研究 API bearer token")
+    key = "agent:" + _hash(header[7:])
+    row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (key,)).fetchone()
+    if row is None or row["expires_at"] <= time.time():
+        raise HTTPException(401, "研究令牌无效或已过期")
+    if request.headers.get("x-research-version", service.VERSION) != service.VERSION:
+        raise HTTPException(400, "不支持的研究合同版本")
+    return key
+
+
+class ResearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    code: str = Field(pattern=r"^\d{6}$")
+    request_id: str = Field(min_length=1, max_length=128)
+    question: str = Field(default="", max_length=4000)
+    parent_report_id: int | None = Field(default=None, gt=0)
+
+
+class FeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: str = Field(min_length=1, max_length=128)
+    location: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@app.exception_handler(service.RequestError)
+async def api_error(request: Request, exc: service.RequestError):
+    return JSONResponse({"version": service.VERSION, "error": str(exc)}, status_code=exc.status)
+
+
+@app.post("/api/research", status_code=202)
+def api_research(request: Request, body: ResearchRequest):
+    api_session(request)
+    if conn.execute("SELECT id FROM runs WHERE request_id = ?", (body.request_id,)).fetchone():
+        return {"version": service.VERSION, "run_id": service.submit(conn, **body.model_dump())}
+    try:
+        company = sources.company(body.code)
+    except sources.SourceError as exc:
+        raise service.RequestError(str(exc)) from exc
+    except requests.RequestException as exc:
+        raise service.RequestError("暂时无法连接巨潮资讯，请稍后重试", 503) from exc
+    if sources.FINANCIAL_NAME.search(company["zwjc"]):
+        raise service.RequestError("金融类公司暂不支持研究")
+    run_id = service.submit(conn, **body.model_dump(), name=company["zwjc"].replace(" ", ""))
+    return {"version": service.VERSION, "run_id": run_id}
+
+
+@app.get("/api/runs/{run_id}")
+def api_run(request: Request, run_id: int):
+    api_session(request)
+    row = conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
+                       " r.id AS report_id FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?", (run_id,)).fetchone()
+    if row is None:
+        raise service.RequestError("任务不存在", 404)
+    return {"version": service.VERSION, **dict(row)}
+
+
+@app.get("/api/reports")
+def api_reports(request: Request, code: str):
+    api_session(request)
+    if not re.fullmatch(r"\d{6}", code):
+        raise service.RequestError("公司代码必须为六位数字")
+    rows = conn.execute("SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, u.status"
+                        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE substr(r.code, 1, 6) = ?"
+                        " ORDER BY r.id DESC LIMIT 100", (code,)).fetchall()
+    return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
+
+
+@app.get("/api/reports/{report_id}")
+def api_report(request: Request, report_id: int):
+    api_session(request)
+    return service.report_view(conn, report_id)
+
+
+@app.post("/api/reports/{report_id}/feedback", status_code=202)
+def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
+    api_session(request)
+    view = service.report_view(conn, report_id)
+    run_id = service.submit(conn, view["code"], body.request_id, name=view["name"], parent_report_id=report_id,
+                            feedback={"location": body.location, "text": body.text})
+    return {"version": service.VERSION, "run_id": run_id}
+
+
+@app.post("/api/session/revoke")
+def api_revoke(request: Request):
+    key = api_session(request)
+    conn.execute("DELETE FROM sessions WHERE token_hash = ?", (key,))
+    return {"version": service.VERSION, "revoked": True}
 
 
 @app.get("/stock/{code}")

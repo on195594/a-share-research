@@ -11,13 +11,15 @@
       <input id="q" name="q" value="{{ q or '' }}" placeholder="600519 或 茅台" autocomplete="off" required>
       <button class="btn" type="submit">开始研究</button>
     </div>
-    <p class="hint">读取最新年报和财务数据，约 1–3 分钟。银行、保险、券商暂不支持。</p>
+    <label for="question">想弄清什么？<span class="muted">（选填）</span></label>
+    <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：最新财报改变了什么，利润与现金流是否一致？">{{ question or '' }}</textarea>
+    <p class="hint">按问题补读定期报告、核对财务与计算，通常需要几分钟。银行、保险、券商暂不支持。</p>
   </form>
 
   {% if error %}<p class="notice caution" role="alert">{{ error }}</p>{% endif %}
   {% if choices %}
   <ul class="choices">
-    {% for c in choices %}<li>{{ research_form(c.code, csrf, request_id, c.zwjc ~ " · " ~ c.code, again=False, cls="btn secondary") }}</li>{% endfor %}
+    {% for c in choices %}<li>{{ research_form(c.code, csrf, request_id, c.zwjc ~ " · " ~ c.code, again=False, cls="btn secondary", question=question or '') }}</li>{% endfor %}
   </ul>
   {% endif %}
   {% if recent %}
@@ -51,7 +53,7 @@
     <li>
       <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
       <p>{% if c.passed %}{{ c.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
-        <span class="muted">· {{ c.period[:4] }} 年报 · 研究于 {{ c.created_at[:10] }}</span></p>
+        <span class="muted">· 资料至 {{ c.period }} · 研究于 {{ c.created_at[:10] }}</span></p>
     </li>
   {% endfor %}
   </ul>

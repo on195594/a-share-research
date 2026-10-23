@@ -15,19 +15,22 @@ import time
 from a_share_research import db
 
 
-def mint(conn, minutes: int) -> str:
+def mint(conn, minutes: int, *, agent: bool = False) -> str:
+    if not 1 <= minutes <= 480:
+        raise ValueError("会话有效期须在 1–480 分钟之间")
     token = secrets.token_urlsafe(32)
     conn.execute("INSERT INTO sessions VALUES (?, ?)",
-                 (hashlib.sha256(token.encode()).hexdigest(), time.time() + minutes * 60))  # same hash as web._hash
+                 (("agent:" if agent else "") + hashlib.sha256(token.encode()).hexdigest(), time.time() + minutes * 60))
     return token
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--minutes", type=int, default=60, choices=range(1, 481), metavar="1-480")
+    parser.add_argument("--agent", action="store_true", help="mint a bearer token for the research API only")
     args = parser.parse_args()
     conn = db.connect()
-    print(mint(conn, args.minutes))
+    print(mint(conn, args.minutes, agent=args.agent))
     conn.close()
 
 

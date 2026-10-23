@@ -1,14 +1,15 @@
-{% macro research_form(code, csrf, request_id, label="重新研究", again=True, cls="link") %}
+{% macro research_form(code, csrf, request_id, label="重新研究", again=True, cls="link", question="") %}
 <form method="post" action="/research" class="inline">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="request_id" value="{{ request_id }}">
   <input type="hidden" name="q" value="{{ code }}">
+  <input type="hidden" name="question" value="{{ question }}">
   {% if again %}<input type="hidden" name="again" value="1">{% endif %}
   <button class="{{ cls }}" type="submit">{{ label }}</button>
 </form>
 {% endmacro %}
 
-{% macro cites(item, rows) %}
+{% macro cites(item, rows, sources={}) %}
 {% if item.cites %}
 <details class="source">
   <summary>出处</summary>
@@ -16,9 +17,12 @@
   {% for c in item.cites %}
     {% if c.ref %}
       {% set r = rows.get(c.ref) %}
-      {% if r %}<li><span class="tag">财务表</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}<span class="num">{{ p }} {{ v }}</span>{% if not loop.last %}；{% endif %}{% endfor %}</li>{% endif %}
+      {% if r %}<li><span class="tag">{{ "程序计算" if r.calculation else "财务表" }}</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}{% if not c.period or c.period == p %}<span class="num">{{ '结果' if p == 'result' else p }} {{ v }}</span> {% endif %}{% endfor %}
+        {% if r.calculation %}<p>{{ r.calculation.formula | replace('left', r.calculation.inputs[0].value) | replace('right', r.calculation.inputs[1].value) }}；{% for value in r.calculation.inputs %}{{ value.label or rows[value.ref].label }}（{{ value.period }}）= {{ value.value }} {{ value.unit }}{% if not loop.last %}；{% endif %}{% endfor %}</p><p>{{ r.calculation.precision }}</p>{% endif %}
+      </li>{% endif %}
     {% else %}
-      <li><span class="tag">第 {{ c.page }} 页</span><q>{{ c.quote }}</q></li>
+      {% set source = sources.get(c.source or 'D0') %}
+      <li><span class="tag">{{ source.document.title ~ ' · ' if source else '' }}第 {{ c.page }} 页</span><q>{{ c.quote }}</q></li>
     {% endif %}
   {% endfor %}
   </ul>
@@ -26,10 +30,10 @@
 {% endif %}
 {% endmacro %}
 
-{% macro items(list, rows, label) %}
+{% macro items(list, rows, label, sources={}) %}
 <ul class="items">
 {% for item in list %}
-  <li><p>{{ item.text }}</p>{{ cites(item, rows) }}</li>
+  <li><p>{{ item.text }}</p>{{ cites(item, rows, sources) }}</li>
 {% else %}
   <li class="muted">没有{{ label }}。</li>
 {% endfor %}

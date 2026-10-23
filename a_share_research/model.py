@@ -1,4 +1,4 @@
-"""One no-tool model completion through the pi runtime."""
+"""Model completions and native tool messages through the pi runtime."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ class Completion:
     usage: dict[str, Any] | None
     seconds: float
     identity: dict
+    message: dict
 
 
 @cache
@@ -51,7 +52,8 @@ def application_identity() -> dict:
 application_identity()  # Imported Python code does not follow later worktree edits.
 
 
-def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000) -> Completion:
+def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000,
+             messages: list | None = None, tools: list | None = None) -> Completion:
     request = {
         "provider": os.environ.get("MODEL_PROVIDER"),
         "model": os.environ.get("MODEL_ID"),
@@ -61,6 +63,8 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000) -> Comp
         # Calls sharing a long stable prefix share the provider prompt cache.
         "session_id": hashlib.sha256(prompt[:4096].encode()).hexdigest()[:32],
     }
+    if messages is not None:
+        request |= {"messages": messages, "tools": tools or []}
     identity = {
         "requested": {k: request[k] for k in ("provider", "model")},
         "actual": None, "pi_version": None, "parameters": None,
@@ -94,11 +98,12 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000) -> Comp
             identity["actual"] = {k: out.get(k) for k in ("provider", "model")}
         if proc.returncode != 0 or out.get("error"):
             raise ValueError(out.get("error") or f"pi exited {proc.returncode}")
-        if out["stop_reason"] != "stop" or out["tool_calls"] or not out["text"].strip():
+        valid_tools = bool(tools) and out["stop_reason"] == "toolUse" and out["tool_calls"] > 0
+        if not valid_tools and (out["stop_reason"] != "stop" or out["tool_calls"] or not out["text"].strip()):
             raise ValueError(f"incomplete model output: stop_reason={out['stop_reason']}")
         if (out["provider"], out["model"]) != (request["provider"], request["model"]):
             raise ValueError("model identity mismatch")
     except Exception as exc:
         raise ModelError(str(exc), identity, time.monotonic() - started) from exc
     return Completion(out["text"], out["provider"], out["model"], out["usage"],
-                      time.monotonic() - started, identity)
+                      time.monotonic() - started, identity, out["message"])

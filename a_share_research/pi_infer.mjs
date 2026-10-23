@@ -1,4 +1,4 @@
-// One no-tool completion through pi's provider runtime: no agent session, tools, skills or context files.
+// One native completion; the Python worker owns tool execution and conversation state.
 // Ported from a-stock-tracker scripts/automation_model_pi.mjs.
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -56,8 +56,8 @@ try {
   };
   const { timeout, ...options } = result.parameters;
   const response = await runtime.completeSimple(model, {
-    messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
-    tools: [],
+    messages: request.messages || [{ role: "user", content: request.prompt, timestamp: Date.now() }],
+    tools: request.tools || [],
   }, {
     ...options,
     signal: AbortSignal.timeout(timeout * 1000),
@@ -66,10 +66,12 @@ try {
   Object.assign(result, {
     text,
     stop_reason: response.stopReason,
+    error: response.stopReason === "error" ? (response.errorMessage || "pi model returned an error without details") : undefined,
     tool_calls: response.content.filter(c => c.type === "toolCall").length,
     provider: response.provider,
     model: response.model,
     usage: response.usage,
+    message: response,
   });
 } catch (error) {
   result.error = `${error.name}: ${error.message}`;
