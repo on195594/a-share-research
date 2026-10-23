@@ -83,6 +83,8 @@ settings = Settings.from_env()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+# Busts browser caches of the stylesheet on each deploy that changes it.
+templates.env.globals["css_version"] = hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:12]
 conn = db.connect()
 
 
@@ -147,6 +149,14 @@ def render(request: Request, name: str, session: str | None, status: int = 200, 
     return templates.TemplateResponse(request, name, context, status_code=status)
 
 
+def message(request: Request, session: str | None, title: str, text: str, status: int) -> HTMLResponse:
+    return render(request, "message.html", session, status, title=title, text=text)
+
+
+def not_found(request: Request, session: str | None, text: str = "这个页面不存在，可能链接有误。") -> HTMLResponse:
+    return message(request, session, "没有找到", text, 404)
+
+
 def login_required() -> RedirectResponse:
     return RedirectResponse("/login", status_code=303)
 
@@ -189,7 +199,7 @@ def github_start():
 @app.get("/oauth_callback")
 def github_callback(request: Request, code: str = "", state: str = ""):
     if not (code and state_ok(state, request.cookies.get(STATE_COOKIE, ""))):
-        return Response("登录已过期，请重新登录", status_code=400, media_type="text/plain")
+        return message(request, None, "登录已过期", "请回到首页重新登录。", 400)
     try:
         token = requests.post("https://github.com/login/oauth/access_token", timeout=10, headers={
             "Accept": "application/json"}, data={
@@ -199,9 +209,9 @@ def github_callback(request: Request, code: str = "", state: str = ""):
         user = requests.get("https://api.github.com/user", timeout=10, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}).json()
     except (requests.RequestException, KeyError, ValueError):
-        return Response("GitHub 登录失败，请重试", status_code=502, media_type="text/plain")
+        return message(request, None, "GitHub 登录失败", "暂时无法连接 GitHub，请稍后回到首页重试。", 502)
     if str(user.get("id")) != settings.github_user_id:
-        return Response("该账号无权访问", status_code=403, media_type="text/plain")
+        return message(request, None, "该账号无权访问", "这是个人使用的站点，只允许所有者的 GitHub 账号登录。", 403)
     response = start_session()
     response.delete_cookie(STATE_COOKIE, path="/")
     return response
@@ -276,7 +286,7 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     if not (session := current_session(request)):
         return login_required()
     if not csrf_ok(session, csrf):
-        return Response("表单已过期，请返回首页重试", status_code=403, media_type="text/plain")
+        return message(request, session, "页面已过期", "请返回首页重新提交。", 403)
     try:
         company, choices = resolve(q)
     except requests.RequestException:
@@ -286,6 +296,9 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
         error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
         return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
                       request_id=request_id, q=q, error=error, choices=choices)
+    if sources.FINANCIAL_NAME.search(company["zwjc"]):
+        return render(request, "home.html", session, companies=latest_reports(), active=active_runs(),
+                      request_id=request_id, q=q, error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
     code = company["code"]
     recent = recent_report(code)
     if recent and not again:
@@ -301,7 +314,7 @@ def run_page(request: Request, run_id: int):
         return login_required()
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if run is None:
-        return Response("Not Found", status_code=404, media_type="text/plain")
+        return not_found(request, session)
     if run["kind"] == "price" and run["status"] == "done":
         return RedirectResponse(f"/stock/{run['code']}#price", status_code=303)
     report = conn.execute("SELECT id FROM reports WHERE run_id = ?", (run_id,)).fetchone()
@@ -327,7 +340,7 @@ def report_page(request: Request, report_id: int):
         return login_required()
     row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
     if row is None:
-        return Response("Not Found", status_code=404, media_type="text/plain")
+        return not_found(request, session)
     body = json.loads(row["body"])
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
     return render(request, "report.html", session, report=row, body=body, run=run,
@@ -346,7 +359,7 @@ def stock_page(request: Request, code: str):
         " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
     ).fetchall()
     if not reports:
-        return Response("Not Found", status_code=404, media_type="text/plain")
+        return not_found(request, session, "还没有研究过这家公司。")
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
                   price=latest_price(code))
 
@@ -366,9 +379,9 @@ def start_price(request: Request, code: str = Form(""), request_id: str = Form("
     if not (session := current_session(request)):
         return login_required()
     if not csrf_ok(session, csrf):
-        return Response("表单已过期，请返回重试", status_code=403, media_type="text/plain")
+        return message(request, session, "页面已过期", "请返回首页重新提交。", 403)
     report = conn.execute("SELECT name FROM reports WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
     if report is None:
-        return Response("请先研究这家公司", status_code=404, media_type="text/plain")
+        return not_found(request, session, "请先研究这家公司。")
     run_id = db.create_run(conn, code, request_id or None, kind="price", name=report["name"])
     return RedirectResponse(f"/runs/{run_id}", status_code=303)

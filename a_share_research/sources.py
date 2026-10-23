@@ -57,6 +57,10 @@ def stock_list() -> dict[str, dict]:
     return {r["code"]: r for r in rows if r.get("category") == "A股"}
 
 
+# shortcut: name-only, misses e.g. 中国平安/东方财富; the worker's TuShare comp_type check still catches those.
+FINANCIAL_NAME = re.compile(r"银行|证券|保险|人寿|期货|信托")
+
+
 def company(code: str) -> dict:
     """cninfo identity for a 6-digit code: {code, zwjc (short name), orgId, ...}."""
     found = stock_list().get(code[:6])
