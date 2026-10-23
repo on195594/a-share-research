@@ -22,6 +22,13 @@ uv run pytest -q tests
 
 `.env.web` 只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 
+AI 或脚本做浏览器验收时不走 GitHub：在能访问数据目录的机器上签发一个短期会话，把输出作为 `session` cookie 注入浏览器，用完点“退出”即作废（不经 HTTP 暴露，能执行它即已有主人权限）：
+
+```bash
+uv run python -m a_share_research.login_token --minutes 30                                    # 本机开发实例
+docker exec a-share-research-web python -m a_share_research.login_token --minutes 30         # 生产
+```
+
 ## 运行身份与材料重放
 
 新研究在 `runs.identity` 保存进程启动时的应用文件内容哈希、Python/Lib 版本及材料哈希，在 `calls.identity` 保存请求与运行时报告的模型、pi/Node 版本、调用参数和完整提示词哈希。每次调用另记桥接脚本哈希、模型来自 catalog 还是 extension；加载扩展时记录其入口路径和文件哈希，不代表已覆盖其全部依赖。失败保留已知身份及子进程诊断；旧记录的空值表示未知，不用当前版本回填。应用内容哈希也适用于没有 `.git` 的容器。
