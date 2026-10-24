@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-10-23。依据[项目契约](project-contract.md)和[路线图](roadmap.md)。本文只记录当前状态、部署与回退、验证规则；逐轮评估、审查过程和历次部署记录见 `git show d560d36:docs/implementation-plan.md`，原始证据在 `~/.local/share/a-share-research-evaluations/` 与 `~/.local/share/a-stock-agent-evaluations/`（仓库外，0700）。
+更新：2026-10-24。依据[项目契约](project-contract.md)和[路线图](roadmap.md)。本文只记录当前状态、部署与回退、验证规则；逐轮评估、审查过程和历次部署记录见 `git show d560d36:docs/implementation-plan.md`，原始证据在 `~/.local/share/a-share-research-evaluations/` 与 `~/.local/share/a-stock-agent-evaluations/`（仓库外，0700）。
 
 ## 工作包与状态
 
@@ -32,23 +32,25 @@ R3 已完成的验证：
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `6ff20ff`（2026-10-24 10:28 部署：完整性合同，见[方案第 6 节](proposal.md#6-状态与正确性)），Skills 仍为 0.1.23。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
+入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `73d5748`（2026-10-24 13:32 部署：复核事实边界、计算单位展示与快照日期提示），Skills 仍为 0.1.23。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
 
 | 项目 | 状态 |
 |---|---|
-| 镜像 | `a-share-research-web:6ff20ff`（`sha256:ebca8974…`）、`a-share-research-worker:6ff20ff`（`sha256:8564730c…`），同为 `latest`（上一版 `ce7ef0e` 镜像保留，可直接回退：新增的 `reports.body_sha256` 列旧代码忽略） |
-| 应用内容哈希 | `513a56a43b3fccc129b4516781167df0c47ed7ae25bda3128dd137d61ad96629` |
-| 运行时 | Python 3.13.17、Node 22.23.4、pi 1.4.0、Lib 0.8.2、pdftotext 25.03.0；模型 `openai-codex/gpt-6.1-sol` |
-| 部署前备份 | `~/a-share-research-data/backup-pre-6ff20ff-20261024T0226Z.db`（0600，SQLite 在线备份，integrity_check ok；更早的 `backup-pre-ce7ef0e-20261023T1112Z.db` 保留） |
-| 线上验收 | 切换前用新 worker 镜像在容器内临时目录研究 600900：77 秒、6 次调用、通过复核，巡检 0 问题。切换后生产巡检：13 份报告（均为旧报告、无正文哈希）、12 份材料快照、12 个 PDF 中仅报任务 21 一项（见下行，删除后巡检 0 问题）；首页、报告 12/13、公司页 601138 均 200，Web 日志无错误 |
-| 数据与会话 | 原有 20 个任务、13 份报告、63 次调用、4 条价格记录逐行摘要与备份前一致。**切换时中断了任务 21**（10:28:20 网页提交的 601138 研究，已发 2 次模型调用）：切换前检查已显示 1 个运行中任务，但命令未据此中止；任务被标为“研究中断”。它由旧代码保存探索进度，巡检报“运行身份记录的材料哈希与快照不符”，属旧代码进度保存未同步身份哈希（本版已修），不是数据损坏。按用户要求，任务 21 及其 2 条调用记录已删除（先备份为 `backup-pre-delete-run21-20261024T0232Z.db`，0600），其余行逐行摘要不变；任务表无 AUTOINCREMENT，下一个任务会复用编号 21。验收令牌 5 分钟自动到期 |
-| Skills 连接 | `runtime.env`（0600）已配置公网 API 与 8 小时 Agent 令牌，其他配置保留；本次令牌到期时间为北京时间 2026-10-24 02:19，需 owner 续签；已有客户端会话需重载 Skill |
+| 镜像 | `a-share-research-web:73d5748`（`sha256:54735478…`）、`a-share-research-worker:73d5748`（`sha256:eabdbb82…`），同为 `latest`；两个镜像的 revision 标签及全部 22 个应用文件均与已审查提交一致 |
+| 应用内容哈希 | `f582480ebafd511d09fde5b6469f28223b70d658b0b809d4c8c9bc6ebd305ac9` |
+| 运行时 | Python 3.13.17、Node 22.23.4、Lib 0.8.2、pdftotext 25.03.0；模型与 pi 配置未改 |
+| 部署前备份 | `~/.local/share/a-share-research-evaluations/deploy-73d5748-20261024T053226Z/`（0700）：独立 SQLite 备份、完整 PDF/派生材料、配置及旧镜像身份；持久文件 41 项均 0600、哈希核验通过，SQLite integrity_check ok、各表摘要一致，无 WAL/SHM 侧文件依赖 |
+| 审查与验收 | 独立只读审查无阻断项，合入 main 后 43 项测试通过；真实报告 1/12/13 在 320/375/1280px 渲染无横向溢出。切换后公网首页、报告 1/12/13、公司页、CSS 及报告 API 均通过；日期差异提示、历史失败报告警示和样式内容哈希正确。巡检 14 份报告、12 份材料快照、12 个 PDF，0 问题；启动日志无错误 |
+| 数据与会话 | 先停止 Web 受理，再以队列为空为切换前提停止 worker；未中断任务。原有 21 个任务、14 份报告、70 次调用、4 条价格记录、1 条会话逐表内容摘要在切换及验收后均不变；仅为验收临时签发的浏览器/API 会话均已撤销 |
+| Skills 连接 | 本次未修改 Skills 的配置或令牌，既有到期限制仍需其 owner 处理 |
 
-本次未新建发布证据目录；上述命令输出即为验收记录。上一版证据仍在 `~/.local/share/a-share-research-evaluations/2026-10-23-paired-942a58d/`。
+发布证据在上述备份目录的 `manifest.json` 与 `verification.json`（0600）。本次未发起新的模型研究，复用真实材料检查及已有报告验证；未重跑 GitHub OAuth 本人授权交换。上一版完整性合同部署及任务 21 删除记录保留在 `git show 577cdac:docs/implementation-plan.md`。
 
 发布方式见 [README](../README.md#部署)：只从已提交、已推送的代码构建；采用已验证镜像时核对内容哈希，在队列空闲（切换命令须以队列检查为前提，不能只在备份时看一次）并备份后用 `docker compose up -d --no-build --no-deps web worker` 切换，避免混入后续工作区改动。生产切换需当次授权。
 
 ### 回退
+
+本次首选回退到刚替换的 `6ff20ff`：保留标签为 `a-share-research-web:rollback-73d5748-20261024T053226Z`、`a-share-research-worker:rollback-73d5748-20261024T053226Z`，不可变镜像 ID 分别以 `ebca8974`、`8564730c` 开头，完整 ID 在备份清单。本补丁无数据库迁移；如需回退，先停止 Web 受理、确认队列为空再停止 worker，将这两个标签恢复为对应 `latest` 后按上述 `--no-build` 方式成对启动；保留新产生的数据，不覆盖生产数据库。
 
 保留旧 Web/worker 镜像 `pre-r3-20261023` 供追溯，但不能直接回退运行：旧网页读取 `methods[i]` 反馈会报错，旧 worker 也不能正确处理方法反馈。可用的应急恢复镜像为 `a-share-research-web:readonly-r3-20261023`（`sha256:5e3ecb1c…`），使用已验证的新报告阅读代码，暂停研究写入。它已读取真实旧报告及方法反馈报告，五个研究/价格写入口均返回 503、任务数不变，退出与令牌撤销仍可用。恢复时停止 worker，暂不提供新研究；这不是恢复旧版完整研究行为。后续操作需当次生产授权：
 
