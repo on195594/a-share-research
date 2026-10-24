@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, sources, service
+from a_share_research import db, screening, sources, service
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -262,7 +262,9 @@ def active_runs() -> list:
 
 
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
-    return render(request, "home.html", session, status, companies=latest_reports(), active=active_runs(), **context)
+    batch = conn.execute("SELECT id, status, created_at FROM batches ORDER BY id DESC LIMIT 1").fetchone()
+    return render(request, "home.html", session, status, companies=latest_reports(), active=active_runs(),
+                  batch=batch, **context)
 
 
 @app.get("/")
@@ -331,8 +333,12 @@ def run_page(request: Request, run_id: int):
     if report and run["status"] in ("done", "failed"):
         return RedirectResponse(f"/reports/{report['id']}", status_code=303)
     # Only web runs share the worker queue; command-line runs execute in their own process.
-    ahead = conn.execute("SELECT COUNT(*) FROM runs WHERE status IN ('queued', 'running') AND id < ?"
-                         " AND request_id IS NOT NULL", (run_id,)).fetchone()[0]
+    # Same order as the worker: running first, then owner submissions, then batch research.
+    ahead = conn.execute(
+        "SELECT COUNT(*) FROM runs u, (SELECT request_id LIKE 'batch-%' AS batch FROM runs WHERE id = ?) me"
+        " WHERE u.request_id IS NOT NULL AND u.id != ? AND (u.status = 'running' OR (u.status = 'queued' AND"
+        " ((u.request_id LIKE 'batch-%') < me.batch OR ((u.request_id LIKE 'batch-%') = me.batch AND u.id < ?))))",
+        (run_id, run_id, run_id)).fetchone()[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
                   request_id=uuid.uuid4().hex)
 
@@ -515,3 +521,59 @@ def start_price(request: Request, code: str = Form(""), request_id: str = Form("
         return not_found(request, session, "请先研究这家公司。")
     run_id = db.create_run(conn, code, request_id or None, kind="price", name=report["name"])
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+
+# ---------- candidate batches ----------
+
+@app.get("/batches")
+def batches_page(request: Request):
+    if not (session := current_session(request)):
+        return login_required()
+    rows = conn.execute("SELECT id, status, error, created_at, as_of, l5, frozen_at FROM batches ORDER BY id DESC").fetchall()
+    return render(request, "batches.html", session, batches=[screening.load(r) for r in rows],
+                  request_id=uuid.uuid4().hex)
+
+
+@app.post("/batches")
+def start_batch(request: Request, request_id: str = Form(""), csrf: str = Form("")):
+    if not (session := current_session(request)):
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, "页面已过期", "请返回候选初筛页面重新提交。", 403)
+    if not 1 <= len(request_id) <= 128:
+        return message(request, session, "无法开始初筛", "请求编号无效，请返回重试。", 422)
+    try:
+        batch_id = screening.create(conn, request_id)
+    except service.RequestError as exc:
+        return message(request, session, "无法开始初筛", str(exc), exc.status)
+    return RedirectResponse(f"/batches/{batch_id}", status_code=303)
+
+
+@app.get("/batches/{batch_id}")
+def batch_page(request: Request, batch_id: int):
+    if not (session := current_session(request)):
+        return login_required()
+    row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+    if row is None:
+        return not_found(request, session)
+    batch = screening.load(row)
+    if batch["status"] == "researching":
+        batch["q20"] = screening.research_state(conn, batch["q20"])[1]
+    draft = ((batch["selection"] or {}).get("draft") or {})
+    return render(request, "batch.html", session, batch=batch, draft=draft,
+                  draft_codes=[p["code"] for p in draft.get("picks", [])],
+                  results=screening.returns(batch), names={r["code"]: r["name"] for r in batch["q20"] or []})
+
+
+@app.post("/batches/{batch_id}/freeze")
+async def freeze_batch(request: Request, batch_id: int):
+    if not (session := current_session(request)):
+        return login_required()
+    form = await request.form()
+    if not csrf_ok(session, str(form.get("csrf", ""))):
+        return message(request, session, "页面已过期", "请返回批次页面重新提交。", 403)
+    try:
+        screening.freeze(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")))
+    except service.RequestError as exc:
+        return message(request, session, "无法冻结", str(exc), exc.status)
+    return RedirectResponse(f"/batches/{batch_id}", status_code=303)

@@ -81,6 +81,15 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
     for price in conn.execute("SELECT id, body FROM prices ORDER BY id"):
         if _object(price["body"]) is None:
             problems.append(f"价格参考 {price['id']}：正文不是 JSON 对象")
+    # A database not yet opened by this version has no batches table.
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batches'").fetchone():
+        for batch in conn.execute("SELECT * FROM batches ORDER BY id"):
+            for column in ("rule", "universe", "q20", "q5", "selection", "l5", "entry", "marks"):
+                try:
+                    if batch[column] is not None:
+                        json.loads(batch[column])
+                except ValueError:
+                    problems.append(f"批次 {batch['id']}：{column} 不是合法 JSON")
     return problems, {"runs_with_material": len(materials), "reports": reports, "reports_without_hash": unhashed}
 
 

@@ -33,6 +33,17 @@
   {% endif %}
 </section>
 
+<section>
+  <h2>候选初筛</h2>
+  {% import "_batch.html" as b with context %}
+  {% if batch %}
+  <p><a href="/batches/{{ batch.id }}">{{ b.month(batch) }}</a> <span class="muted">· {{ b.batch_status[batch.status] }}</span></p>
+  {% else %}
+  <p class="muted">每月从全市场筛出 20 家候选、深挖后选 5 家做模拟跟踪。</p>
+  {% endif %}
+  <p><a href="/batches">{{ "全部批次" if batch else "开始初筛" }}</a></p>
+</section>
+
 {% if active %}
 <section>
   <h2>进行中</h2>

@@ -1,0 +1,6 @@
+{% set batch_status = {
+  "queued": "排队中", "screening": "全市场初筛中", "researching": "候选深挖中", "selecting": "跨公司比较中",
+  "proposed": "待你确认", "frozen": "已冻结，等待入场", "tracking": "模拟跟踪中", "failed": "没有完成"} %}
+{% macro month(batch) %}{{ batch.created_at[:7].replace("-", " 年 ") }} 月批次{% endmacro %}
+{% macro day(d) %}{{ d[:4] }}-{{ d[4:6] }}-{{ d[6:] }}{% endmacro %}
+{% macro pct(v) %}{% if v is none %}—{% else %}{{ "%+.2f" | format(v * 100) }}%{% endif %}{% endmacro %}

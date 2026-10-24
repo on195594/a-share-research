@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% import "_batch.html" as b with context %}
+{% block title %}候选初筛{% endblock %}
+{% block main %}
+<section class="narrow">
+  <h1>候选初筛</h1>
+  <p>每月一批：程序从全市场按固定规则筛出 20 家候选，逐家深挖后由模型做一次跨公司比较，你确认 5 家后冻结，按下一交易日开盘价模拟买入，与机械前五、全部候选和全收益指数比较。</p>
+  <form method="post" action="/batches" class="actions">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <button class="btn" type="submit">开始本月初筛</button>
+  </form>
+  <p class="hint">初筛约 20–30 分钟，期间提交的单家研究会排队；随后 20 家深挖约 1 小时，期间你提交的研究优先。金融股不在范围内。</p>
+</section>
+
+<section class="narrow">
+  <h2>批次</h2>
+  {% if batches %}
+  <ul class="list">
+  {% for batch in batches %}
+    <li>
+      <a class="company" href="/batches/{{ batch.id }}"><strong>{{ b.month(batch) }}</strong></a>
+      <p>{% if batch.status == "failed" %}<span class="flag">没有完成</span>{% else %}{{ b.batch_status[batch.status] }}{% endif %}
+        <span class="muted">{% if batch.as_of %}· 基准日 {{ b.day(batch.as_of) }}{% endif %}{% if batch.l5 %} · 选定 {{ batch.l5.codes | length }} 家{% endif %}</span></p>
+    </li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">还没有批次。开始本月初筛后，候选、研究进度和模拟结果都会出现在这里。</p>
+  {% endif %}
+</section>
+{% endblock %}

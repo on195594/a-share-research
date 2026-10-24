@@ -1,0 +1,1664 @@
+{
+"as_of": "20261023",
+"companies": {
+"002648.SZ": {
+"indicator": [
+{
+"ts_code": "002648.SZ",
+"ann_date": "20261017",
+"end_date": "20260930",
+"roe_dt": 24.2759,
+"profit_dedt": 9022063530.61,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260815",
+"end_date": "20260630",
+"roe_dt": 16.9073,
+"profit_dedt": 6052915382.61,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260815",
+"end_date": "20260630",
+"roe_dt": 16.9073,
+"profit_dedt": 6052915382.61,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260414",
+"end_date": "20260331",
+"roe_dt": 5.6629,
+"profit_dedt": 1953892611.64,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260324",
+"end_date": "20251231",
+"roe_dt": 19.7104,
+"profit_dedt": 6291539606.92,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20251025",
+"end_date": "20250930",
+"roe_dt": 13.5988,
+"profit_dedt": 4237804513.7,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250812",
+"end_date": "20250630",
+"roe_dt": 9.4331,
+"profit_dedt": 2896000872.57,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250425",
+"end_date": "20250331",
+"roe_dt": 5.4491,
+"profit_dedt": 1692092059.89,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250325",
+"end_date": "20241231",
+"roe_dt": 21.6969,
+"profit_dedt": 6048106001.69,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20241022",
+"end_date": "20240930",
+"roe_dt": 15.344,
+"profit_dedt": 4088435017.72,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240718",
+"end_date": "20240630",
+"roe_dt": 8.6391,
+"profit_dedt": 2234456615.73,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240423",
+"end_date": "20240331",
+"roe_dt": 4.0895,
+"profit_dedt": 1063049340.04,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240326",
+"end_date": "20231231",
+"roe_dt": 20.0605,
+"profit_dedt": 4672247568.47,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20231025",
+"end_date": "20230930",
+"roe_dt": 14.6674,
+"profit_dedt": 3356644799.37,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230718",
+"end_date": "20230630",
+"roe_dt": 8.8367,
+"profit_dedt": 1952121004.93,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230718",
+"end_date": "20230630",
+"roe_dt": 8.8367,
+"profit_dedt": 1952121004.93,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"end_date": "20230331",
+"roe_dt": 3.6213,
+"profit_dedt": 778057784.26,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"end_date": "20230331",
+"roe_dt": 3.6213,
+"profit_dedt": 778057784.26,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"end_date": "20221231",
+"roe_dt": 15.0407,
+"profit_dedt": 3044182919.3,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"end_date": "20221231",
+"roe_dt": 15.0407,
+"profit_dedt": 3044182919.3,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20221025",
+"end_date": "20220930",
+"roe_dt": 13.794,
+"profit_dedt": 2791232666.24,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20221025",
+"end_date": "20220930",
+"roe_dt": 13.794,
+"profit_dedt": 2791232666.24,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220830",
+"end_date": "20220630",
+"roe_dt": 13.1673,
+"profit_dedt": 2705846066.68,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220830",
+"end_date": "20220630",
+"roe_dt": 13.1673,
+"profit_dedt": 2705846066.68,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220427",
+"end_date": "20220331",
+"roe_dt": 7.6763,
+"profit_dedt": 1539617291.55,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220427",
+"end_date": "20220331",
+"roe_dt": 7.6763,
+"profit_dedt": 1539617291.55,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220322",
+"end_date": "20211231",
+"roe_dt": 35.4739,
+"profit_dedt": 5851985479.08,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220322",
+"end_date": "20211231",
+"roe_dt": 35.4739,
+"profit_dedt": 5851985479.08,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20211023",
+"end_date": "20210930",
+"roe_dt": 26.1144,
+"profit_dedt": 4093320478.36,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20211023",
+"end_date": "20210930",
+"roe_dt": 26.1144,
+"profit_dedt": 4093320478.36,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210727",
+"end_date": "20210630",
+"roe_dt": 13.8962,
+"profit_dedt": 2029882974.77,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210727",
+"end_date": "20210630",
+"roe_dt": 13.8962,
+"profit_dedt": 2029882974.77,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210429",
+"end_date": "20210331",
+"roe_dt": 5.002,
+"profit_dedt": 702583168.14,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210429",
+"end_date": "20210331",
+"roe_dt": 5.002,
+"profit_dedt": 702583168.14,
+"update_flag": "0"
+}
+],
+"income": [
+{
+"ts_code": "002648.SZ",
+"ann_date": "20261017",
+"f_ann_date": "20261017",
+"end_date": "20260930",
+"report_type": "1",
+"n_income": 9060236606.43,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20261017",
+"f_ann_date": "20261017",
+"end_date": "20260930",
+"report_type": "1",
+"n_income": 9060236606.43,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260815",
+"f_ann_date": "20260815",
+"end_date": "20260630",
+"report_type": "1",
+"n_income": 6227478399.91,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260414",
+"f_ann_date": "20260414",
+"end_date": "20260331",
+"report_type": "1",
+"n_income": 2116988863.35,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260324",
+"f_ann_date": "20260324",
+"end_date": "20251231",
+"report_type": "1",
+"n_income": 5305340636.39,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20251025",
+"f_ann_date": "20251025",
+"end_date": "20250930",
+"report_type": "1",
+"n_income": 3754583941.98,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250812",
+"f_ann_date": "20250812",
+"end_date": "20250630",
+"report_type": "1",
+"n_income": 2742458143.32,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250425",
+"f_ann_date": "20250425",
+"end_date": "20250331",
+"report_type": "1",
+"n_income": 1567570031.91,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250325",
+"f_ann_date": "20250325",
+"end_date": "20241231",
+"report_type": "1",
+"n_income": 6061959302.9,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20241022",
+"f_ann_date": "20241022",
+"end_date": "20240930",
+"report_type": "1",
+"n_income": 3687535990.91,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20241022",
+"f_ann_date": "20241022",
+"end_date": "20240930",
+"report_type": "1",
+"n_income": 3687535990.91,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240718",
+"f_ann_date": "20240718",
+"end_date": "20240630",
+"report_type": "1",
+"n_income": 2052559716.76,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240423",
+"f_ann_date": "20240423",
+"end_date": "20240331",
+"report_type": "1",
+"n_income": 1020671267.89,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240326",
+"f_ann_date": "20240326",
+"end_date": "20231231",
+"report_type": "1",
+"n_income": 4783753675.73,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20231025",
+"f_ann_date": "20231025",
+"end_date": "20230930",
+"report_type": "1",
+"n_income": 3390559678.27,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230718",
+"f_ann_date": "20230718",
+"end_date": "20230630",
+"report_type": "1",
+"n_income": 1840396874.74,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230718",
+"f_ann_date": "20230718",
+"end_date": "20230630",
+"report_type": "1",
+"n_income": 1840396874.74,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20230331",
+"report_type": "1",
+"n_income": 704943414.85,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20221231",
+"report_type": "1",
+"n_income": 3076770922.8,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20221025",
+"f_ann_date": "20221025",
+"end_date": "20220930",
+"report_type": "1",
+"n_income": 3035014073.19,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220830",
+"f_ann_date": "20220830",
+"end_date": "20220630",
+"report_type": "1",
+"n_income": 2792073037.7,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220427",
+"f_ann_date": "20220427",
+"end_date": "20220331",
+"report_type": "1",
+"n_income": 1531633895.74,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220427",
+"f_ann_date": "20220427",
+"end_date": "20220331",
+"report_type": "1",
+"n_income": 1531633895.74,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220322",
+"f_ann_date": "20220322",
+"end_date": "20211231",
+"report_type": "1",
+"n_income": 6012789450.25,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220322",
+"f_ann_date": "20220322",
+"end_date": "20211231",
+"report_type": "1",
+"n_income": 6012789450.25,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20211023",
+"f_ann_date": "20211023",
+"end_date": "20210930",
+"report_type": "1",
+"n_income": 4258255761.92,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210727",
+"f_ann_date": "20210727",
+"end_date": "20210630",
+"report_type": "1",
+"n_income": 2125331814.39,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20210331",
+"report_type": "1",
+"n_income": 766433632.4,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210413",
+"f_ann_date": "20210413",
+"end_date": "20201231",
+"report_type": "1",
+"n_income": 1657626320.24,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210413",
+"f_ann_date": "20210413",
+"end_date": "20201231",
+"report_type": "1",
+"n_income": 1657626320.24,
+"update_flag": "1"
+}
+],
+"cashflow": [
+{
+"ts_code": "002648.SZ",
+"ann_date": "20261017",
+"f_ann_date": "20261017",
+"end_date": "20260930",
+"report_type": "1",
+"n_cashflow_act": 13486145870.78,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260815",
+"f_ann_date": "20260815",
+"end_date": "20260630",
+"report_type": "1",
+"n_cashflow_act": 9629275881.25,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260815",
+"f_ann_date": "20260815",
+"end_date": "20260630",
+"report_type": "1",
+"n_cashflow_act": 9629275881.25,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260414",
+"f_ann_date": "20260414",
+"end_date": "20260331",
+"report_type": "1",
+"n_cashflow_act": 2210957284.18,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260414",
+"f_ann_date": "20260414",
+"end_date": "20260331",
+"report_type": "1",
+"n_cashflow_act": 2210957284.18,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20260324",
+"f_ann_date": "20260324",
+"end_date": "20251231",
+"report_type": "1",
+"n_cashflow_act": 9606885402.76,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20251025",
+"f_ann_date": "20251025",
+"end_date": "20250930",
+"report_type": "1",
+"n_cashflow_act": 6621187829.21,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250812",
+"f_ann_date": "20250812",
+"end_date": "20250630",
+"report_type": "1",
+"n_cashflow_act": 5052341098.53,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250812",
+"f_ann_date": "20250812",
+"end_date": "20250630",
+"report_type": "1",
+"n_cashflow_act": 5052341098.53,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250425",
+"f_ann_date": "20250425",
+"end_date": "20250331",
+"report_type": "1",
+"n_cashflow_act": 1598501498.16,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250425",
+"f_ann_date": "20250425",
+"end_date": "20250331",
+"report_type": "1",
+"n_cashflow_act": 1598501498.16,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20250325",
+"f_ann_date": "20250325",
+"end_date": "20241231",
+"report_type": "1",
+"n_cashflow_act": 10590386556.71,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20241022",
+"f_ann_date": "20241022",
+"end_date": "20240930",
+"report_type": "1",
+"n_cashflow_act": 5694274725.48,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20241022",
+"f_ann_date": "20241022",
+"end_date": "20240930",
+"report_type": "1",
+"n_cashflow_act": 5694274725.48,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240718",
+"f_ann_date": "20240718",
+"end_date": "20240630",
+"report_type": "1",
+"n_cashflow_act": 2115005378.54,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240423",
+"f_ann_date": "20240423",
+"end_date": "20240331",
+"report_type": "1",
+"n_cashflow_act": 660779331.17,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20240326",
+"f_ann_date": "20240326",
+"end_date": "20231231",
+"report_type": "1",
+"n_cashflow_act": 7996401776.66,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20231025",
+"f_ann_date": "20231025",
+"end_date": "20230930",
+"report_type": "1",
+"n_cashflow_act": 4544360724.68,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20231025",
+"f_ann_date": "20231025",
+"end_date": "20230930",
+"report_type": "1",
+"n_cashflow_act": 4544360724.68,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230718",
+"f_ann_date": "20230718",
+"end_date": "20230630",
+"report_type": "1",
+"n_cashflow_act": 2929645243.33,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230718",
+"f_ann_date": "20230718",
+"end_date": "20230630",
+"report_type": "1",
+"n_cashflow_act": 2929645243.33,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20230331",
+"report_type": "1",
+"n_cashflow_act": 974729178.56,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20230331",
+"report_type": "1",
+"n_cashflow_act": 974729178.56,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20221231",
+"report_type": "1",
+"n_cashflow_act": 5935042162.28,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20221231",
+"report_type": "1",
+"n_cashflow_act": 5935042162.28,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20221025",
+"f_ann_date": "20221025",
+"end_date": "20220930",
+"report_type": "1",
+"n_cashflow_act": 3034825036.33,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220830",
+"f_ann_date": "20220830",
+"end_date": "20220630",
+"report_type": "1",
+"n_cashflow_act": 3644941451.0,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220427",
+"f_ann_date": "20220427",
+"end_date": "20220331",
+"report_type": "1",
+"n_cashflow_act": 1316355709.25,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220322",
+"f_ann_date": "20220322",
+"end_date": "20211231",
+"report_type": "1",
+"n_cashflow_act": 3668378873.9,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20220322",
+"f_ann_date": "20220322",
+"end_date": "20211231",
+"report_type": "1",
+"n_cashflow_act": 3668378873.9,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20211023",
+"f_ann_date": "20211023",
+"end_date": "20210930",
+"report_type": "1",
+"n_cashflow_act": 1013473913.27,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210727",
+"f_ann_date": "20210727",
+"end_date": "20210630",
+"report_type": "1",
+"n_cashflow_act": 584113194.72,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20210331",
+"report_type": "1",
+"n_cashflow_act": -367206925.0,
+"update_flag": "1"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210413",
+"f_ann_date": "20210413",
+"end_date": "20201231",
+"report_type": "1",
+"n_cashflow_act": -519545147.52,
+"update_flag": "0"
+},
+{
+"ts_code": "002648.SZ",
+"ann_date": "20210413",
+"f_ann_date": "20210413",
+"end_date": "20201231",
+"report_type": "1",
+"n_cashflow_act": -519545147.52,
+"update_flag": "1"
+}
+]
+},
+"000651.SZ": {
+"indicator": [
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260827",
+"end_date": "20260630",
+"roe_dt": 8.6312,
+"profit_dedt": 12706672720.9,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260827",
+"end_date": "20260630",
+"roe_dt": 8.6312,
+"profit_dedt": 12706672720.9,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260429",
+"end_date": "20260331",
+"roe_dt": 3.8276,
+"profit_dedt": 5702183701.81,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260429",
+"end_date": "20251231",
+"roe_dt": 19.5565,
+"profit_dedt": 27706292436.94,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20251031",
+"end_date": "20250930",
+"roe_dt": 14.6074,
+"profit_dedt": 20584848884.47,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250829",
+"end_date": "20250630",
+"roe_dt": 10.2242,
+"profit_dedt": 13946409161.52,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"end_date": "20250331",
+"roe_dt": 4.075,
+"profit_dedt": 5717342878.89,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"end_date": "20250331",
+"roe_dt": 4.075,
+"profit_dedt": 5717342878.89,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"end_date": "20241231",
+"roe_dt": 23.681,
+"profit_dedt": 30099760382.99,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20241031",
+"end_date": "20240930",
+"roe_dt": 17.408,
+"profit_dedt": 21162940772.39,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240831",
+"end_date": "20240630",
+"roe_dt": 11.8214,
+"profit_dedt": 13863964133.57,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240430",
+"end_date": "20240331",
+"roe_dt": 3.7978,
+"profit_dedt": 4525486717.09,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240430",
+"end_date": "20231231",
+"roe_dt": 25.8161,
+"profit_dedt": 27565461117.79,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20231031",
+"end_date": "20230930",
+"roe_dt": 18.376,
+"profit_dedt": 19214514241.06,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230831",
+"end_date": "20230630",
+"roe_dt": 11.942,
+"profit_dedt": 12065135735.77,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"end_date": "20230331",
+"roe_dt": 3.7477,
+"profit_dedt": 3723297678.38,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"end_date": "20230331",
+"roe_dt": 3.7477,
+"profit_dedt": 3723297678.38,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"end_date": "20221231",
+"roe_dt": 23.9371,
+"profit_dedt": 23986248264.15,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"end_date": "20221231",
+"roe_dt": 23.9371,
+"profit_dedt": 23986248264.15,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20221031",
+"end_date": "20220930",
+"roe_dt": 18.626,
+"profit_dedt": 18566867450.84,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20221031",
+"end_date": "20220930",
+"roe_dt": 18.626,
+"profit_dedt": 18566867450.84,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220831",
+"end_date": "20220630",
+"roe_dt": 11.6669,
+"profit_dedt": 11607422014.22,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220831",
+"end_date": "20220630",
+"roe_dt": 11.6669,
+"profit_dedt": 11607422014.22,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"end_date": "20220331",
+"roe_dt": 3.7562,
+"profit_dedt": 3774746923.56,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"end_date": "20220331",
+"roe_dt": 3.7562,
+"profit_dedt": 3774746923.56,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"end_date": "20211231",
+"roe_dt": 19.9688,
+"profit_dedt": 21850050895.31,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"end_date": "20211231",
+"roe_dt": 19.9688,
+"profit_dedt": 21850050895.31,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20211027",
+"end_date": "20210930",
+"roe_dt": 14.2302,
+"profit_dedt": 14762284676.64,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20211027",
+"end_date": "20210930",
+"roe_dt": 14.2302,
+"profit_dedt": 14762284676.64,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210823",
+"end_date": "20210630",
+"roe_dt": 8.2358,
+"profit_dedt": 8791754578.14,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210823",
+"end_date": "20210630",
+"roe_dt": 8.2358,
+"profit_dedt": 8791754578.14,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"end_date": "20210331",
+"roe_dt": 2.8928,
+"profit_dedt": 3299482181.81,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"end_date": "20210331",
+"roe_dt": 2.8928,
+"profit_dedt": 3299482181.81,
+"update_flag": "0"
+}
+],
+"income": [
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260827",
+"f_ann_date": "20260827",
+"end_date": "20260630",
+"report_type": "1",
+"n_income": 13322833444.57,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260429",
+"f_ann_date": "20260429",
+"end_date": "20260331",
+"report_type": "1",
+"n_income": 6098807482.82,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260429",
+"f_ann_date": "20260429",
+"end_date": "20251231",
+"report_type": "1",
+"n_income": 28862746016.16,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20251031",
+"f_ann_date": "20251031",
+"end_date": "20250930",
+"report_type": "1",
+"n_income": 21576908418.3,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250829",
+"f_ann_date": "20250829",
+"end_date": "20250630",
+"report_type": "1",
+"n_income": 14512869071.01,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"f_ann_date": "20250428",
+"end_date": "20250331",
+"report_type": "1",
+"n_income": 5941618723.39,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"f_ann_date": "20250428",
+"end_date": "20241231",
+"report_type": "1",
+"n_income": 32371069287.35,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20241031",
+"f_ann_date": "20241031",
+"end_date": "20240930",
+"report_type": "1",
+"n_income": 21214823423.24,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240831",
+"f_ann_date": "20240831",
+"end_date": "20240630",
+"report_type": "1",
+"n_income": 13887709317.03,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240430",
+"f_ann_date": "20240430",
+"end_date": "20240331",
+"report_type": "1",
+"n_income": 4640546489.68,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240430",
+"f_ann_date": "20240430",
+"end_date": "20231231",
+"report_type": "1",
+"n_income": 27719022913.59,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20231031",
+"f_ann_date": "20231031",
+"end_date": "20230930",
+"report_type": "1",
+"n_income": 19522774681.03,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230831",
+"f_ann_date": "20230831",
+"end_date": "20230630",
+"report_type": "1",
+"n_income": 12350122226.27,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20230331",
+"report_type": "1",
+"n_income": 3903774614.31,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20221231",
+"report_type": "1",
+"n_income": 23011344353.11,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20221031",
+"f_ann_date": "20221031",
+"end_date": "20220930",
+"report_type": "1",
+"n_income": 17443170836.76,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220831",
+"f_ann_date": "20220831",
+"end_date": "20220630",
+"report_type": "1",
+"n_income": 10826791122.61,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20220331",
+"report_type": "1",
+"n_income": 3583536065.26,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20220331",
+"report_type": "1",
+"n_income": 3583536065.26,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20211231",
+"report_type": "1",
+"n_income": 22831893632.89,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20211231",
+"report_type": "1",
+"n_income": 22831893632.89,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20211027",
+"f_ann_date": "20211027",
+"end_date": "20210930",
+"report_type": "1",
+"n_income": 15689349584.4,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20211027",
+"f_ann_date": "20211027",
+"end_date": "20210930",
+"report_type": "1",
+"n_income": 15689349584.4,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210823",
+"f_ann_date": "20210823",
+"end_date": "20210630",
+"report_type": "1",
+"n_income": 9490816427.95,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20210331",
+"report_type": "1",
+"n_income": 3452575863.41,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20201231",
+"report_type": "1",
+"n_income": 22279242195.27,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20201231",
+"report_type": "1",
+"n_income": 22279242195.27,
+"update_flag": "1"
+}
+],
+"cashflow": [
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260827",
+"f_ann_date": "20260827",
+"end_date": "20260630",
+"report_type": "1",
+"n_cashflow_act": 18808832392.46,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260827",
+"f_ann_date": "20260827",
+"end_date": "20260630",
+"report_type": "1",
+"n_cashflow_act": 18808832392.46,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260429",
+"f_ann_date": "20260429",
+"end_date": "20260331",
+"report_type": "1",
+"n_cashflow_act": 7798541802.42,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20260429",
+"f_ann_date": "20260429",
+"end_date": "20251231",
+"report_type": "1",
+"n_cashflow_act": 46383114754.02,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20251031",
+"f_ann_date": "20251031",
+"end_date": "20250930",
+"report_type": "1",
+"n_cashflow_act": 45728383685.2,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250829",
+"f_ann_date": "20250829",
+"end_date": "20250630",
+"report_type": "1",
+"n_cashflow_act": 28328562187.2,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"f_ann_date": "20250428",
+"end_date": "20250331",
+"report_type": "1",
+"n_cashflow_act": 11001218583.01,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"f_ann_date": "20250428",
+"end_date": "20250331",
+"report_type": "1",
+"n_cashflow_act": 11001218583.01,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20250428",
+"f_ann_date": "20250428",
+"end_date": "20241231",
+"report_type": "1",
+"n_cashflow_act": 29369250570.66,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20241031",
+"f_ann_date": "20241031",
+"end_date": "20240930",
+"report_type": "1",
+"n_cashflow_act": 12712439743.99,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240831",
+"f_ann_date": "20240831",
+"end_date": "20240630",
+"report_type": "1",
+"n_cashflow_act": 5122166411.4,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240430",
+"f_ann_date": "20240430",
+"end_date": "20240331",
+"report_type": "1",
+"n_cashflow_act": -2940867716.29,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20240430",
+"f_ann_date": "20240430",
+"end_date": "20231231",
+"report_type": "1",
+"n_cashflow_act": 56398426354.17,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20231031",
+"f_ann_date": "20231031",
+"end_date": "20230930",
+"report_type": "1",
+"n_cashflow_act": 39596171712.18,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20231031",
+"f_ann_date": "20231031",
+"end_date": "20230930",
+"report_type": "1",
+"n_cashflow_act": 39596171712.18,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230831",
+"f_ann_date": "20230831",
+"end_date": "20230630",
+"report_type": "1",
+"n_cashflow_act": 30859691934.6,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230831",
+"f_ann_date": "20230831",
+"end_date": "20230630",
+"report_type": "1",
+"n_cashflow_act": 30859691934.6,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20230331",
+"report_type": "1",
+"n_cashflow_act": 15065152965.6,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20230331",
+"report_type": "1",
+"n_cashflow_act": 15065152965.6,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20221231",
+"report_type": "1",
+"n_cashflow_act": 28668435921.27,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20230429",
+"f_ann_date": "20230429",
+"end_date": "20221231",
+"report_type": "1",
+"n_cashflow_act": 28668435921.27,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20221031",
+"f_ann_date": "20221031",
+"end_date": "20220930",
+"report_type": "1",
+"n_cashflow_act": 22458621192.42,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220831",
+"f_ann_date": "20220831",
+"end_date": "20220630",
+"report_type": "1",
+"n_cashflow_act": 13144260367.59,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20220331",
+"report_type": "1",
+"n_cashflow_act": 3394256789.15,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20211231",
+"report_type": "1",
+"n_cashflow_act": 1894363258.72,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20220430",
+"f_ann_date": "20220430",
+"end_date": "20211231",
+"report_type": "1",
+"n_cashflow_act": 1894363258.72,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20211027",
+"f_ann_date": "20211027",
+"end_date": "20210930",
+"report_type": "1",
+"n_cashflow_act": 6461831241.56,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210823",
+"f_ann_date": "20210823",
+"end_date": "20210630",
+"report_type": "1",
+"n_cashflow_act": -6071219912.21,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20210331",
+"report_type": "1",
+"n_cashflow_act": -4265483021.72,
+"update_flag": "1"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20201231",
+"report_type": "1",
+"n_cashflow_act": 19238637309.16,
+"update_flag": "0"
+},
+{
+"ts_code": "000651.SZ",
+"ann_date": "20210429",
+"f_ann_date": "20210429",
+"end_date": "20201231",
+"report_type": "1",
+"n_cashflow_act": 19238637309.16,
+"update_flag": "1"
+}
+]
+}
+}
+}

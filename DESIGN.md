@@ -75,7 +75,7 @@ accent 用于主要动作与链接；background 是冷矿蓝全页底；surface 
 
 ## Components
 
-`.notice`（色域横带，`.caution` 为琥珀）、`.btn`（主要动作，至少 48px 高）、`.link`（文字动作）、条目列表、`<details>`（出处）。页脚只有一次免责说明。
+`.notice`（色域横带，`.caution` 为琥珀）、`.btn`（主要动作，至少 48px 高）、`.link`（文字动作）、条目列表、`<details>`（出处）。候选初筛用编号列表 `.candidates`：公司名与代码同行，`.badge` 文字徽标（accent 底为“选定”，band 底为“机械前五”），下方四格 `.factors` 因子；勾选框 24px、标签至少 44px 高；`.funnel` 为左右对齐的计数行。页脚只有一次免责说明。
 
 ## Motion
 

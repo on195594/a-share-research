@@ -1,9 +1,9 @@
-"""Run queued research one at a time; the only process holding model and market credentials."""
+"""Run queued research one at a time, then batch steps; the only process holding model and market credentials."""
 
 import logging
 import time
 
-from a_share_research import db, price, research
+from a_share_research import db, price, research, screening
 
 log = logging.getLogger(__name__)
 
@@ -17,11 +17,16 @@ def main() -> None:
         "UPDATE runs SET status = 'failed', step = NULL, error = '研究中断（服务重启），请重新开始', finished_at = ?"
         " WHERE status = 'running' AND request_id IS NOT NULL", (db.now(),),
     )
+    screening.recover(conn)
     log.info("worker ready")
     while True:
-        row = conn.execute("SELECT id, kind FROM runs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+        # A candidate batch queues 20 research runs; the owner's own submissions go ahead of them.
+        row = conn.execute("SELECT id, kind FROM runs WHERE status = 'queued'"
+                           " ORDER BY request_id LIKE 'batch-%', id LIMIT 1").fetchone()
         if row is None:
-            time.sleep(2)
+            # Batch steps run only when no single-company task is waiting.
+            if not screening.tick(conn):
+                time.sleep(2)
             continue
         log.info("run %s started", row["id"])
         (price if row["kind"] == "price" else research).execute(conn, row["id"])

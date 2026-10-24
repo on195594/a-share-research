@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% import "_batch.html" as b with context %}
+{% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
+{% block head %}{% if busy %}<meta http-equiv="refresh" content="15">{% endif %}{% endblock %}
+{% block title %}{{ b.month(batch) }} · 候选初筛{% endblock %}
+{% block main %}
+{% set q5 = batch.q5 or [] %}
+{% set l5 = batch.l5.codes if batch.l5 else [] %}
+<section>
+  <h1>{{ b.month(batch) }}</h1>
+  <p class="meta">{% if batch.as_of %}基准日 {{ b.day(batch.as_of) }} · {% endif %}规则 {{ batch.rule.version }}{% if batch.frozen_at %} · 冻结于 {{ batch.frozen_at[:16].replace("T", " ") }}{% endif %}</p>
+
+  {% if batch.status == "failed" %}
+    <p class="notice caution" role="alert">没有完成：{{ batch.error }}</p>
+    <p><a href="/batches">返回候选初筛，重新开始本月批次</a></p>
+  {% elif batch.status in ("queued", "screening") %}
+    <p class="notice" role="status">{{ b.batch_status[batch.status] }}：逐家取近 4 年财务和审计意见，约 20–30 分钟。页面每 15 秒自动刷新，可以离开。</p>
+  {% elif batch.status == "researching" %}
+    {% set finished = batch.q20 | rejectattr("research_status", "in", ["queued", "running"]) | list | length %}
+    <p class="notice" role="status">候选深挖中：{{ finished }} / {{ batch.q20 | length }} 家已完成。全部完成后自动做跨公司比较。</p>
+  {% elif batch.status == "selecting" %}
+    <p class="notice" role="status">跨公司比较中，通常几分钟。</p>
+  {% elif batch.status == "proposed" %}
+    <p class="notice" role="status">待你确认：下面已按模型草案勾选，可调整后冻结。冻结后不再修改，下一交易日开盘价模拟买入。</p>
+  {% elif batch.status == "frozen" %}
+    <p class="notice" role="status">已冻结。冻结后的第一个交易日收盘后记录开盘入场价，之后每个交易日收盘后更新。</p>
+  {% endif %}
+  {% if batch.error and batch.status in ("researching", "frozen", "tracking") %}<p class="notice caution" role="status">最近一次更新失败：{{ batch.error }}。约 30 分钟后自动重试。</p>{% endif %}
+</section>
+
+{% if results %}
+<section>
+  <h2>模拟收益</h2>
+  <p class="muted small">{{ b.day(batch.entry.date) }} 开盘入场 → {{ b.day(results.date) }} 收盘；等权、复权、扣 {{ "%.1f" | format(batch.rule.cost * 1000) }}‰ 往返费用，买不进的席位按现金计。</p>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="模拟收益">
+  <table>
+    <thead><tr><th scope="col">组合</th><th scope="col" class="num">累计</th>
+      {% for key in (batch.marks.horizons or {}) %}<th scope="col" class="num">{{ key[:-1] }} 个月</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for key, label in [("L5", "你确认的 5 家"), ("Q5", "机械前五"), ("Q20", "全部候选")] + batch.rule.benchmarks.items() | list %}
+      <tr><th scope="row">{{ label }}</th><td class="num">{{ b.pct(results["values"][key]) }}</td>
+        {% for h in (batch.marks.horizons or {}).values() %}<td class="num">{{ b.pct(h["values"][key]) }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% set unfilled = batch.entry.prices.items() | rejectattr("1.filled") | list %}
+  {% if unfilled %}<p class="small">未成交：{% for code, p in unfilled %}{{ names.get(code, code) }}（{{ p.reason }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
+  <p class="hint">单个批次只是一次观察；6 个月为主评价期限。</p>
+</section>
+{% endif %}
+
+{% if batch.l5 %}
+<section>
+  <h2>选定</h2>
+  <p>{% for code in l5 %}{{ names.get(code, code) }}{% if not loop.last %}、{% endif %}{% endfor %}</p>
+  <p class="muted small">{% if batch.l5.changed_from_draft %}与模型草案不同（草案：{% for code in batch.l5.draft %}{{ names.get(code, code) }}{% if not loop.last %}、{% endif %}{% else %}无{% endfor %}）{% else %}与模型草案一致{% endif %}</p>
+  {% if batch.l5.note %}<p>{{ batch.l5.note }}</p>{% endif %}
+</section>
+{% endif %}
+
+{% if batch.selection %}
+<section>
+  <h2>跨公司比较</h2>
+  {% if draft.picks %}
+  <ul class="items">
+  {% for p in draft.picks %}
+    <li>
+      <p><strong>{{ names.get(p.code, p.code) }}</strong> <span class="code">{{ p.code }}</span></p>
+      <p><span class="tag">回报来源</span>{{ p.return_source }}</p>
+      <p><span class="tag">为何不选排名更高者</span>{{ p.why_over_higher_ranked }}</p>
+      <p><span class="tag">失效条件</span>{{ p.invalidation }}</p>
+    </li>
+  {% endfor %}
+  </ul>
+  {% if draft.concentration %}<p class="notice caution">{{ draft.concentration }}</p>{% endif %}
+  {% if draft.rejected %}
+  <details>
+    <summary>未选的高排名候选（{{ draft.rejected | length }}）</summary>
+    <ul class="items">{% for r in draft.rejected %}<li><p><strong>{{ names.get(r.code, r.code) }}</strong>：{{ r.reason }}</p></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if draft.gaps %}<p class="small muted">证据缺口：{{ draft.gaps | join("；") }}</p>{% endif %}
+  {% else %}
+  <p class="notice caution" role="status">模型没有给出合格草案（{{ batch.selection.error or "无可选候选" }}）。可以直接在下方按研究结论自行勾选。</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if batch.q20 %}
+<section>
+  <h2>候选 {{ batch.q20 | length }} 家</h2>
+  <p class="muted small">行业内分位加权：扣非 ROE、现金含量、扣非利润增速各 20%，低市盈率 40%。分位只是排序，不代表预期收益。</p>
+  {% if batch.status == "proposed" %}<form method="post" action="/batches/{{ batch.id }}/freeze" class="freeze">
+  <input type="hidden" name="csrf" value="{{ csrf }}">{% endif %}
+  <ol class="candidates">
+  {% for r in batch.q20 %}
+    <li>
+      <div class="candidate-head">
+        {% if batch.status == "proposed" %}
+        <input type="checkbox" name="codes" value="{{ r.code }}" id="c{{ loop.index }}"
+               {% if r.code in draft_codes %}checked{% endif %} {% if not r.verdict %}disabled{% endif %}>
+        <label for="c{{ loop.index }}"><strong>{{ r.name }}</strong></label>
+        {% else %}<strong>{{ r.name }}</strong>{% endif %}
+        <span class="code">{{ r.code }}</span>
+        {% if r.code in l5 %}<span class="badge">选定</span>{% endif %}
+        {% if r.code in q5 %}<span class="badge quiet">机械前五</span>{% endif %}
+      </div>
+      <p class="muted small">{{ r.industry }}{% if r.small_group %} · <span class="flag">行业样本不足 {{ r.group_size }} 家</span>{% endif %} · 总分 {{ "%.2f" | format(r.score) }}</p>
+      <dl class="factors">
+        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd></div>
+        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd></div>
+        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd></div>
+        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd></div>
+      </dl>
+      <p class="small">
+        {% if r.research_status in ("queued", "running") %}<span class="muted">研究{{ "排队中" if r.research_status == "queued" else "进行中" }}</span>
+        {% elif r.report_id and r.verdict %}<a href="/reports/{{ r.report_id }}">{{ r.verdict }}</a>{% if r.reused %} <span class="muted">· 沿用近期报告</span>{% endif %}
+        {% elif r.report_id %}<a href="/reports/{{ r.report_id }}">复核未通过</a> <span class="muted">· 不可选</span>
+        {% elif r.research_status == "failed" %}<span class="flag">研究失败</span> <span class="muted">{{ r.research_error }} · 不可选</span>
+        {% elif r.run_id %}<a href="/runs/{{ r.run_id }}">查看研究</a>{% endif %}
+      </p>
+    </li>
+  {% endfor %}
+  </ol>
+  {% if batch.status == "proposed" %}
+    <div class="search">
+      <label for="note">说明<span class="muted">（选填，例如排除已持有的股票）</span></label>
+      <textarea id="note" name="note" rows="3" maxlength="2000"></textarea>
+    </div>
+    <p class="hint">最多 {{ batch.rule.picks }} 家，同一行业最多 {{ batch.rule.picks_per_industry }} 家；不足 5 家时空位按现金计。</p>
+    <div class="actions"><button class="btn" type="submit">冻结所选</button></div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if batch.universe %}
+<section>
+  <h2>初筛过程</h2>
+  {% set f = batch.universe.funnel %}
+  {% set labels = [("listed", "上市 A 股"), ("after_financial", "排除金融类"), ("after_st", "排除 ST"), ("after_suspended", "排除当日停牌"),
+                   ("after_listed_years", "上市满 3 年"), ("after_market_cap", "总市值 ≥ 100 亿"), ("after_liquidity", "20 日均成交 ≥ 1 亿"),
+                   ("after_industry_mapping", "有申万一级行业"), ("factor_ok", "财务与审计合格、参与排名")] %}
+  <ul class="funnel">
+  {% for key, label in labels %}<li><span>{{ label }}</span><span class="num">{{ f[key] }}</span></li>{% endfor %}
+  </ul>
+  <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名（缺口不代表质量差）。</p>
+</section>
+{% endif %}
+<p><a href="/batches">全部批次</a></p>
+{% endblock %}

@@ -1,4 +1,4 @@
-"""SQLite storage: runs, model calls and reports."""
+"""SQLite storage: runs, model calls, reports and candidate batches."""
 
 import hashlib
 import json
@@ -65,6 +65,25 @@ CREATE TABLE IF NOT EXISTS prices (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS prices_by_code ON prices(code, id);
+CREATE TABLE IF NOT EXISTS batches (
+    id INTEGER PRIMARY KEY,
+    request_id TEXT UNIQUE,
+    status TEXT NOT NULL,  -- queued / screening / researching / selecting / proposed / frozen / tracking / failed
+    step TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    as_of TEXT,  -- screened trading day, YYYYMMDD
+    rule TEXT NOT NULL,  -- JSON: frozen rule parameters
+    universe TEXT,  -- JSON: funnel, gaps and every screened company's factors
+    q20 TEXT,  -- JSON: ranked candidates with linked run/report ids
+    q5 TEXT,  -- JSON: mechanical top five codes
+    selection TEXT,  -- JSON: model comparison draft and its identity
+    l5 TEXT,  -- JSON: owner's frozen picks
+    frozen_at TEXT,
+    entry TEXT,  -- JSON: entry day prices and benchmarks
+    marks TEXT  -- JSON: latest valuation and horizon returns
+);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     expires_at REAL NOT NULL
@@ -159,3 +178,8 @@ def save_report(conn, run_id: int, code: str, name: str, period: str, passed: bo
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, code, name, period, int(passed), verdict, text, now(), hashlib.sha256(text.encode()).hexdigest()),
     )
+
+
+def update_batch(conn: sqlite3.Connection, batch_id: int, **fields) -> None:
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(f"UPDATE batches SET {sets} WHERE id = ?", (*fields.values(), batch_id))

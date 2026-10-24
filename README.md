@@ -81,6 +81,20 @@ docker exec a-share-research-worker python -m a_share_research.integrity   # 生
 DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # 本地
 ```
 
+## 候选初筛
+
+网页“候选初筛”每月开一个批次（设计见[方案](docs/screening-experiment.md)）。worker 在没有排队的单家任务时推进批次：
+
+1. 全市场确定性初筛（不调模型）：按交易日取股票池、估值、成交额和申万一级行业，粗筛后逐家取近 5 年 `fina_indicator`/`income`/`cashflow`/`fina_audit`，4 线程约 20–30 分钟；初筛期间单家研究排队。
+2. 前 20 家（Q20）各自提交一次研究（7 天内已通过的报告直接沿用；网页或 API 新提交的研究排在这些批次研究之前），全部结束后经 pi 做一次跨公司比较，给出 5 家草案。
+3. 所有者在批次页勾选并冻结；冻结后第一个交易日收盘后（17:00 后）记录开盘入场价，之后每个交易日收盘后更新 L5、机械前五 Q5、全部 Q20 与中证 800/沪深 300 全收益指数的单位净值收益。
+
+服务重启时，进行中的初筛记为失败（重新开始本月批次即可），跨公司比较自动重试。只看初筛结果、不建批次：
+
+```bash
+uv run --env-file .env python -m a_share_research.screening
+```
+
 ## 部署
 
 项目采用 Docker Compose 进行前后端容器化分离部署，全部服务在本项目目录下统一编排：
