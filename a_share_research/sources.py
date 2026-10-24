@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -19,6 +21,7 @@ from urllib3.util import Retry
 
 from a_share_research.db import DATA, SHANGHAI
 
+log = logging.getLogger(__name__)
 CNINFO = "https://www.cninfo.com.cn/new"
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://www.cninfo.com.cn/"})
@@ -139,7 +142,7 @@ def announcements(code: str, query: str = "", days: int = 180) -> tuple[list[Doc
 
 
 def fetch(doc: Document) -> Document:
-    """Download the PDF once (stored by content hash) and extract per-page text."""
+    """Download the PDF (stored by content hash) and extract per-page text."""
     response = SESSION.get(doc.url, timeout=(10, 120))
     response.raise_for_status()
     payload = response.content
@@ -147,28 +150,60 @@ def fetch(doc: Document) -> Document:
         raise SourceError(f"{doc.url} is not a PDF")
     doc.sha256 = hashlib.sha256(payload).hexdigest()
     doc.retrieved_at = datetime.now(SHANGHAI).isoformat(timespec="seconds")
-    pdf = DATA / "pdf" / f"{doc.sha256}.pdf"
-    pdf.parent.mkdir(parents=True, exist_ok=True)
-    if not pdf.exists():
-        pdf.write_bytes(payload)
-    doc.pages = _pages(pdf, "-layout")
-    doc.raw_pages = _pages(pdf, "-raw")
+    pdf = store_pdf(DATA / "pdf", payload, doc.sha256)
+    doc.pages = _pages(pdf, doc.sha256, "-layout")
+    doc.raw_pages = _pages(pdf, doc.sha256, "-raw")
     if len(doc.raw_pages) != len(doc.pages):
         raise SourceError(f"{doc.url}: page count differs between text extractions")
     return doc
 
 
-def _pages(pdf: Path, mode: str) -> list[str]:
+def store_pdf(directory: Path, payload: bytes, sha: str) -> Path:
+    """Keep the downloaded bytes at <sha>.pdf; a stored copy that no longer matches is replaced."""
+    pdf = directory / f"{sha}.pdf"
+    if pdf.exists():
+        if hashlib.sha256(pdf.read_bytes()).hexdigest() == sha:
+            return pdf
+        log.warning("stored %s no longer matches its hash; replacing it with the fresh download", pdf.name)
+    directory.mkdir(parents=True, exist_ok=True)
+    _write_atomic(pdf, payload)
+    return pdf
+
+
+@cache
+def extractor() -> str:
+    """The pdftotext version line; cached page text is only reused from the same extractor."""
+    out = subprocess.run(["pdftotext", "-v"], capture_output=True, text=True, check=True, timeout=10)
+    return (out.stderr or out.stdout).splitlines()[0].strip()
+
+
+def _pages(pdf: Path, sha: str, mode: str) -> list[str]:
+    """Per-page text of a PDF the caller has verified to hash to sha."""
     cache = pdf.with_suffix(f".{mode.lstrip('-')}.json")
+    identity = {"pdf_sha256": sha, "extractor": extractor(), "mode": mode}
     if cache.exists():
-        return json.loads(cache.read_text(encoding="utf-8"))
+        try:
+            saved = json.loads(cache.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            saved = None
+        if isinstance(saved, dict) and isinstance(saved.get("pages"), list) and \
+                {key: saved.get(key) for key in identity} == identity:
+            return saved["pages"]
+        log.warning("re-extracting %s: cached text is unreadable or from another PDF/extractor", cache.name)
     text = subprocess.run(
         ["pdftotext", mode, "-enc", "UTF-8", str(pdf), "-"],
         capture_output=True, text=True, check=True, timeout=120,
     ).stdout
     pages = text.split("\f")[:-1] if text.endswith("\f") else text.split("\f")
-    cache.write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
+    _write_atomic(cache, json.dumps(identity | {"pages": pages}, ensure_ascii=False).encode())
     return pages
+
+
+def _write_atomic(path: Path, payload: bytes) -> None:
+    # A crash mid-write must not leave a truncated PDF or cache under the final name.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(payload)
+    os.replace(tmp, path)
 
 
 def _frame(result) -> pd.DataFrame:

@@ -1,8 +1,10 @@
 """SQLite storage: runs, model calls and reports."""
 
+import hashlib
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -48,7 +50,8 @@ CREATE TABLE IF NOT EXISTS reports (
     passed INTEGER NOT NULL,  -- 1: reviewed report; 0: only verified facts are shown
     verdict TEXT,
     body TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    body_sha256 TEXT  -- sha256 of body as written; NULL for reports saved before it was recorded
 );
 CREATE INDEX IF NOT EXISTS reports_by_code ON reports(code, created_at);
 CREATE TABLE IF NOT EXISTS prices (
@@ -82,21 +85,31 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
-    migrations = [("runs", ("identity", "material", "request")), ("calls", ("identity",))]
+    migrations = [("runs", ("identity", "material", "request")), ("calls", ("identity",)), ("reports", ("body_sha256",))]
     if any(name not in {r["name"] for r in conn.execute(f"PRAGMA table_info({t})")} for t, names in migrations for name in names):
-        conn.execute("BEGIN IMMEDIATE")
         try:
-            for table, names in migrations:
-                existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-                for name in names:
-                    if name not in existing:
-                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
-            conn.execute("COMMIT")
+            with transaction(conn):
+                for table, names in migrations:
+                    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                    for name in names:
+                        if name not in existing:
+                            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
         except Exception:
-            conn.execute("ROLLBACK")
             conn.close()
             raise
     return conn
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection):
+    """Commit every statement inside together, or none (connections are in autocommit mode)."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
 
 
 def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = None,
@@ -130,8 +143,9 @@ def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=
 
 def save_report(conn, run_id: int, code: str, name: str, period: str, passed: bool,
                 verdict: str | None, body: dict) -> None:
+    text = json.dumps(body, ensure_ascii=False)
     conn.execute(
-        "INSERT INTO reports (run_id, code, name, period, passed, verdict, body, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (run_id, code, name, period, int(passed), verdict, json.dumps(body, ensure_ascii=False), now()),
+        "INSERT INTO reports (run_id, code, name, period, passed, verdict, body, created_at, body_sha256)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, code, name, period, int(passed), verdict, text, now(), hashlib.sha256(text.encode()).hexdigest()),
     )

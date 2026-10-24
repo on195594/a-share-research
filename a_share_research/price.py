@@ -100,12 +100,13 @@ def execute(conn, run_id: int) -> None:
     db.update_run(conn, run_id, status="running", step="price", started_at=db.now())
     try:
         body = reference(run["code"], run["name"] or "")
-        conn.execute(
-            "INSERT INTO prices (run_id, code, name, as_of, expires, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (run_id, run["code"], run["name"], body["as_of"], body["expires"],
-             json.dumps(body, ensure_ascii=False), db.now()),
-        )
-        db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
+        with db.transaction(conn):
+            conn.execute(
+                "INSERT INTO prices (run_id, code, name, as_of, expires, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, run["code"], run["name"], body["as_of"], body["expires"],
+                 json.dumps(body, ensure_ascii=False), db.now()),
+            )
+            db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
     except Exception as exc:
         if not isinstance(exc, PriceError):
             log.exception("price run %s failed", run_id)

@@ -469,6 +469,18 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     return context
 
 
+def publish(conn, run_id: int, material: Material, period: str, passed: bool,
+            verdict: str | None, body: dict) -> None:
+    """Save the report and finish its run together, so a crash never leaves one without the other."""
+    with db.transaction(conn):
+        db.save_report(conn, run_id, material.code, material.name, period, passed, verdict, body)
+        if passed:
+            db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
+        else:
+            db.update_run(conn, run_id, status="failed", step=None, finished_at=db.now(),
+                          error="复核未通过，只展示已核验的事实")
+
+
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, request FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
@@ -529,17 +541,13 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         }
         if problems:
             body |= {"facts": _verified_facts(report, problems), "problems": problems}
-            db.save_report(conn, run_id, material.code, material.name, period, False, None, body)
-            db.update_run(conn, run_id, status="failed", step=None, finished_at=db.now(),
-                          error="复核未通过，只展示已核验的事实")
+            publish(conn, run_id, material, period, False, None, body)
         else:
             body |= {k: report[k] for k in ("verdict", "summary", *SECTIONS)}
             if material.extra.get("feedback"):
                 body["methods"] = report["methods"]
             body["answer"] = report.get("answer", [])
-            db.save_report(conn, run_id, material.code, material.name, period, True,
-                           report["verdict"], body)
-            db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
+            publish(conn, run_id, material, period, True, report["verdict"], body)
     except Exception as exc:
         if not isinstance(exc, ScopeError | ResearchError | sources.SourceError):
             log.exception("run %s failed", run_id)
