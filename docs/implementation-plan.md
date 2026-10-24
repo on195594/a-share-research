@@ -11,7 +11,7 @@
 | I2 | 质量基线与模型/Skill 比较 | Research、Skills 各自维护 | Research 修复已部署；Skills `992f5a5` 获批合同下离线复算 8/8、追问组 4/4，已发布并激活 |
 | I3–I6 | 共用研究 API、自主补证与计算、追问与纠错 | Research | `e00f3ce` 已部署生产，评估非金融 10/10，线上纠错通过 |
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
-| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 已完成（无财务批量权限，改单股接口，见方案第 7 节），P1 待开始 |
+| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 `7076091` 已部署生产，首个批次运行中；P4 历史回测未开始 |
 
 ### 下一批推进顺序
 
@@ -33,25 +33,24 @@ R3 已完成的验证：
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `73d5748`（2026-10-24 13:32 部署：复核事实边界、计算单位展示与快照日期提示），Skills 仍为 0.1.23。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
+入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `7076091`（2026-10-24 18:02 部署：候选初筛批次 E 的 P1–P3），Skills 仍为 0.1.23。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
 
 | 项目 | 状态 |
 |---|---|
-| 镜像 | `a-share-research-web:73d5748`（`sha256:54735478…`）、`a-share-research-worker:73d5748`（`sha256:eabdbb82…`），同为 `latest`；两个镜像的 revision 标签及全部 22 个应用文件均与已审查提交一致 |
-| 应用内容哈希 | `f582480ebafd511d09fde5b6469f28223b70d658b0b809d4c8c9bc6ebd305ac9` |
-| 运行时 | Python 3.13.17、Node 22.23.4、Lib 0.8.2、pdftotext 25.03.0；模型与 pi 配置未改 |
-| 部署前备份 | `~/.local/share/a-share-research-evaluations/deploy-73d5748-20261024T053226Z/`（0700）：独立 SQLite 备份、完整 PDF/派生材料、配置及旧镜像身份；持久文件 41 项均 0600、哈希核验通过，SQLite integrity_check ok、各表摘要一致，无 WAL/SHM 侧文件依赖 |
-| 审查与验收 | 独立只读审查无阻断项，合入 main 后 43 项测试通过；真实报告 1/12/13 在 320/375/1280px 渲染无横向溢出。切换后公网首页、报告 1/12/13、公司页、CSS 及报告 API 均通过；日期差异提示、历史失败报告警示和样式内容哈希正确。巡检 14 份报告、12 份材料快照、12 个 PDF，0 问题；启动日志无错误 |
-| 数据与会话 | 先停止 Web 受理，再以队列为空为切换前提停止 worker；未中断任务。原有 21 个任务、14 份报告、70 次调用、4 条价格记录、1 条会话逐表内容摘要在切换及验收后均不变；仅为验收临时签发的浏览器/API 会话均已撤销 |
-| Skills 连接 | 本次未修改 Skills 的配置或令牌，既有到期限制仍需其 owner 处理 |
+| 镜像 | `a-share-research-web:7076091`（`sha256:b24e50d7…`）、`a-share-research-worker:7076091`（`sha256:2202e709…`），同为 `latest`；两个镜像内应用内容哈希均为 `ea641b259bfd990ca1b5ea096abf2dd6b2e99398afec7631ed7b105b142f6c38`，与已推送提交一致 |
+| 数据库 | 仅新增 `batches` 表（`CREATE TABLE IF NOT EXISTS`），既有表不变 |
+| 部署前备份 | `~/.local/share/a-share-research-evaluations/deploy-7076091-20261024T100126Z/`（0700）：SQLite 在线备份 `app.db`（integrity_check ok，sha256 `c683c02e…`）与 `manifest.json`；PDF 未变动，未另行备份 |
+| 切换与验收 | 先停止 Web 受理，队列检查以非零退出为门禁，0 个进行中任务后成对切换。切换后巡检 14 份报告、12 份材料快照、12 个 PDF，0 问题；21 个任务、70 次调用、14 份报告、4 条价格记录不变；公网首页与“候选初筛”入口正常；验收会话已退出作废 |
+| 本机验收 | 开发实例（生产库快照副本）跑通完整批次：初筛 1347→918 家参与排名，Q20 深挖 18 通过/2 失败，跨公司比较给出 5 家，冻结校验与冻结、以 2026-10-19 真实行情入场及估值；手机 390px 无横向溢出；51 项测试通过 |
+| 首个生产批次 | 2026-10 批次于 18:02 开始初筛，待深挖与比较后由所有者冻结 |
 
-发布证据在上述备份目录的 `manifest.json` 与 `verification.json`（0600）。本次未发起新的模型研究，复用真实材料检查及已有报告验证；未重跑 GitHub OAuth 本人授权交换。上一版完整性合同部署及任务 21 删除记录保留在 `git show 577cdac:docs/implementation-plan.md`。
+发布证据在上述备份目录。上一版 `73d5748` 的部署记录见 `git show 7076091:docs/implementation-plan.md`。
 
-发布方式见 [README](../README.md#部署)：只从已提交、已推送的代码构建；采用已验证镜像时核对内容哈希，在队列空闲（切换命令须以队列检查为前提，不能只在备份时看一次）并备份后用 `docker compose up -d --no-build --no-deps web worker` 切换，避免混入后续工作区改动。生产切换需当次授权。
+发布方式见 [README](../README.md#部署)：只从已提交、已推送的代码构建；采用已验证镜像时核对内容哈希，在队列空闲（切换命令须以队列检查为前提，不能只在备份时看一次）并备份后用 `docker compose up -d --no-build --no-deps web worker` 切换，避免混入后续工作区改动。生产切换需当次授权。**批次初筛进行中（`batches.status = 'screening'`）切换 worker 会使该批次失败**，切换前一并检查。
 
 ### 回退
 
-本次首选回退到刚替换的 `6ff20ff`：保留标签为 `a-share-research-web:rollback-73d5748-20261024T053226Z`、`a-share-research-worker:rollback-73d5748-20261024T053226Z`，不可变镜像 ID 分别以 `ebca8974`、`8564730c` 开头，完整 ID 在备份清单。本补丁无数据库迁移；如需回退，先停止 Web 受理、确认队列为空再停止 worker，将这两个标签恢复为对应 `latest` 后按上述 `--no-build` 方式成对启动；保留新产生的数据，不覆盖生产数据库。
+本次首选回退到刚替换的 `73d5748`：保留标签为 `a-share-research-web:rollback-7076091-20261024T100126Z`、`a-share-research-worker:rollback-7076091-20261024T100126Z`（镜像 ID 以 `54735478`、`eabdbb82` 开头）。旧代码忽略 `batches` 表，无需回退数据库；如需回退，先停止 Web 受理、确认队列为空再停止 worker，将这两个标签恢复为对应 `latest` 后按上述 `--no-build` 方式成对启动；保留新产生的数据，不覆盖生产数据库。回退后批次停止推进，重新部署后从原状态继续（初筛中的批次除外）。
 
 保留旧 Web/worker 镜像 `pre-r3-20261023` 供追溯，但不能直接回退运行：旧网页读取 `methods[i]` 反馈会报错，旧 worker 也不能正确处理方法反馈。可用的应急恢复镜像为 `a-share-research-web:readonly-r3-20261023`（`sha256:5e3ecb1c…`），使用已验证的新报告阅读代码，暂停研究写入。它已读取真实旧报告及方法反馈报告，五个研究/价格写入口均返回 503、任务数不变，退出与令牌撤销仍可用。恢复时停止 worker，暂不提供新研究；这不是恢复旧版完整研究行为。后续操作需当次生产授权：
 
