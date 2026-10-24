@@ -21,7 +21,7 @@
   {% elif batch.status == "selecting" %}
     <p class="notice" role="status">跨公司比较中，通常几分钟。</p>
   {% elif batch.status == "proposed" %}
-    <p class="notice" role="status">待你选择：模型没有给出可自动冻结的名单，请在下方按研究结论勾选后冻结。冻结后不再修改，下一交易日开盘价模拟买入。</p>
+    <p class="notice" role="status">待你选择：{{ "草案未能自动冻结" if batch.selection and batch.selection.freeze_error else "模型没有给出可自动冻结的名单" }}，请在下方按研究结论勾选后冻结。冻结后不再修改，下一交易日开盘价模拟买入。</p>
   {% elif batch.status == "frozen" %}
     <p class="notice" role="status">已冻结。冻结后的第一个交易日收盘后记录开盘入场价，之后每个交易日收盘后更新。</p>
   {% endif %}
@@ -37,7 +37,7 @@
     <thead><tr><th scope="col">组合</th><th scope="col" class="num">累计</th>
       {% for key in (batch.marks.horizons or {}) %}<th scope="col" class="num">{{ key[:-1] }} 个月</th>{% endfor %}</tr></thead>
     <tbody>
-    {% for key, label in [("L5", "你确认的 5 家"), ("Q5", "机械前五"), ("Q20", "全部候选")] + batch.rule.benchmarks.items() | list %}
+    {% for key, label in [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")] + batch.rule.benchmarks.items() | list %}
       <tr><th scope="row">{{ label }}</th><td class="num">{{ b.pct(results["values"][key]) }}</td>
         {% for h in (batch.marks.horizons or {}).values() %}<td class="num">{{ b.pct(h["values"][key]) }}</td>{% endfor %}</tr>
     {% endfor %}

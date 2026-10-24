@@ -114,3 +114,34 @@ def test_freeze_records_who_froze_and_validates(tmp_path):
     assert l5["frozen_by"] == "auto" and l5["changed_from_draft"] is False
     with pytest.raises(service.RequestError):
         screening.freeze(conn, 1, [rows[0]["code"]], "")
+
+
+def _proposed_batch(conn, draft_codes):
+    from a_share_research import db
+    rows = [r | {"verdict": "需要谨慎", "return_60d": 0.0, "drawdown": False} for r in ROWS["rows"][:6]]
+    conn.execute("INSERT INTO batches (status, created_at, rule, q20, q5, selection) VALUES ('selecting', ?, ?, ?, ?, NULL)",
+                 (db.now(), json.dumps(screening.RULE), json.dumps(rows), "[]"))
+    return {"draft": {"picks": [{"code": c} for c in draft_codes]}}
+
+
+def test_draft_is_saved_and_frozen_together(tmp_path):
+    from a_share_research import db
+    conn = db.connect(tmp_path / "app.db")
+    code = ROWS["rows"][0]["code"]
+    screening._auto_freeze(conn, 1, _proposed_batch(conn, [code]))
+    row = conn.execute("SELECT status, l5 FROM batches").fetchone()
+    assert row["status"] == "frozen" and json.loads(row["l5"])["frozen_by"] == "auto"
+    # An unfreezable draft is kept, with the reason, for the owner.
+    conn.execute("INSERT INTO batches (status, created_at, rule, q20, q5) SELECT 'selecting', created_at, rule, q20, q5 FROM batches")
+    screening._auto_freeze(conn, 2, {"draft": {"picks": [{"code": "000000.SZ"}]}})
+    row = conn.execute("SELECT status, selection FROM batches WHERE id = 2").fetchone()
+    assert row["status"] == "proposed" and "freeze_error" in json.loads(row["selection"])
+
+
+def test_a_proposed_draft_left_by_a_restart_is_frozen_by_the_worker(tmp_path):
+    from a_share_research import db
+    conn = db.connect(tmp_path / "app.db")
+    selection = _proposed_batch(conn, [ROWS["rows"][0]["code"]])
+    conn.execute("UPDATE batches SET status = 'proposed', selection = ?", (json.dumps(selection),))
+    assert screening.tick(conn) is True
+    assert conn.execute("SELECT status FROM batches").fetchone()["status"] == "frozen"

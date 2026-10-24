@@ -499,10 +499,11 @@ def freeze(conn, batch_id: int, codes: list[str], note: str, by: str = "owner") 
     draft = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
     l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
           "frozen_by": by}
-    cur = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
-                       " WHERE id = ? AND status = 'proposed'",
-                       (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id))
-    if cur.rowcount != 1:
+    # RETURNING, not rowcount: the web connection is shared and other writes change its counters.
+    updated = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
+                           " WHERE id = ? AND status = 'proposed' RETURNING id",
+                           (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id)).fetchone()
+    if updated is None:
         raise service.RequestError("批次已被冻结", 409)
 
 
@@ -655,6 +656,30 @@ def _waiting(batch: dict, now: datetime) -> bool:
     return bool(attempted) and now - datetime.fromisoformat(attempted) < timedelta(minutes=RETRY_MINUTES)
 
 
+def _draft_picks(selection: dict | None) -> list[str]:
+    return [p["code"] for p in ((selection or {}).get("draft") or {}).get("picks", [])]
+
+
+def _auto_freeze(conn, batch_id: int, selection: dict) -> None:
+    """Save the draft and, when it has picks, freeze it in the same transaction.
+
+    The owner chose (2026-10-25) to freeze the model's draft as soon as it exists. A draft that
+    fails freeze validation stays proposed with the reason, for the owner to pick from.
+    """
+    picks = _draft_picks(selection)
+    try:
+        with db.transaction(conn):
+            _save(conn, batch_id, status="proposed", selection=selection, error=None, marks=None)
+            if picks:
+                freeze(conn, batch_id, picks, "", by="auto")
+        if picks:
+            log.info("batch %s frozen with the model draft", batch_id)
+    except service.RequestError as exc:
+        log.warning("batch %s draft could not be frozen: %s", batch_id, exc)
+        _save(conn, batch_id, status="proposed", selection=selection | {"freeze_error": str(exc)},
+              error=f"草案未能自动冻结：{exc}", marks=None)
+
+
 def recover(conn) -> None:
     """After a restart: an interrupted screen fails; an interrupted comparison is simply retried."""
     conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = '初筛中断（服务重启），请重新开始',"
@@ -690,8 +715,13 @@ def tick(conn) -> bool:
                     moves = {r["code"]: {"return_60d": None, "drawdown": False} for r in batch["q20"]}
                 _save(conn, batch["id"], q20=[r | moves[r["code"]] for r in batch["q20"]])
                 return True
-            if batch["status"] == "proposed":  # only a draft without picks waits for the owner
-                continue
+            if batch["status"] == "proposed":
+                # A draft with picks normally freezes in the same transaction that saved it; this
+                # catches one left behind by an older version. Empty or unfreezable drafts wait.
+                if not _draft_picks(batch["selection"]) or (batch["selection"] or {}).get("freeze_error"):
+                    continue
+                _auto_freeze(conn, batch["id"], batch["selection"])
+                return True
             if batch["status"] == "researching":
                 finished, q20 = research_state(conn, batch["q20"])
                 if not finished or _waiting(batch, now):
@@ -709,15 +739,7 @@ def tick(conn) -> bool:
                     _save(conn, batch["id"], status="researching", error=f"跨公司比较失败，稍后重试：{exc}",
                           selection={"failures": failures}, marks={"attempted": db.now()})
                     return True
-                _save(conn, batch["id"], status="proposed", selection=selection, error=None, marks=None)
-                # The owner chose (2026-10-25) to freeze the model's draft as soon as it exists.
-                picks = [p["code"] for p in (selection.get("draft") or {}).get("picks", [])]
-                if picks:
-                    try:
-                        freeze(conn, batch["id"], picks, "", by="auto")
-                        log.info("batch %s frozen with the model draft", batch["id"])
-                    except service.RequestError:  # the draft stays for the owner to pick from
-                        log.exception("batch %s draft could not be frozen", batch["id"])
+                _auto_freeze(conn, batch["id"], selection)
                 return True
             stamp = now.strftime("%Y%m%d")
             if now.hour < MARK_HOUR or (batch.get("marks") or {}).get("checked") == stamp or _waiting(batch, now):
