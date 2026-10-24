@@ -99,7 +99,7 @@
       <div class="candidate-head">
         {% if batch.status == "proposed" %}
         <input type="checkbox" name="codes" value="{{ r.code }}" id="c{{ loop.index }}"
-               {% if r.code in draft_codes %}checked{% endif %} {% if not r.verdict %}disabled{% endif %}>
+               {% if r.code in draft_codes %}checked{% endif %} {% if not r.verdict or r.verdict == "暂不值得" %}disabled{% endif %}>
         <label for="c{{ loop.index }}"><strong>{{ r.name }}</strong></label>
         {% else %}<strong>{{ r.name }}</strong>{% endif %}
         <span class="code">{{ r.code }}</span>
@@ -128,7 +128,7 @@
       <label for="note">说明<span class="muted">（选填，例如排除已持有的股票）</span></label>
       <textarea id="note" name="note" rows="3" maxlength="2000"></textarea>
     </div>
-    <p class="hint">最多 {{ batch.rule.picks }} 家，同一行业最多 {{ batch.rule.picks_per_industry }} 家；不足 5 家时空位按现金计。</p>
+    <p class="hint">最多 {{ batch.rule.picks }} 家，同一行业最多 {{ batch.rule.picks_per_industry }} 家；研究结论为“暂不值得”或未通过复核的不可选；不足 5 家时空位按现金计。</p>
     <div class="actions"><button class="btn" type="submit">冻结所选</button></div>
   </form>
   {% endif %}
