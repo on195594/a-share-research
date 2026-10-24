@@ -32,21 +32,21 @@ R3 已完成的验证：
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `ce7ef0e`（2026-10-23 部署），与 Skills 0.1.23 同时启用。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
+入口 [stock.keyi.win](https://stock.keyi.win)，生产 Web/worker 配对运行 `6ff20ff`（2026-10-24 10:28 部署：完整性合同，见[方案第 6 节](proposal.md#6-状态与正确性)），Skills 仍为 0.1.23。域名、Nginx、端口和数据目录（`~/a-share-research-data`）未变。
 
 | 项目 | 状态 |
 |---|---|
-| 镜像 | `a-share-research-web:ce7ef0e`（`sha256:408cf390…`）、`a-share-research-worker:ce7ef0e`（`sha256:25971fec…`），同为 `latest`（上一版 `942a58d` 镜像保留供回退） |
-| 应用内容哈希 | `493cf12ca6c9c81401ac7159fb18a99acdd2a65b1909e1f385cf62499bf3e992` |
-| 运行时 | Python 3.13.17、Node 22.23.4、pi 1.4.0、Lib 0.8.2；模型 `openai-codex/gpt-6.1-sol` |
-| 部署前备份 | `~/a-share-research-data/backup-pre-ce7ef0e-20261023T1112Z.db`（0600，及 `backup-pre-942a58d-20261023T101825Z.db`） |
-| 线上验收 | 已安装 CLI 使用实际配置读取报告 11，再发起纠错任务 18 → [报告 12](https://stock.keyi.win/reports/12)：98 秒、4 次模型调用，通过核查，生成两条方法；390×844 网页沿关联任务读取同一结果并展开原文，无整页横向溢出 |
-| 数据与会话 | 原有 17 个任务、11 份报告、53 次调用及 3 条价格记录逐行摘要不变；未创建验收用账户库；Web 无模型/行情凭据；浏览器验收会话已退出撤销 |
+| 镜像 | `a-share-research-web:6ff20ff`（`sha256:ebca8974…`）、`a-share-research-worker:6ff20ff`（`sha256:8564730c…`），同为 `latest`（上一版 `ce7ef0e` 镜像保留，可直接回退：新增的 `reports.body_sha256` 列旧代码忽略） |
+| 应用内容哈希 | `513a56a43b3fccc129b4516781167df0c47ed7ae25bda3128dd137d61ad96629` |
+| 运行时 | Python 3.13.17、Node 22.23.4、pi 1.4.0、Lib 0.8.2、pdftotext 25.03.0；模型 `openai-codex/gpt-6.1-sol` |
+| 部署前备份 | `~/a-share-research-data/backup-pre-6ff20ff-20261024T0226Z.db`（0600，SQLite 在线备份，integrity_check ok；更早的 `backup-pre-ce7ef0e-20261023T1112Z.db` 保留） |
+| 线上验收 | 切换前用新 worker 镜像在容器内临时目录研究 600900：77 秒、6 次调用、通过复核，巡检 0 问题。切换后生产巡检：13 份报告（均为旧报告、无正文哈希）、12 份材料快照、12 个 PDF 中仅报任务 21 一项（见下行）；首页、报告 12/13、公司页 601138 均 200，Web 日志无错误 |
+| 数据与会话 | 原有 20 个任务、13 份报告、63 次调用、4 条价格记录逐行摘要与备份前一致。**切换时中断了任务 21**（10:28:20 网页提交的 601138 研究，已发 2 次模型调用）：切换前检查已显示 1 个运行中任务，但命令未据此中止；任务被标为“研究中断”，需重新提交。它由旧代码保存探索进度，巡检报“运行身份记录的材料哈希与快照不符”，属旧代码进度保存未同步身份哈希（本版已修），不是数据损坏。验收令牌 5 分钟自动到期 |
 | Skills 连接 | `runtime.env`（0600）已配置公网 API 与 8 小时 Agent 令牌，其他配置保留；本次令牌到期时间为北京时间 2026-10-24 02:19，需 owner 续签；已有客户端会话需重载 Skill |
 
-发布证据在 `~/.local/share/a-share-research-evaluations/2026-10-23-paired-942a58d/`（目录 0700、文件 0600），包括镜像身份、备份摘要、安装与回退记录、生产结果及截图，不含令牌明文。复用 R3 的完整评估，本次只新增上述一条真实研究，没有重跑 11 家或新增模型审查。
+本次未新建发布证据目录；上述命令输出即为验收记录。上一版证据仍在 `~/.local/share/a-share-research-evaluations/2026-10-23-paired-942a58d/`。
 
-发布方式见 [README](../README.md#部署)：只从已提交、已推送的代码构建；采用已验证镜像时核对内容哈希，在队列空闲并备份后用 `docker compose up -d --no-build --no-deps web worker` 切换，避免混入后续工作区改动。生产切换需当次授权。
+发布方式见 [README](../README.md#部署)：只从已提交、已推送的代码构建；采用已验证镜像时核对内容哈希，在队列空闲（切换命令须以队列检查为前提，不能只在备份时看一次）并备份后用 `docker compose up -d --no-build --no-deps web worker` 切换，避免混入后续工作区改动。生产切换需当次授权。
 
 ### 回退
 
