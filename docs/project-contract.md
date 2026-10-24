@@ -98,7 +98,7 @@ QA 通过只表示正文满足相应流程规则。报告核验、流程合规�
 | 维护内容 | 当前入口 |
 |---|---|
 | Research 产品与流程、运行与开发约束 | [重构方案](proposal.md)、[README](../README.md)、[AGENTS](../AGENTS.md) |
-| Research 当前部署、回退与后续实施 | [部署记录](implementation-plan.md#当前部署)、[推进顺序](implementation-plan.md#下一批推进顺序) |
+| Research 当前部署、回退与后续实施 | [部署记录](implementation-plan.md#当前部署)、[工作包与状态](implementation-plan.md#工作包与状态) |
 | Skills 状态合同、验证与实际部署 | [runtime contracts](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/architecture/runtime-contracts.md)、[development](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/development.md)、[operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) |
 | Lib 公共数据语义与发版 | [Provider 合同](https://github.com/on195594/a-stock-lib/blob/master/docs/TUSHARE_PRIMARY_PROVIDERS.md)、[发版清单](https://github.com/on195594/a-stock-lib/blob/master/docs/RELEASE_CHECKLIST.md) |
 

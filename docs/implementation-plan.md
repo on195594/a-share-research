@@ -13,7 +13,7 @@
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
 | E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 `7d99ac9` 已部署生产，首个批次待冻结；P4 历史回测未开始 |
 
-### 下一批推进顺序
+### R3 推进记录
 
 2026-10-23 用户选择依次推进以下三项，并授权真实研究及网页登录任务：
 
@@ -29,7 +29,7 @@ R3 已完成的验证：
 - 一次 11 家完整评估：非金融 **10/10**，银行按范围拒绝、零模型调用；75 次模型、127 次工具请求，单家 94–256 秒。之后发现自动上下文残留旧方法，修复后只补验茅台通过。
 - 本机隔离实例 390×844 走通登录→公司档案→方法出处→纠错→结果→退出，无整页横向溢出。
 
-用户随后明确授权配对发布；2026-10-23 完成[上线与生产验收](#当前部署)。Skills 的安装身份、配置与回退由其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) 维护。GitHub 本人授权交换未验证。
+用户随后明确授权配对发布；2026-10-23 完成上线与生产验收（记录见 `git show 7076091:docs/implementation-plan.md`）。Skills 的安装身份、配置与回退由其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) 维护。GitHub 本人授权交换未验证。
 
 ## 当前部署
 
@@ -70,6 +70,8 @@ docker compose up -d --no-build --no-deps web
 - 名称不含银行/证券/保险等关键词的金融公司（如 601318 中国平安）由 worker 按 TuShare 公司类型在数秒内拒绝，无模型调用，但会留下一条失败任务。
 - GitHub 本人 OAuth 授权交换未在新部署上验证；浏览器验收使用 `login_token` 短期会话。
 - 未独立审计全部披露；投资效果未验证。
+- 候选初筛约 15 分钟在 worker 内同步运行，期间单家研究排队；批次的 20 家深挖排在所有者提交之后。年报缺“管理层讨论与分析”一节的公司（如 2026-10 批次的申通快递）研究失败、不可选。
+- 批次处于初筛或跨公司比较时切换 worker 会中断该步，见上方门禁。
 
 ## 质量基线与候选采用
 
