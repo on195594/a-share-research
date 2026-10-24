@@ -11,7 +11,7 @@
 | I2 | 质量基线与模型/Skill 比较 | Research、Skills 各自维护 | Research 修复已部署；Skills `992f5a5` 获批合同下离线复算 8/8、追问组 4/4，已发布并激活 |
 | I3–I6 | 共用研究 API、自主补证与计算、追问与纠错 | Research | `e00f3ce` 已部署生产，评估非金融 10/10，线上纠错通过 |
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
-| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 进行中 |
+| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 已完成（无财务批量权限，改单股接口，见方案第 7 节），P1 待开始 |
 
 ### 下一批推进顺序
 
