@@ -472,7 +472,7 @@ def select(conn, batch: dict) -> dict:
     return {"draft": None, "attempts": attempts, "error": "；".join(problems)}
 
 
-FROZEN_BY = {"owner": "所有者确认", "auto": "到期按模型草案自动冻结，未经人工确认",
+FROZEN_BY = {"owner": "所有者确认", "auto": "草案生成后按模型草案自动冻结，未经人工确认",
              "delegate": "所有者授权 Claude 代为冻结"}
 
 
@@ -647,15 +647,6 @@ def update_marks(pro, batch: dict, day: str) -> dict:
 # ---------- worker ----------
 
 RETRY_MINUTES = 30
-AUTO_FREEZE_HOUR = 9
-
-
-def auto_freeze_at(pro, proposed: datetime) -> str:
-    """09:00 on the first trading day after the draft's date; unfrozen drafts freeze then."""
-    day = proposed.date()
-    following = [d for d in _trade_days(pro, _compact(day + timedelta(days=1)), _compact(day + timedelta(days=30)))]
-    first = datetime.strptime(following[0], "%Y%m%d").replace(hour=AUTO_FREEZE_HOUR, tzinfo=SHANGHAI)
-    return first.isoformat(timespec="seconds")
 
 
 def _waiting(batch: dict, now: datetime) -> bool:
@@ -699,14 +690,8 @@ def tick(conn) -> bool:
                     moves = {r["code"]: {"return_60d": None, "drawdown": False} for r in batch["q20"]}
                 _save(conn, batch["id"], q20=[r | moves[r["code"]] for r in batch["q20"]])
                 return True
-            if batch["status"] == "proposed":
-                deadline = (batch["selection"] or {}).get("auto_freeze_at")
-                picks = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
-                if not deadline or not picks or now < datetime.fromisoformat(deadline) or _waiting(batch, now):
-                    continue
-                freeze(conn, batch["id"], picks, "", by="auto")
-                log.info("batch %s auto-frozen with the model draft", batch["id"])
-                return True
+            if batch["status"] == "proposed":  # only a draft without picks waits for the owner
+                continue
             if batch["status"] == "researching":
                 finished, q20 = research_state(conn, batch["q20"])
                 if not finished or _waiting(batch, now):
@@ -724,11 +709,15 @@ def tick(conn) -> bool:
                     _save(conn, batch["id"], status="researching", error=f"跨公司比较失败，稍后重试：{exc}",
                           selection={"failures": failures}, marks={"attempted": db.now()})
                     return True
-                try:
-                    selection["auto_freeze_at"] = auto_freeze_at(_pro(), now)
-                except Exception:  # without a deadline the draft simply waits for the owner
-                    log.exception("batch %s auto-freeze deadline failed", batch["id"])
                 _save(conn, batch["id"], status="proposed", selection=selection, error=None, marks=None)
+                # The owner chose (2026-10-25) to freeze the model's draft as soon as it exists.
+                picks = [p["code"] for p in (selection.get("draft") or {}).get("picks", [])]
+                if picks:
+                    try:
+                        freeze(conn, batch["id"], picks, "", by="auto")
+                        log.info("batch %s frozen with the model draft", batch["id"])
+                    except service.RequestError:  # the draft stays for the owner to pick from
+                        log.exception("batch %s draft could not be frozen", batch["id"])
                 return True
             stamp = now.strftime("%Y%m%d")
             if now.hour < MARK_HOUR or (batch.get("marks") or {}).get("checked") == stamp or _waiting(batch, now):
