@@ -138,10 +138,10 @@ form.inline { display: inline; margin: 0; }
 .stub { background: var(--surface); margin: 8px -20px 0; padding: 4px 20px 16px; }
 .meta { color: var(--muted); font-size: 14px; }
 .conclusion { font-size: 18px; font-weight: 600; line-height: 1.6; margin: 16px 0; }
-.snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 12px; margin: 16px 0 4px; }
+.snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 12px; margin: 16px 0 4px; }
 .snapshot div { margin: 0; }
 .snapshot dt { color: var(--muted); font-size: 13px; }
-.snapshot dd { margin: 0; font-size: 18px; font-weight: 600; }
+.snapshot dd { margin: 0; font-size: 18px; font-weight: 600; white-space: nowrap; }
 .snapshot small, th small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 2px; }
 .perforation { border: 0; border-top: 2px dashed var(--line); margin: 0 -20px 8px; }
 .items { list-style: none; padding: 0; margin: 0; }

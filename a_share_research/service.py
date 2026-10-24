@@ -66,7 +66,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
 
 
 def ready(status: str, passed: int) -> bool:
-    """A report is final only when its run agrees: reviewed and done, or failed with verified facts."""
+    """A report is final only when its run agrees: reviewed and done, or failed."""
     return (status, passed) in (("done", 1), ("failed", 0))
 
 
@@ -94,7 +94,9 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
             "name": row["name"], "created_at": row["created_at"], "status": row["status"],
             "passed": bool(row["passed"]), "error": row["error"],
             "question": json.loads(row["request"] or "{}").get("question", ""),
-            "report": body if row["passed"] else {"facts": body.get("facts", {}), "problems": body.get("problems", [])},
+            "report": body if row["passed"] else {"facts": body.get("facts", {}),
+                                                   "facts_reviewed": body.get("facts_reviewed"),
+                                                   "problems": body.get("problems", [])},
             "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
             "model_calls": [{key: identity.get(key) for key in
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}

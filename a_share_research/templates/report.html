@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import items, research_form, price_block %}
+{% from "_macros.html" import items, research_form, price_block, snapshot_date_notice %}
 {% block title %}{{ report.name }} · 研究报告{% endblock %}
 {% block main %}
 <article class="report">
@@ -10,13 +10,20 @@
     {% if report.passed %}
       <p class="conclusion">{{ body.summary }}</p>
     {% else %}
-      <p class="notice caution" role="status">独立复核没有通过，不展示结论。下面只列出已通过原文核对、复核也未提出异议的事实。</p>
+      {% if body.facts_reviewed and body.facts and body.facts.values() | select | list %}
+      <p class="notice caution" role="status">独立复核没有通过，不展示结论。仅保留本次原文与数字检查通过、且独立复核未指出问题的条目；不代表报告结论可靠。</p>
+      {% elif body.facts_reviewed %}
+      <p class="notice caution" role="status">独立复核没有通过，不展示结论，也未保留可单独展示的事实条目。以下原始资料仅供核对。</p>
+      {% else %}
+      <p class="notice caution" role="status">研究未通过完整核查，不展示结论。以下资料仅供核对，不应视为已获独立复核认可的事实。</p>
+      {% endif %}
     {% endif %}
     {% if market %}
     <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
       {% for r in market %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}
     </dl>
     <p class="muted small">行情为 {{ body.market_date }} 收盘。</p>
+    {% if report.passed %}{{ snapshot_date_notice(body.market_date, price) }}{% endif %}
     {% endif %}
   </header>
   <hr class="perforation">

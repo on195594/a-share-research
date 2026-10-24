@@ -406,8 +406,16 @@ def review(runner: Runner, material: Material, report: dict) -> list[dict]:
 
 # 资料
 {material.prompt_block()}"""
-    verdict = _parse(runner.ask("review", prompt))
-    if verdict is None or not isinstance(verdict.get("issues"), list):
+    return _review_issues(runner.ask("review", prompt))
+
+
+def _review_issues(text: str) -> list[dict]:
+    verdict = _parse(text)
+    if (verdict is None or not isinstance(verdict.get("issues"), list)
+            or not all(isinstance(issue, dict)
+                       and isinstance(issue.get("where"), str) and issue["where"].strip()
+                       and isinstance(issue.get("problem"), str) and issue["problem"].strip()
+                       for issue in verdict["issues"])):
         return [{"where": "review", "problem": "复核输出无法解析"}]
     return verdict["issues"]
 
@@ -435,17 +443,35 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 
 # ---------- run ----------
 
-def _verified_facts(report: dict | None, problems: list[dict]) -> dict:
-    """Items that passed the mechanical check and were not flagged, for display when review fails."""
-    if not report:
+def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool = False) -> dict:
+    """Retain unflagged claims only after semantic review of this exact report completed."""
+    if not report or not reviewed or any(p["where"] == "review" for p in problems):
         return {}
-    flagged = {location for p in problems for location in
-               re.findall(r"\b(?:risks|business|financial|answer)(?:\[\d+\])?", p["where"])}
-    return {
+    flagged = set()
+    for problem in problems:
+        targets = set()
+        for location in problem["where"].split("/"):
+            location = location.strip()
+            if location == "missing":
+                continue
+            match = re.fullmatch(r"(risks|business|financial|answer)(?:\[(\d+)\])?", location)
+            if not match:
+                return {}
+            section, index = match.groups()
+            items = report.get(section)
+            if not isinstance(items, list) or not items or (index is not None and int(index) >= len(items)):
+                return {}
+            targets.add(section if index is None else f"{section}[{int(index)}]")
+        # A global or unlocatable finding cannot establish which claims were unaffected.
+        if not targets:
+            return {}
+        flagged.update(targets)
+    facts = {
         section: [item for i, item in enumerate(report.get(section) or [])
                   if isinstance(item, dict) and section not in flagged and f"{section}[{i}]" not in flagged]
         for section in (*SECTIONS, "answer")
     }
+    return facts if any(facts.values()) else {}
 
 
 def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
@@ -478,7 +504,7 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
             db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
         else:
             db.update_run(conn, run_id, status="failed", step=None, finished_at=db.now(),
-                          error="复核未通过，只展示已核验的事实")
+                          error="研究核查未通过，不展示结论")
 
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
@@ -518,9 +544,11 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         problems: list[dict] = []
         # At most two repairs, so a repair spent on mechanical slips still leaves one for review findings.
         for attempt in range(3):
+            reviewed = False  # A repair is a new report; prior review cannot endorse it.
             problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON"}]
             if not problems:
                 problems = review(runner, material, report)
+                reviewed = not any(p["where"] == "review" for p in problems)
             if not problems or attempt == 2:
                 break
             report = repair(runner, material, report, problems)
@@ -540,7 +568,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "replay_of": replay_of, "material_sha256": material_sha256,
         }
         if problems:
-            body |= {"facts": _verified_facts(report, problems), "problems": problems}
+            body |= {"facts": _verified_facts(report, problems, reviewed=reviewed),
+                     "facts_reviewed": reviewed, "problems": problems}
             publish(conn, run_id, material, period, False, None, body)
         else:
             body |= {k: report[k] for k in ("verdict", "summary", *SECTIONS)}

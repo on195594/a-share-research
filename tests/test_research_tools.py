@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from jinja2 import Environment, FileSystemLoader
 
 from a_share_research import db, service
-from a_share_research.research import Material, check, financial_table, _research_context, _verified_facts
+from a_share_research.research import Material, check, financial_table, _research_context, _verified_facts, _review_issues
 from a_share_research.research_tools import calculate
 from test_check import MATERIAL, report
 from test_financial_table import DATA
@@ -37,8 +38,29 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     share = calculate(MATERIAL.table, "销售费用占营收比", "ratio_pct",
                       pdf_2025, {"ref": "T.revenue", "period": "2025-12-31"}, material=MATERIAL)
     assert share["values"] == {"result": "4.22"}
+    assert share["calculation"]["normalized_inputs"] == [
+        {"value": "72.5349960068", "unit": "亿元"}, {"value": "1720.54", "unit": "亿元"}]
+    assert share["calculation"]["inputs"][0]["value"] == "7253499600.68"
+    assert share["calculation"]["inputs"][0]["unit"] == "元"
+    env = Environment(loader=FileSystemLoader(Path(__file__).parents[1] / "a_share_research/templates"),
+                      autoescape=True)
+    render = env.from_string('{% from "_macros.html" import cites %}{{ cites(item, rows) }}')
+    def show_calculation(row):
+        return render.render(item={"cites": [{"ref": row["id"]}]},
+                             rows={r["id"]: r for r in MATERIAL.table + [row]})
+    html = show_calculation(share)
+    assert "72.5349960068 / 1720.54 * 100" in html
+    assert "7253499600.68 / 1720.54" not in html
+    assert "7253499600.68 元" in html  # Preserve exact original source input.
+    # Historical rows lack normalized inputs: never invent or show a wrong numeric equation.
+    share["calculation"].pop("normalized_inputs")
+    html = show_calculation(share)
+    assert "故不展示代入算式" in html
+    assert "7253499600.68 / 1720.54" not in html
     yoy = calculate(MATERIAL.table, "销售费用同比", "growth_pct", pdf_2025, pdf_2024, material=MATERIAL)
     assert yoy["values"] == {"result": "28.62"}
+    yoy["calculation"].pop("normalized_inputs")
+    assert "(7253499600.68 / 5639300059.49 - 1) * 100" in show_calculation(yoy)
     with pytest.raises(ValueError, match="原数"):
         calculate(MATERIAL.table, "缩放或符号不符", "ratio_pct",
                   pdf_2025 | {"value": "72.53"}, {"ref": "T.revenue", "period": "2025-12-31"}, material=MATERIAL)
@@ -115,12 +137,13 @@ def test_idempotency_and_feedback_reference_real_report(tmp_path):
 
 def test_failed_report_feedback_uses_the_visible_fact_positions(tmp_path):
     captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
-    facts = _verified_facts(captured["report"], captured["problems"])
+    facts = _verified_facts(captured["report"], captured["problems"], reviewed=True)
     conn = db.connect(tmp_path / "app.db")
     run_id = db.create_run(conn, "603606.SH", status="failed")
     db.save_report(conn, run_id, "603606.SH", "东方电缆", "2026-06-30", False, None,
-                   {"facts": facts, "problems": captured["problems"]})
+                   {"facts": facts, "facts_reviewed": True, "problems": captured["problems"]})
     report_id = conn.execute("SELECT id FROM reports").fetchone()[0]
+    assert service.report_view(conn, report_id)["report"]["facts_reviewed"] is True
     service.submit(conn, "603606", "failed-feedback", parent_report_id=report_id,
                    feedback={"location": "risks[1]", "text": "负债率上升能否全部解释为银行借款增加？"})
     context = _research_context(conn, "603606.SH", report_id)
@@ -128,3 +151,60 @@ def test_failed_report_feedback_uses_the_visible_fact_positions(tmp_path):
     assert context[0]["claims_to_recheck"]["risks"][1] == facts["risks"][1]
     assert context[0]["claims_to_recheck"]["risks"] == captured["report"]["risks"][:2]
     conn.close()
+
+
+def test_failed_review_does_not_endorse_unreviewed_claims():
+    captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
+    issues = _review_issues(json.dumps({"issues": captured["problems"]}, ensure_ascii=False))
+    # A completed semantic review preserves the two unflagged captured claims.
+    assert _verified_facts(captured["report"], issues, reviewed=True)["risks"] == captured["report"]["risks"][:2]
+    # Mechanical failure skips review, and a repaired report cannot inherit prior endorsement.
+    assert _verified_facts(captured["report"], issues) == {}
+    # Truncated or structurally incomplete review output cannot endorse any claims.
+    response = json.dumps({"issues": captured["problems"]}, ensure_ascii=False)
+    for text in (response[:-1], json.dumps({"issues": [{"where": issues[0]["where"]}]})):
+        failures = _review_issues(text)
+        assert failures[0]["where"] == "review"
+        assert _verified_facts(captured["report"], failures, reviewed=True) == {}
+
+
+def test_failed_report_api_preserves_review_status_without_inference(tmp_path):
+    captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
+    conn = db.connect(tmp_path / "app.db")
+    for reviewed in (None, False, True):
+        run_id = db.create_run(conn, "603606.SH", status="failed")
+        body = {"facts": captured["report"], "problems": captured["problems"]}
+        if reviewed is not None:
+            body["facts_reviewed"] = reviewed
+        db.save_report(conn, run_id, "603606.SH", "东方电缆", "2026-06-30", False, None, body)
+        report_id = conn.execute("SELECT max(id) FROM reports").fetchone()[0]
+        assert service.report_view(conn, report_id)["report"]["facts_reviewed"] is reviewed
+    conn.close()
+
+
+@pytest.mark.parametrize("where", [
+    "report", "global", "unknown", "summary", "missing", "risks[3]", "business[0]",
+    "risks[2] / global", "risks[2] / summary", "risks[2] / risks[3]", "risks[-1]", "risks[2] trailing text",
+])
+def test_unlocatable_review_findings_preserve_no_claims(where):
+    # Structural boundary cases, not captured model findings or synthetic financial evidence.
+    captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
+    issue = captured["problems"][0] | {"where": where}
+    assert _verified_facts(captured["report"], [issue], reviewed=True) == {}
+
+
+def test_review_targets_are_canonical_and_empty_facts_are_not_endorsed():
+    captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
+    # Structural variations of the captured location, using its unchanged real claims.
+    issue = captured["problems"][0] | {"where": "risks[02] / missing"}
+    assert _verified_facts(captured["report"], [issue], reviewed=True)["risks"] == captured["report"]["risks"][:2]
+    issue = issue | {"where": "risks"}
+    facts = _verified_facts(captured["report"], [issue], reviewed=True)
+    assert facts == {}
+    # Render the actual failure-notice fragment without inventing report metadata.
+    template = (Path(__file__).parents[1] / "a_share_research/templates/report.html").read_text()
+    notice = template[template.index("{% if report.passed %}"):template.index("{% if market %}")]
+    html = Environment(autoescape=True).from_string(notice).render(
+        report={"passed": False}, body={"facts": facts, "facts_reviewed": True})
+    assert "也未保留可单独展示的事实条目" in html
+    assert "仅保留本次" not in html

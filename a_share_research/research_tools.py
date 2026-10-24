@@ -141,6 +141,7 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
         b = b * CURRENCY_UNITS[u1] / CURRENCY_UNITS[unit]
     else:
         raise ValueError("计算输入单位不同，不能直接比较")
+    normalized_inputs = [{"value": str(value), "unit": unit} for value in (a, b)]
     if operation == "difference":
         result, formula = a - b, "left - right"
         unit = "个百分点" if unit == "%" else unit
@@ -169,6 +170,7 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
     return {"id": f"C.{1 + sum(r['id'].startswith('C.') for r in table)}", "label": label,
             "unit": unit, "values": {"result": str(result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))},
             "calculation": {"operation": operation, "formula": formula, "inputs": inputs,
+                            "normalized_inputs": normalized_inputs,
                             "precision": "基于所列输入精确计算，结果四舍五入到两位"}}
 
 

@@ -1,0 +1,19 @@
+{
+  "source": "Read-only browser observations of https://stock.keyi.win/reports/12 and /reports/13 on 2026-10-24. Only displayed scalar fields are transcribed; these are not full report payloads.",
+  "reports": [
+    {
+      "url": "https://stock.keyi.win/reports/12",
+      "name": "贵州茅台",
+      "market_date": "2026-10-23",
+      "market_cap_yi": "16688.59",
+      "price": {"as_of": "2026-10-20", "expires": "2026-10-27", "expired": false}
+    },
+    {
+      "url": "https://stock.keyi.win/reports/13",
+      "name": "工业富联",
+      "market_date": "2026-10-23",
+      "market_cap_yi": "9693.84",
+      "price": {"as_of": "2026-10-23", "expires": "2026-10-30", "expired": false}
+    }
+  ]
+}
