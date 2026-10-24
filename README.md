@@ -73,7 +73,7 @@ DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.re
 DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research --replay 1 # 按任务 ID 重放
 ```
 
-完整性巡检（只读，不联网，不修复；契约见[方案第 6 节](docs/proposal.md#6-状态与正确性)）。有问题时输出清单并以 1 退出，旧报告没有正文哈希只计数：
+完整性巡检（不写数据库内容，可在线运行，不联网，不修复；契约见[方案第 6 节](docs/proposal.md#6-状态与正确性)）。有问题时输出清单并以 1 退出，旧报告没有正文哈希只计数：
 
 ```bash
 docker exec a-share-research-worker python -m a_share_research.integrity   # 生产（备份前、恢复后）

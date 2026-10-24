@@ -184,19 +184,25 @@ def _pages(pdf: Path, sha: str, mode: str) -> list[str]:
     if cache.exists():
         try:
             saved = json.loads(cache.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError):
             saved = None
         if isinstance(saved, dict) and isinstance(saved.get("pages"), list) and \
-                {key: saved.get(key) for key in identity} == identity:
+                {key: saved.get(key) for key in identity} == identity and \
+                saved.get("pages_sha256") == _pages_hash(saved["pages"]):
             return saved["pages"]
-        log.warning("re-extracting %s: cached text is unreadable or from another PDF/extractor", cache.name)
+        log.warning("re-extracting %s: cached text is damaged or from another PDF/extractor", cache.name)
     text = subprocess.run(
         ["pdftotext", mode, "-enc", "UTF-8", str(pdf), "-"],
         capture_output=True, text=True, check=True, timeout=120,
     ).stdout
     pages = text.split("\f")[:-1] if text.endswith("\f") else text.split("\f")
-    _write_atomic(cache, json.dumps(identity | {"pages": pages}, ensure_ascii=False).encode())
+    saved = identity | {"pages_sha256": _pages_hash(pages), "pages": pages}
+    _write_atomic(cache, json.dumps(saved, ensure_ascii=False).encode())
     return pages
+
+
+def _pages_hash(pages: list) -> str:
+    return hashlib.sha256(json.dumps(pages, ensure_ascii=False).encode()).hexdigest()
 
 
 def _write_atomic(path: Path, payload: bytes) -> None:

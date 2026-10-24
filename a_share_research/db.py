@@ -106,10 +106,11 @@ def transaction(conn: sqlite3.Connection):
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield
+        conn.execute("COMMIT")
     except BaseException:
-        conn.execute("ROLLBACK")
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
         raise
-    conn.execute("COMMIT")
 
 
 def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = None,
@@ -138,6 +139,15 @@ def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, step, prompt, response, json.dumps(usage) if usage else None, seconds, error, now(),
          json.dumps(identity) if identity is not None else None),
+    )
+
+
+def save_material(conn, run_id: int, snapshot: dict) -> None:
+    """Store a material snapshot and keep the run identity's hash of it in step."""
+    conn.execute(
+        "UPDATE runs SET material = ?, identity = json_set(coalesce(identity, '{}'), '$.material_sha256', ?)"
+        " WHERE id = ?",
+        (json.dumps(snapshot, ensure_ascii=False), snapshot["sha256"], run_id),
     )
 
 

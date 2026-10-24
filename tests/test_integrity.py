@@ -11,9 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import db, integrity, sources
-from a_share_research.research import publish
+from a_share_research import db, integrity, price, sources
+from a_share_research.research import _material_hash, publish
 from test_check import MATERIAL
+from test_price import DATA as PRICES
 
 PDF = Path(__file__).parent / "data" / "601138-buyback-announcement.pdf"
 SHA = hashlib.sha256(PDF.read_bytes()).hexdigest()
@@ -26,20 +27,27 @@ def stored(tmp_path: Path) -> Path:
 def test_page_text_cache_is_reused_only_for_the_same_pdf_and_extractor(tmp_path):
     pdf = stored(tmp_path)
     pages = sources._pages(pdf, SHA, "-layout")
-    assert "工业富联" in pages[0]
+    assert "实际回购金额            100,000.52万元" in pages[0]
     cache = pdf.with_suffix(".layout.json")
     identity = {"pdf_sha256": SHA, "extractor": sources.extractor(), "mode": "-layout"}
-    assert json.loads(cache.read_text(encoding="utf-8")) == identity | {"pages": pages}
+    assert json.loads(cache.read_text(encoding="utf-8")) == identity | {
+        "pages_sha256": sources._pages_hash(pages), "pages": pages}
 
-    cache.write_text(json.dumps(identity | {"pages": ["cached"]}), encoding="utf-8")
+    def cached(**fields) -> dict:
+        return identity | {"pages_sha256": sources._pages_hash(["cached"]), "pages": ["cached"]} | fields
+
+    cache.write_text(json.dumps(cached()), encoding="utf-8")
     assert sources._pages(pdf, SHA, "-layout") == ["cached"]
-    for stale in (identity | {"extractor": "pdftotext version 0.1", "pages": ["cached"]},
-                  identity | {"pdf_sha256": "0" * 64, "pages": ["cached"]},
+    one_digit = [pages[0].replace("100,000.52万元", "100,000.53万元"), *pages[1:]]
+    for stale in (cached(extractor="pdftotext version 0.1"), cached(pdf_sha256="0" * 64),
+                  identity | {"pages_sha256": sources._pages_hash(pages), "pages": one_digit},
                   ["cached"]):  # the unbound list format written before this check existed
-        cache.write_text(json.dumps(stale), encoding="utf-8")
+        cache.write_text(json.dumps(stale, ensure_ascii=False), encoding="utf-8")
         assert sources._pages(pdf, SHA, "-layout") == pages
-    cache.write_text('{"pdf_sha256": "', encoding="utf-8")  # truncated by a crash mid-write
-    assert sources._pages(pdf, SHA, "-layout") == pages
+    intact = cache.read_bytes()
+    for damaged in (intact[:len(intact) // 2], intact[:intact.index("回".encode()) + 1]):  # cut mid-write / mid-character
+        cache.write_bytes(damaged)
+        assert sources._pages(pdf, SHA, "-layout") == pages
 
 
 def test_stored_pdf_that_no_longer_matches_is_replaced_not_reused(tmp_path):
@@ -127,3 +135,43 @@ def test_database_without_the_body_hash_column_is_checked_read_only(tmp_path):
     conn.close()
     assert integrity.check(tmp_path / "old.db", tmp_path / "none") == (
         [], {"runs_with_material": 0, "reports": 1, "reports_without_hash": 1, "pdfs": 0})
+
+
+def test_price_reference_and_run_status_commit_together(tmp_path):
+    conn = db.connect(tmp_path / "app.db")
+    run_id = db.create_run(conn, "600900.SH", kind="price", name="长江电力", status="running")
+    body = price.compute(PRICES["stock"], PRICES["benchmark"]) | {"as_of": "2026-10-20", "expires": "2026-10-27"}
+    conn.execute("CREATE TRIGGER fail_finish BEFORE UPDATE OF status ON runs"
+                 " BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="injected failure"):
+        price.publish(conn, run_id, "600900.SH", "长江电力", body)
+    assert conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0] == 0
+    conn.execute("DROP TRIGGER fail_finish")
+    price.publish(conn, run_id, "600900.SH", "长江电力", body)
+    assert conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()[0] == "done"
+
+
+def test_exploration_progress_keeps_the_identity_hash_in_step(tmp_path):
+    # A worker killed mid-exploration leaves the last progress snapshot; that is not corruption.
+    conn, run_id = research_db(tmp_path)
+    progressed = MATERIAL.snapshot()
+    progressed["data"]["market_date"] = "2026-10-21"
+    progressed["sha256"] = _material_hash(progressed["data"])
+    db.save_material(conn, run_id, progressed)
+    conn.close()
+    assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == []
+
+
+def test_wrongly_typed_json_is_listed_and_the_check_carries_on(tmp_path):
+    conn, run_id = research_db(tmp_path)
+    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code})
+    second = db.create_run(conn, MATERIAL.code, status="running")
+    publish(conn, second, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code})
+    conn.execute("UPDATE reports SET body = 'null' WHERE id = 1")
+    conn.execute("UPDATE runs SET identity = '[]' WHERE id = ?", (run_id,))
+    conn.close()
+    stored(tmp_path / "pdf")
+    problems, counts = integrity.check(tmp_path / "app.db", tmp_path / "pdf")
+    assert problems == [f"任务 {run_id}：运行身份无法解析", "报告 1：正文与写入时的哈希不符",
+                        "报告 1：正文不是 JSON 对象"]
+    assert counts["reports"] == 2 and counts["pdfs"] == 1

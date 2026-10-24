@@ -342,7 +342,7 @@ def explore(runner, material, *, budget_seconds: float = 900):
             messages.append({"role": "toolResult", "toolCallId": call["id"], "toolName": call["name"],
                              "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
                              "isError": failed, "timestamp": int(time.time() * 1000)})
-        db.update_run(runner.conn, runner.run_id, material=json.dumps(material.snapshot(), ensure_ascii=False))
+        db.save_material(runner.conn, runner.run_id, material.snapshot())
         stale = 0 if any_new else stale + 1
     else:
         material.extra["gaps"].append("探索达到十二轮上限，未完成的取证仍未知。")
