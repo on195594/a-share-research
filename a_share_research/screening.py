@@ -472,8 +472,12 @@ def select(conn, batch: dict) -> dict:
     return {"draft": None, "attempts": attempts, "error": "；".join(problems)}
 
 
-def freeze(conn, batch_id: int, codes: list[str], note: str) -> None:
-    """Owner's final picks; validated against the batch and frozen once."""
+FROZEN_BY = {"owner": "所有者确认", "auto": "到期按模型草案自动冻结，未经人工确认",
+             "delegate": "所有者授权 Claude 代为冻结"}
+
+
+def freeze(conn, batch_id: int, codes: list[str], note: str, by: str = "owner") -> None:
+    """Final picks; validated against the batch and frozen once. `by` is a FROZEN_BY key."""
     row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
     if row is None:
         raise service.RequestError("批次不存在", 404)
@@ -493,7 +497,8 @@ def freeze(conn, batch_id: int, codes: list[str], note: str) -> None:
     if len(note) > 2000:
         raise service.RequestError("说明不超过 2000 字")
     draft = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
-    l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft}
+    l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
+          "frozen_by": by}
     cur = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
                        " WHERE id = ? AND status = 'proposed'",
                        (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id))
@@ -642,6 +647,15 @@ def update_marks(pro, batch: dict, day: str) -> dict:
 # ---------- worker ----------
 
 RETRY_MINUTES = 30
+AUTO_FREEZE_HOUR = 9
+
+
+def auto_freeze_at(pro, proposed: datetime) -> str:
+    """09:00 on the first trading day after the draft's date; unfrozen drafts freeze then."""
+    day = proposed.date()
+    following = [d for d in _trade_days(pro, _compact(day + timedelta(days=1)), _compact(day + timedelta(days=30)))]
+    first = datetime.strptime(following[0], "%Y%m%d").replace(hour=AUTO_FREEZE_HOUR, tzinfo=SHANGHAI)
+    return first.isoformat(timespec="seconds")
 
 
 def _waiting(batch: dict, now: datetime) -> bool:
@@ -686,7 +700,13 @@ def tick(conn) -> bool:
                 _save(conn, batch["id"], q20=[r | moves[r["code"]] for r in batch["q20"]])
                 return True
             if batch["status"] == "proposed":
-                continue
+                deadline = (batch["selection"] or {}).get("auto_freeze_at")
+                picks = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
+                if not deadline or not picks or now < datetime.fromisoformat(deadline) or _waiting(batch, now):
+                    continue
+                freeze(conn, batch["id"], picks, "", by="auto")
+                log.info("batch %s auto-frozen with the model draft", batch["id"])
+                return True
             if batch["status"] == "researching":
                 finished, q20 = research_state(conn, batch["q20"])
                 if not finished or _waiting(batch, now):
@@ -704,6 +724,10 @@ def tick(conn) -> bool:
                     _save(conn, batch["id"], status="researching", error=f"跨公司比较失败，稍后重试：{exc}",
                           selection={"failures": failures}, marks={"attempted": db.now()})
                     return True
+                try:
+                    selection["auto_freeze_at"] = auto_freeze_at(_pro(), now)
+                except Exception:  # without a deadline the draft simply waits for the owner
+                    log.exception("batch %s auto-freeze deadline failed", batch["id"])
                 _save(conn, batch["id"], status="proposed", selection=selection, error=None, marks=None)
                 return True
             stamp = now.strftime("%Y%m%d")

@@ -567,7 +567,8 @@ def batch_page(request: Request, batch_id: int):
     draft = ((batch["selection"] or {}).get("draft") or {})
     return render(request, "batch.html", session, batch=batch, draft=draft,
                   draft_codes=[p["code"] for p in draft.get("picks", [])],
-                  results=screening.returns(batch), names={r["code"]: r["name"] for r in batch["q20"] or []})
+                  results=screening.returns(batch), names={r["code"]: r["name"] for r in batch["q20"] or []},
+                  frozen_by=screening.FROZEN_BY)
 
 
 @app.post("/batches/{batch_id}/freeze")

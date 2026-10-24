@@ -98,3 +98,19 @@ def test_selection_output_must_be_renderable():
     same = [c for c in candidates if c["industry"] == candidates[0]["industry"]][:3]
     three = [pick | {"code": c["code"]} for c in same]
     assert any("超过" in p for p in screening.selection_problems({"picks": three}, candidates, screening.RULE))
+
+
+def test_freeze_records_who_froze_and_validates(tmp_path):
+    from a_share_research import db, service
+    conn = db.connect(tmp_path / "app.db")
+    rows = [r | {"verdict": "需要谨慎"} for r in ROWS["rows"][:6]]
+    draft = {"picks": [{"code": rows[0]["code"]}]}
+    conn.execute("INSERT INTO batches (status, created_at, rule, q20, q5, selection) VALUES ('proposed', ?, ?, ?, ?, ?)",
+                 (db.now(), json.dumps(screening.RULE), json.dumps(rows), "[]", json.dumps({"draft": draft})))
+    with pytest.raises(service.RequestError):
+        screening.freeze(conn, 1, ["000000.SZ"], "", by="auto")
+    screening.freeze(conn, 1, [rows[0]["code"]], "", by="auto")
+    l5 = json.loads(conn.execute("SELECT l5 FROM batches").fetchone()["l5"])
+    assert l5["frozen_by"] == "auto" and l5["changed_from_draft"] is False
+    with pytest.raises(service.RequestError):
+        screening.freeze(conn, 1, [rows[0]["code"]], "")
