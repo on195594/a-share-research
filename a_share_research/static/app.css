@@ -192,6 +192,7 @@ th small { display: block; margin-left: 0; }
 .factors div { margin: 0; }
 .factors dt { color: var(--muted); font-size: 12px; }
 .factors dd { margin: 0; font-weight: 600; }
+.factors dd.pct { color: var(--muted); font-size: 12px; font-weight: 400; }
 .funnel { list-style: none; padding: 0; margin: 0 0 8px; }
 .funnel li { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .funnel li:last-child { border-bottom: 1px solid var(--line); font-weight: 600; }

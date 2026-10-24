@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -525,6 +526,9 @@ def start_price(request: Request, code: str = Form(""), request_id: str = Form("
 
 # ---------- candidate batches ----------
 
+# The shared connection is not safe for concurrent statements from the request threadpool.
+batch_writes = threading.Lock()
+
 @app.get("/batches")
 def batches_page(request: Request):
     if not (session := current_session(request)):
@@ -543,7 +547,8 @@ def start_batch(request: Request, request_id: str = Form(""), csrf: str = Form("
     if not 1 <= len(request_id) <= 128:
         return message(request, session, "无法开始初筛", "请求编号无效，请返回重试。", 422)
     try:
-        batch_id = screening.create(conn, request_id)
+        with batch_writes:
+            batch_id = screening.create(conn, request_id)
     except service.RequestError as exc:
         return message(request, session, "无法开始初筛", str(exc), exc.status)
     return RedirectResponse(f"/batches/{batch_id}", status_code=303)
@@ -573,7 +578,8 @@ async def freeze_batch(request: Request, batch_id: int):
     if not csrf_ok(session, str(form.get("csrf", ""))):
         return message(request, session, "页面已过期", "请返回批次页面重新提交。", 403)
     try:
-        screening.freeze(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")))
+        with batch_writes:
+            screening.freeze(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")))
     except service.RequestError as exc:
         return message(request, session, "无法冻结", str(exc), exc.status)
     return RedirectResponse(f"/batches/{batch_id}", status_code=303)

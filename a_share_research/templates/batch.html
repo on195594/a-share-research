@@ -108,11 +108,12 @@
       </div>
       <p class="muted small">{{ r.industry }}{% if r.small_group %} · <span class="flag">行业样本不足 {{ r.group_size }} 家</span>{% endif %} · 总分 {{ "%.2f" | format(r.score) }}</p>
       <dl class="factors">
-        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd></div>
-        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd></div>
-        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd></div>
-        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd></div>
+        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.roe_pct) }}</dd></div>
+        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.cash_pct) }}</dd></div>
+        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.growth_pct) }}</dd></div>
+        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.pe_pct) }}</dd></div>
       </dl>
+      {% if r.return_60d is defined %}<p class="small">近 60 个交易日 {{ b.pct(r.return_60d) }}{% if r.drawdown %} · <span class="flag">跌幅超过 30%，冻结前核对原因</span>{% endif %}</p>{% endif %}
       <p class="small">
         {% if r.research_status in ("queued", "running") %}<span class="muted">研究{{ "排队中" if r.research_status == "queued" else "进行中" }}</span>
         {% elif r.report_id and r.verdict %}<a href="/reports/{{ r.report_id }}">{{ r.verdict }}</a>{% if r.reused %} <span class="muted">· 沿用近期报告</span>{% endif %}
@@ -146,6 +147,14 @@
   {% for key, label in labels %}<li><span>{{ label }}</span><span class="num">{{ f[key] }}</span></li>{% endfor %}
   </ul>
   <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名（缺口不代表质量差）。</p>
+  {% if batch.universe.markets %}<p class="muted small">粗筛后板块覆盖：{% for m, n in batch.universe.markets.items() %}{{ m }} {{ n }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+  {% set gaps = batch.universe.rows | selectattr("status", "equalto", "gap") | list %}
+  {% if gaps %}
+  <details>
+    <summary>数据缺口未排名的 {{ gaps | length }} 家</summary>
+    <ul class="items small">{% for g in gaps %}<li><p>{{ g.name }} <span class="code">{{ g.code }}</span>：{{ g.reason }}</p></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
 </section>
 {% endif %}
 <p><a href="/batches">全部批次</a></p>
