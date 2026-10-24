@@ -7,6 +7,7 @@
 - 产品方向与现有流程：[重构方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
 - 三项目职责与协作：[项目契约](docs/project-contract.md)。
 - AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
+- 候选发现与研究实验（规划中）：[方案](docs/screening-experiment.md)。
 - 当前批次与验收：[推进顺序](docs/implementation-plan.md#下一批推进顺序)；生产版本与回退：[当前部署](docs/implementation-plan.md#当前部署)。
 
 ## 运行
