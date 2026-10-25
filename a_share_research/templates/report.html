@@ -5,7 +5,7 @@
 <article class="report">
   <header class="stub">
     <h1>{{ report.name }}</h1>
-    <p class="meta"><span class="code">{{ report.code }}</span> · 基础资料 {{ body.document.title }}{% if body.sources %}，另补读 {{ body.sources|length }} 份披露{% endif %} · 研究于 {{ report.created_at[:16].replace("T", " ") }}</p>
+    <p class="meta"><span class="code">{{ report.code }}</span> · 基础资料 {{ body.document.title }}{% if body.sources %}，另补读 {{ body.sources|length }} 份披露{% endif %} · <span class="date">研究于 {{ report.created_at[:16].replace("T", " ") }}</span></p>
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
       <p class="conclusion">{{ body.summary }}</p>
@@ -27,11 +27,22 @@
     {% endif %}
   </header>
   <hr class="perforation">
+  <nav aria-label="报告章节">
+    <ul class="toc">
+      {% if body.question %}<li><a href="#answer">{{ '纠错核查' if feedback else '你的问题' }}</a></li>{% endif %}
+      <li><a href="#risks">风险与反证</a></li>
+      <li><a href="#business">业务</a></li>
+      <li><a href="#financial">财务</a></li>
+      <li><a href="#data">财务数据</a></li>
+      {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
+      <li><a href="#more">继续研究</a></li>
+    </ul>
+  </nav>
 
   {% set content = body if report.passed else body.facts %}
   {% set documents = dict(body.sources or {}, D0=dict(document=body.document)) %}
   {% if body.question %}
-  <section>
+  <section id="answer">
     <h2>{{ '纠错核查' if feedback else '你的问题' }}</h2>
     {% if feedback %}<p>核查原报告的{{ feedback_label }}</p>{% endif %}
     <p>{{ feedback.text if feedback else body.question }}</p>
@@ -39,20 +50,20 @@
     {{ items(content.answer or [], rows, "可核查的回答", documents) }}
   </section>
   {% endif %}
-  <section class="risks">
+  <section id="risks" class="risks">
     <h2>主要风险与反证</h2>
     {{ items(content.risks or [], rows, "可列出的风险", documents) }}
   </section>
-  <section>
+  <section id="business">
     <h2>业务</h2>
     {{ items(content.business or [], rows, "可列出的业务事实", documents) }}
   </section>
-  <section>
+  <section id="financial">
     <h2>财务</h2>
     {{ items(content.financial or [], rows, "可列出的财务事实", documents) }}
   </section>
 
-  <section>
+  <section id="data">
     <h2>财务数据</h2>
     {% set periods = (fin[0]["values"].keys() | list)[-4:] if fin else [] %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="财务数据表">
@@ -99,7 +110,7 @@
     {% if body.gaps %}<p>仍有缺口：</p><ul>{% for gap in body.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% endif %}
   </details>
 
-  <section>
+  <section id="more">
     <h2>继续研究</h2>
     <form method="post" action="/research" class="search">
       <input type="hidden" name="csrf" value="{{ csrf }}">

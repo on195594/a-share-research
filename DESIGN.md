@@ -8,9 +8,12 @@ colors:
   ink: "#203536"
   muted: "#486168"
   accent: "#006975"
+  accent-strong: "#00565F"
   line: "#BCCDCF"
   caution: "#805500"
   caution-bg: "#FFF1D6"
+  caution-ink: "#5C3D00"
+  placeholder: "#5E7479"
 typography:
   headline:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
@@ -59,7 +62,7 @@ components:
 
 ## Colors
 
-accent 用于主要动作与链接；background 是冷矿蓝全页底；surface 是报告头与出处的局部浅底；band 标明来源与日期。ink 承担正文与标题，muted 只用于代码、日期等辅助信息；line 分隔条目。caution 配 caution-bg 表达反证、失败与缺口，始终附文字标签。禁止用红绿暗示涨跌或买卖；结论不用颜色区分好坏。文字对实际背景至少 4.5:1。
+accent 用于主要动作与链接，accent-strong 是其悬停态；background 是冷矿蓝全页底；surface 是报告头与出处的局部浅底；band 标明来源与日期。ink 承担正文与标题，muted 只用于代码、日期等辅助信息；line 分隔条目。caution 配 caution-bg 表达反证、失败与缺口，始终附文字标签；琥珀横带内文字用 caution-ink。placeholder 只用于输入框占位文字。禁止用红绿暗示涨跌或买卖；结论不用颜色区分好坏。文字对实际背景至少 4.5:1。
 
 ## Typography
 
@@ -75,8 +78,8 @@ accent 用于主要动作与链接；background 是冷矿蓝全页底；surface 
 
 ## Components
 
-`.notice`（色域横带，`.caution` 为琥珀）、`.btn`（主要动作，至少 48px 高）、`.link`（文字动作）、条目列表、`<details>`（出处）。候选初筛用编号列表 `.candidates`：公司名与代码同行，`.badge` 文字徽标（accent 底为“选定”，band 底为“机械前五”），下方四格 `.factors` 因子；勾选框 24px、标签至少 44px 高；`.funnel` 为左右对齐的计数行。页脚只有一次免责说明。
+`.notice`（色域横带，`.caution` 为琥珀）、`.btn`（主要动作，至少 48px 高）、`.link`（文字动作）、条目列表、`<details>`（出处；`summary` 前有细线折角，展开时转向下，悬停加下划线）。报告头下方 `.toc` 一行章节跳转链接（只列本报告实际有的章节）。日期及其前缀（“研究于”“资料至”“基准日”）用 `.date` 不断行。候选初筛用编号列表 `.candidates`：公司名与代码同行，`.badge` 文字徽标（accent 底为“选定”，band 底为“机械前五”），下方四格 `.factors` 因子；勾选框 24px、标签至少 44px 高；`.funnel` 为左右对齐的计数行。页脚只有一次免责说明。
 
 ## Motion
 
-只有控件反馈；进度页每 4 秒整页刷新，不做动画。
+只有控件反馈（按钮按下下沉 1px、折角 120ms 转向，减少动效偏好下关闭）；进度页每 4 秒整页刷新，不做动画。

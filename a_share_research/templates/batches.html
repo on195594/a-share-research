@@ -21,7 +21,7 @@
     <li>
       <a class="company" href="/batches/{{ batch.id }}"><strong>{{ b.month(batch) }}</strong></a>
       <p>{% if batch.status == "failed" %}<span class="flag">没有完成</span>{% else %}{{ b.batch_status[batch.status] }}{% endif %}
-        <span class="muted">{% if batch.as_of %}· 基准日 {{ b.day(batch.as_of) }}{% endif %}{% if batch.l5 %} · 选定 {{ batch.l5.codes | length }} 家{% endif %}</span></p>
+        <span class="muted">{% if batch.as_of %}· <span class="date">基准日 {{ b.day(batch.as_of) }}</span>{% endif %}{% if batch.l5 %} · 选定 {{ batch.l5.codes | length }} 家{% endif %}</span></p>
     </li>
   {% endfor %}
   </ul>

@@ -64,7 +64,7 @@
     <li>
       <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
       <p>{% if c.passed %}{{ c.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
-        <span class="muted">· 资料至 {{ c.period }} · 研究于 {{ c.created_at[:10] }}</span></p>
+        <span class="muted">· <span class="date">资料至 {{ c.period }}</span> · <span class="date">研究于 {{ c.created_at[:10] }}</span></span></p>
     </li>
   {% endfor %}
   </ul>

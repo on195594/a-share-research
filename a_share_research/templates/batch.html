@@ -8,7 +8,7 @@
 {% set l5 = batch.l5.codes if batch.l5 else [] %}
 <section>
   <h1>{{ b.month(batch) }}</h1>
-  <p class="meta">{% if batch.as_of %}基准日 {{ b.day(batch.as_of) }} · {% endif %}规则 {{ batch.rule.version }}{% if batch.frozen_at %} · 冻结于 {{ batch.frozen_at[:16].replace("T", " ") }}{% endif %}</p>
+  <p class="meta">{% if batch.as_of %}<span class="date">基准日 {{ b.day(batch.as_of) }}</span> · {% endif %}规则 {{ batch.rule.version }}{% if batch.frozen_at %} · <span class="date">冻结于 {{ batch.frozen_at[:16].replace("T", " ") }}</span>{% endif %}</p>
 
   {% if batch.status == "failed" %}
     <p class="notice caution" role="alert">没有完成：{{ batch.error }}</p>
@@ -31,7 +31,7 @@
 {% if results %}
 <section>
   <h2>模拟收益</h2>
-  <p class="muted small">{{ b.day(batch.entry.date) }} 开盘入场 → {{ b.day(results.date) }} 收盘；等权、复权、扣 {{ "%.1f" | format(batch.rule.cost * 1000) }}‰ 往返费用，买不进的席位按现金计。</p>
+  <p class="muted small"><span class="date">{{ b.day(batch.entry.date) }}</span> 开盘入场 → <span class="date">{{ b.day(results.date) }}</span> 收盘；等权、复权、扣 {{ "%.1f" | format(batch.rule.cost * 1000) }}‰ 往返费用，买不进的席位按现金计。</p>
   <div class="table-wrap" tabindex="0" role="region" aria-label="模拟收益">
   <table>
     <thead><tr><th scope="col">组合</th><th scope="col" class="num">累计</th>
@@ -64,7 +64,7 @@
 <section>
   <h2>跨公司比较</h2>
   {% if draft.picks %}
-  <ul class="items">
+  <ul class="items picks">
   {% for p in draft.picks %}
     <li>
       <p><strong>{{ names.get(p.code, p.code) }}</strong> <span class="code">{{ p.code }}</span></p>
