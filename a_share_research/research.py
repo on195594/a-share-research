@@ -194,6 +194,9 @@ def _page_offset(doc: Document) -> int | None:
                 break
     if not offsets:
         return None
+    counts = sorted((offsets.count(o) for o in set(offsets)), reverse=True)
+    if len(counts) > 1 and counts[0] == counts[1]:
+        return None  # two numbering schemes agree equally: the section could sit in either
     best = max(set(offsets), key=offsets.count)
     return best if offsets.count(best) >= len(doc.pages) / 2 else None
 

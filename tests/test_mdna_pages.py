@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from a_share_research.research import mdna_pages
+from a_share_research.research import _page_offset, mdna_pages
 from a_share_research.sources import Document
 
 
@@ -23,3 +23,10 @@ def test_designed_report_without_text_headings_uses_the_table_of_contents():
 def test_wrapped_cross_reference_is_not_a_section_heading():
     # 恒力石化 2025: page 33 cites 第四节“经营情况讨论与分析”之… from an older report.
     assert _span("600346") == (15, 43)
+
+
+def test_two_equally_common_page_numberings_give_no_offset():
+    # 申通 pages 2–127 (printed = PDF page) followed by 恒力 pages 1–126 (printed = PDF page - 126):
+    # each numbering covers half the document, so the MD&A could sit in either.
+    pages = REPORTS["002468"]["pages"][1:127] + REPORTS["600346"]["pages"][:126]
+    assert _page_offset(Document("", "", "", "", "", "", pages=pages)) is None
