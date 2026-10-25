@@ -158,7 +158,55 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     return table
 
 
-HEADING = re.compile(r"^\s*第[一二三四五六七八九十]+节\s*(\S[^.…]*)$")
+# Titles never quote; a wrapped cross-reference like 第四节“经营情况讨论与分析”之… does.
+HEADING = re.compile(r"^\s*第[一二三四五六七八九十]+节\s*([^\s.…“”\"《][^.…“”\"《]*)$")
+
+
+TOC_SECTION = re.compile(r"^第[一二三四五六七八九十]+节$")
+PAGE_NUMBER = re.compile(r"(?:^|\s)(\d{1,3})(?:\s*/\s*\d{1,3})?$")
+
+
+def _toc_sections(doc: Document) -> list[tuple[str, int]]:
+    """(title, printed page) per 第X节 entry of the table of contents, in order."""
+    for page in doc.pages[:10]:
+        tokens = re.sub(r"[.…·]+", " ", page).split()
+        entries: list[list] = []
+        for token in tokens:
+            if TOC_SECTION.match(token):
+                entries.append(["", None])
+            elif entries and entries[-1][1] is None and token.isdigit() and len(token) <= 3:
+                entries[-1][1] = int(token)
+            elif entries:
+                entries[-1][0] += token
+        if len(entries) >= 5 and all(n is not None for _, n in entries):
+            return [(title, n) for title, n in entries]
+    return []
+
+
+def _page_offset(doc: Document) -> int | None:
+    """PDF page minus printed page number, agreed by most numbered headers or footers."""
+    offsets = []
+    for i, page in enumerate(doc.pages):
+        lines = [line.strip() for line in page.splitlines() if line.strip()]
+        for line in lines[:1] + lines[-1:]:
+            if m := PAGE_NUMBER.search(line):
+                offsets.append(i + 1 - int(m[1]))
+                break
+    if not offsets:
+        return None
+    best = max(set(offsets), key=offsets.count)
+    return best if offsets.count(best) >= len(doc.pages) / 2 else None
+
+
+def _mdna_span_from_toc(doc: Document) -> tuple[int, int] | None:
+    """Section bounds from the table of contents, for designed reports whose body headings are images."""
+    sections = _toc_sections(doc)
+    offset = _page_offset(doc)
+    at = next((i for i, (title, _) in enumerate(sections) if "管理层讨论与分析" in title), None)
+    if at is None or offset is None or at + 1 >= len(sections):
+        return None
+    start, end = sections[at][1] + offset, sections[at + 1][1] + offset
+    return (start, end) if 1 <= start <= end <= len(doc.pages) else None
 
 
 def mdna_pages(doc: Document) -> dict[int, str]:
@@ -166,10 +214,13 @@ def mdna_pages(doc: Document) -> dict[int, str]:
     heads = [(i + 1, m[1]) for i, page in enumerate(doc.pages)
              for line in page.splitlines() if (m := HEADING.match(line))]
     starts = [p for p, title in heads if "管理层讨论与分析" in title]
-    if not starts:
+    if starts:
+        start = max(starts)  # the table of contents repeats headings earlier
+        end = min((p for p, _ in heads if p > start), default=min(start + 40, len(doc.pages)))
+    elif span := _mdna_span_from_toc(doc):
+        start, end = span
+    else:
         raise ResearchError("年报中找不到“管理层讨论与分析”一节")
-    start = max(starts)  # the table of contents repeats headings earlier
-    end = min((p for p, _ in heads if p > start), default=min(start + 40, len(doc.pages)))
     pages = {}
     for n in range(start, end + 1):
         lines = (re.sub(r"[ \t　]+", " ", line).strip() for line in doc.pages[n - 1].splitlines())
