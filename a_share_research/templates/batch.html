@@ -2,7 +2,8 @@
 {% import "_batch.html" as b with context %}
 {% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
 {% set refresh = 15 if busy else none %}
-{% set refresh_key = [batch.status, batch.error, (batch.q20 or []) | map(attribute="research_status") | join(",")] | join("|") %}
+{# updated_at moves with every batch write; research statuses come from the runs table #}
+{% set refresh_key = [batch.status, batch.updated_at, (batch.q20 or []) | map(attribute="research_status") | join(",")] | join("|") %}
 {% block title %}{{ b.month(batch) }} · 候选初筛{% endblock %}
 {% block main %}
 {% set q5 = batch.q5 or [] %}

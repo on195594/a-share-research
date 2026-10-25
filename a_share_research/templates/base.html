@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="same-origin">
-{% if refresh %}<noscript><meta http-equiv="refresh" content="{{ refresh }}"></noscript>{% endif %}
+{% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
 <title>{% block title %}个股研究{% endblock %}</title>
 <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
 <script src="/static/app.js?v={{ asset_version }}" defer></script>
