@@ -84,6 +84,8 @@ section { margin-bottom: 28px; }
   text-decoration-thickness: 1px;
 }
 .link:hover { color: var(--accent-strong); text-decoration-thickness: 2px; }
+/* set by app.js while a submitted form is on its way */
+button[aria-busy="true"] { opacity: 0.6; cursor: progress; transform: none; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 16px; }
 form.inline { display: inline; margin: 0; }
 

@@ -8,7 +8,7 @@
     <input type="hidden" name="request_id" value="{{ request_id }}">
     <label for="q">代码或简称</label>
     <div class="row">
-      <input id="q" name="q" value="{{ q or '' }}" placeholder="600519 或 茅台" autocomplete="off" required>
+      <input id="q" name="q" value="{{ q or '' }}" placeholder="600519 或 茅台" autocomplete="off" enterkeyhint="go" required>
       <button class="btn" type="submit">开始研究</button>
     </div>
     <label for="question">想弄清什么？<span class="muted">（选填）</span></label>

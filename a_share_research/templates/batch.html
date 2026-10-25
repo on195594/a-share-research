@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% import "_batch.html" as b with context %}
 {% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
-{% block head %}{% if busy %}<meta http-equiv="refresh" content="15">{% endif %}{% endblock %}
+{% set refresh = 15 if busy else none %}
+{% set refresh_key = [batch.status, batch.error, (batch.q20 or []) | map(attribute="research_status") | join(",")] | join("|") %}
 {% block title %}{{ b.month(batch) }} · 候选初筛{% endblock %}
 {% block main %}
 {% set q5 = batch.q5 or [] %}

@@ -84,8 +84,9 @@ settings = Settings.from_env()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
-# Busts browser caches of the stylesheet on each deploy that changes it.
-templates.env.globals["css_version"] = hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:12]
+# Busts browser caches of the stylesheet and script on each deploy that changes them.
+ASSET_VERSION = hashlib.sha256(b"".join((HERE / "static" / name).read_bytes() for name in ("app.css", "app.js"))).hexdigest()[:12]
+templates.env.globals["asset_version"] = ASSET_VERSION
 conn = db.connect()
 
 
@@ -101,6 +102,8 @@ async def guard(request: Request, call_next):
     response.headers.update(SECURITY_HEADERS)
     if not request.url.path.startswith("/static/"):
         response.headers["cache-control"] = "no-store, no-transform"
+    elif request.query_params.get("v") == ASSET_VERSION:
+        response.headers["cache-control"] = "public, max-age=31536000, immutable"
     return response
 
 

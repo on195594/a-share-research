@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="same-origin">
-{% block head %}{% endblock %}
+{% if refresh %}<noscript><meta http-equiv="refresh" content="{{ refresh }}"></noscript>{% endif %}
 <title>{% block title %}个股研究{% endblock %}</title>
-<link rel="stylesheet" href="/static/app.css?v={{ css_version }}">
+<link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
+<script src="/static/app.js?v={{ asset_version }}" defer></script>
 </head>
 <body>
 <header class="shell">
@@ -15,7 +16,7 @@
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">退出</button></form>
   {% endif %}
 </header>
-<main>
+<main{% if refresh %} data-refresh="{{ refresh }}" data-key="{{ refresh_key }}"{% endif %}>
 {% block main %}{% endblock %}
 </main>
 <footer class="disclaimer"><p>仅供个人研究参考，不构成投资建议。内容由程序和 AI 依据公开资料整理，可能有误，以原文为准。</p></footer>
