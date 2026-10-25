@@ -161,3 +161,10 @@ def test_restated_statement_is_used_only_after_it_was_announced():
     pick = lambda as_of: screening.annual_rows(screening.announced_by(RESTATED, as_of), consolidated=True)
     assert pick("20260430").loc["20231231", "n_income"] == 248361059.72
     assert pick("20250430").loc["20231231", "n_income"] == 269479234.80
+
+
+def test_windfall_flag_needs_both_a_profit_jump_and_a_low_multiple():
+    # Factor values of the 2026-10 batch (as of 2026-10-23).
+    assert screening.windfall({"growth": 1.5721894490314785, "pe": 8.3101}) == {"min_growth": 0.5, "max_pe": 10}  # 株冶集团
+    assert screening.windfall({"growth": 0.27378284819584753, "pe": 7.9025}) is None  # 卫星化学: low PE, modest growth
+    assert screening.windfall({"growth": 0.7764, "pe": 16.2376}) is None  # 燕京啤酒: jump at a normal multiple

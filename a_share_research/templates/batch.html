@@ -115,6 +115,7 @@
         <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.pe_pct) }}</dd></div>
       </dl>
       {% if r.return_60d is defined %}<p class="small">近 60 个交易日 {{ b.pct(r.return_60d) }}{% if r.drawdown %} · <span class="flag">跌幅超过 30%，冻结前核对原因</span>{% endif %}</p>{% endif %}
+      {% if r.windfall %}<p class="small"><span class="flag">利润跳升且市盈率低</span> <span class="muted">· 三年扣非增速 ≥{{ "%.0f" | format(r.windfall.min_growth * 100) }}%、市盈率 &lt; {{ r.windfall.max_pe }}，核对是否为一次性或周期高点利润</span></p>{% endif %}
       <p class="small">
         {% if r.research_status in ("queued", "running") %}<span class="muted">研究{{ "排队中" if r.research_status == "queued" else "进行中" }}</span>
         {% elif r.report_id and r.verdict %}<a href="/reports/{{ r.report_id }}">{{ r.verdict }}</a>{% if r.reused %} <span class="muted">· 沿用近期报告</span>{% endif %}
