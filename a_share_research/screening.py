@@ -115,19 +115,28 @@ def latest_session(pro) -> str:
     raise ScreenError("近 20 天没有可用的每日指标")
 
 
+def announced_by(frame: pd.DataFrame, as_of: str) -> pd.DataFrame:
+    """Rows public by `as_of`. A restated statement keeps the original ann_date; f_ann_date dates the restatement."""
+    day = frame["ann_date"].astype(str)
+    if "f_ann_date" in frame:
+        day = frame["f_ann_date"].where(frame["f_ann_date"].notna(), frame["ann_date"]).astype(str)
+    return frame[day <= as_of]
+
+
 def annual_rows(frame: pd.DataFrame, *, consolidated: bool) -> pd.DataFrame:
-    """One row per annual period: consolidated statements, the updated version when both exist."""
+    """One row per annual period: consolidated statements, the latest restatement when several exist."""
     frame = frame[frame["end_date"].astype(str).str.endswith("1231")].copy()
     if consolidated and "report_type" in frame:
         frame = frame[frame["report_type"].astype(str) == "1"]
-    if "update_flag" in frame:
-        frame = frame.sort_values("update_flag")
+    order = [c for c in ("f_ann_date", "update_flag") if c in frame]
+    if order:
+        frame = frame.sort_values(order, kind="stable")
     return frame.groupby("end_date").tail(1).set_index("end_date").sort_index()
 
 
 def indicator_check(indicator: pd.DataFrame, as_of: str) -> dict:
     """Eligibility from annual indicators announced by `as_of`: four consecutive years, last three profitable."""
-    ind = annual_rows(indicator[indicator["ann_date"].astype(str) <= as_of], consolidated=False)
+    ind = annual_rows(announced_by(indicator, as_of), consolidated=False)
     years = list(ind.index[-4:])
     if len(years) < 4:
         return {"status": "gap", "reason": f"年度财务指标不足 4 期（{len(years)}）"}
@@ -151,8 +160,8 @@ def factors(indicator: pd.DataFrame, income: pd.DataFrame, cashflow: pd.DataFram
     if out["status"] != "ok":
         return out
     last3 = [f"{y}1231" for y in out["years"][1:]]
-    inc = annual_rows(income[income["ann_date"].astype(str) <= as_of], consolidated=True)
-    cf = annual_rows(cashflow[cashflow["ann_date"].astype(str) <= as_of], consolidated=True)
+    inc = annual_rows(announced_by(income, as_of), consolidated=True)
+    cf = annual_rows(announced_by(cashflow, as_of), consolidated=True)
     ni = [inc["n_income"].get(y) if "n_income" in inc else None for y in last3]
     ocf = [cf["n_cashflow_act"].get(y) if "n_cashflow_act" in cf else None for y in last3]
     gaps = []

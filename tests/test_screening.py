@@ -145,3 +145,19 @@ def test_a_proposed_draft_left_by_a_restart_is_frozen_by_the_worker(tmp_path):
     conn.execute("UPDATE batches SET status = 'proposed', selection = ?", (json.dumps(selection),))
     assert screening.tick(conn) is True
     assert conn.execute("SELECT status FROM batches").fetchone()["status"] == "frozen"
+
+
+# TuShare income for 002102.SZ FY2023, captured 2026-10-25: the restatement keeps the original ann_date,
+# both rows carry update_flag 1, and only f_ann_date tells them apart.
+RESTATED = pd.DataFrame([
+    {"ann_date": "20240419", "f_ann_date": "20260429", "end_date": "20231231", "report_type": "1",
+     "n_income": 248361059.72, "update_flag": "1"},
+    {"ann_date": "20240419", "f_ann_date": "20240419", "end_date": "20231231", "report_type": "1",
+     "n_income": 269479234.80, "update_flag": "1"},
+])
+
+
+def test_restated_statement_is_used_only_after_it_was_announced():
+    pick = lambda as_of: screening.annual_rows(screening.announced_by(RESTATED, as_of), consolidated=True)
+    assert pick("20260430").loc["20231231", "n_income"] == 248361059.72
+    assert pick("20250430").loc["20231231", "n_income"] == 269479234.80
