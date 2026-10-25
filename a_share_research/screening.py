@@ -186,6 +186,53 @@ def factors(indicator: pd.DataFrame, income: pd.DataFrame, cashflow: pd.DataFram
     return out
 
 
+INDICATOR_FIELDS = "ts_code,ann_date,end_date,roe_dt,profit_dedt,update_flag"
+INCOME_FIELDS = "ts_code,ann_date,f_ann_date,end_date,report_type,n_income,update_flag"
+CASHFLOW_FIELDS = "ts_code,ann_date,f_ann_date,end_date,report_type,n_cashflow_act,update_flag"
+
+
+def market_filters(frame: pd.DataFrame, suspended: set[str], as_of: str) -> tuple[pd.DataFrame, dict, list[str]]:
+    """Coarse screen on one session's cross-section; returns survivors, the funnel and codes lacking an industry.
+
+    `frame` needs ts_code, name, industry, industry_sw, list_date, total_mv (万元) and avg_amount (千元).
+    """
+    listed_before = _months_after(as_of, -12 * RULE["min_list_years"])
+    funnel = {"listed": len(frame)}
+    steps = [
+        ("financial", lambda f: ~(f["industry"].isin(FINANCIAL_INDUSTRIES) | f["industry_sw"].isin(FINANCIAL_INDUSTRIES))),
+        ("st", lambda f: ~f["name"].str.contains("ST|退", na=False)),
+        ("suspended", lambda f: ~f["ts_code"].isin(suspended)),
+        ("listed_years", lambda f: f["list_date"].astype(str) <= listed_before),
+        ("market_cap", lambda f: f["total_mv"].fillna(0) >= RULE["min_total_mv_yi"] * 1e4),  # 万元
+        ("liquidity", lambda f: f["avg_amount"] >= RULE["min_avg_amount_yi"] * 1e5),  # 千元
+    ]
+    for name, keep in steps:
+        frame = frame[keep(frame)]
+        funnel[f"after_{name}"] = len(frame)
+    no_industry = frame[frame["industry_sw"].isna()]["ts_code"].tolist()
+    frame = frame[frame["industry_sw"].notna()]
+    funnel["after_industry_mapping"] = len(frame)
+    return frame, funnel, no_industry
+
+
+def evaluate(base: dict, ind: pd.DataFrame, inc: pd.DataFrame, cf: pd.DataFrame, audit, as_of: str) -> dict:
+    """One company's status and factors as of `as_of`; `audit` is called only when the opinion matters."""
+    result = base | factors(ind, inc, cf, as_of)
+    if result["status"] == "excluded":
+        return result
+    audit = audit()
+    audit = audit[(audit["end_date"].astype(str) == f"{result['years'][-1]}1231") & (audit["ann_date"].astype(str) <= as_of)]
+    opinion = str(audit.sort_values("ann_date")["audit_result"].iloc[-1]) if not audit.empty else None
+    result["audit"] = opinion
+    if opinion is None:
+        return result | {"status": "gap", "reason": "; ".join(filter(None, [result.get("reason"), "最新年度审计意见缺失"]))}
+    if opinion != STANDARD_AUDIT:
+        return result | {"status": "excluded", "reason": f"审计意见：{opinion}"}
+    if result["status"] == "ok" and (result["pe"] is None or result["pe"] <= 0):
+        return result | {"status": "gap", "reason": "市盈率TTM非正或缺失，不参与估值排名"}
+    return result
+
+
 def percentiles(values: list[float]) -> list[float]:
     """Average-rank percentile in [0, 1], higher value → higher percentile; one value → 0.5."""
     n = len(values)
@@ -267,23 +314,7 @@ def screen(as_of: str | None = None, workers: int = 4) -> dict:
     frame = basic.merge(valuation, on="ts_code", how="left")
     frame["industry_sw"] = frame["ts_code"].map(sw)
     frame["avg_amount"] = frame["ts_code"].map(avg_amount).fillna(0)
-    listed_before = _months_after(as_of, -12 * RULE["min_list_years"])
-    funnel = {"listed": len(frame)}
-    steps = [
-        ("financial", lambda f: ~(f["industry"].isin(FINANCIAL_INDUSTRIES) | f["industry_sw"].isin(FINANCIAL_INDUSTRIES))),
-        ("st", lambda f: ~f["name"].str.contains("ST|退", na=False)),
-        ("suspended", lambda f: ~f["ts_code"].isin(suspended)),
-        ("listed_years", lambda f: f["list_date"].astype(str) <= listed_before),
-        ("market_cap", lambda f: f["total_mv"].fillna(0) >= RULE["min_total_mv_yi"] * 1e4),  # 万元
-        ("liquidity", lambda f: f["avg_amount"] >= RULE["min_avg_amount_yi"] * 1e5),  # 千元
-    ]
-    for name, keep in steps:
-        frame = frame[keep(frame)]
-        funnel[f"after_{name}"] = len(frame)
-    no_industry = frame[frame["industry_sw"].isna()]["ts_code"].tolist()
-    frame = frame[frame["industry_sw"].notna()]
-    funnel["after_industry_mapping"] = len(frame)
-
+    frame, funnel, no_industry = market_filters(frame, suspended, as_of)
     since = f"{int(as_of[:4]) - 5}0101"
 
     def company(row) -> dict:
@@ -292,31 +323,16 @@ def screen(as_of: str | None = None, workers: int = 4) -> dict:
                 "pe": float(row.pe_ttm) if pd.notna(row.pe_ttm) else None,
                 "total_mv_yi": round(float(row.total_mv) / 1e4, 2), "avg_amount_yi": round(float(row.avg_amount) / 1e5, 2)}
         try:
-            ind = _query(pro, "fina_indicator", ts_code=code, start_date=since, end_date=as_of,
-                         fields="ts_code,ann_date,end_date,roe_dt,profit_dedt,update_flag")
+            ind = _query(pro, "fina_indicator", ts_code=code, start_date=since, end_date=as_of, fields=INDICATOR_FIELDS)
             if ind.empty:
                 return base | {"status": "gap", "reason": "没有财务指标"}
             pre = indicator_check(ind, as_of)
             if pre["status"] != "ok":  # skip the other calls for ineligible companies
                 return base | pre
-            inc = _query(pro, "income", ts_code=code, start_date=since, end_date=as_of,
-                         fields="ts_code,ann_date,f_ann_date,end_date,report_type,n_income,update_flag")
-            cf = _query(pro, "cashflow", ts_code=code, start_date=since, end_date=as_of,
-                        fields="ts_code,ann_date,f_ann_date,end_date,report_type,n_cashflow_act,update_flag")
-            result = base | factors(ind, inc, cf, as_of)
-            if result["status"] == "excluded":
-                return result
-            audit = _query(pro, "fina_audit", ts_code=code, start_date=since, end_date=as_of)
-            audit = audit[audit["end_date"].astype(str) == f"{result['years'][-1]}1231"]
-            opinion = str(audit.sort_values("ann_date")["audit_result"].iloc[-1]) if not audit.empty else None
-            result["audit"] = opinion
-            if opinion is None:
-                return result | {"status": "gap", "reason": "; ".join(filter(None, [result.get("reason"), "最新年度审计意见缺失"]))}
-            if opinion != STANDARD_AUDIT:
-                return result | {"status": "excluded", "reason": f"审计意见：{opinion}"}
-            if result["status"] == "ok" and (result["pe"] is None or result["pe"] <= 0):
-                return result | {"status": "gap", "reason": "市盈率TTM非正或缺失，不参与估值排名"}
-            return result
+            inc = _query(pro, "income", ts_code=code, start_date=since, end_date=as_of, fields=INCOME_FIELDS)
+            cf = _query(pro, "cashflow", ts_code=code, start_date=since, end_date=as_of, fields=CASHFLOW_FIELDS)
+            return evaluate(base, ind, inc, cf, lambda: _query(pro, "fina_audit", ts_code=code,
+                                                               start_date=since, end_date=as_of), as_of)
         except ScreenError as exc:
             return base | {"status": "gap", "reason": f"取数失败：{exc}"}
 

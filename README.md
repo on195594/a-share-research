@@ -95,6 +95,12 @@ DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # �
 uv run --env-file .env python -m a_share_research.screening
 ```
 
+历史回测（只测确定性规则 Q20/Q5，按月末点时还原数据，接口返回缓存在 `--out` 下，结果为每批一个 JSON；方法与结论见[方案第 5 节](docs/screening-experiment.md#5-历史回测)）：
+
+```bash
+uv run --env-file .env python -m a_share_research.backtest --out DIR --start 201601 --end 202510
+```
+
 ## 部署
 
 项目采用 Docker Compose 进行前后端容器化分离部署，全部服务在本项目目录下统一编排：

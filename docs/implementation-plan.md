@@ -11,7 +11,7 @@
 | I2 | 质量基线与模型/Skill 比较 | Research、Skills 各自维护 | Research 修复已部署；Skills `992f5a5` 获批合同下离线复算 8/8、追问组 4/4，已发布并激活 |
 | I3–I6 | 共用研究 API、自主补证与计算、追问与纠错 | Research | `e00f3ce` 已部署生产，评估非金融 10/10，线上纠错通过 |
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
-| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 已部署生产（当前 `c89e6c1`，草案即冻），首个批次已冻结、10-26 入场；P4：点时核查已完成（2026-10-25，见[方案第 5 节](screening-experiment.md#5-历史回测推迟)），规则回测未开始 |
+| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 已部署生产（当前 `c89e6c1`，草案即冻），首个批次已冻结、10-26 入场；P4 已完成（2026-10-25：点时核查与 118 批规则回测，未证明规则有效，主要漏洞为一次性高利润叠加低估值，见[方案第 5 节](screening-experiment.md#5-历史回测)）；为共用抽出的初筛函数不改变线上结果，随下次部署上线 |
 
 ### R3 推进记录
 
