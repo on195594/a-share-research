@@ -2,7 +2,7 @@
 {% from "_macros.html" import research_form %}
 {% set refresh = 4 if run.status in ("queued", "running") else none %}
 {% set refresh_key = [run.status, run.step, ahead] | join("|") %}
-{% block title %}{{ run.name or run.code }} · 研究中{% endblock %}
+{% block title %}{{ run.name or run.code }} · {{ {'queued':'排队中','failed':'未完成'}.get(run.status, '研究中') }}{% endblock %}
 {% block main %}
 <section class="narrow">
   <h1>{{ run.name or run.code }}</h1>

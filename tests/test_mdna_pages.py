@@ -30,3 +30,9 @@ def test_two_equally_common_page_numberings_give_no_offset():
     # each numbering covers half the document, so the MD&A could sit in either.
     pages = REPORTS["002468"]["pages"][1:127] + REPORTS["600346"]["pages"][:126]
     assert _page_offset(Document("", "", "", "", "", "", pages=pages)) is None
+
+
+def test_designed_report_with_number_first_contents_and_footers():
+    # 紫金矿业 2025: contents list "34   管理层讨论与分析" in two columns, left pages print "3   Annual Report 2025",
+    # and the unnumbered financial statements make up most of the PDF.
+    assert _span("601899") == (34, 62)

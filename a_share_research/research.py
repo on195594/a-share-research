@@ -189,6 +189,10 @@ HEADING = re.compile(r"^\s*第[一二三四五六七八九十]+节\s*([^\s.…�
 
 TOC_SECTION = re.compile(r"^第[一二三四五六七八九十]+节$")
 PAGE_NUMBER = re.compile(r"(?:^|\s)(\d{1,3})(?:\s*/\s*\d{1,3})?$")
+# Designed reports print the number first on left-hand pages: "3       Annual Report 2025".
+LEADING_PAGE_NUMBER = re.compile(r"^(\d{1,3})\s{2,}\S")
+# Number-first contents entries, possibly two columns per line: "34   管理层讨论与分析      94   债券相关情况".
+TOC_ENTRY = re.compile(r"(?<!\S)(\d{1,3})\s+([^\d\s]\S*)")
 
 
 def _toc_sections(doc: Document) -> list[tuple[str, int]]:
@@ -205,6 +209,13 @@ def _toc_sections(doc: Document) -> list[tuple[str, int]]:
                 entries[-1][0] += token
         if len(entries) >= 5 and all(n is not None for _, n in entries):
             return [(title, n) for title, n in entries]
+    for page in doc.pages[:10]:
+        if "目录" not in page:
+            continue
+        # Columns interleave in reading order, so order entries by page number instead.
+        entries = sorted({(int(n), title) for n, title in TOC_ENTRY.findall(page)})
+        if len(entries) >= 5:
+            return [(title, n) for n, title in entries]
     return []
 
 
@@ -214,7 +225,7 @@ def _page_offset(doc: Document) -> int | None:
     for i, page in enumerate(doc.pages):
         lines = [line.strip() for line in page.splitlines() if line.strip()]
         for line in lines[:1] + lines[-1:]:
-            if m := PAGE_NUMBER.search(line):
+            if m := PAGE_NUMBER.search(line) or LEADING_PAGE_NUMBER.match(line):
                 offsets.append(i + 1 - int(m[1]))
                 break
     if not offsets:
@@ -223,7 +234,8 @@ def _page_offset(doc: Document) -> int | None:
     if len(counts) > 1 and counts[0] == counts[1]:
         return None  # two numbering schemes agree equally: the section could sit in either
     best = max(set(offsets), key=offsets.count)
-    return best if offsets.count(best) >= len(doc.pages) / 2 else None
+    # Designed reports number only their front part; financial statements restart or go unnumbered.
+    return best if offsets.count(best) >= max(10, len(offsets) * 2 / 3) else None
 
 
 def _mdna_span_from_toc(doc: Document) -> tuple[int, int] | None:
