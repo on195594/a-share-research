@@ -1,0 +1,38 @@
+{
+ "source": "backtest-20261025b cached TuShare fina_indicator; 600694.SH; captured 2026-10-25",
+ "as_of": "20160229",
+ "rows": [
+  {
+   "ts_code": "600694.SH",
+   "ann_date": "20151028",
+   "end_date": "20150930",
+   "roe_dt": 9.8647,
+   "profit_dedt": 614550537.23,
+   "update_flag": "1"
+  },
+  {
+   "ts_code": "600694.SH",
+   "ann_date": "20151028",
+   "end_date": "20150930",
+   "roe_dt": 9.8647,
+   "profit_dedt": 614550537.23,
+   "update_flag": "0"
+  },
+  {
+   "ts_code": "600694.SH",
+   "ann_date": "20141028",
+   "end_date": "20140930",
+   "roe_dt": 17.821,
+   "profit_dedt": 1006768293.79,
+   "update_flag": "1"
+  },
+  {
+   "ts_code": "600694.SH",
+   "ann_date": "20141028",
+   "end_date": "20140930",
+   "roe_dt": 17.821,
+   "profit_dedt": 1006768293.79,
+   "update_flag": "0"
+  }
+ ]
+}

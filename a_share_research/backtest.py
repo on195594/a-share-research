@@ -46,6 +46,8 @@ def cached(pro, api: str, **params) -> pd.DataFrame:
     path = cache_path(api, params)
     if path.exists():
         return pickle.loads(path.read_bytes())
+    if pro is None:
+        raise ScreenError(f"离线缓存缺失：{path.name} ({api} {params})")
     frame = screening._query(pro, api, **params)
     tmp = path.with_suffix(f".{os.getpid()}.{time.monotonic_ns()}.tmp")
     tmp.write_bytes(pickle.dumps(frame))
@@ -77,7 +79,7 @@ def _on(frame: pd.DataFrame, day: str, start: str, end: str) -> pd.DataFrame:
 class Market:
     """Whole-history reference tables fetched once."""
 
-    def __init__(self, pro, data_end: str):
+    def __init__(self, pro, data_end: str, *, days: list[str] | None = None):
         self.pro, self.data_end = pro, data_end
         self.basic = pd.concat([cached(pro, "stock_basic", list_status=s,
                                        fields="ts_code,name,industry,market,list_date,delist_date") for s in ("L", "D")])
@@ -91,7 +93,7 @@ class Market:
                 raise ScreenError(f"{year} 年的简称变更超过单次 {NAME_LIMIT} 行，可能被截断")
             names.append(page)
         self.names = pd.concat(names).drop_duplicates()
-        self.days = screening._trade_days(pro, "20150101", data_end)
+        self.days = days if days is not None else screening._trade_days(pro, "20150101", data_end)
 
     def next_day(self, day: str) -> str | None:
         return next((d for d in self.days if d > day), None)

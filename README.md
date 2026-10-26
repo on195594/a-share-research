@@ -15,7 +15,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测 |
+| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/` | 确定性与状态边界测试、真实采集样本；样本随代码保留 |
 | `docs/` | 方案、项目契约、路线图、实施与部署状态；`PRODUCT.md` / `DESIGN.md` 是界面设计入口 |
@@ -120,6 +120,14 @@ uv run --env-file .env python -m a_share_research.backtest --out DIR --start 201
 ```
 
 续跑时只跳过已包含当前全部到期收益窗口的批次；缺少到期的 6/12 个月收益时复用接口缓存重算，成功后原子替换结果，失败保留原文件。仅处理已有下月交易日行情的完整月份，当前月自动跳过。接口缓存仍按请求参数复用，不主动刷新已有历史响应；需要全新取数时使用新的输出目录。
+
+固定三项离线归因实验（不调用模型、不联网补缓存、不修改线上规则；在 Linux 上使用 `fork`；须保留断言，不使用 `python -O` 或 `PYTHONOPTIMIZE`）：
+
+```bash
+uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --calendar CALENDAR_JSON --out EXPERIMENT_DIR
+```
+
+`BASELINE_DIR` 必须是可信私有目录，包含既有 `cache/` 与 `batches/`；`CALENDAR_JSON` 为已采集的交易日历，包含 `end`（缓存财务查询截止日）和 `days`（自 2015 年起的 SSE 开市日升序列表）。输出目录须与基线分离。程序逐批核对基线名单、分数与收益，缺缓存立即失败；保存来源与代码哈希，同一输入可续跑。`--limit 1` 可先做一个真实批次的检查。结果与限制见[实验方案](docs/screening-experiment.md#5-历史回测)。
 
 ## 部署
 
