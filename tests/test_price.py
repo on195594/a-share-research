@@ -22,8 +22,8 @@ def test_short_history_is_refused():
 
 
 def test_supported_board_codes_and_exchange_boundaries():
-    # Positive codes come from the real F3a price runs; the variants below are invalid inputs.
-    for code in ("600900.SH", "300750.SZ", "301269.SZ", "688981.SH", "688208.SH"):
+    # Positive codes come from real research/price runs; the variants below are invalid inputs.
+    for code in ("600900.SH", "002648.SZ", "300750.SZ", "301269.SZ", "688981.SH", "688208.SH"):
         assert SUPPORTED_CODE.fullmatch(code)
     for code in ("600900.SZ", "300750.SH", "688981.SZ", "688981.BJ", "689009.SH", "200002.SZ"):
         assert not SUPPORTED_CODE.fullmatch(code)

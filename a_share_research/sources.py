@@ -221,13 +221,18 @@ def _frame(result) -> pd.DataFrame:
 
 def financials(code: str, years: int = 4) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
-    provider = TushareFinancialProvider()
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
-    deducted = ts.pro_api(os.environ["TUSHARE_TOKEN"]).fina_indicator(
-        ts_code=to_tushare_stock_code(code), start_date=start.replace("-", ""),
-        fields="ts_code,ann_date,end_date,update_flag,profit_dedt")
-    for column in ("ann_date", "end_date"):
-        deducted[column] = pd.to_datetime(deducted[column], format="%Y%m%d").dt.strftime("%Y-%m-%d")
+    try:
+        deducted = ts.pro_api(os.environ["TUSHARE_TOKEN"]).fina_indicator(
+            ts_code=to_tushare_stock_code(code), start_date=start.replace("-", ""),
+            fields="ts_code,ann_date,end_date,update_flag,profit_dedt")
+        if not isinstance(deducted, pd.DataFrame) or not {"ann_date", "end_date", "profit_dedt"} <= set(deducted.columns):
+            raise ValueError("返回数据缺少必要列")
+        for column in ("ann_date", "end_date"):
+            deducted[column] = pd.to_datetime(deducted[column], format="%Y%m%d").dt.strftime("%Y-%m-%d")
+    except Exception as exc:
+        raise SourceError(f"TuShare fina_indicator: {exc}") from exc
+    provider = TushareFinancialProvider()
     return {
         "income": _frame(provider.fetch_income_history(code, start_date=start)),
         "cashflow": _frame(provider.fetch_cashflow_history(code, start_date=start)),

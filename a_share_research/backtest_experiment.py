@@ -185,6 +185,8 @@ def summarize(batches: list[dict]) -> dict:
 
 
 def main():
+    if not __debug__:
+        raise SystemExit("离线实验依赖断言核验基线，请勿使用 python -O 或 PYTHONOPTIMIZE")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--calendar", required=True, type=Path)
@@ -192,7 +194,8 @@ def main():
     parser.add_argument("--limit", type=int, help="first N source batches for a smoke check")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    if args.out.resolve() == args.source.resolve() or args.source.resolve() in args.out.resolve().parents:
+    source, output_root = args.source.resolve(), args.out.resolve()
+    if source == output_root or source in output_root.parents or output_root in source.parents:
         parser.error("output must be separate from the frozen source")
     bt.CACHE = args.source / "cache"
     calendar = json.loads(args.calendar.read_text())

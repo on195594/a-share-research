@@ -4,11 +4,19 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
+from a_share_research import sources
 from a_share_research.research import Material, financial_table
 from test_check import MATERIAL
 
 DATA = json.loads((Path(__file__).parent / "data" / "600519-financials.json").read_text())
+
+
+def test_missing_financial_token_is_a_source_error(monkeypatch):
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    with pytest.raises(sources.SourceError, match="TuShare fina_indicator.*TUSHARE_TOKEN"):
+        sources.financials("002648.SZ")
 
 
 def test_indicators_survive_the_providers_null_statement_type():
