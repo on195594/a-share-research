@@ -1,6 +1,6 @@
 # A 股研究系统项目契约
 
-更新：2026-10-24。覆盖 `a-share-research`、`a-stock-agent-skills`、`a-stock-lib`。
+更新：2026-10-26。覆盖 `a-share-research`、`a-stock-agent-skills`、`a-stock-lib`。
 
 本文件是三个项目的职责与协作边界单一来源；[路线图](roadmap.md)定义演进条件，[实施计划](implementation-plan.md)定义工作包与验收。现行接口以各 owner 的代码和合同为准，标为“规划”的能力尚未实现。本文不改变投资规则，也不扩展各仓库 `AGENTS.md` 中的授权。
 
@@ -21,7 +21,7 @@ flowchart TD
     H -->|提交问题、读取证据、追问纠错| R
 ```
 
-实线是当前调用关系。两个应用独立运行、存储和发布；Lib 是版本化 Python 包。研究 API 已生产部署，本次 Agent 已通过公网 HTTP 消费 Research；Skills 专用 CLI/Skill 接入已实现、待激活，状态见实施计划。
+实线是当前调用关系。两个应用独立运行、存储和发布；Lib 是版本化 Python 包。研究 API 已生产部署，本次 Agent 已通过公网 HTTP 消费 Research；Skills 专用 CLI/Skill 接入已激活，生产 CLI → 研究 → 网页读取已验证，发布记录见[实施计划](implementation-plan.md#工作包与状态)。
 
 `a-stock-tracker` 已停止，2026-10-24 归档（GitHub 仓库只读、宿主接收器单元已删除、无镜像，不可回滚），本地目录保留为只读历史参考；旧 MCP 证据包计划已取消，不作为依赖、回退来源或待恢复任务。
 

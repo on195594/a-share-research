@@ -1,5 +1,5 @@
 """Monthly candidate batches: deterministic whole-market screen → linked research → one model
-comparison → owner freeze → forward simulation against total-return benchmarks.
+comparison → automatic draft freeze (owner selection if unavailable) → forward simulation against total-return benchmarks.
 
 Design: docs/screening-experiment.md. Runs in the worker only (TuShare and model credentials).
 """

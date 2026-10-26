@@ -102,9 +102,14 @@ class Market:
     def month_ends(self, start: str, end: str) -> list[str]:
         by_month: dict[str, str] = {}
         for d in self.days:
-            if start <= d[:6] <= end:
+            # A later month's bar confirms both month-end and an available entry session.
+            if start <= d[:6] <= end and d[:6] < self.days[-1][:6]:
                 by_month[d[:6]] = d
         return list(by_month.values())
+
+    def horizon_dates(self, day: str) -> dict[str, str]:
+        return {f"{months}m": end for months in HORIZONS
+                if (end := self.first_on_or_after(screening._months_after(day, months))) is not None}
 
     def daily(self, day: str) -> pd.DataFrame:
         return cached(self.pro, "daily", trade_date=day, fields="ts_code,open,close,amount").set_index("ts_code")
@@ -229,6 +234,9 @@ def mark(m: Market, start: str, day: str, codes: list[str]) -> dict:
 
 
 def batch(m: Market, as_of: str, workers: int) -> dict:
+    day = m.next_day(as_of)
+    if day is None:
+        raise ScreenError(f"{as_of} 之后尚无入场交易日行情")
     frame, funnel, no_industry, no_name = universe(m, as_of)
     with ThreadPoolExecutor(workers) as pool:
         companies = list(pool.map(lambda r: company(m, r, as_of), frame.itertuples(index=False)))
@@ -239,23 +247,19 @@ def batch(m: Market, as_of: str, workers: int) -> dict:
     failed = [c["code"] for c in companies if str(c.get("reason", "")).startswith("取数失败")]
     if failed:  # a provider error must not pass for a data gap; the batch is not saved, so a rerun fetches again
         raise ScreenError(f"{len(failed)} 家公司取数失败：{failed[:10]}")
-    day = m.next_day(as_of)
     groups = {"Q20": ([r["code"] for r in q20], RULE["q20"]), "Q5": ([r["code"] for r in q5], RULE["picks"]),
               "U": ([r["code"] for r in ranked], len(ranked))}
     prices = entry(m, day, groups["U"][0])
     bench_entry = screening.benchmark_prices(m.pro, day, day, "open")
     horizons = {}
-    for months in HORIZONS:
-        hday = m.first_on_or_after(screening._months_after(day, months))
-        if hday is None:
-            continue
+    for horizon, hday in m.horizon_dates(day).items():
         marks = mark(m, day, hday, [c for c, p in prices.items() if p["filled"]])
         values = {name: screening.group_return({"prices": prices}, {"prices": marks}, codes, seats, RULE["cost"])
                   for name, (codes, seats) in groups.items()}
         bench = screening.benchmark_prices(m.pro, day, hday, "close")
         values |= {code: bench[code]["value"] / bench_entry[code]["value"] - 1 for code in bench}
-        horizons[f"{months}m"] = {"date": hday, "values": values,
-                                  "stale": sorted(c for c, p in marks.items() if p.get("stale"))}
+        horizons[horizon] = {"date": hday, "values": values,
+                             "stale": sorted(c for c, p in marks.items() if p.get("stale"))}
     log.info("%s: %s ranked, %s, Q5 %s", as_of, len(ranked), counts, [r["name"] for r in q5])
     return {"as_of": as_of, "entry": day, "funnel": funnel | {f"factor_{k}": v for k, v in counts.items()},
             "no_industry": len(no_industry), "no_name": no_name,
@@ -264,6 +268,11 @@ def batch(m: Market, as_of: str, workers: int) -> dict:
             "q5": [r["code"] for r in q5],
             "unfilled": {c: p["reason"] for c, p in prices.items() if not p["filled"] and c in groups["Q20"][0]},
             "horizons": horizons}
+
+
+def batch_is_current(m: Market, result: dict) -> bool:
+    return all(result["horizons"].get(key, {}).get("date") == day
+               for key, day in m.horizon_dates(result["entry"]).items())
 
 
 def main() -> None:
@@ -284,7 +293,7 @@ def main() -> None:
     failed = []
     for as_of in m.month_ends(args.start, args.end):
         path = results / f"{as_of}.json"
-        if path.exists():
+        if path.exists() and batch_is_current(m, json.loads(path.read_text())):
             continue
         started = time.monotonic()
         try:
@@ -293,7 +302,9 @@ def main() -> None:
             log.exception("%s failed; not saved, rerun to retry", as_of)
             failed.append(as_of)
             continue
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        temporary.replace(path)
         log.info("%s done in %.0fs", as_of, time.monotonic() - started)
     if failed:
         raise SystemExit(f"{len(failed)} batches failed: {failed}")

@@ -11,6 +11,19 @@
 - 基本面深度与选股信号升级（规划）：[方案](docs/investment-upgrade.md)。
 - 当前批次与验收：[工作包与状态](docs/implementation-plan.md#工作包与状态)；生产版本与回退：[当前部署](docs/implementation-plan.md#当前部署)。
 
+## 项目目录
+
+| 路径 | 内容 |
+|---|---|
+| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测 |
+| `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
+| `tests/`、`tests/data/` | 确定性与状态边界测试、真实采集样本；样本随代码保留 |
+| `docs/` | 方案、项目契约、路线图、实施与部署状态；`PRODUCT.md` / `DESIGN.md` 是界面设计入口 |
+| `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
+| `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
+
+`.pytest_cache/` 和 `__pycache__/` 可重建；`data/`、`.env*`、真实测试样本和仓库外评估证据不是临时文件。
+
 ## 运行
 
 需要 Python ≥3.13、uv、Node.js、`pdftotext`（poppler-utils）和本机 pi 运行时。按 `.env.example` 建 `.env`（0600，不进 Git），然后 `uv sync`。
@@ -101,6 +114,8 @@ uv run --env-file .env python -m a_share_research.screening
 ```bash
 uv run --env-file .env python -m a_share_research.backtest --out DIR --start 201601 --end 202510
 ```
+
+续跑时只跳过已包含当前全部到期收益窗口的批次；缺少到期的 6/12 个月收益时复用接口缓存重算，成功后原子替换结果，失败保留原文件。仅处理已有下月交易日行情的完整月份，当前月自动跳过。接口缓存仍按请求参数复用，不主动刷新已有历史响应；需要全新取数时使用新的输出目录。
 
 ## 部署
 

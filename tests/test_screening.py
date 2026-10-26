@@ -56,10 +56,9 @@ def test_scores_reproduce_the_live_screen():
 
 
 def test_percentiles_average_ties():
-    pe = [r["pe"] for r in ROWS["rows"][:3]]
-    assert screening.percentiles(pe + pe[:1]) == screening.percentiles(pe + pe[:1])  # deterministic
-    tied = screening.percentiles([pe[0], pe[0]])
-    assert tied == [0.5, 0.5] and screening.percentiles([pe[0]]) == [0.5]
+    pe = ROWS["rows"][0]["pe"]
+    tied = screening.percentiles([pe, pe])
+    assert tied == [0.5, 0.5] and screening.percentiles([pe]) == [0.5]
 
 
 def test_group_return_uses_adjusted_prices_and_cash_seats():

@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-10-25。依据[项目契约](project-contract.md)和[路线图](roadmap.md)。本文只记录当前状态、部署与回退、验证规则；逐轮评估、审查过程和历次部署记录见 `git show d560d36:docs/implementation-plan.md`，原始证据在 `~/.local/share/a-share-research-evaluations/` 与 `~/.local/share/a-stock-agent-evaluations/`（仓库外，0700）。
+更新：2026-10-26。依据[项目契约](project-contract.md)和[路线图](roadmap.md)。本文只记录当前状态、部署与回退、验证规则；逐轮评估、审查过程和历次部署记录见 `git show d560d36:docs/implementation-plan.md`，原始证据在 `~/.local/share/a-share-research-evaluations/` 与 `~/.local/share/a-stock-agent-evaluations/`（仓库外，0700）。
 
 ## 工作包与状态
 
@@ -54,7 +54,9 @@ R3 已完成的验证：
 
 ### 回退
 
-首选回退到 `5a70e6c`（无页码平票拒绝）：标签 `a-share-research-*:5a70e6c`（`1ad87c1c`、`dec19060`）；再前 `c89e6c1`（无利润跳升提示）：标签 `a-share-research-*:c89e6c1`（`ea1541b0`、`82f5f851`）；再前 `4bc5bf4`（无章节定位与更正版取行修复）：标签 `a-share-research-*:4bc5bf4`（`1cd7aa55`、`92a9d84e`）；再前 `ebc9f25`（草案即冻，但保存与冻结分两步）：标签 `a-share-research-*:ebc9f25`（`b4d28519`、`7a28705e`）；再前 `134b250`（草案到期次一交易日 09:00 才自动冻结）：标签 `a-share-research-*:134b250`（`03e0bbc7`、`b75f1012`）；再前 `7d99ac9`（无自动冻结；`frozen_by` 缺省按所有者展示）：标签 `a-share-research-*:7d99ac9`（`92ecbeb6`、`31851b51`）；其次 `7076091`（未含全面审查修复）：`a-share-research-*:7076091`（`b24e50d7`、`2202e709`）；再往前是 `73d5748`：`a-share-research-*:rollback-7076091-20261024T100126Z`（`54735478`、`eabdbb82`），旧代码忽略 `batches` 表。回退无需改数据库：先停止 Web 受理、按上述门禁确认空闲再停止 worker，将对应标签恢复为 `latest` 后按 `--no-build` 方式成对启动；保留新产生的数据，不覆盖生产数据库。
+仅回退本轮网页改动时，将 Web 恢复为 `a-share-research-web:e4fa678`，按 `--no-build --no-deps web` 只重建 Web，worker 保持 `e4fa678`；仍需当次生产授权。
+
+需要连同 worker 回退时，首选回退到 `5a70e6c`（无页码平票拒绝）：标签 `a-share-research-*:5a70e6c`（`1ad87c1c`、`dec19060`）；再前 `c89e6c1`（无利润跳升提示）：标签 `a-share-research-*:c89e6c1`（`ea1541b0`、`82f5f851`）；再前 `4bc5bf4`（无章节定位与更正版取行修复）：标签 `a-share-research-*:4bc5bf4`（`1cd7aa55`、`92a9d84e`）；再前 `ebc9f25`（草案即冻，但保存与冻结分两步）：标签 `a-share-research-*:ebc9f25`（`b4d28519`、`7a28705e`）；再前 `134b250`（草案到期次一交易日 09:00 才自动冻结）：标签 `a-share-research-*:134b250`（`03e0bbc7`、`b75f1012`）；再前 `7d99ac9`（无自动冻结；`frozen_by` 缺省按所有者展示）：标签 `a-share-research-*:7d99ac9`（`92ecbeb6`、`31851b51`）；其次 `7076091`（未含全面审查修复）：`a-share-research-*:7076091`（`b24e50d7`、`2202e709`）；再往前是 `73d5748`：`a-share-research-*:rollback-7076091-20261024T100126Z`（`54735478`、`eabdbb82`），旧代码忽略 `batches` 表。回退无需改数据库：先停止 Web 受理、按上述门禁确认空闲再停止 worker，将对应标签恢复为 `latest` 后按 `--no-build` 方式成对启动；保留新产生的数据，不覆盖生产数据库。
 
 保留旧 Web/worker 镜像 `pre-r3-20261023` 供追溯，但不能直接回退运行：旧网页读取 `methods[i]` 反馈会报错，旧 worker 也不能正确处理方法反馈。可用的应急恢复镜像为 `a-share-research-web:readonly-r3-20261023`（`sha256:5e3ecb1c…`），使用已验证的新报告阅读代码，暂停研究写入。它已读取真实旧报告及方法反馈报告，五个研究/价格写入口均返回 503、任务数不变，退出与令牌撤销仍可用。恢复时停止 worker，暂不提供新研究；这不是恢复旧版完整研究行为。后续操作需当次生产授权：
 
@@ -73,7 +75,7 @@ docker compose up -d --no-build --no-deps web
 - 名称不含银行/证券/保险等关键词的金融公司（如 601318 中国平安）由 worker 按 TuShare 公司类型在数秒内拒绝，无模型调用，但会留下一条失败任务。
 - GitHub 本人 OAuth 授权交换未在新部署上验证；浏览器验收使用 `login_token` 短期会话。
 - 未独立审计全部披露；投资效果未验证。
-- 候选初筛约 15 分钟在 worker 内同步运行，期间单家研究排队；批次的 20 家深挖排在所有者提交之后。年报正文与目录都找不到“管理层讨论与分析”一节的公司研究失败、不可选；正文标题为图片的设计版年报（如申通快递）改按目录页码与页眉页码定位，定位依赖公司目录页码准确。
+- 候选初筛以 4 线程约 20–30 分钟在 worker 内同步运行，期间单家研究排队；批次的 20 家深挖排在所有者提交之后。年报正文与目录都找不到“管理层讨论与分析”一节的公司研究失败、不可选；正文标题为图片的设计版年报（如申通快递）改按目录页码与页眉页码定位，定位依赖公司目录页码准确。
 - 批次处于初筛或跨公司比较时切换 worker 会中断该步，见上方门禁。
 
 ## 质量基线与候选采用

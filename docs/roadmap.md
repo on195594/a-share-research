@@ -1,6 +1,6 @@
 # AI 核心能力演进路线图
 
-更新：2026-10-24。职责见[项目契约](project-contract.md)，交付步骤见[实施计划](implementation-plan.md)。阶段按需求和验收结果推进，不预设模型发布时间或固定工期。
+更新：2026-10-26。职责见[项目契约](project-contract.md)，交付步骤见[实施计划](implementation-plan.md)。阶段按需求和验收结果推进，不预设模型发布时间或固定工期。
 
 ## 1. 目标场景
 
