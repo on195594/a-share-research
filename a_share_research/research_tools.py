@@ -315,7 +315,7 @@ def explore(runner, material, *, budget_seconds: float = 900):
     traces = material.extra.setdefault("tools", [])
     seen: set[str] = set()
     stale = 0
-    for turn in range(12):
+    for _ in range(12):
         if time.monotonic() >= deadline or len(traces) >= 24 or stale >= 2:
             material.extra["gaps"].append("探索已到停止条件，回答仅依据已取得证据；未完成的取证仍未知。")
             break
