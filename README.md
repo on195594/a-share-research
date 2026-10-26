@@ -8,6 +8,7 @@
 - 三项目职责与协作：[项目契约](docs/project-contract.md)。
 - AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
 - 候选发现与研究实验：[方案](docs/screening-experiment.md)，用法见下文[候选初筛](#候选初筛)。
+- 基本面深度与选股信号升级（规划）：[方案](docs/investment-upgrade.md)。
 - 当前批次与验收：[工作包与状态](docs/implementation-plan.md#工作包与状态)；生产版本与回退：[当前部署](docs/implementation-plan.md#当前部署)。
 
 ## 运行

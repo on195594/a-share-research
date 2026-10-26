@@ -12,6 +12,7 @@
 | I3–I6 | 共用研究 API、自主补证与计算、追问与纠错 | Research | `e00f3ce` 已部署生产，评估非金融 10/10，线上纠错通过 |
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
 | E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 已部署生产（当前 `e4fa678`，草案即冻），首个批次已冻结、10-26 入场；P4 已完成（2026-10-25：点时核查与 118 批规则回测，未证明规则有效，主要漏洞为一次性高利润叠加低估值，见[方案第 5 节](screening-experiment.md#5-历史回测)；同日 Codex 审查发现回测简称表漏行等问题，修复后全量重跑，结论不变、Q5 相对 Q20 更弱，审查原文在 `~/.local/share/a-share-research-evaluations/review-4bc5bf4-20261025/`）；为共用抽出的初筛函数不改变线上结果。按回测新增“利润跳升且市盈率低”提示（`screen-v1.1`，只展示并传给跨公司比较，不计分），已于 `5a70e6c` 部署 |
+| F | 基本面深度与选股信号升级（[方案](investment-upgrade.md#5-分阶段与验收)） | Research | 2026-10-26 根据投资视角审查拟定方案（F1 三表勾稽与当期披露、F2 初筛回测归因、F3 估值分位与价格参考）；待开始 |
 
 ### R3 推进记录
 
