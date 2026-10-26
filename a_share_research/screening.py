@@ -576,10 +576,25 @@ def entry_prices(pro, day: str, codes: list[str]) -> dict:
     daily = _query(pro, "daily", trade_date=day, fields="ts_code,open,close").set_index("ts_code")
     factor = _query(pro, "adj_factor", trade_date=day).set_index("ts_code")["adj_factor"]
     limit = _query(pro, "stk_limit", trade_date=day).set_index("ts_code")["up_limit"]
-    suspended = set(_query(pro, "suspend_d", trade_date=day, suspend_type="S")["ts_code"])
+    suspensions = _query(pro, "suspend_d", trade_date=day, suspend_type="S")
+    suspended = set()
+    opening = datetime.strptime("09:30", "%H:%M").time()
+    for row in suspensions[suspensions["ts_code"].isin(codes)].itertuples(index=False):
+        timing = getattr(row, "suspend_timing", None)
+        if timing is None or pd.isna(timing) or timing == "":  # no interval means a full-day suspension
+            suspended.add(row.ts_code)
+            continue
+        try:
+            start, end = [datetime.strptime(t, "%H:%M").time() for t in timing.split("-")]
+            if start >= end:
+                raise ValueError("invalid interval")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ScreenError(f"{day} {row.ts_code} 停牌时段无效：{timing}") from exc
+        if start <= opening < end:
+            suspended.add(row.ts_code)
     prices = {}
     for code in codes:
-        if code in suspended and code not in daily.index:
+        if code in suspended:
             prices[code] = {"filled": False, "reason": "入场日停牌"}
             continue
         if code not in daily.index or not _positive(daily.at[code, "open"]):
@@ -596,23 +611,32 @@ def entry_prices(pro, day: str, codes: list[str]) -> dict:
 PRICE_INDEX = {"H00906.CSI": "000906.SH", "H00300.CSI": "000300.SH"}  # total-return index → its price index
 
 
-def benchmark_prices(pro, start: str, end: str, field: str) -> dict:
+def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) -> dict:
     """Total-return index level: latest close in [start, end], or the entry-day open.
 
     Total-return indexes publish no open; the open is the previous close scaled by the price
     index's open / previous close on that day (dividends do not move the index intraday).
     """
     out = {}
-    for code in RULE["benchmarks"]:
+    for code in benchmarks:
         frame = _query(pro, "index_daily", ts_code=code, start_date=start, end_date=end).sort_values("trade_date")
         if frame.empty or str(frame["trade_date"].iloc[-1]) != end:
             raise ScreenError(f"{code} {end} 的行情未发布")
         last = frame.iloc[-1]
+        if last["ts_code"] != code or not _positive(last["close"]):
+            raise ScreenError(f"{code} {end} 的指数代码或收盘点位无效")
         value = float(last["close"])
         if field == "open":
             price = _query(pro, "index_daily", ts_code=PRICE_INDEX[code], start_date=last["trade_date"],
-                           end_date=last["trade_date"]).iloc[0]
+                           end_date=last["trade_date"])
+            if len(price) != 1 or str(price.iloc[0]["trade_date"]) != end or price.iloc[0]["ts_code"] != PRICE_INDEX[code]:
+                raise ScreenError(f"{PRICE_INDEX[code]} {end} 的行情未发布或日期/代码不符")
+            price = price.iloc[0]
+            if not all(_positive(v) for v in (last["pre_close"], price["open"], price["pre_close"])):
+                raise ScreenError(f"{code} {end} 的开盘计算点位无效")
             value = float(last["pre_close"]) * float(price["open"]) / float(price["pre_close"])
+        if not _positive(value):
+            raise ScreenError(f"{code} {end} 的计算点位无效")
         out[code] = {"date": str(last["trade_date"]), "value": value}
     return out
 
@@ -682,7 +706,8 @@ def mark_on(pro, batch: dict, day: str, previous: dict | None = None) -> dict:
             if adj.empty or not _positive(adj.iloc[0]):
                 raise ScreenError(f"{code} {last['trade_date']} 复权因子缺失")
             prices[code] = {"close": float(last["close"]), "adj": float(adj.iloc[0]), "date": str(last["trade_date"])}
-    return {"date": day, "prices": prices, "benchmarks": benchmark_prices(pro, batch["entry"]["date"], day, "close")}
+    return {"date": day, "prices": prices,
+            "benchmarks": benchmark_prices(pro, batch["entry"]["date"], day, "close", batch["rule"]["benchmarks"])}
 
 
 def update_marks(pro, batch: dict, day: str) -> dict:
@@ -808,7 +833,7 @@ def tick(conn) -> bool:
                     continue
                 codes = list(dict.fromkeys([r["code"] for r in batch["q20"]] + batch["l5"]["codes"]))
                 entry = {"date": days[0], "prices": entry_prices(pro, days[0], codes),
-                         "benchmarks": benchmark_prices(pro, days[0], days[0], "open")}
+                         "benchmarks": benchmark_prices(pro, days[0], days[0], "open", batch["rule"]["benchmarks"])}
                 batch = batch | {"entry": entry}
                 _save(conn, batch["id"], status="tracking", entry=entry, error=None,
                       marks=update_marks(pro, batch, days[-1]) | {"checked": stamp, "attempted": None})

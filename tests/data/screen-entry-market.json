@@ -1,0 +1,16 @@
+{
+  "source": "TuShare, captured read-only 2026-10-26T15:48:13+08:00; only fields used by entry tests retained",
+  "trade_date": "20261023",
+  "stock": "002648.SZ",
+  "daily": [{"ts_code": "002648.SZ", "trade_date": "20261023", "open": 24.42, "close": 24.9}],
+  "adj_factor": [{"ts_code": "002648.SZ", "trade_date": "20261023", "adj_factor": 13.2697}],
+  "stk_limit": [{"ts_code": "002648.SZ", "trade_date": "20261023", "up_limit": 26.99}],
+  "suspend_d": [],
+  "trade_cal": [{"cal_date": "20261023"}],
+  "index_daily": {
+    "H00906.CSI": [{"ts_code": "H00906.CSI", "trade_date": "20261023", "close": 6660.1741, "pre_close": 6533.3801}],
+    "H00300.CSI": [{"ts_code": "H00300.CSI", "trade_date": "20261023", "close": 6179.3848, "pre_close": 6071.7863}],
+    "000906.SH": [{"ts_code": "000906.SH", "trade_date": "20261023", "open": 4429.918, "pre_close": 4482.4376}],
+    "000300.SH": [{"ts_code": "000300.SH", "trade_date": "20261023", "open": 3992.9041, "pre_close": 4036.2966}]
+  }
+}

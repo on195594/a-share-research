@@ -252,13 +252,13 @@ def batch(m: Market, as_of: str, workers: int) -> dict:
     groups = {"Q20": ([r["code"] for r in q20], RULE["q20"]), "Q5": ([r["code"] for r in q5], RULE["picks"]),
               "U": ([r["code"] for r in ranked], len(ranked))}
     prices = entry(m, day, groups["U"][0])
-    bench_entry = screening.benchmark_prices(m.pro, day, day, "open")
+    bench_entry = screening.benchmark_prices(m.pro, day, day, "open", RULE["benchmarks"])
     horizons = {}
     for horizon, hday in m.horizon_dates(day).items():
         marks = mark(m, day, hday, [c for c, p in prices.items() if p["filled"]])
         values = {name: screening.group_return({"prices": prices}, {"prices": marks}, codes, seats, RULE["cost"])
                   for name, (codes, seats) in groups.items()}
-        bench = screening.benchmark_prices(m.pro, day, hday, "close")
+        bench = screening.benchmark_prices(m.pro, day, hday, "close", RULE["benchmarks"])
         values |= {code: bench[code]["value"] / bench_entry[code]["value"] - 1 for code in bench}
         horizons[horizon] = {"date": hday, "values": values,
                              "stale": sorted(c for c, p in marks.items() if p.get("stale"))}
