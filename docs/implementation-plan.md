@@ -11,7 +11,7 @@
 | I2 | 质量基线与模型/Skill 比较 | Research、Skills 各自维护 | Research 修复已部署；Skills `992f5a5` 获批合同下离线复算 8/8、追问组 4/4，已发布并激活 |
 | I3–I6 | 共用研究 API、自主补证与计算、追问与纠错 | Research | `e00f3ce` 已部署生产，评估非金融 10/10，线上纠错通过 |
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
-| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 已部署生产（当前 `588c77e`，草案即冻），首个批次已冻结、10-26 入场；P4 已完成（2026-10-25：点时核查与 118 批规则回测，未证明规则有效，主要漏洞为一次性高利润叠加低估值，见[方案第 5 节](screening-experiment.md#5-历史回测)；同日 Codex 审查发现回测简称表漏行等问题，修复后全量重跑，结论不变、Q5 相对 Q20 更弱，审查原文在 `~/.local/share/a-share-research-evaluations/review-4bc5bf4-20261025/`）；为共用抽出的初筛函数不改变线上结果。按回测新增“利润跳升且市盈率低”提示（`screen-v1.1`，只展示并传给跨公司比较，不计分），已于 `5a70e6c` 部署 |
+| E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | 2026-10-24 方案经 Codex 方法学审查、agy 工程审查后定稿（审查原文在 `~/.local/share/a-share-research-evaluations/screening-review-20261024/`）；P0 完成（无财务批量权限，改单股接口），P1–P3 已部署生产（当前 `4fd01c2`，草案即冻；补入场数据边界校验），首个批次已冻结，10-26 为计划入场日，实际记录须等 17:00 后核对；P4 已完成（2026-10-25：点时核查与 118 批规则回测，未证明规则有效，主要漏洞为一次性高利润叠加低估值，见[方案第 5 节](screening-experiment.md#5-历史回测)；同日 Codex 审查发现回测简称表漏行等问题，修复后全量重跑，结论不变、Q5 相对 Q20 更弱，审查原文在 `~/.local/share/a-share-research-evaluations/review-4bc5bf4-20261025/`）；为共用抽出的初筛函数不改变线上结果。按回测新增“利润跳升且市盈率低”提示（`screen-v1.1`，只展示并传给跨公司比较，不计分），已于 `5a70e6c` 部署 |
 | F | 基本面深度与选股信号升级（[方案](investment-upgrade.md#5-分阶段与验收)） | Research | 2026-10-26 根据投资视角审查拟定方案（F1 三表勾稽与当期披露、F2 初筛回测归因、F3 估值分位与价格参考）；用户已授权：计划收敛 → F1 → F3a 板块覆盖 → F2 三个固定单变量离线实验；每阶段 Claude 独立审查后提交；F3b 后置 |
 
 ### F 推进记录
@@ -52,25 +52,25 @@ R3 已完成的验证：
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 均于 **2026-10-26 13:03 部署 `588c77e`**。已上线 F1 三表与当期披露、比较证据摘要扩展、F3a 创业板/科创板价格参考，以及 AGY 审查后的数据源错误处理。F2 仍为离线实验，线上初筛保持 `screen-v1.1`；F3b 后置。无数据库迁移，Skills 仍为 0.1.23。上一版 Web/worker 均为 `0a15931`；历史记录见 `git show 588c77e:docs/implementation-plan.md`。
+入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-26 16:15 验收部署 `4fd01c2`**（Web 16:12、worker 16:14 启动）。新增基准有限正数与日期/代码校验、开盘停牌现金席位及冻结基准集合读取；未改选股、成本或入场时点。保留此前 F1 三表与当期披露、比较证据摘要扩展、F3a 创业板/科创板价格参考及数据源错误处理。F2 仍为离线实验，线上新批默认 `screen-v1.1`，首个冻结批次仍为 `screen-v1`；F3b 后置。无数据库迁移，Skills 仍为 0.1.23。上一版 Web/worker 均为 `588c77e`；历史记录见 `git show 4fd01c2:docs/implementation-plan.md`。
 
 | 项目 | 证据 |
 |---|---|
-| 镜像 | Web `a-share-research-web:588c77e`（`sha256:1a2650e1…`）；worker `a-share-research-worker:588c77e`（`sha256:4e9ac40a…`）；两者同时标记为 `latest` |
-| 构建与身份 | 远端 main 与构建提交一致；从 `git archive 588c77e` 构建，两份镜像内应用文件及 `pyproject.toml`、`uv.lock`、`README.md` 逐文件 SHA-256 与提交一致；Web 无模型/行情凭据，镜像 `/app` 无 `.env` 文件 |
-| 门禁与备份 | 停止 Web 前后各检查一次，排队/运行研究与活动批次数均为 0；停止 worker 后完整备份生产数据，备份 SQLite `integrity_check` 为 `ok`；旧镜像另保留 `rollback-588c77e` 标签 |
-| 本地验证 | 71 项测试通过；两家真实财务取数及既有年度指标核对通过；真实历史首批实验与原结果一致。此前 F1 两家真实研究/一次20家比较、F3a 真实行情及浏览器验收见上方阶段记录 |
-| 生产验收 | worker ready；生产 worker 取卫星化学、茅台数据，各18项年度指标与捕获一致。公网手机390×844从报告提交宁德时代、道通科技价格任务44/45，worker完成并跳转公司页；首页、批次列表/详情、旧报告均200，手机及桌面无横向溢出，无脚本错误，短期会话已退出撤销 |
-| 数据保持 | 部署前后完整性巡检均零问题（33份报告、118份PDF）；冻结批次状态、规则及Q20/Q5/L5等选择数据与备份一致，仅新增本次验收的价格任务与结果 |
-| 证据目录 | `~/.local/share/a-share-research-evaluations/deploy-588c77e-20261026/`（0700）：完整备份、镜像文件清单、切换脚本、取数验证、浏览器截图与巡检结果 |
+| 镜像 | Web `a-share-research-web:4fd01c2`（`sha256:5d68b3fe…`）；worker `a-share-research-worker:4fd01c2`（`sha256:f1089f26…`）；两者同时标记为 `latest` |
+| 构建与身份 | 推送并回读远端 `4fd01c2` 后从该提交的 `git archive` 构建；两份候选镜像及运行容器内32个应用/配置说明文件逐文件 SHA-256 与构建提交一致；Web 无模型/行情凭据，镜像 `/app` 无 `.env` 文件 |
+| 门禁与备份 | 停止 Web 前后确认排队/运行研究及进行中的初筛/比较均为 0；停止 worker 后完整备份生产数据及发布配置，SQLite 与候选镜像对备份的完整性检查均通过，全部备份文件哈希已核验；旧镜像保留 `rollback-4fd01c2-20261026` 标签。先启动 Web，公网只读验收与数据核对通过后才启动 worker |
+| 本地验证 | 174 项测试通过（原71、新增37、前轮隔离审计66）；独立只读复审无阻断并另跑新增37项通过。真实10-23股票入场及两个基准开盘/收盘结果与旧实现完全一致；未重跑历史全集 |
+| 生产验收 | worker ready，两个容器零重启；使用原生短期会话访问公网首页、批次列表/详情、旧报告、公司页与静态资源共7条路径均200，静态资源哈希一致；会话经退出接口撤销后回读确认。没有提交研究、价格任务或手动调用入场tick |
+| 数据保持 | 前后完整性巡检均零问题（33份报告、118份PDF）；runs/calls/reports/prices/batches/sessions全部行与停机备份一致，冻结名单、规则与历史快照均未变。16:15时首批仍为 `frozen`、`entry=null`、无错误，尚未到17:00执行窗口，不宣称实际入场成功 |
+| 证据目录 | `~/.local/share/a-share-research-evaluations/deploy-4fd01c2-20261026/`（0700）：完整数据与配置备份、哈希清单、构建日志、切换/验收脚本、镜像与运行文件身份、巡检及 `acceptance.json` |
 
-本次部署未重跑模型研究、20家比较或118批历史全集，未验证 GitHub OAuth 授权交换；复用已完成的本地验收，线上验证覆盖发布身份、数据、取数与价格主流程。
+本次部署未重跑模型研究、20家比较或118批历史全集，未验证 GitHub OAuth 授权交换或重新做移动端视觉验收；复用已完成的本地与界面验收，线上覆盖发布身份、数据保持及真实会话读取。历史回测仍有独立停牌入场路径，本轮未改，不声称其停牌语义与前瞻路径完全一致。
 
 发布方式见 [README](../README.md#部署)：从已提交、已推送的代码构建并核对镜像内容，在队列及批次空闲、完成备份后用 `docker compose up -d --no-build --no-deps web worker` 切换。生产切换需当次授权；初筛或跨公司比较期间停止 worker 会中断任务。
 
 ### 回退
 
-本轮首选回退组合：Web `a-share-research-web:0a15931`（`1ad62927…`），worker `a-share-research-worker:0a15931`（`e2980eb9…`）；也可使用两者的 `rollback-588c77e` 标签。按空闲门禁停止服务，将这两份镜像分别恢复为 `latest` 后以 `--no-build --no-deps web worker` 启动；保留新产生的数据，不覆盖生产数据库，仍需当次生产授权。
+本轮首选回退组合：Web `a-share-research-web:588c77e`（`1a2650e1…`），worker `a-share-research-worker:588c77e`（`4e9ac40a…`）；也可使用两者的 `rollback-4fd01c2-20261026` 标签。按空闲门禁停止服务，将这两份镜像分别恢复为 `latest` 后以 `--no-build --no-deps web worker` 启动；保留新产生的数据，不覆盖生产数据库，仍需当次生产授权。回退会撤下本轮入场数据边界校验，不应当作无风险降级。
 
 更早版本回退参考：`5a70e6c`（无页码平票拒绝）：标签 `a-share-research-*:5a70e6c`（`1ad87c1c`、`dec19060`）；再前 `c89e6c1`（无利润跳升提示）：标签 `a-share-research-*:c89e6c1`（`ea1541b0`、`82f5f851`）；再前 `4bc5bf4`（无章节定位与更正版取行修复）：标签 `a-share-research-*:4bc5bf4`（`1cd7aa55`、`92a9d84e`）；再前 `ebc9f25`（草案即冻，但保存与冻结分两步）：标签 `a-share-research-*:ebc9f25`（`b4d28519`、`7a28705e`）；再前 `134b250`（草案到期次一交易日 09:00 才自动冻结）：标签 `a-share-research-*:134b250`（`03e0bbc7`、`b75f1012`）；再前 `7d99ac9`（无自动冻结；`frozen_by` 缺省按所有者展示）：标签 `a-share-research-*:7d99ac9`（`92ecbeb6`、`31851b51`）；其次 `7076091`（未含全面审查修复）：`a-share-research-*:7076091`（`b24e50d7`、`2202e709`）；再往前是 `73d5748`：`a-share-research-*:rollback-7076091-20261024T100126Z`（`54735478`、`eabdbb82`），旧代码忽略 `batches` 表。回退无需改数据库：先停止 Web 受理、按上述门禁确认空闲再停止 worker，将对应标签恢复为 `latest` 后按 `--no-build` 方式成对启动；保留新产生的数据，不覆盖生产数据库。
 
