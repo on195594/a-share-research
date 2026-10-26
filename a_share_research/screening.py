@@ -17,7 +17,7 @@ import tushare as ts
 
 from a_share_research import db, model, service
 from a_share_research.db import SHANGHAI
-from a_share_research.research import _parse
+from a_share_research.research import METRICS, _parse
 
 log = logging.getLogger(__name__)
 
@@ -414,8 +414,27 @@ def _report_digest(conn, report_id: int | None) -> dict | None:
         return None
     body = json.loads(row["body"])
     texts = lambda key: [item["text"] for item in body.get(key, []) if isinstance(item, dict)]
+    table = body.get("table", [])
+    dates = sorted({p for r in table if r["id"].startswith("T.") for p in r["values"]})
+    periods = set()
+    if dates:
+        latest = dates[-1]
+        annual = [p for p in dates if p.endswith("12-31")]
+        periods = {latest, f"{int(latest[:4]) - 1}{latest[4:]}", *annual[-1:]}
+    metrics = []
+    for r in table:
+        if r["id"].startswith("C."):
+            metrics.append(r)  # Keep exact calculation inputs, periods and units.
+        elif r["id"].startswith("T."):
+            values = {p: v for p, v in r["values"].items() if p in periods}
+            if values:
+                metrics.append({k: r[k] for k in ("id", "label", "unit")} | {"values": values})
+    present = {r["id"]: r["values"] for r in metrics}
     return {"verdict": body.get("verdict"), "summary": body.get("summary"), "answer": texts("answer"),
-            "risks": texts("risks"), "financial": texts("financial")}
+            "risks": texts("risks"), "financial": texts("financial"), "business": texts("business"),
+            "gaps": body.get("gaps", []), "metrics": metrics,
+            "missing_metrics": {f"T.{m[0]}": sorted(periods - present.get(f"T.{m[0]}", {}).keys())
+                                for m in METRICS if periods - present.get(f"T.{m[0]}", {}).keys()}}
 
 
 SELECT_SCHEMA = """输出且只输出一个 JSON 对象：
@@ -494,6 +513,7 @@ def select(conn, batch: dict) -> dict:
                    "report": _report_digest(conn, r.get("report_id"))}
                   for i, r in enumerate(batch["q20"])]
     prompt = selection_prompt(candidates, rule)
+    log.info("comparison: %s candidates, %s prompt characters", len(candidates), len(prompt))
     attempts = []
     for _ in range(2):
         completion = model.complete(prompt, timeout=600, max_tokens=12000)

@@ -167,3 +167,23 @@ def test_windfall_flag_needs_both_a_profit_jump_and_a_low_multiple():
     assert screening.windfall({"growth": 1.5721894490314785, "pe": 8.3101}) == {"min_growth": 0.5, "max_pe": 10}  # 株冶集团
     assert screening.windfall({"growth": 0.27378284819584753, "pe": 7.9025}) is None  # 卫星化学: low PE, modest growth
     assert screening.windfall({"growth": 0.7764, "pe": 16.2376}) is None  # 燕京啤酒: jump at a normal multiple
+
+
+def test_comparison_keeps_real_calculations_and_marks_legacy_gaps(tmp_path):
+    from a_share_research import db
+    from a_share_research.research_tools import calculate
+    from test_check import MATERIAL, report
+
+    conn = db.connect(tmp_path / 'app.db')
+    calculation = calculate(MATERIAL.table, '经营现金流差额', 'difference',
+                            {'ref': 'T.op_cash', 'period': '2025-12-31'},
+                            {'ref': 'T.op_cash', 'period': '2024-12-31'})
+    body = report() | {'table': MATERIAL.table + [calculation]}
+    run = db.create_run(conn, MATERIAL.code)
+    db.save_report(conn, run, MATERIAL.code, MATERIAL.name, MATERIAL.doc.period, True, body['verdict'], body)
+    report_id = conn.execute('SELECT id FROM reports').fetchone()[0]
+    digest = screening._report_digest(conn, report_id)
+    assert digest['business'] == [r['text'] for r in body['business']]
+    assert next(r for r in digest['metrics'] if r['id'] == calculation['id']) == calculation
+    assert digest['missing_metrics']['T.capex'] == ['2024-12-31', '2025-12-31']
+    conn.close()

@@ -1,6 +1,6 @@
 # 基本面深度与选股信号升级方案
 
-更新：2026-10-26。状态：**已授权按阶段推进；先 F1，再 F3a，最后 F2；F3b 后置**；阶段与部署状态见[路线图](roadmap.md#3-本批与后续)和[实施计划](implementation-plan.md#工作包与状态)。
+更新：2026-10-26。状态：**阶段 1 已提交；F1 本地实现、验收与 Claude 独立审查完成；F3a/F2 待推进，F3b 后置**；阶段与部署状态见[路线图](roadmap.md#3-本批与后续)和[实施计划](implementation-plan.md#工作包与状态)。
 
 ## 1 背景与诊断
 
@@ -27,11 +27,11 @@
 
 | 行 ID | 名称 | 来源表与字段 | 投资用途与计算规则 |
 |---|---|---|---|
-| `T.core_profit` | 扣非归母净利润 | `fina_indicator.profit_dedt`（已换算为亿元） | 与 `T.net_profit` 对照，直接识别政府补助、资产处置等非经常性损益占比 |
+| `T.core_profit` | 扣非归母净利润 | `fina_indicator.profit_dedt`（原始元，展示时除以 1e8） | 与 `T.net_profit` 对照，直接识别政府补助、资产处置等非经常性损益占比 |
 | `T.capex` | 资本开支 | `cashflow.c_pay_acq_const_fiolta` | 购建固定资产、无形资产和其他长期资产支付的现金，衡量产能扩张消耗 |
 | `T.fcf` | 自由现金流（经营现金流减购建长期资产现金） | 程序由 `n_cashflow_act − c_pay_acq_const_fiolta` 计算 | 当期两项均非空时生成，作为该口径下的现金流参考，不等同于可分配现金 |
 | `T.cash` | 货币资金 | `balancesheet.money_cap` | 账面现金储备，用于与有息负债和分红能力核对 |
-| `T.interest_debt` | 四项债务合计 | `balancesheet`：`st_borr` + `non_cur_liab_due_1y` + `lt_borr` + `bond_payable` | 短期借款、一年内到期非流动负债、长期借款、应付债券；仅四项均非空才求和，部分或全部缺失均留空；不把未知当零；真实验收列出四分项原值及缺失情况。名称与来源明确限定这四项，不声称覆盖全部有息负债 |
+| `T.interest_debt` | 四项债务合计 | `balancesheet`：`st_borr` + `non_cur_liab_due_1y` + `lt_borr` + `bond_payable` | 短期借款、一年内到期非流动负债、长期借款、应付债券；仅四项均非空才求和，部分或全部缺失均留空；不把未知当零；真实验收列出四分项原值及缺失情况。名称与来源明确限定这四项；一年内到期非流动负债可能包含租赁负债，不声称是全部或同口径的银行有息负债 |
 | `T.receivables` | 应收票据及应收账款 | `balancesheet.accounts_receiv_bill`（若为空且两分项均非空则回退 `notes_receiv + accounts_receiv`，否则留空） | 与营收增速对比，检查是否靠放宽账期铺货 |
 | `T.inventory` | 存货 | `balancesheet.inventories` | 检查存货积压或备货周期变化 |
 | `T.contract_liab` | 合同负债 | `balancesheet.contract_liab` | 先款后货行业的订单与收入蓄水池 |

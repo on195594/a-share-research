@@ -65,6 +65,8 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.login_token --agent --m
 
 相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial` 的实际零基下标。报告的 `passed` 与任务状态一起判断，失败只返回核验事实，不能当成已通过的结论。
 
+财务表包含利润、现金流及资产负债表指标，新增扣非净利润、购建长期资产现金、经营现金流减购建长期资产现金、货币资金、四项债务合计、应收、存货、合同负债和商誉。派生项按原始数值计算；四项债务或应收回退分项不齐时保持缺失，不将空值视为零。跨公司比较保留业务、缺口、最新年度/当期/同期指标及计算输入，旧报告缺少的指标明确标记，不回填。
+
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 
 Skills 候选通过 `a-stock-cache research` 接入本 API，先复用旧报告，再按缺口发起追问；配置与使用见 [Skills 接入说明](https://github.com/on195594/a-stock-agent-skills/blob/master/skills/a-stock-research/references/research-service.md)，发布状态见实施计划。

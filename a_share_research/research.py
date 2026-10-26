@@ -7,6 +7,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Self
 
 import pandas as pd
@@ -31,6 +32,15 @@ METRICS = [
     ("gross_margin", "毛利率", "%", "indicator", "grossprofit_margin", 1),
     ("roe", "加权ROE", "%", "indicator", "roe_waa", 1),
     ("debt_ratio", "资产负债率", "%", "indicator", "debt_to_assets", 1),
+    ("core_profit", "扣非归母净利润", "亿元", "deducted", "profit_dedt", 1e8),
+    ("capex", "购建长期资产支付的现金", "亿元", "cashflow", "c_pay_acq_const_fiolta", 1e8),
+    ("fcf", "经营现金流减购建长期资产现金", "亿元", "cashflow", "fcf", 1e8),
+    ("cash", "货币资金", "亿元", "balance", "money_cap", 1e8),
+    ("interest_debt", "四项债务合计（短借、一年内到期非流动负债、长借、债券）", "亿元", "balance", "interest_debt", 1e8),
+    ("receivables", "应收票据及应收账款", "亿元", "balance", "accounts_receiv_bill", 1e8),
+    ("inventory", "存货", "亿元", "balance", "inventories", 1e8),
+    ("contract_liab", "合同负债", "亿元", "balance", "contract_liab", 1e8),
+    ("goodwill", "商誉", "亿元", "balance", "goodwill", 1e8),
 ]
 MARKET = [
     ("close", "收盘价", "元", 1),
@@ -130,13 +140,18 @@ def _latest_rows(frame: pd.DataFrame, *, consolidated: bool) -> pd.DataFrame:
     if consolidated:
         frame = frame[frame["report_type"].astype(str) == "1"]  # consolidated statements
     frame["end_date"] = frame["end_date"].astype(str)
-    order = [c for c in ("ann_date", "f_ann_date") if c in frame]
-    return frame.sort_values(order).groupby("end_date").tail(1).set_index("end_date")
+    order = [c for c in ("ann_date", "f_ann_date", "update_flag") if c in frame]
+    return frame.sort_values(order, na_position="first").groupby("end_date").tail(1).set_index("end_date")
+
+
+def _financial_value(frame: pd.DataFrame, period: str, column: str) -> Decimal | None:
+    raw = frame[column].get(period) if column in frame else None
+    return Decimal(str(raw)) if raw is not None and pd.notna(raw) else None
 
 
 def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     # Indicators have no report_type; the provider keeps that common column null.
-    statements = {k: _latest_rows(v, consolidated=k != "indicator") for k, v in fin.items()}
+    statements = {k: _latest_rows(v, consolidated=k in ("income", "cashflow", "balance")) for k, v in fin.items()}
     ends = sorted(statements["income"].index)
     annual = [e for e in ends if e.endswith("12-31")][-3:]
     latest = ends[-1]
@@ -144,12 +159,22 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     periods = sorted(set(annual + [latest] + ([prior] if prior in ends else [])))
     table = []
     for key, label, unit, statement, column, divisor in METRICS:
-        frame = statements[statement]
+        frame = statements.get(statement, pd.DataFrame())
         values = {}
         for p in periods:
-            raw = frame[column].get(p) if column in frame else None
-            if raw is not None and pd.notna(raw):
-                values[p] = f"{float(raw) / divisor:.2f}"
+            raw = _financial_value(frame, p, column)
+            if key == "fcf":
+                cash = _financial_value(frame, p, "n_cashflow_act")
+                capex = _financial_value(frame, p, "c_pay_acq_const_fiolta")
+                raw = cash - capex if cash is not None and capex is not None else None
+            elif key == "interest_debt":
+                parts = [_financial_value(frame, p, c) for c in ("st_borr", "non_cur_liab_due_1y", "lt_borr", "bond_payable")]
+                raw = sum(parts) if all(v is not None for v in parts) else None
+            elif key == "receivables" and raw is None:
+                parts = [_financial_value(frame, p, c) for c in ("notes_receiv", "accounts_receiv")]
+                raw = sum(parts) if all(v is not None for v in parts) else None
+            if raw is not None:
+                values[p] = f"{raw / Decimal(str(divisor)):.2f}"
         table.append({"id": f"T.{key}", "label": label, "unit": unit, "values": values})
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
