@@ -1,0 +1,109 @@
+{
+"source": "TuShare, captured read-only 2026-10-26T17:41:16+08:00; total-return indexes not yet published for 20261026; only fields used by entry tests retained",
+"trade_date": "20261026",
+"stock": "002648.SZ",
+"daily": [
+{
+"ts_code": "002648.SZ",
+"trade_date": "20261026",
+"open": 24.94,
+"close": 25.15
+}
+],
+"adj_factor": [
+{
+"ts_code": "002648.SZ",
+"trade_date": "20261026",
+"adj_factor": 13.2697
+}
+],
+"stk_limit": [
+{
+"ts_code": "002648.SZ",
+"trade_date": "20261026",
+"up_limit": 27.39
+}
+],
+"suspend_d": [],
+"trade_cal": [
+{
+"cal_date": "20261026"
+},
+{
+"cal_date": "20261023"
+},
+{
+"cal_date": "20261022"
+}
+],
+"index_daily": {
+"H00906.CSI": [
+{
+"ts_code": "H00906.CSI",
+"trade_date": "20261023",
+"close": 6660.1741,
+"pre_close": 6533.3801
+},
+{
+"ts_code": "H00906.CSI",
+"trade_date": "20261022",
+"close": 6533.3801,
+"pre_close": 6671.2946
+}
+],
+"H00300.CSI": [
+{
+"ts_code": "H00300.CSI",
+"trade_date": "20261023",
+"close": 6179.3848,
+"pre_close": 6071.7863
+},
+{
+"ts_code": "H00300.CSI",
+"trade_date": "20261022",
+"close": 6071.7863,
+"pre_close": 6185.1396
+}
+],
+"000906.SH": [
+{
+"ts_code": "000906.SH",
+"trade_date": "20261026",
+"open": 4535.0474,
+"pre_close": 4567.2567
+},
+{
+"ts_code": "000906.SH",
+"trade_date": "20261023",
+"open": 4429.918,
+"pre_close": 4482.4376
+},
+{
+"ts_code": "000906.SH",
+"trade_date": "20261022",
+"open": 4576.4587,
+"pre_close": 4577.329
+}
+],
+"000300.SH": [
+{
+"ts_code": "000300.SH",
+"trade_date": "20261026",
+"open": 4078.5695,
+"pre_close": 4105.3286
+},
+{
+"ts_code": "000300.SH",
+"trade_date": "20261023",
+"open": 3992.9041,
+"pre_close": 4036.2966
+},
+{
+"ts_code": "000300.SH",
+"trade_date": "20261022",
+"open": 4110.6489,
+"pre_close": 4111.9325
+}
+]
+}
+}

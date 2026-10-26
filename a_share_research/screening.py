@@ -620,6 +620,15 @@ def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) ->
     out = {}
     for code in benchmarks:
         frame = _query(pro, "index_daily", ts_code=code, start_date=start, end_date=end).sort_values("trade_date")
+        if field == "open" and (frame.empty or str(frame["trade_date"].iloc[-1]) != end):
+            # Total-return rows publish after the price index; the entry-day pre_close equals the
+            # previous session's close (no exception in either benchmark since 2015), so use that.
+            prev = [d for d in _trade_days(pro, _compact(datetime.strptime(end, "%Y%m%d") - timedelta(days=20)), end)
+                    if d < end][-1:]
+            frame = _query(pro, "index_daily", ts_code=code, start_date=prev[0], end_date=prev[0]) if prev else frame.iloc[0:0]
+            if frame.empty or str(frame["trade_date"].iloc[-1]) != prev[0]:
+                raise ScreenError(f"{code} {end} 及前一交易日的行情未发布")
+            frame = frame.assign(trade_date=end, pre_close=frame["close"])
         if frame.empty or str(frame["trade_date"].iloc[-1]) != end:
             raise ScreenError(f"{code} {end} 的行情未发布")
         last = frame.iloc[-1]
@@ -627,8 +636,7 @@ def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) ->
             raise ScreenError(f"{code} {end} 的指数代码或收盘点位无效")
         value = float(last["close"])
         if field == "open":
-            price = _query(pro, "index_daily", ts_code=PRICE_INDEX[code], start_date=last["trade_date"],
-                           end_date=last["trade_date"])
+            price = _query(pro, "index_daily", ts_code=PRICE_INDEX[code], start_date=end, end_date=end)
             if len(price) != 1 or str(price.iloc[0]["trade_date"]) != end or price.iloc[0]["ts_code"] != PRICE_INDEX[code]:
                 raise ScreenError(f"{PRICE_INDEX[code]} {end} 的行情未发布或日期/代码不符")
             price = price.iloc[0]
@@ -710,6 +718,16 @@ def mark_on(pro, batch: dict, day: str, previous: dict | None = None) -> dict:
             "benchmarks": benchmark_prices(pro, batch["entry"]["date"], day, "close", batch["rule"]["benchmarks"])}
 
 
+def benchmark_day(pro, start: str, end: str, benchmarks: dict) -> str | None:
+    """Latest session in [start, end] on which every benchmark close is published (they lag the stocks)."""
+    days = None
+    for code in benchmarks:
+        frame = _query(pro, "index_daily", ts_code=code, start_date=start, end_date=end)
+        published = set(frame["trade_date"].astype(str)) if not frame.empty else set()
+        days = published if days is None else days & published
+    return max(days) if days else None
+
+
 def update_marks(pro, batch: dict, day: str) -> dict:
     """Latest mark plus each horizon valued on its own first trading day on or after the target date."""
     marks = batch.get("marks") or {}
@@ -765,6 +783,15 @@ def recover(conn) -> None:
     conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = '初筛中断（服务重启），请重新开始',"
                  " updated_at = ? WHERE status = 'screening'", (db.now(),))
     conn.execute("UPDATE batches SET status = 'researching', step = NULL WHERE status = 'selecting'")
+
+
+def _marks_through(pro, batch: dict, day: str, stamp: str) -> dict:
+    """Marks up to the latest session with published benchmarks; until that reaches `day`, retry later."""
+    marked = benchmark_day(pro, batch["entry"]["date"], day, batch["rule"]["benchmarks"])
+    marks = update_marks(pro, batch, marked) if marked else (batch.get("marks") or {})
+    if marked == day:
+        return marks | {"checked": stamp, "attempted": None}
+    return marks | {"attempted": db.now()}
 
 
 def tick(conn) -> bool:
@@ -836,10 +863,10 @@ def tick(conn) -> bool:
                          "benchmarks": benchmark_prices(pro, days[0], days[0], "open", batch["rule"]["benchmarks"])}
                 batch = batch | {"entry": entry}
                 _save(conn, batch["id"], status="tracking", entry=entry, error=None,
-                      marks=update_marks(pro, batch, days[-1]) | {"checked": stamp, "attempted": None})
+                      marks=_marks_through(pro, batch, days[-1], stamp))
                 return True
             day = _trade_days(pro, batch["entry"]["date"], stamp)[-1]
-            _save(conn, batch["id"], error=None, marks=update_marks(pro, batch, day) | {"checked": stamp, "attempted": None})
+            _save(conn, batch["id"], error=None, marks=_marks_through(pro, batch, day, stamp))
             return True
         except Exception as exc:
             if not isinstance(exc, ScreenError):

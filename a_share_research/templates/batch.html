@@ -26,6 +26,8 @@
     <p class="notice" role="status">待你选择：{{ "草案未能自动冻结" if batch.selection and batch.selection.freeze_error else "模型没有给出可自动冻结的名单" }}，请在下方按研究结论勾选后冻结。冻结后不再修改，下一交易日开盘价模拟买入。</p>
   {% elif batch.status == "frozen" %}
     <p class="notice" role="status">已冻结。冻结后的第一个交易日收盘后记录开盘入场价，之后每个交易日收盘后更新。</p>
+  {% elif batch.status == "tracking" and not (batch.marks or {}).get("latest") %}
+    <p class="notice" role="status">已于 <span class="date">{{ b.day(batch.entry.date) }}</span> 开盘入场。基准全收益指数的行情晚于个股发布，发布后自动计算首次收益。</p>
   {% endif %}
   {% if batch.error and batch.status in ("researching", "frozen", "tracking") %}<p class="notice caution" role="status">最近一次更新失败：{{ batch.error }}。约 30 分钟后自动重试。</p>{% endif %}
 </section>
