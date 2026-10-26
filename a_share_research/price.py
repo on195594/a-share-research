@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 SESSIONS = 61
 VALID_SESSIONS = 5
+SUPPORTED_CODE = re.compile(r"(?:(?:60\d{4}|688\d{3})\.SH|(?:00\d{4}|30[01]\d{3})\.SZ)")
 LIMITS = (
     "量价仅作风险纪律参考，历史重放未发现稳定超额，不代表投资价值或交易建议。"
     "未覆盖公告、财报与资金变化；A 股 T+1、跳空、停牌和涨跌停可能使退出条件无法执行。"
@@ -56,8 +57,8 @@ def compute(stock: list[dict], benchmark: list[dict]) -> dict:
 
 
 def reference(code: str, name: str) -> dict:
-    if not re.fullmatch(r"(?:60\d{4}\.SH|00\d{4}\.SZ)", code):
-        raise PriceError("价格参考只支持沪深主板股票")
+    if not SUPPORTED_CODE.fullmatch(code):
+        raise PriceError("价格参考支持沪深主板、创业板和科创板股票，暂不支持北交所")
     if "ST" in name.upper() or "退" in name:
         raise PriceError("ST 或退市风险股票不提供价格参考")
     pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from a_share_research.price import PriceError, compute
+from a_share_research.price import PriceError, SUPPORTED_CODE, compute
 
 DATA = json.loads((Path(__file__).parent / "data" / "600900-61d.json").read_text())
 
@@ -19,3 +19,11 @@ def test_levels_match_the_reference_run():
 def test_short_history_is_refused():
     with pytest.raises(PriceError):
         compute(DATA["stock"][1:], DATA["benchmark"][1:])
+
+
+def test_supported_board_codes_and_exchange_boundaries():
+    # Positive codes come from the real F3a price runs; the variants below are invalid inputs.
+    for code in ("600900.SH", "300750.SZ", "301269.SZ", "688981.SH", "688208.SH"):
+        assert SUPPORTED_CODE.fullmatch(code)
+    for code in ("600900.SZ", "300750.SH", "688981.SZ", "688981.BJ", "689009.SH", "200002.SZ"):
+        assert not SUPPORTED_CODE.fullmatch(code)

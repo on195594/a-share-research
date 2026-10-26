@@ -97,6 +97,8 @@ docker exec a-share-research-worker python -m a_share_research.integrity   # 生
 DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # 本地
 ```
 
+价格参考支持沪深主板、创业板（300/301）和科创板（688），继续排除 ST、退市风险股及北交所；公式与旧 `price-reference-v2` 记录保持兼容。
+
 ## 候选初筛
 
 网页“候选初筛”每月开一个批次（设计见[方案](docs/screening-experiment.md)）。worker 在没有排队的单家任务时推进批次：
