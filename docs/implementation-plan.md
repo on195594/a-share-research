@@ -43,16 +43,16 @@ AGY 复审后修复扣非取数异常封装、离线实验优化模式拒绝与�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 10:33 部署 `5942883`**（先 `docker compose build`，核对镜像代码与任务空闲后 `docker compose up -d --no-build`）。明确财务期间覆盖语义与报表累计值说明、增加批次页章节导航与候选名单无障碍链接、过滤公司档案页上基础全面报告的空关联占位文案。无数据库迁移，Skills 仍为 0.1.23。上一版为 `bea45f0`（部署记录见 `git show 545941a:docs/implementation-plan.md`）。
+入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 12:41 部署 `8112902`**（先 `docker compose build`，逐文件核对镜像代码与提交一致、任务与批次空闲后 `docker compose up -d --no-build --no-deps web worker`）。上线[积累方案](research-accumulation.md) K1（首页来源分组、财务覆盖期过期提示）与 K2（下期检查点、同公司接续复核、公司页程序对照）。无数据库迁移，旧报告兼容显示；Skills 仍为 0.1.23。上一版为 `5942883`（部署记录见 `git show 8112902:docs/implementation-plan.md`）。
 
 | 项目 | 证据 |
 |---|---|
-| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:5942883` 与 `latest`；上一版 `:bea45f0` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build` |
-| 门禁 | 发布前排队/运行任务及忙碌批次均为 0；工作树干净，远端 main 为 `5942883`。发布后两个容器运行、零重启，worker ready；web 正常响应，基础报告关联占位清理 |
-| 本地验证 | 重跑 118 项测试全部通过（6.44 秒）。基础全面报告、追问报告、纠错报告及长问题折叠宏渲染与 AST SQL 查询校验均通过 |
-| 生产验收 | 生产数据库已于发布前在线备份（`backup-pre-5942883-20261027103308.db`）；完整性巡检通过（37 份报告、129 份 PDF，0 异常）；外部 HTTPS 入口正常跳转认证 |
+| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:8112902` 与 `latest`，29 个代码文件哈希与提交一致；上一版 `:5942883` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build --no-deps web worker` |
+| 门禁 | 切换脚本在排队/运行任务或忙碌批次非零时退出，备份前后各查一次，均为 0。发布后两个容器运行、零重启，worker ready |
+| 本地验证 | 126 项测试通过；本机验收见[积累方案](research-accumulation.md)开头 |
+| 生产验收 | 发布前完整性巡检通过并在线备份（`backup-pre-8112902-20261027044120.db`）；发布后巡检 0 异常；登录后首页（8 家主动研究、19 家初筛收起）、公司页、报告页、批次列表与详情均 200 且内容正确；外部 HTTPS 入口正常跳转认证 |
 
-本次已用 SQLite 在线备份保存发布前数据库，未复制或修改 PDF。备份、代码/数据哈希、容器身份和浏览器验收证据在 `~/.local/share/a-share-research-evaluations/deploy-bea45f0-20261027/`（0700）。未重复模型研究、11 家评估集或 20 家比较。
+证据在 `~/.local/share/a-share-research-evaluations/deploy-8112902-20261027/`（0700）。K2 带/不带接续对照仍待三季报披露后完成。
 
 **收盘后观察尚待完成**：已启动仅限 10-27 的只读观察进程，17:00 起每分钟检查首批，更新完成后退出，最晚 22:00 结束；不改 cron、系统服务或生产数据。检查冻结内容和入场记录不变、旧日收益在等待时保留、当日收益与两基准日期一致。结果写入上述目录的 `close-observation.json` / `.jsonl`，成功时另存 `batch-after-close.json`；`waiting_observed` 表示是否实际捕捉到当晚等待状态。进程不会在宿主重启后自动恢复，也不发送通知；安排观察不代表实时验收已通过。
 
