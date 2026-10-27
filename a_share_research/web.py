@@ -523,8 +523,9 @@ def stock_page(request: Request, code: str):
     since = None
     if prior := json.loads(reports[0]["body"]).get("prior"):
         old = conn.execute("SELECT created_at, body FROM reports WHERE id = ?", (prior["report_id"],)).fetchone()
-        since = research.since_prior(json.loads(old["body"])["table"], json.loads(reports[0]["body"])["table"]) | {
-            "report_id": prior["report_id"], "researched": old["created_at"][:10]}
+        if old:  # the comparison is skipped, not the page, if the earlier report is gone
+            since = research.since_prior(json.loads(old["body"])["table"], json.loads(reports[0]["body"])["table"]) | {
+                "report_id": prior["report_id"], "researched": old["created_at"][:10]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
                   price=latest_price(code), since=since)
 

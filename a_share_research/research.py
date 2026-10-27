@@ -592,7 +592,7 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     for parent in parents:
         body = json.loads(parent["body"])
         content = body if parent["passed"] else body.get("facts", {})
-        claims = {k: content.get(k) for k in ("summary", "answer", "methods", *SECTIONS)}
+        claims = {k: content.get(k) for k in ("summary", "answer", "methods", "checkpoints", *SECTIONS)}
         # Retired methods must not return through automatic same-company context.
         if parent["id"] != parent_id:
             claims["methods"] = None
@@ -622,6 +622,14 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
             "checkpoints": [item["text"] for item in body.get("checkpoints", [])]}
 
 
+def prior_question(prior: dict) -> str:
+    """The question a continuation asks when the user brought none."""
+    return f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
+
+
+VALUATION = ("M.pe_ttm", "M.pb", "M.dv_ttm")
+
+
 def since_prior(old: list[dict], new: list[dict]) -> dict:
     """What changed in the program tables between two reports; shown to people, never cited by the model.
 
@@ -639,10 +647,13 @@ def since_prior(old: list[dict], new: list[dict]) -> dict:
         "revised": [{"label": r["label"], "unit": r["unit"], "period": p, "before": before[r["id"]][p], "after": v}
                     for r in rows if r["id"] in before for p, v in r["values"].items()
                     if p in before[r["id"]] and before[r["id"]][p] != v],
-        "uncollected": [r["label"] for r in rows if r["id"] not in before and r["values"]],
+        # Rows usually stay in the table with an empty value, so absence is per row and period.
+        "uncollected": [r["label"] for r in new
+                        if (r["id"].startswith("T.") and any(p in seen and p not in before.get(r["id"], {}) for p in r["values"]))
+                        or (r["id"] in VALUATION and r["values"] and r["id"] not in before)],
         "valuation": [{"label": r["label"], "unit": r["unit"], "before": next(iter(before[r["id"]].items()), None),
                        "after": next(iter(r["values"].items()), None), "unchanged": before[r["id"]] == r["values"]}
-                      for r in new if r["id"] in ("M.pe_ttm", "M.pb", "M.dv_ttm") and r["id"] in before],
+                      for r in new if r["id"] in VALUATION and r["id"] in before],
     }
 
 
@@ -690,7 +701,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                 if prior := _prior_report(conn, material.code, run_id):
                     material.extra["prior"] = prior
                     if not material.extra["question"]:
-                        material.extra["question"] = f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
+                        material.extra["question"] = prior_question(prior)
         save_material(material)
         if replay_of is None:
             from a_share_research.research_tools import explore
@@ -726,8 +737,9 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "replay_of": replay_of, "material_sha256": material_sha256,
         }
         if prior := material.extra.get("prior"):
+            # Derived from the frozen question so replays, including of older snapshots, keep the label.
             body["prior"] = {"report_id": prior["report_id"], "period": prior["period"],
-                             "question_added": not request.get("question")}
+                             "question_added": material.extra.get("question") == prior_question(prior)}
         if problems:
             body |= {"facts": _verified_facts(report, problems, reviewed=reviewed),
                      "facts_reviewed": reviewed, "problems": problems}

@@ -372,16 +372,23 @@ def screen(as_of: str | None = None, workers: int = 4) -> dict:
 
 # ---------- research and selection ----------
 
+def reusable_report(conn, code: str, since: str):
+    """The latest passed, non-replay report of `code` since `since` that a batch may reuse."""
+    return conn.execute(
+        "SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
+        " WHERE r.code = ? AND r.passed = 1 AND u.status = 'done' AND r.created_at >= ?"
+        " AND json_extract(u.identity, '$.replay_of') IS NULL"
+        # A continuation's answer is about its earlier report, not the batch question.
+        " AND json_type(r.body, '$.prior') IS NOT 'object' ORDER BY r.id DESC LIMIT 1",
+        (code, since),
+    ).fetchone()
+
+
 def link_research(conn, batch_id: int, q20: list[dict]) -> list[dict]:
     """Reuse a recent passed report or submit research for each Q20 company."""
     since = (datetime.now(SHANGHAI) - timedelta(days=REUSE_DAYS)).isoformat(timespec="seconds")
     for row in q20:
-        recent = conn.execute(
-            "SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
-            " WHERE r.code = ? AND r.passed = 1 AND u.status = 'done' AND r.created_at >= ?"
-            " AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC LIMIT 1",
-            (row["code"], since),
-        ).fetchone()
+        recent = reusable_report(conn, row["code"], since)
         if recent:
             row |= {"run_id": recent["run_id"], "report_id": recent["id"], "reused": True}
         else:
