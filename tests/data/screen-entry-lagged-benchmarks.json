@@ -105,5 +105,40 @@
 "pre_close": 4111.9325
 }
 ]
+},
+"published_later": {
+"source": "TuShare, captured read-only 2026-10-27T08:50:33+08:00: the 20261026 total-return rows published after the main capture, and the SSE calendar through 20261027",
+"index_daily": {
+"H00906.CSI": [
+{
+"ts_code": "H00906.CSI",
+"trade_date": "20261026",
+"close": 6632.0858,
+"pre_close": 6660.1741
+}
+],
+"H00300.CSI": [
+{
+"ts_code": "H00300.CSI",
+"trade_date": "20261026",
+"close": 6177.5368,
+"pre_close": 6179.3848
+}
+]
+},
+"trade_cal": [
+{
+"cal_date": "20261027"
+},
+{
+"cal_date": "20261026"
+},
+{
+"cal_date": "20261023"
+},
+{
+"cal_date": "20261022"
+}
+]
 }
 }

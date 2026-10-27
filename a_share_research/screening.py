@@ -788,7 +788,10 @@ def recover(conn) -> None:
 def _marks_through(pro, batch: dict, day: str, stamp: str) -> dict:
     """Marks up to the latest session with published benchmarks; until that reaches `day`, retry later."""
     marked = benchmark_day(pro, batch["entry"]["date"], day, batch["rule"]["benchmarks"])
-    marks = update_marks(pro, batch, marked) if marked else (batch.get("marks") or {})
+    marks = batch.get("marks") or {}
+    # A saved mark for that session already carries every horizon due by then; do not revalue it.
+    if marked and marked != (marks.get("latest") or {}).get("date"):
+        marks = update_marks(pro, batch, marked)
     if marked == day:
         return marks | {"checked": stamp, "attempted": None}
     return marks | {"attempted": db.now()}

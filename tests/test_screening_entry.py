@@ -116,14 +116,23 @@ LAGGED = json.loads((Path(__file__).parent / "data/screen-entry-lagged-benchmark
 
 
 class LaggedReplay:
-    """2026-10-26 as published at 17:41: price indexes and stocks are out, total-return indexes stop at 10-23."""
+    """2026-10-26 as published at 17:41: price indexes and stocks are out, total-return indexes stop at 10-23.
+
+    `published` adds the later-captured 10-26 total-return rows for those benchmarks, as they appeared that evening.
+    """
+
+    def __init__(self, published=()):
+        self.published, self.calls = set(published), []
 
     def query(self, api, **params):
+        self.calls.append(api)
+        later = LAGGED["published_later"]
         if api == "index_daily":
-            rows = [r for r in LAGGED["index_daily"][params["ts_code"]]
-                    if params["start_date"] <= r["trade_date"] <= params["end_date"]]
+            code = params["ts_code"]
+            rows = LAGGED["index_daily"][code] + (later["index_daily"].get(code, []) if code in self.published else [])
+            rows = [r for r in rows if params["start_date"] <= r["trade_date"] <= params["end_date"]]
         elif api == "trade_cal":
-            rows = [r for r in LAGGED["trade_cal"] if params["start_date"] <= r["cal_date"] <= params["end_date"]]
+            rows = [r for r in later["trade_cal"] if params["start_date"] <= r["cal_date"] <= params["end_date"]]
         else:
             rows = LAGGED[api]
         return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ts_code", "suspend_timing", "trade_date"])
@@ -143,7 +152,7 @@ def test_entry_open_uses_previous_close_while_total_return_lags():
     assert s.benchmark_day(LaggedReplay(), "20261022", day, s.RULE["benchmarks"]) == "20261023"
 
 
-def test_lagging_benchmarks_record_entry_and_retry_marks(tmp_path, monkeypatch):
+def test_lagging_benchmarks_enter_then_mark_once_both_are_published(tmp_path, monkeypatch):
     class Clock(datetime):
         value = datetime.fromisoformat("2026-10-26T17:41:00+08:00")
 
@@ -151,23 +160,60 @@ def test_lagging_benchmarks_record_entry_and_retry_marks(tmp_path, monkeypatch):
         def now(cls, tz=None):
             return cls.value.astimezone(tz)
 
+    def at(moment):
+        Clock.value = datetime.fromisoformat(moment)
+
+    market = LaggedReplay()
     monkeypatch.setattr(s, "datetime", Clock)
     monkeypatch.setattr(db, "now", lambda: Clock.value.isoformat())
-    monkeypatch.setattr(s, "_pro", LaggedReplay)
-    code = LAGGED["stock"]
+    monkeypatch.setattr(s, "_pro", lambda: market)
+    code, day = LAGGED["stock"], LAGGED["trade_date"]
+    later = LAGGED["published_later"]["index_daily"]
     conn = db.connect(tmp_path / "lagged-batch.db")
+
+    def batch():
+        return s.load(conn.execute("SELECT * FROM batches").fetchone())
+
     try:
         conn.execute("INSERT INTO batches (status,created_at,rule,q20,q5,l5,frozen_at) VALUES (?,?,?,?,?,?,?)",
                      ("frozen", db.now(), json.dumps(s.RULE), json.dumps([{"code": code}]), json.dumps([code]),
                       json.dumps({"codes": [code]}), "2026-10-25T00:19:04+08:00"))
+        # 17:41: stocks and price indexes are out, total-return indexes are not. Enter, but no mark yet.
         assert s.tick(conn) is True
-        batch = s.load(conn.execute("SELECT * FROM batches").fetchone())
-        assert batch["status"] == "tracking" and batch["error"] is None
-        assert batch["entry"]["date"] == LAGGED["trade_date"]
-        assert batch["entry"]["prices"][code] == {"filled": True, "open": 24.94, "adj": 13.2697}
-        # No mark yet: neither checked for the day nor shown as a result; retried after RETRY_MINUTES.
-        assert "latest" not in batch["marks"] and "checked" not in batch["marks"]
-        assert batch["marks"]["attempted"] == db.now() and s.returns(batch) is None
-        assert s.tick(conn) is False
+        b = batch()
+        assert b["status"] == "tracking" and b["error"] is None and b["entry"]["date"] == day
+        assert b["entry"]["prices"][code] == {"filled": True, "open": 24.94, "adj": 13.2697}
+        entry = b["entry"]
+        assert "latest" not in b["marks"] and "checked" not in b["marks"] and s.returns(b) is None
+        assert s.tick(conn) is False  # throttled for RETRY_MINUTES
+
+        # 18:12: only one benchmark has published; still no mark.
+        market.published = {"H00906.CSI"}
+        at("2026-10-26T18:12:00+08:00")
+        assert s.tick(conn) is True
+        b = batch()
+        assert "latest" not in b["marks"] and "checked" not in b["marks"] and b["marks"]["attempted"] == db.now()
+
+        # 19:31: both published. Mark the day, stop checking for it, keep the entry.
+        market.published = {"H00906.CSI", "H00300.CSI"}
+        at("2026-10-26T19:31:00+08:00")
+        assert s.tick(conn) is True
+        b = batch()
+        assert b["entry"] == entry
+        assert b["marks"]["checked"] == day and b["marks"]["attempted"] is None
+        result = s.returns(b)
+        assert result["date"] == day
+        for bench in s.RULE["benchmarks"]:
+            assert result["values"][bench] == later[bench][0]["close"] / entry["benchmarks"][bench]["value"] - 1
+        assert s.tick(conn) is False  # done for today
+
+        # Next evening the new day's benchmarks lag again: keep the saved mark without revaluing it.
+        at("2026-10-27T17:30:00+08:00")
+        market.calls.clear()
+        assert s.tick(conn) is True
+        b2 = batch()
+        assert b2["marks"]["latest"] == b["marks"]["latest"] and b2["marks"]["checked"] == day
+        assert b2["marks"]["attempted"] == db.now()
+        assert not {"daily", "adj_factor"} & set(market.calls)
     finally:
         conn.close()
