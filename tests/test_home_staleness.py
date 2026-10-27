@@ -20,8 +20,8 @@ def coverage(report: dict) -> str:
 
 
 def test_early_reports_cover_their_newer_financial_table():
-    # 五粮液 and 比亚迪 recorded the prior annual report as period while their tables held the half year.
-    for report_id in (6, 7):
+    # 茅台, 五粮液 and 比亚迪 recorded the prior annual report as period while their tables held the half year.
+    for report_id in (5, 6, 7):
         assert REPORTS[report_id]["period"] == "2025-12-31"
         assert coverage(REPORTS[report_id]) == "2026-06-30"
     assert coverage(REPORTS[37]) == "2026-06-30"
@@ -39,7 +39,7 @@ def test_due_report_follows_statutory_deadlines():
 
 
 def test_half_year_coverage_turns_stale_only_after_third_quarter_deadline():
-    for report_id in (6, 7, 37):
+    for report_id in (5, 6, 7, 37):
         assert not coverage(REPORTS[report_id]) < due_report(date(2026, 10, 31))[0]
         assert coverage(REPORTS[report_id]) < due_report(date(2026, 11, 1))[0]
     # 紫金矿业 already covers the third quarter, so it stays current through the annual-report season.
