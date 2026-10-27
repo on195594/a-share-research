@@ -41,26 +41,27 @@ AGY 复审后修复扣非取数异常封装、离线实验优化模式拒绝与�
 
 完整发布记录见 `git show 7076091:docs/implementation-plan.md`；Skills 安装身份、配置与回退由其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) 维护。
 
-### 2026-10-27 长期研究 API Key（本地完成，待上线）
+### 2026-10-27 长期研究 API Key（已上线）
 
-独立 `api_keys` 表只存哈希与管理元数据，owner 本地 CLI 创建/列出/撤销；Key 持续有效直到撤销，兼容旧短期 Agent 令牌。浏览器会话隔离、合同版本和幂等语义不变。未变更生产凭据、生产服务或活动客户端。
+独立 `api_keys` 表只存哈希与管理元数据，owner 本地 CLI 创建/列出/撤销；Key 持续有效直到撤销，兼容旧短期 Agent 令牌。浏览器会话隔离、合同版本和幂等语义不变。实现已获本次明确授权并配对上线，生产结果见下方当前部署。
 
-Research 140 项测试通过；Skills 候选 18 项 CLI 测试、1,018 项研究/监控测试、Ruff 与 Skill 验证通过，独立只读审查无阻断问题。隔离本地 HTTP 验证了重启、浏览器登录、具名 Key 并存/轮换、两种撤销路径、撤销后 CLI 401、未知版本拒绝、原 request-id 复用；读取茅台与长江电力真实旧报告正常。新 Key 发起茅台真实研究，本地 run 19 / report 13 复核通过并经 Skills 读取，未创建账户数据库。当前安装的 Skills 0.1.23 同样能使用新 Key，不依赖客户端升级才可稳定认证。
+Research 140 项测试通过；Skills 候选 18 项 CLI 测试、1,018 项研究/监控测试、Ruff 与 Skill 验证通过，独立只读审查无阻断问题。隔离本地 HTTP 验证了重启、浏览器登录、具名 Key 并存/轮换、两种撤销路径、撤销后 CLI 401、未知版本拒绝、原 request-id 复用；读取茅台与长江电力真实旧报告正常。新 Key 发起茅台真实研究，本地 run 19 / report 13 复核通过并经 Skills 读取，未创建账户数据库。本地验收时原已安装的 Skills 0.1.23 同样能使用新 Key，不依赖客户端升级才可稳定认证。
 
-候选镜像为 `a-share-research-web:api-key-candidate`、`a-share-research-worker:api-key-candidate`，未覆盖生产标签；两镜像各 33 个应用文件哈希与工作树一致，无网络、无生产挂载的容器内 Key 鉴权/撤销检查通过。临时验收记录在 `/tmp/asr-api-key-e2e/`；Skills 的 401 提示和接入文档在隔离副本 `/tmp/a-stock-agent-skills-api-key/`，尚未激活。上线应先备份并确认无进行中任务，再切换服务、签发正式 Key、只更新 Skills 私有配置中的研究凭据，验证读取后撤销旧凭据。回退旧服务需恢复可用的短期 Agent 令牌，不删除新增表或研究数据。
+两候选镜像各 33 个应用文件哈希与提交一致，无网络、无生产挂载的容器内 Key 鉴权/撤销检查通过。已配对发布 Research `042a4ad` 与 Skills `0.1.24 / 5154986`，部署及回退证据在 `/home/lin/.local/share/a-share-research-evaluations/api-key-20261027-154133`（0700）。Skills 发布前的完整检查首轮 1,439 项通过、11 项可选跳过，2 项受隔离虚拟环境/缓存写权限影响；补齐环境后这 2 项通过，其余 Ruff、Skill、监管时效、独立 QA 与隔离 cron 门禁均通过。
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 13:55 部署 `5123d2e`**（先 `docker compose build`，逐文件核对镜像代码与提交一致、任务与批次空闲后 `docker compose up -d --no-build --no-deps web worker`）。本次包含只读已有研究搜索（`/research-library`）及首页入口、显式报告前后对照（`_comparison.html` / `reading.comparison`）上线报告页与公司页，以及 Codex 审查指出的残缺指标行导致 `sorted(excluded)` 抛 `TypeError` 的容错修复与分页 URL 优化。无数据库迁移；Skills 仍为 0.1.23。上一版为 `5bd0571`（部署记录见 `git show 5123d2e:docs/implementation-plan.md`）。
+入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 部署 `042a4ad`**，Skills **0.1.24 / `5154986`** 配对激活。此次新增独立长期研究 API Key，不改研究成文、账户或投资政策；上一版 Research 为 `5123d2e`、Skills 为 0.1.23。此前部署详情保留于 `git show 042a4ad:docs/implementation-plan.md`。
 
 | 项目 | 证据 |
 |---|---|
-| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:5123d2e` 与 `latest`，32 个代码与模板文件哈希与提交一致；上一版 `:5bd0571` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build --no-deps web worker` |
-| 门禁 | 切换脚本在排队/运行任务或忙碌批次非零时退出，备份前后各查一次，均为 0。发布后两个容器运行、零重启，worker ready |
-| 本地验证 | 139 项测试通过；搜索字面匹配与转义、无关联/缺失关联拒绝自动配对、残缺指标容错比对均有测试覆盖 |
-| 生产验收 | 发布前完整性巡检通过并在线备份（`backup-pre-5123d2e-20261027055138.db`）；发布后巡检 0 异常；以临时会话访问首页、查已有研究页（空查与“茅台”检索）、公司页（贵州茅台 600519、紫金矿业 601899）、报告页（12、35、37）、批次列表均 200，前后对照渲染正确；外部 HTTPS 入口正常跳转认证 |
+| 镜像与入口 | Web/worker 的 `:042a4ad` 与 `latest` 选中已核验候选；33 个应用文件哈希一致。Skills 26 个 runtime 文件、九个 Skill 树一致，三个 CLI help 正常；Hermes 保留原 canonical 允许目录 |
+| 切换与备份 | 先检查无排队/运行任务及忙碌批次，停止 Web 后复查，再停止 worker、完整性巡检并备份至 `backup-pre-042a4ad-20261027-154133.db`；启动后历史 runs/reports/calls/prices/batches 内容哈希未变，新增 `api_keys` 表 |
+| 正式凭据 | `skills-runtime`（Key ID 1），持续有效直到撤销；只替换原 0600 `runtime.env` 中的研究 token，其他配置保留；旧临时凭据已撤销，测试 Key 已自撤销 |
+| 生产验收 | 公网读取茅台报告 12、长江电力报告 10；旧/撤销凭据返回 401，未知合同版本拒绝，API Key 不能作为网页登录 cookie。正式 CLI 追问 run 56 → report 39 复核通过并读取证据；重复原 request-id 返回同一任务，未创建账户数据库 |
+| 回退 | 保留前版镜像标签 `:pre-api-key-20261027-154133` 与旧 Skills runtime/内容/指向。仅回退 Skills 0.1.23 仍可用新 Key；若回退 Research 旧服务，需重新签发短期 Agent 令牌并只更新配置对应字段，不恢复已过期的旧配置，也不删除新增表或恢复账户数据 |
 
-证据在 `~/.local/share/a-share-research-evaluations/deploy-5123d2e-20261027/`（0700）。K2 跨期接续对照与首次 K3 复盘仍待三季报披露后完成。
+证据：`/home/lin/.local/share/a-share-research-evaluations/api-key-20261027-154133`（0700；含前后完整性检查、历史数据哈希、安装 manifest 路径与实际 CLI 验收记录）。Skills 配置备份独立保存在其私有 backups 目录；明文 Key 不写入日志或仓库。未重新跑模型评估集、三端新 Agent 会话或真实账户流程；既有会话可能缓存旧 Skill 文本，需要重新加载。
 
 **收盘后观察尚待完成**（`bea45f0` 部署时安排，与本次切换无关）：已启动仅限 10-27 的只读观察进程，17:00 起每分钟检查首批，更新完成后退出，最晚 22:00 结束；不改 cron、系统服务或生产数据。检查冻结内容和入场记录不变、旧日收益在等待时保留、当日收益与两基准日期一致。结果写入 `deploy-bea45f0-20261027/` 的 `close-observation.json` / `.jsonl`，成功时另存 `batch-after-close.json`；`waiting_observed` 表示是否实际捕捉到当晚等待状态。进程不会在宿主重启后自动恢复，也不发送通知；安排观察不代表实时验收已通过。
 
