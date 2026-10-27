@@ -64,12 +64,14 @@
     <li>
       <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
       <p>{% if c.passed %}{{ c.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
-        <span class="muted">· <span class="date">资料至 {{ c.period }}</span> · <span class="date">研究于 {{ c.created_at[:10] }}</span></span></p>
+        <span class="muted">· <span class="date">资料至 {{ c.coverage }}</span> · <span class="date">研究于 {{ c.created_at[:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}</span></p>
+      {% if c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过）</p>{% endif %}
     </li>
   {% endfor %}
   </ul>
-  {% else %}
+  {% elif not batch_only %}
   <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
   {% endif %}
+  {% if batch_only %}<p class="muted">另有 {{ batch_only }} 家只在初筛中深挖过，见<a href="/batches">各批次</a>。</p>{% endif %}
 </section>
 {% endblock %}

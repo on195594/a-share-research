@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 """
 
 
+# A report's financial coverage: the later of its period and its newest T.* table period. Reports
+# saved before period tracked the table recorded only the base document's period (e.g. a prior
+# annual report while the table already held the half year). Expects the reports table aliased r.
+COVERAGE = ("MAX(r.period, COALESCE((SELECT MAX(v.key) FROM json_each(r.body, '$.table') t,"
+            " json_each(t.value, '$.values') v WHERE json_extract(t.value, '$.id') LIKE 'T.%'), ''))")
+
+
 def now() -> str:
     return datetime.now(SHANGHAI).isoformat(timespec="seconds")
 

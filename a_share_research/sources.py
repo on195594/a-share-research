@@ -251,3 +251,15 @@ def valuation(code: str) -> dict:
     if frame.empty:
         raise SourceError(f"no valuation rows for {code}")
     return frame.sort_values("trade_date").iloc[-1].to_dict()
+
+
+# Periodic reports: period end, name, deadline year offset, statutory deadline.
+PERIODIC = [("03-31", "一季报", 0, "04-30"), ("06-30", "半年报", 0, "08-31"),
+            ("09-30", "三季报", 0, "10-31"), ("12-31", "年报", 1, "04-30")]
+
+
+def due_report(today: date) -> tuple[str, str]:
+    """The latest periodic report whose statutory deadline has passed: (period end, name)."""
+    return max((f"{year}-{end}", f"{year} 年{name}") for year in (today.year - 1, today.year)
+               for end, name, later, deadline in PERIODIC
+               if today > date.fromisoformat(f"{year + later}-{deadline}"))

@@ -240,13 +240,22 @@ def logout(request: Request, csrf: str = Form("")):
 
 # ---------- pages ----------
 
-def latest_reports() -> list:
-    return conn.execute(
-        "SELECT r.* FROM reports r JOIN (SELECT p.code, MAX(p.id) AS id FROM reports p"
-        " JOIN runs u ON u.id = p.run_id WHERE json_extract(u.identity, '$.replay_of') IS NULL"
+def latest_reports() -> tuple[list, int]:
+    """Companies with research of their own (not only batch deep dives), and how many are batch-only.
+
+    Each row is the company's latest non-replay report, whichever source produced it.
+    """
+    rows = conn.execute(
+        "SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, l.own,"
+        " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch,"
+        f" {db.COVERAGE} AS coverage"
+        " FROM reports r JOIN runs u ON u.id = r.run_id"
+        " JOIN (SELECT p.code, MAX(p.id) AS id, SUM(COALESCE(q.request_id, '') NOT LIKE 'batch-%') AS own"
+        " FROM reports p JOIN runs q ON q.id = p.run_id WHERE json_extract(q.identity, '$.replay_of') IS NULL"
         " GROUP BY p.code) l ON r.id = l.id"
         " ORDER BY r.id DESC"
     ).fetchall()
+    return [r for r in rows if r["own"]], sum(1 for r in rows if not r["own"])
 
 
 def recent_report(code: str):
@@ -267,8 +276,9 @@ def active_runs() -> list:
 
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
     batch = conn.execute("SELECT id, status, created_at FROM batches ORDER BY id DESC LIMIT 1").fetchone()
-    return render(request, "home.html", session, status, companies=latest_reports(), active=active_runs(),
-                  batch=batch, **context)
+    companies, batch_only = latest_reports()
+    return render(request, "home.html", session, status, companies=companies, batch_only=batch_only,
+                  due=sources.due_report(datetime.now(db.SHANGHAI).date()), active=active_runs(), batch=batch, **context)
 
 
 @app.get("/")
