@@ -107,8 +107,10 @@ class Material:
             + f"\n\n## {self.doc.title}·管理层讨论与分析（原文，按页）\n{pages}"
         )
         if self.extra:
-            block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(
-                {k: self.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}, ensure_ascii=False)
+            pending = {k: self.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}
+            if self.extra.get("prior"):
+                pending["prior"] = self.extra["prior"]
+            block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(pending, ensure_ascii=False)
             block += "\n\n# 补充资料（source 标识用于 cites）\n" + json.dumps(
                 {k: {"document": v["document"], "pages": v["pages"]}
                  for k, v in self.extra.get("sources", {}).items()}, ensure_ascii=False)
@@ -360,6 +362,8 @@ def check(report: dict, material: Material) -> list[dict]:
         sections.append("answer")
     if material.extra.get("feedback") or "methods" in report:
         sections.append("methods")
+    if not material.extra.get("feedback") or "checkpoints" in report:
+        sections.append("checkpoints")
     for section in sections:
         items = report.get(section)
         if not isinstance(items, list) or (not items and section != "methods"):
@@ -412,8 +416,17 @@ SCHEMA = """输出且只输出一个 JSON 对象：
 出处有两种：原文引文 {"source": "D0 或工具给的文档标识", "page": 页码, "quote": "该页原文中连续的一段，逐字复制，20–200 字"}；表格/程序计算 {"ref": "T.revenue 或 C.1 等实际行标识", "period": "实际期间键，跨期论断可省略"}。"""
 
 
+CHECKPOINTS = ('\n另加 "checkpoints": [{"text": "下一期披露中应观察的事项与方向，以及出现什么情况会削弱当前判断", "cites": [基期事实的出处]}]，1–3 条。'
+               '这是条件，不是预测：出处只证明基期事实；观察阈值须来自出处或程序计算，不自拟数字。')
+PRIOR = ('\n上下文中的 prior 是同一公司此前一份报告当时列出的风险与检查点：只是待复核的旧议程，不是事实来源，也不是完整的取证清单；'
+         '结论按本次证据独立给出，新披露中的重大反证优先。answer 末尾逐条说明这些旧风险与旧检查点在本期的状态'
+         '（仍存在 / 已缓解 / 已证伪 / 无法判断）并引用本次资料；risks 只保留当前仍可能推翻判断的风险。')
+
+
 def output_schema(material: Material) -> str:
     schema = SCHEMA
+    if not material.extra.get("feedback"):
+        schema += CHECKPOINTS
     if material.extra.get("question"):
         schema += '\n另加 "answer": [{"text": "直接回答本次问题", "cites": [出处]}]，不得省略。'
     if material.extra.get("feedback"):
@@ -422,6 +435,8 @@ def output_schema(material: Material) -> str:
                    '只保留有依据的通用做法，不把公司事实泛化成规律；没有可复用方法就返回 []。'
                    '若核查位置是 methods[i]，本次 methods 将替代该条历史方法：反馈不成立则重述仍成立的方法，失效且无适用替代时返回 []。'
                    '这不改变投资政策、代码或原报告。')
+    if material.extra.get("prior"):
+        schema += PRIOR
     return schema
 
 RULES = """规则：
@@ -487,10 +502,11 @@ def review(runner: Runner, material: Material, report: dict) -> list[dict]:
 2. 资料中是否有足以改变结论的重大风险或不利变化被遗漏（只依据资料判断，次要项不算）。
 3. verdict 与 summary 是否和报告内容一致。
 4. 有具体问题时，answer 是否回答了它；纠错是否核对了所指原文。
+5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。
 原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
 通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
 
-输出且只输出一个 JSON 对象：{{"issues": [{{"where": "risks[0] / business[1] / summary / missing", "problem": "具体问题"}}]}}，没有问题时 issues 为空数组。
+输出且只输出一个 JSON 对象：{{"issues": [{{"where": "risks[0] / business[1] / checkpoints[0] / summary / missing", "problem": "具体问题"}}]}}，没有问题时 issues 为空数组。
 
 # 待复核的报告
 {json.dumps(report, ensure_ascii=False, indent=1)}
@@ -545,7 +561,7 @@ def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool
             location = location.strip()
             if location == "missing":
                 continue
-            match = re.fullmatch(r"(risks|business|financial|answer)(?:\[(\d+)\])?", location)
+            match = re.fullmatch(r"(risks|business|financial|answer|checkpoints)(?:\[(\d+)\])?", location)
             if not match:
                 return {}
             section, index = match.groups()
@@ -586,6 +602,50 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     return context
 
 
+def _prior_report(conn, code: str, run_id: int) -> dict | None:
+    """The company's latest reviewed, non-replay, non-feedback report before this run, as an agenda to recheck.
+
+    Only its risks and checkpoints travel: no verdict or summary, so the new judgment starts from evidence.
+    """
+    row = conn.execute(
+        f"SELECT r.id, r.body, r.created_at, {db.COVERAGE} AS coverage FROM reports r JOIN runs u ON u.id = r.run_id"
+        " WHERE r.code = ? AND r.run_id < ? AND r.passed = 1 AND u.status = 'done'"
+        " AND json_extract(u.identity, '$.replay_of') IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
+        " ORDER BY r.id DESC LIMIT 1", (code, run_id),
+    ).fetchone()
+    if row is None:
+        return None
+    body = json.loads(row["body"])
+    return {"report_id": row["id"], "researched": row["created_at"][:10], "period": row["coverage"],
+            "market_date": body.get("market_date"),
+            "risks": [item["text"] for item in body.get("risks", [])],
+            "checkpoints": [item["text"] for item in body.get("checkpoints", [])]}
+
+
+def since_prior(old: list[dict], new: list[dict]) -> dict:
+    """What changed in the program tables between two reports; shown to people, never cited by the model.
+
+    Values are compared only within the same row and period: cumulative figures of different periods are
+    not subtracted, and a row the old report never collected is listed rather than treated as zero.
+    """
+    before = {r["id"]: r["values"] for r in old}
+    rows = [r for r in new if r["id"].startswith("T.")]
+    seen = {p for r in old if r["id"].startswith("T.") for p in r["values"]}
+    added = sorted({p for r in rows for p in r["values"]} - seen)
+    newest = max(seen, default="")
+    return {
+        "disclosed": [p for p in added if p > newest],
+        "backfilled": [p for p in added if p <= newest],  # comparison periods, not new disclosures
+        "revised": [{"label": r["label"], "unit": r["unit"], "period": p, "before": before[r["id"]][p], "after": v}
+                    for r in rows if r["id"] in before for p, v in r["values"].items()
+                    if p in before[r["id"]] and before[r["id"]][p] != v],
+        "uncollected": [r["label"] for r in rows if r["id"] not in before and r["values"]],
+        "valuation": [{"label": r["label"], "unit": r["unit"], "before": next(iter(before[r["id"]].items()), None),
+                       "after": next(iter(r["values"].items()), None)}
+                      for r in new if r["id"] in ("M.pe_ttm", "M.pb", "M.dv_ttm") and r["id"] in before],
+    }
+
+
 def publish(conn, run_id: int, material: Material, period: str, passed: bool,
             verdict: str | None, body: dict) -> None:
     """Save the report and finish its run together, so a crash never leaves one without the other."""
@@ -599,7 +659,7 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
 
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
-    run = conn.execute("SELECT code, request FROM runs WHERE id = ?", (run_id,)).fetchone()
+    run = conn.execute("SELECT code, request, request_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
     db.update_run(conn, run_id, status="running", step="gather", started_at=db.now())
     runner = Runner(conn, run_id)
@@ -624,6 +684,13 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             material.extra["question"] = request.get("question", "")
             material.extra["feedback"] = request.get("feedback")
             material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"))
+            # Batch deep dives stay independent so cross-company comparison inputs keep their meaning.
+            if not (request.get("parent_report_id") or request.get("feedback")
+                    or (run["request_id"] or "").startswith("batch-")):
+                if prior := _prior_report(conn, material.code, run_id):
+                    material.extra["prior"] = prior
+                    if not material.extra["question"]:
+                        material.extra["question"] = f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
         save_material(material)
         if replay_of is None:
             from a_share_research.research_tools import explore
@@ -658,12 +725,17 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "methods_used": material.extra.get("methods_used", []),
             "replay_of": replay_of, "material_sha256": material_sha256,
         }
+        if prior := material.extra.get("prior"):
+            body["prior"] = {"report_id": prior["report_id"], "period": prior["period"],
+                             "question_added": not request.get("question")}
         if problems:
             body |= {"facts": _verified_facts(report, problems, reviewed=reviewed),
                      "facts_reviewed": reviewed, "problems": problems}
             publish(conn, run_id, material, period, False, None, body)
         else:
             body |= {k: report[k] for k in ("verdict", "summary", *SECTIONS)}
+            if "checkpoints" in report:
+                body["checkpoints"] = report["checkpoints"]
             if material.extra.get("feedback"):
                 body["methods"] = report["methods"]
             body["answer"] = report.get("answer", [])

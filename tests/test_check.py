@@ -37,6 +37,8 @@ def report(**changes):
         "risks": [{"text": "经营现金流从924.64亿元降至615.22亿元。", "cites": [{"ref": "T.op_cash"}, CASH]}],
         "business": [{"text": "销售费用增加主要因为广告宣传。", "cites": [SALES]}],
         "financial": [{"text": "销售费用同比增长28.62%，约72.53亿元。", "cites": [SALES_ROW]}],
+        "checkpoints": [{"text": "下一期经营现金流若仍低于615.22亿元，说明现金转化尚未恢复。",
+                         "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}]}],
     }
     return deepcopy(base | changes)
 
@@ -75,3 +77,22 @@ def test_snapshot_preserves_prompt_and_checks():
     snapshot["data"]["table"].pop()
     with pytest.raises(ResearchError, match="哈希"):
         Material.from_snapshot(snapshot)
+
+
+def test_checkpoint_thresholds_must_come_from_cited_figures():
+    bad = report(checkpoints=[{"text": "下一期经营现金流若低于700.00亿元，说明现金转化未恢复。",
+                               "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}]}])
+    assert [p["where"] for p in check(bad, MATERIAL)] == ["checkpoints[0]"]
+    # Reports written before checkpoints existed fail the current contract on replay.
+    legacy = report()
+    del legacy["checkpoints"]
+    assert [p["where"] for p in check(legacy, MATERIAL)] == ["checkpoints"]
+
+
+def test_feedback_reports_do_not_require_checkpoints():
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra = {"feedback": {"location": "risks[0]", "text": "核查现金流口径"}}
+    result = report(answer=[{"text": "经营现金流从924.64亿元降至615.22亿元。", "cites": [{"ref": "T.op_cash"}]}],
+                    methods=[])
+    del result["checkpoints"]
+    assert check(result, material) == []

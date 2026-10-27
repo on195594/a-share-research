@@ -39,7 +39,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
             body = json.loads(parent["body"])
             content = body if "summary" in body else body.get("facts", {})
-            match = re.fullmatch(r"(answer|risks|business|financial|methods)\[(\d{1,4})\]", location)
+            match = re.fullmatch(r"(answer|risks|business|financial|methods|checkpoints)\[(\d{1,4})\]", location)
             valid = location == "summary" and bool(content.get("summary"))
             if match:
                 valid = int(match[2]) < len(content.get(match[1], []))

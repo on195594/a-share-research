@@ -29,8 +29,9 @@
   <hr class="perforation">
   <nav aria-label="报告章节">
     <ul class="toc">
-      {% if body.question %}<li><a href="#answer">{{ '纠错核查' if feedback else '你的问题' }}</a></li>{% endif %}
+      {% if body.question %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
       <li><a href="#risks">风险与反证</a></li>
+      {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点</a></li>{% endif %}
       <li><a href="#business">业务</a></li>
       <li><a href="#financial">财务</a></li>
       <li><a href="#data">财务数据</a></li>
@@ -40,13 +41,15 @@
   </nav>
 
   {% set content = body if report.passed else body.facts %}
+  {% set answer_title = '纠错核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
   {% set documents = dict(body.sources or {}, D0=dict(document=body.document)) %}
   {% if body.question %}
   <section id="answer">
-    <h2>{{ '纠错核查' if feedback else '你的问题' }}</h2>
+    <h2>{{ answer_title }}</h2>
     {% if feedback %}<p>核查原报告的{{ feedback_label }}</p>{% endif %}
     <p>{{ feedback.text if feedback else body.question }}</p>
     {% if body.parent_report_id %}<p><a href="/reports/{{ body.parent_report_id }}">查看原报告</a></p>{% endif %}
+    {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。</p>{% endif %}
     {{ items(content.answer or [], rows, "可核查的回答", documents) }}
   </section>
   {% endif %}
@@ -54,6 +57,13 @@
     <h2>主要风险与反证</h2>
     {{ items(content.risks or [], rows, "可列出的风险", documents) }}
   </section>
+  {% if content.checkpoints %}
+  <section id="checkpoints" tabindex="-1">
+    <h2>下期检查点</h2>
+    <p class="muted">下一期披露时应观察的事项；出处只证明基期事实，不是预测。</p>
+    {{ items(content.checkpoints, rows, "检查点", documents) }}
+  </section>
+  {% endif %}
   <section id="business">
     <h2>业务</h2>
     {{ items(content.business or [], rows, "可列出的业务事实", documents) }}
@@ -129,7 +139,7 @@
         <label for="location">哪一处需要核查？</label>
         <select id="location" name="location" required>
           {% if report.passed %}<option value="summary">一句话结论</option>{% endif %}
-          {% for key, label in [('answer','问题回答'),('risks','风险与反证'),('business','业务'),('financial','财务'),('methods','研究方法')] %}
+          {% for key, label in [('answer','问题回答'),('risks','风险与反证'),('business','业务'),('financial','财务'),('checkpoints','下期检查点'),('methods','研究方法')] %}
           {% for item in content.get(key, []) %}<option value="{{ key }}[{{ loop.index0 }}]">{{ label }}第 {{ loop.index }} 条：{{ item.text[:45] }}…</option>{% endfor %}
           {% endfor %}
         </select>

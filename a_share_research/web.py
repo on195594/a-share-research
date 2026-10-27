@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, screening, sources, service
+from a_share_research import db, research, screening, sources, service
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -247,6 +247,7 @@ def latest_reports() -> tuple[list, int]:
     """
     rows = conn.execute(
         "SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, l.own,"
+        " json_extract(r.body, '$.checkpoints[0].text') AS checkpoint,"
         " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch,"
         f" {db.COVERAGE} AS coverage"
         " FROM reports r JOIN runs u ON u.id = r.run_id"
@@ -380,7 +381,8 @@ def report_page(request: Request, report_id: int):
     if feedback:
         section, _, index = feedback["location"].partition("[")
         feedback_label = {"summary": "一句话结论", "answer": "问题回答", "risks": "风险与反证",
-                          "business": "业务", "financial": "财务", "methods": "研究方法"}[section]
+                          "business": "业务", "financial": "财务", "methods": "研究方法",
+                          "checkpoints": "下期检查点"}[section]
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body,
@@ -517,8 +519,13 @@ def stock_page(request: Request, code: str):
     ).fetchall()
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
+    since = None
+    if prior := json.loads(reports[0]["body"]).get("prior"):
+        old = conn.execute("SELECT created_at, body FROM reports WHERE id = ?", (prior["report_id"],)).fetchone()
+        since = research.since_prior(json.loads(old["body"])["table"], json.loads(reports[0]["body"])["table"]) | {
+            "report_id": prior["report_id"], "researched": old["created_at"][:10]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
-                  price=latest_price(code))
+                  price=latest_price(code), since=since)
 
 
 def latest_price(code: str) -> dict | None:

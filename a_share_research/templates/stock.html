@@ -6,6 +6,18 @@
   <h1>{{ reports[0].name }}</h1>
   <p class="code">{{ code }}</p>
   {{ price_block(price, code, csrf, request_id) }}
+  {% if since %}
+  <section aria-labelledby="since">
+    <h2 id="since">自上次研究以来</h2>
+    <p class="muted">程序对照最新报告与 <a href="/reports/{{ since.report_id }}">{{ since.researched }} 的报告</a>的财务表，只列数字，不作评价。</p>
+    <ul>
+      <li>新增报告期：{{ since.disclosed | join('、') if since.disclosed else '无' }}{% if since.backfilled %}；补齐比较期 {{ since.backfilled | join('、') }}（不是新披露）{% endif %}</li>
+      {% for v in since.valuation %}<li>{{ v.label }}：{{ v.before[1] }}（{{ v.before[0] }}）→ {{ v.after[1] }}（{{ v.after[0] }}）{{ v.unit }}，估值快照变化，不是收益</li>{% endfor %}
+      {% for r in since.revised %}<li>数据修订：{{ r.label }} {{ r.period }} 由 {{ r.before }} 改为 {{ r.after }} {{ r.unit }}</li>{% endfor %}
+      {% if since.uncollected %}<li>上次未采集：{{ since.uncollected | join('、') }}</li>{% endif %}
+    </ul>
+  </section>
+  {% endif %}
   <h2>研究记录</h2>
   <ul class="list">
   {% for r in reports %}
