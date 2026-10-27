@@ -21,7 +21,7 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。2026-10-27 部署 **Research `042a4ad`**，配对激活 **Skills 0.1.24 / `5154986`**；前版分别为 `5123d2e` 和 0.1.23。之后的文档或源码整理不代表再次部署。
+入口 [stock.keyi.win](https://stock.keyi.win)。2026-10-27 部署 **Research `042a4ad`**，配对激活 Skills 0.1.24 / `5154986`；前版分别为 `5123d2e` 和 0.1.23。同日 Skills 单独升级为 **0.1.25 / `04dbc6c`**（精简研究上下文与盘后简报，`research-v1` 接口和凭据不变），身份与回退见其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record)。下表为 0.1.24 配对验收；之后的文档或源码整理不代表再次部署。
 
 | 项目 | 当前结果 |
 |---|---|
