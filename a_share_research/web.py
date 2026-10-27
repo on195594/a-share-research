@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, research, screening, sources, service, reading
+from a_share_research import db, screening, sources, service, reading
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"

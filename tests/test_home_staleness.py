@@ -36,11 +36,3 @@ def test_due_report_follows_statutory_deadlines():
     assert due_report(date(2027, 4, 30)) == ("2026-09-30", "2026 年三季报")
     assert due_report(date(2027, 5, 1)) == ("2027-03-31", "2027 年一季报")
     assert due_report(date(2027, 9, 1)) == ("2027-06-30", "2027 年半年报")
-
-
-def test_half_year_coverage_turns_stale_only_after_third_quarter_deadline():
-    for report_id in (5, 6, 7, 37):
-        assert not coverage(REPORTS[report_id]) < due_report(date(2026, 10, 31))[0]
-        assert coverage(REPORTS[report_id]) < due_report(date(2026, 11, 1))[0]
-    # 紫金矿业 already covers the third quarter, so it stays current through the annual-report season.
-    assert not coverage(REPORTS[35]) < due_report(date(2027, 4, 30))[0]

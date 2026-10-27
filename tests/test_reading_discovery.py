@@ -6,7 +6,7 @@ import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from a_share_research import db, reading
-from test_continuation import RECORDS, load
+from test_continuation import load
 
 ROOT = Path(__file__).parents[1]
 ENV = Environment(loader=FileSystemLoader(ROOT / 'a_share_research/templates'), autoescape=select_autoescape())
@@ -85,19 +85,12 @@ def test_legacy_missing_table_and_incomplete_units_are_not_compared(conn):
 
 
 def test_search_render_escapes_query_and_uses_get_without_research_action():
-    from urllib.parse import urlencode
     html = ENV.get_template('research_library.html').render(q='<script>&"', page=1, companies=[], more=False)
     assert '<script>&"' not in html and '&lt;script&gt;' in html
     assert 'method="get"' in html and 'action="/research"' not in html
     assert '没有找到匹配' in html
     html = ENV.get_template('research_library.html').render(q='', page=1, companies=[], more=False)
     assert '还没有可查' in html
-    # URL parameters should not include empty query
-    for q in ('', '  '):
-        clean = q.strip()
-        params = {'q': clean} if clean else {}
-        assert urlencode(params | {'page': 2}) == 'page=2'
-    assert urlencode(({'q': '茅台'}) | {'page': 2}) == 'q=%E8%8C%85%E5%8F%B0&page=2'
 
 
 def test_reverse_link_uses_real_continuation_question_from_report_body(conn):

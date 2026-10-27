@@ -29,7 +29,7 @@
 需要 Python ≥3.13、uv、Node.js、`pdftotext`（poppler-utils）和本机 pi 运行时。按 `.env.example` 建 `.env`（0600，不进 Git），然后 `uv sync`。
 
 ```bash
-uv run --env-file .env python -m a_share_research.research 600519   # 命令行研究一家（不带代码则跑评估集）
+uv run --env-file .env python -m a_share_research.research 600519 --question '最新财报改变了什么？'
 uv run --env-file .env python -m a_share_research.worker            # 后台 worker：执行网页提交的研究与价格参考
 uv run --env-file .env.web.dev uvicorn a_share_research.web:app --port 8610  # 网页（本机开发）
 uv run pytest -q tests
@@ -54,13 +54,13 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编号>
 ```
 
-`create` 仅输出一次明文，请直接保存到调用方权限为 0600 的私有 `runtime.env` 的 `A_STOCK_RESEARCH_TOKEN`；不要进入聊天、日志、命令参数或 Git。服务端只保存哈希，`list` 只输出编号、名称和创建时间，`revoke` 按编号立即撤销。Key 只授予研究 API 权限，不授予网页登录、其他 Key 管理或账户写入权限。管理命令只在 owner 本机执行，不提供远程签发接口。
+`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_STOCK_RESEARCH_URL` 指向服务，`A_STOCK_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存哈希，`list` 只显示编号、名称与创建时间。管理命令仅由 owner 本地执行；Key 只授予研究 API 权限。
 
-轮换顺序：创建新 Key → 更新调用方配置并验证一次报告读取 → 撤销旧 Key；同名 Key 可以并存，按编号区分。环境变量优先于 `runtime.env`，更新配置时须排除旧环境变量覆盖。重启服务或浏览器登录/退出不影响 Key。收到 401 后先修复凭据，不重复重试；恢复后提交仍沿用原 `request_id`。
+轮换：创建新 Key → 更新配置并验证读取 → 按编号撤销旧 Key。同名 Key 可并存；环境变量优先于文件，须排除旧值覆盖。Key 不受服务重启或浏览器登录/退出影响。401 后先修复凭据，再沿用原 `request_id` 重试。
 
-升级时自动新增 `api_keys` 表，不改旧会话和研究数据。回退到不支持 Key 的旧服务时，需要 owner 重新签发临时 Agent 令牌并更新调用方配置；保留新表即可，不删除研究数据。
+临时验收仍可用 `python -m a_share_research.login_token --agent --minutes 60`（1–480 分钟，不续期）。两种凭据均通过 `Authorization: Bearer ...` 发送，与浏览器 cookie 隔离；`POST /api/session/revoke` 仅撤销当前凭据。API 无需模型或行情凭据。
 
-临时验收仍可用 `python -m a_share_research.login_token --agent --minutes 60`（最长 480 分钟），不自动续期。两种凭据都只用于 `Authorization: Bearer ...`，不能用作浏览器 cookie；浏览器会话也不能访问 API。`POST /api/session/revoke` 只撤销当前请求携带的凭据。API 不需要模型或行情凭据。下面的请求使用 `Content-Type: application/json`，可带 `X-Research-Version: research-v1`；未知版本返回 400。
+请求使用 `Content-Type: application/json`；可带 `X-Research-Version: research-v1`，未知版本返回 400。升级只新增 `api_keys` 表；旧服务不识别长期 Key，回退流程见[当前部署](docs/implementation-plan.md#当前部署)。
 
 | 路由 | 输入/结果 |
 |---|---|
@@ -71,21 +71,15 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `POST /api/research`（追问） | 上述输入加 `parent_report_id`，必须同公司，创建关联新任务 |
 | `POST /api/reports/{id}/feedback` | `{"request_id":"新编号","location":"financial[0]","text":"具体问题与依据"}` → 核查任务 |
 
-相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial` 的实际零基下标。报告的 `passed` 与任务状态一起判断；失败报告不提供已通过的结论，可保留的事实范围见[产品方案](docs/proposal.md#2-从用户角度的取舍)。
+相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial/methods/checkpoints` 的实际零基下标，例如 `financial[0]`。报告的 `passed` 与任务状态一起判断；失败报告不提供已通过的结论，可保留的事实范围见[产品方案](docs/proposal.md#2-从用户角度的取舍)。
 
-财务表包含利润、现金流及资产负债表指标，新增扣非净利润、购建长期资产现金、经营现金流减购建长期资产现金、货币资金、四项债务合计、应收、存货、合同负债和商誉。派生项按原始数值计算；四项债务或应收回退分项不齐时保持缺失，不将空值视为零。跨公司比较保留业务、缺口、最新年度/当期/同期指标及计算输入，旧报告缺少的指标明确标记，不回填。
+财务表覆盖三表、现金流与债务；字段、单位和缺失值规则见[三表口径](docs/investment-upgrade.md#21-结构化三表扩展)。旧报告不回填新增指标，缺失不当作零。
 
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 
-Skills 候选通过 `a-stock-cache research` 接入本 API，先复用旧报告，再按缺口发起追问；配置与使用见 [Skills 接入说明](https://github.com/on195594/a-stock-agent-skills/blob/master/skills/a-stock-research/references/research-service.md)，发布状态见实施计划。
+Skills 通过 `a-stock-cache research` 接入本 API，先复用旧报告，再按缺口发起追问；配置与使用见 [Skills 接入说明](https://github.com/on195594/a-stock-agent-skills/blob/master/skills/a-stock-research/references/research-service.md)，发布状态见实施计划。
 
-纠错报告的 `methods` 保存有引证、经本轮复核的方法；worker 可按问题关键词跨公司检索，原出处和参考记录随 `evidence.methods_used` 保存。它们只是待验证线索，当前事实仍需重新取证。针对 `methods[i]` 的新核查通过后，其方法结果替代该条历史检索项；返回空列表表示不再保留该方法。原报告不改写，失败核查不影响旧方法，也不自动修改 Skill、代码、账户或投资政策。
-
-CLI 同样支持问题：
-
-```bash
-uv run --env-file .env python -m a_share_research.research 600519 --question '最新财报改变了什么，利润与现金流是否一致？'
-```
+纠错报告的 `methods` 是已核查的方法线索，使用记录随 `evidence.methods_used` 保存。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
 
 ## 运行身份与材料重放
 
@@ -141,14 +135,16 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 
 ## 部署
 
-项目采用 Docker Compose 进行前后端容器化分离部署，全部服务在本项目目录下统一编排：
+Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
-- **前端（web）**：FastAPI + Jinja 服务端 HTML、OAuth 认证与交互界面。镜像内不含模型与行情凭据，通过 `nginx-network` 接入宿主 Nginx 反向代理，监听 `127.0.0.1:8620`。配置由 `.env.web` 提供。
-- **后端（worker）**：后台研究任务执行器，负责 TuShare 行情抓取、PDF 财报抽取与 LLM 研报生成。挂载宿主 `~/.pi`（pi 托管安装与认证），`PI_RUNTIME` 留空时按 `~/.pi/agent/install/current-version` 找运行时。配置由 `.env` 提供。与前端通过共享的 SQLite 数据目录解耦通信，不暴露外部端口。
+- web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
+- worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口。
 
-发布：提交并推送 main 后在本目录执行（worker 有任务在跑时先等它空闲）：
+经当次上线授权后，从已提交、已推送的 main 构建并核对镜像。确认研究任务和批次空闲，暂停受理后复查、备份与巡检，再启动候选；验证主流程后记录版本与回退依据。构建和切换分开执行：
+
 ```bash
-docker compose up -d --build
+docker compose build
+docker compose up -d --no-build --no-deps web worker
 ```
-镜像构建时复制代码，开发改动在重建前不影响线上；不要从有未提交改动的工作树重建。
-数据默认保存在 `/home/lin/a-share-research-data`（可通过 `DATA_DIR` 自定义）。
+
+这两条命令不代替空闲检查、备份或验收；具体版本、证据与回退见[当前部署](docs/implementation-plan.md#当前部署)。开发工作树改动不会自动影响运行中的镜像。
