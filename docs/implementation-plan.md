@@ -43,16 +43,16 @@ AGY 复审后修复扣非取数异常封装、离线实验优化模式拒绝与�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 12:58 部署 `5bd0571`**（先 `docker compose build`，逐文件核对镜像代码与提交一致、任务与批次空闲后 `docker compose up -d --no-build --no-deps web worker`）。本次是 `8112902`（[积累方案](research-accumulation.md) K1、K2 首次上线）的热修，处理 Codex 上线后审查（方案第 6 节）：追问与检查点纠错带上原报告检查点、批次不复用接续报告、公司页对照按指标与期间判断「上次未采集」并容忍旧报告缺失、自动补问题标记改由冻结问题推导，测试改用真实任务与报告记录。无数据库迁移；Skills 仍为 0.1.23。上一版为 `8112902`（部署记录见 `git show 5bd0571:docs/implementation-plan.md`）。
+入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 13:55 部署 `5123d2e`**（先 `docker compose build`，逐文件核对镜像代码与提交一致、任务与批次空闲后 `docker compose up -d --no-build --no-deps web worker`）。本次包含只读已有研究搜索（`/research-library`）及首页入口、显式报告前后对照（`_comparison.html` / `reading.comparison`）上线报告页与公司页，以及 Codex 审查指出的残缺指标行导致 `sorted(excluded)` 抛 `TypeError` 的容错修复与分页 URL 优化。无数据库迁移；Skills 仍为 0.1.23。上一版为 `5bd0571`（部署记录见 `git show 5123d2e:docs/implementation-plan.md`）。
 
 | 项目 | 证据 |
 |---|---|
-| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:5bd0571` 与 `latest`，29 个代码文件哈希与提交一致；上一版 `:8112902` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build --no-deps web worker` |
+| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:5123d2e` 与 `latest`，32 个代码与模板文件哈希与提交一致；上一版 `:5bd0571` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build --no-deps web worker` |
 | 门禁 | 切换脚本在排队/运行任务或忙碌批次非零时退出，备份前后各查一次，均为 0。发布后两个容器运行、零重启，worker ready |
-| 本地验证 | 132 项测试通过；审查修复各有对应测试，四处守卫逐一改坏均被测试发现 |
-| 生产验收 | 发布前完整性巡检通过并在线备份（`backup-pre-5bd0571-20261027045815.db`）；发布后巡检 0 异常；以临时会话访问首页、公司页（东方电缆、贵州茅台）、报告页（5、12、37）、批次列表与详情均 200，首页初筛收起行正常；外部 HTTPS 入口正常跳转认证 |
+| 本地验证 | 139 项测试通过；搜索字面匹配与转义、无关联/缺失关联拒绝自动配对、残缺指标容错比对均有测试覆盖 |
+| 生产验收 | 发布前完整性巡检通过并在线备份（`backup-pre-5123d2e-20261027055138.db`）；发布后巡检 0 异常；以临时会话访问首页、查已有研究页（空查与“茅台”检索）、公司页（贵州茅台 600519、紫金矿业 601899）、报告页（12、35、37）、批次列表均 200，前后对照渲染正确；外部 HTTPS 入口正常跳转认证 |
 
-证据在 `~/.local/share/a-share-research-evaluations/deploy-5bd0571-20261027/`（0700）。K2 跨期接续对照与首次 K3 复盘仍待三季报披露后完成。
+证据在 `~/.local/share/a-share-research-evaluations/deploy-5123d2e-20261027/`（0700）。K2 跨期接续对照与首次 K3 复盘仍待三季报披露后完成。
 
 **收盘后观察尚待完成**（`bea45f0` 部署时安排，与本次切换无关）：已启动仅限 10-27 的只读观察进程，17:00 起每分钟检查首批，更新完成后退出，最晚 22:00 结束；不改 cron、系统服务或生产数据。检查冻结内容和入场记录不变、旧日收益在等待时保留、当日收益与两基准日期一致。结果写入 `deploy-bea45f0-20261027/` 的 `close-observation.json` / `.jsonl`，成功时另存 `batch-after-close.json`；`waiting_observed` 表示是否实际捕捉到当晚等待状态。进程不会在宿主重启后自动恢复，也不发送通知；安排观察不代表实时验收已通过。
 
