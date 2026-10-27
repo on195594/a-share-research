@@ -514,7 +514,8 @@ def stock_page(request: Request, code: str):
         "SELECT r.*, json_extract(u.identity, '$.replay_of') AS replay_of,"
         " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
         " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
-        " json_extract(u.request, '$.feedback.text') AS feedback_text FROM reports r"
+        " json_extract(u.request, '$.feedback.text') AS feedback_text,"
+        " json_extract(r.body, '$.prior.report_id') AS prior_report_id FROM reports r"
         " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
     ).fetchall()
     if not reports:

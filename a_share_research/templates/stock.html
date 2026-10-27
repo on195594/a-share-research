@@ -10,12 +10,15 @@
   <section aria-labelledby="since">
     <h2 id="since">自上次研究以来</h2>
     <p class="muted">程序对照最新报告与 <a href="/reports/{{ since.report_id }}">{{ since.researched }} 的报告</a>的财务表，只列数字，不作评价。</p>
+    {% set moved = since.valuation | rejectattr("unchanged") | list %}
+    {% if since.disclosed or since.backfilled or since.revised or since.uncollected or moved %}
     <ul>
       <li>新增报告期：{{ since.disclosed | join('、') if since.disclosed else '无' }}{% if since.backfilled %}；补齐比较期 {{ since.backfilled | join('、') }}（不是新披露）{% endif %}</li>
-      {% for v in since.valuation %}<li>{{ v.label }}：{{ v.before[1] }}（{{ v.before[0] }}）→ {{ v.after[1] }}（{{ v.after[0] }}）{{ v.unit }}，估值快照变化，不是收益</li>{% endfor %}
+      {% for v in moved %}<li>{{ v.label }}：{{ v.before[1] }}（{{ v.before[0] }}）→ {{ v.after[1] }}（{{ v.after[0] }}）{{ v.unit }}，估值快照变化，不是收益</li>{% endfor %}
       {% for r in since.revised %}<li>数据修订：{{ r.label }} {{ r.period }} 由 {{ r.before }} 改为 {{ r.after }} {{ r.unit }}</li>{% endfor %}
       {% if since.uncollected %}<li>上次未采集：{{ since.uncollected | join('、') }}</li>{% endif %}
     </ul>
+    {% else %}<p>财务表和估值快照都没有变化。</p>{% endif %}
   </section>
   {% endif %}
   <h2>研究记录</h2>
@@ -23,7 +26,7 @@
   {% for r in reports %}
     <li>
       <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
-      {{ research_context(r.question, r.parent_report_id, r.feedback_text) }}
+      {{ research_context(r.question, r.parent_report_id, r.feedback_text, r.prior_report_id) }}
       {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
       <p>{% if r.passed %}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
         <span class="muted">· <span class="date">资料至 {{ r.period }}</span></span></p>

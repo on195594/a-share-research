@@ -27,6 +27,8 @@
     {% endif %}
   </header>
   <hr class="perforation">
+  {% set content = body if report.passed else body.facts %}
+  {% set answer_title = '纠错核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
   <nav aria-label="报告章节">
     <ul class="toc">
       {% if body.question %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
@@ -40,8 +42,6 @@
     </ul>
   </nav>
 
-  {% set content = body if report.passed else body.facts %}
-  {% set answer_title = '纠错核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
   {% set documents = dict(body.sources or {}, D0=dict(document=body.document)) %}
   {% if body.question %}
   <section id="answer">

@@ -641,7 +641,7 @@ def since_prior(old: list[dict], new: list[dict]) -> dict:
                     if p in before[r["id"]] and before[r["id"]][p] != v],
         "uncollected": [r["label"] for r in rows if r["id"] not in before and r["values"]],
         "valuation": [{"label": r["label"], "unit": r["unit"], "before": next(iter(before[r["id"]].items()), None),
-                       "after": next(iter(r["values"].items()), None)}
+                       "after": next(iter(r["values"].items()), None), "unchanged": before[r["id"]] == r["values"]}
                       for r in new if r["id"] in ("M.pe_ttm", "M.pb", "M.dv_ttm") and r["id"] in before],
     }
 
