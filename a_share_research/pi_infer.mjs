@@ -17,12 +17,18 @@ try {
   result.pi_version = JSON.parse(await readFile(join(base, "package.json"), "utf8")).version;
   const load = name => import(pathToFileURL(join(base, "dist/core", name)).href);
   const { ModelRuntime } = await load("model-runtime.js");
+  const { FileModelsStore } = await load("models-store.js");
   const runtime = await ModelRuntime.create({
     authPath: join(process.env.PI_AGENT_DIR, "auth.json"),
     modelsPath: null,
+    modelsStore: new FileModelsStore(join(process.env.PI_AGENT_DIR, "models-store.json")),
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
+  const refreshed = await runtime.refresh({ providers: [request.provider], allowNetwork: false,
+    signal: AbortSignal.timeout(request.timeout * 1000) });
+  if (refreshed.aborted) throw new Error("Model catalog refresh timed out");
+  if (refreshed.errors.has(request.provider)) throw refreshed.errors.get(request.provider);
   let model = runtime.getModel(request.provider, request.model);
   if (model) result.model_source = "catalog";
   if (!model && process.env.PI_EXTENSION) {
@@ -50,7 +56,7 @@ try {
     maxTokens: request.max_tokens,
     transport: "sse",
     maxRetries: 0,
-    reasoning: "medium",
+    reasoning: "high",
     sessionId: request.session_id, // pi only sends prompt_cache_key with a sessionId
     timeout: request.timeout,
   };
