@@ -42,14 +42,14 @@ AGY 复审后修复扣非取数异常封装、离线实验优化模式拒绝与�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 09:42 部署 `bea45f0`**（先 `docker compose build`，核对镜像代码与任务空闲后 `docker compose up -d --no-build`）。基准全收益行情滞后时先记录入场、等待两个基准均发布后计算收益，已有同日收益不重复估值；批次页补充等待说明。无数据库迁移，Skills 仍为 0.1.23。上一版为 `f6fc0a7`（部署记录见 `git show bea45f0:docs/implementation-plan.md`）。
+入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 10:33 部署 `5942883`**（先 `docker compose build`，核对镜像代码与任务空闲后 `docker compose up -d --no-build`）。明确财务期间覆盖语义与报表累计值说明、增加批次页章节导航与候选名单无障碍链接、过滤公司档案页上基础全面报告的空关联占位文案。无数据库迁移，Skills 仍为 0.1.23。上一版为 `bea45f0`（部署记录见 `git show 545941a:docs/implementation-plan.md`）。
 
 | 项目 | 证据 |
 |---|---|
-| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:bea45f0` 与 `latest`；上一版 `:f6fc0a7` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build` |
-| 门禁 | 发布前排队/运行任务及忙碌批次均为 0；工作树干净，远端 main 为 `bea45f0`；两个候选镜像的应用文件哈希与源码一致。发布后两个容器运行、零重启，worker ready；web 无模型/行情凭据环境变量 |
-| 本地验证 | 接手后重跑 111 项测试全部通过（24.60 秒）。生产副本与已采集的 10-26 17:41 基准行情用于本机 390×844 浏览器验收：正常收益、入场后等待基准、候选报告及退出均通过，无整页横向溢出。等待状态为隔离副本回放，不是当时的生产状态 |
-| 生产验收 | 390×844 浏览器走通首批→卫星化学报告→全部批次→退出，退出后访问批次跳转登录。L5/Q5/Q20 收益仍为 +0.99%/+0.64%/+0.77%，两基准 +0.29%/+0.63%。发布前后 runs/calls/reports/prices/batches 全表哈希一致（54/247/37/8/1 条）；入场及已有收益未改变。完整性巡检通过（37 份报告、129 份 PDF） |
+| 镜像 | `a-share-research-web` / `a-share-research-worker` 标 `:5942883` 与 `latest`；上一版 `:bea45f0` 保留，回退时将两镜像的 `latest` 指回该标签后 `docker compose up -d --no-build` |
+| 门禁 | 发布前排队/运行任务及忙碌批次均为 0；工作树干净，远端 main 为 `5942883`。发布后两个容器运行、零重启，worker ready；web 正常响应，基础报告关联占位清理 |
+| 本地验证 | 重跑 118 项测试全部通过（6.44 秒）。基础全面报告、追问报告、纠错报告及长问题折叠宏渲染与 AST SQL 查询校验均通过 |
+| 生产验收 | 生产数据库已于发布前在线备份（`backup-pre-5942883-20261027103308.db`）；完整性巡检通过（37 份报告、129 份 PDF，0 异常）；外部 HTTPS 入口正常跳转认证 |
 
 本次已用 SQLite 在线备份保存发布前数据库，未复制或修改 PDF。备份、代码/数据哈希、容器身份和浏览器验收证据在 `~/.local/share/a-share-research-evaluations/deploy-bea45f0-20261027/`（0700）。未重复模型研究、11 家评估集或 20 家比较。
 
