@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import research_form, price_block %}
+{% from "_macros.html" import research_form, price_block, research_context %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
 <section class="narrow">
@@ -11,6 +11,7 @@
   {% for r in reports %}
     <li>
       <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
+      {{ research_context(r.question, r.parent_report_id, r.feedback_text) }}
       {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
       <p>{% if r.passed %}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
         <span class="muted">· <span class="date">资料至 {{ r.period }}</span></span></p>

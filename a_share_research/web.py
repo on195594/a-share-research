@@ -379,7 +379,11 @@ def report_page(request: Request, report_id: int):
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]),
-                  followups=conn.execute("SELECT id, status FROM runs WHERE json_extract(request, '$.parent_report_id') = ? ORDER BY id DESC", (report_id,)).fetchall())
+                  followups=conn.execute(
+                      "SELECT id, status, json_extract(request, '$.question') AS question,"
+                      " json_extract(request, '$.feedback.text') AS feedback_text FROM runs"
+                      " WHERE json_extract(request, '$.parent_report_id') = ? ORDER BY id DESC",
+                      (report_id,)).fetchall())
 
 
 @app.post("/reports/{report_id}/feedback")
@@ -495,7 +499,10 @@ def stock_page(request: Request, code: str):
     if not (session := current_session(request)):
         return login_required()
     reports = conn.execute(
-        "SELECT r.*, json_extract(u.identity, '$.replay_of') AS replay_of FROM reports r"
+        "SELECT r.*, json_extract(u.identity, '$.replay_of') AS replay_of,"
+        " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
+        " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
+        " json_extract(u.request, '$.feedback.text') AS feedback_text FROM reports r"
         " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
     ).fetchall()
     if not reports:

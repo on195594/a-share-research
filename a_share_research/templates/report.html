@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import items, research_form, price_block, snapshot_date_notice %}
+{% from "_macros.html" import items, research_form, price_block, snapshot_date_notice, financial_period, followup_link %}
 {% block title %}{{ report.name }} · 研究报告{% endblock %}
 {% block main %}
 <article class="report">
@@ -68,7 +68,7 @@
     {% set periods = (fin[0]["values"].keys() | list)[-4:] if fin else [] %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="财务数据表">
     <table>
-      <thead><tr><th scope="col">指标</th>{% for p in periods %}<th scope="col" class="num">{{ p[:4] }}{{ "" if p.endswith("12-31") else ("H1" if p.endswith("06-30") else p[5:]) }}</th>{% endfor %}</tr></thead>
+      <thead><tr><th scope="col">指标</th>{% for p in periods %}<th scope="col" class="num">{{ financial_period(p) }}</th>{% endfor %}</tr></thead>
       <tbody>
       {% for r in fin %}
         <tr><th scope="row">{{ r.label }}<small>{{ r.unit }}</small></th>{% for p in periods %}<td class="num">{{ r["values"].get(p, "—") }}</td>{% endfor %}</tr>
@@ -76,7 +76,7 @@
       </tbody>
     </table>
     </div>
-    <p class="muted small">来源：TuShare 合并报表与财务指标，显示最近四个报告期。年度为年报口径，H1 为半年报；完整期间数据可在出处中查看。</p>
+    <p class="muted small">来源：TuShare 合并报表与财务指标，显示最近四个报告期。收入、利润和现金流为年初至报告期末累计值，并非单季值；资产负债为期末时点值，比率按指标口径。完整期间数据可在出处中查看。</p>
   </section>
 
   {% if report.passed and body.methods %}
@@ -139,7 +139,7 @@
         <button class="btn secondary" type="submit">提交核查</button>
       </form>
     </details>
-    {% if followups %}<h2>关联研究</h2><ul class="list">{% for followup in followups %}<li><a href="/runs/{{ followup.id }}">查看后续研究 {{ followup.id }}</a> · {{ {'queued':'排队中','running':'研究中','done':'已完成','failed':'未完成'}.get(followup.status) }}</li>{% endfor %}</ul>{% endif %}
+    {% if followups %}<h2>关联研究</h2><ul class="list">{% for followup in followups %}<li>{{ followup_link(followup) }} · {{ {'queued':'排队中','running':'研究中','done':'已完成','failed':'未完成'}.get(followup.status) }}</li>{% endfor %}</ul>{% endif %}
   </section>
 
   <div class="actions">

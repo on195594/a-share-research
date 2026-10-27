@@ -87,3 +87,22 @@
   {% endif %}
 </section>
 {% endmacro %}
+
+{# Keep the source period intact; labels describe coverage, not every metric's basis. #}
+{% macro financial_period(period) -%}
+<time datetime="{{ period }}">{{ period }}</time>{% set label = {"03-31": "一季度", "06-30": "上半年", "09-30": "前三季度", "12-31": "全年"}.get(period[5:]) %}{% if label %}<small>{{ label }}</small>{% endif %}
+{%- endmacro %}
+
+{% macro research_context(question, parent_report_id, feedback_text) -%}
+<p class="small muted">{% if parent_report_id %}{{ '纠错核查' if feedback_text else '后续追问' }} · <a href="/reports/{{ parent_report_id }}">查看原报告</a>{% else %}未关联原报告{% endif %}</p>
+{% set text = feedback_text or question %}
+{% if text %}
+  {% if text | length > 100 %}<details><summary>{{ '核查问题' if feedback_text else '研究问题' }}：{{ text[:100] }}…（展开全文）</summary><p>{{ text }}</p></details>
+  {% else %}<p>{{ '核查问题' if feedback_text else '研究问题' }}：{{ text }}</p>{% endif %}
+{% else %}<p class="muted small">未记录研究问题</p>{% endif %}
+{%- endmacro %}
+
+{% macro followup_link(followup) -%}
+{% set text = followup.feedback_text or followup.question %}
+<a href="/runs/{{ followup.id }}">{{ '纠错核查' if followup.feedback_text else '后续追问' }}：{{ (text[:100] ~ ('…' if text | length > 100 else '')) if text else ('查看任务 ' ~ followup.id ~ '（未记录问题）') }}</a>
+{%- endmacro %}
