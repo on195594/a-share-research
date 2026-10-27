@@ -61,7 +61,8 @@ def test_history_shows_observed_question_without_inferring_a_parent():
     assert '研究问题：什么价格区间可以买入' in html
     assert '未关联原报告' in html
     assert '查看原报告' not in html
-    assert '未记录研究问题' in str(MACROS.research_context(None, None, None))
+    assert str(MACROS.research_context(None, None, None)).strip() == ''
+    assert '未记录研究问题' in str(MACROS.research_context(None, 34, None))
 
 
 def test_relationship_and_feedback_only_use_explicit_fields():
