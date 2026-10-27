@@ -13,7 +13,7 @@
 | R3 | Skills 消费研究 API、临时公告取证、纠错方法复用 | Research、Skills | Research `942a58d` 已上线；Skills `7340a21` / 0.1.23 已激活三端；真实 CLI → 研究 → 网页读同一结果通过 |
 | E | 候选发现与研究实验（[方案](screening-experiment.md#7-分阶段)） | Research | P1–P3 已上线，首批 10-26 入场、20/20 成交并开始跟踪；P4 完成 118 批点时回测，未证明规则有效。现行 `screen-v1.1` 只增加利润跳升提示、不改分数；已冻结批次沿用原规则 |
 | F | 基本面深度与选股信号升级（[方案](investment-upgrade.md#5-分阶段与验收)） | Research | 计划收敛、F1、F3a、F2 四阶段均已完成并经 Claude 独立审查；F1/F3a 已上线，F2 不采用新规则，F3b 后置 |
-| K | 研究积累与降噪（[方案](research-accumulation.md#4-分阶段与验收)） | Research | 方案经 AGY 对抗审查修订（2026-10-27），未实施；K2 待三季报披露后验收，K3 待 2027-04 样本到期 |
+| K | 研究积累与降噪（[方案](research-accumulation.md#4-分阶段与验收)） | Research | 方案经 AGY、Codex 两轮对抗审查修订（2026-10-27），未实施；K2 与首次归因复盘待三季报披露后验收 |
 
 ### 2026-10-27 入场滞后与结论校准
 
