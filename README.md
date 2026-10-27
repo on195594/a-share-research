@@ -46,13 +46,21 @@ docker exec a-share-research-web python -m a_share_research.login_token --minute
 
 ## Agent 研究 API
 
-在目标实例的数据目录签发研究专用令牌（默认 60 分钟、最长 480 分钟）：
+Skills 等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
 
 ```bash
-DATA_DIR=/path/to/data uv run python -m a_share_research.login_token --agent --minutes 60
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create skills-runtime
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编号>
 ```
 
-令牌仅用于 `Authorization: Bearer ...`，不能用作浏览器 cookie；浏览器会话也不能访问 API。`POST /api/session/revoke` 撤销当前令牌。API 不需要模型或行情凭据。下面的请求使用 `Content-Type: application/json`，可带 `X-Research-Version: research-v1`；未知版本返回 400。
+`create` 仅输出一次明文，请直接保存到调用方权限为 0600 的私有 `runtime.env` 的 `A_STOCK_RESEARCH_TOKEN`；不要进入聊天、日志、命令参数或 Git。服务端只保存哈希，`list` 只输出编号、名称和创建时间，`revoke` 按编号立即撤销。Key 只授予研究 API 权限，不授予网页登录、其他 Key 管理或账户写入权限。管理命令只在 owner 本机执行，不提供远程签发接口。
+
+轮换顺序：创建新 Key → 更新调用方配置并验证一次报告读取 → 撤销旧 Key；同名 Key 可以并存，按编号区分。环境变量优先于 `runtime.env`，更新配置时须排除旧环境变量覆盖。重启服务或浏览器登录/退出不影响 Key。收到 401 后先修复凭据，不重复重试；恢复后提交仍沿用原 `request_id`。
+
+升级时自动新增 `api_keys` 表，不改旧会话和研究数据。回退到不支持 Key 的旧服务时，需要 owner 重新签发临时 Agent 令牌并更新调用方配置；保留新表即可，不删除研究数据。
+
+临时验收仍可用 `python -m a_share_research.login_token --agent --minutes 60`（最长 480 分钟），不自动续期。两种凭据都只用于 `Authorization: Bearer ...`，不能用作浏览器 cookie；浏览器会话也不能访问 API。`POST /api/session/revoke` 只撤销当前请求携带的凭据。API 不需要模型或行情凭据。下面的请求使用 `Content-Type: application/json`，可带 `X-Research-Version: research-v1`；未知版本返回 400。
 
 | 路由 | 输入/结果 |
 |---|---|

@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from a_share_research import db, login_token
+from a_share_research import api_keys, db, login_token
 from a_share_research.login_token import mint
 
 
@@ -40,5 +40,28 @@ def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, caps
 
         web.conn.execute("UPDATE sessions SET expires_at = ?", (time.time() - 1,))
         assert web.current_session(cookie(token)) is None
+
+        persistent = api_keys.create(web.conn, "skills-runtime")
+        replacement = api_keys.create(web.conn, "skills-runtime")
+        assert persistent != replacement
+        for value in (persistent, replacement):
+            assert web.current_session(cookie(value)) is None
+            assert web.api_session(bearer(value)) == "key:" + web._hash(value)
+        # Browser login clears expired sessions but must not clear persistent credentials.
+        web.start_session()
+        web.conn.close()
+        web.conn = db.connect()
+        assert web.api_session(bearer(persistent)) == "key:" + web._hash(persistent)
+        request = bearer(persistent)
+        request.scope["headers"].append((b"x-research-version", b"unsupported"))
+        with pytest.raises(HTTPException) as exc:
+            web.api_session(request)
+        assert exc.value.status_code == 400
+
+        assert web.api_revoke(bearer(persistent))["revoked"]
+        with pytest.raises(HTTPException) as exc:
+            web.api_session(bearer(persistent))
+        assert exc.value.status_code == 401
+        assert web.api_session(bearer(replacement)) == "key:" + web._hash(replacement)
     finally:
         web.conn.close()

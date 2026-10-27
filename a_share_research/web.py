@@ -431,15 +431,19 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
-# JSON clients authenticate only with namespaced bearer tokens, never ambient cookies.
+# JSON clients accept persistent API keys and legacy agent sessions, never cookies.
 def api_session(request: Request) -> str:
     header = request.headers.get("authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(401, "需要研究 API bearer token")
-    key = "agent:" + _hash(header[7:])
-    row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (key,)).fetchone()
-    if row is None or row["expires_at"] <= time.time():
-        raise HTTPException(401, "研究令牌无效或已过期")
+    digest = _hash(header[7:])
+    if conn.execute("SELECT id FROM api_keys WHERE token_hash = ?", (digest,)).fetchone():
+        key = "key:" + digest
+    else:
+        key = "agent:" + digest
+        row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (key,)).fetchone()
+        if row is None or row["expires_at"] <= time.time():
+            raise HTTPException(401, "研究凭据无效、已撤销或临时令牌已过期")
     if request.headers.get("x-research-version", service.VERSION) != service.VERSION:
         raise HTTPException(400, "不支持的研究合同版本")
     return key
@@ -520,7 +524,10 @@ def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
 @app.post("/api/session/revoke")
 def api_revoke(request: Request):
     key = api_session(request)
-    conn.execute("DELETE FROM sessions WHERE token_hash = ?", (key,))
+    if key.startswith("key:"):
+        conn.execute("DELETE FROM api_keys WHERE token_hash = ?", (key[4:],))
+    else:
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (key,))
     return {"version": service.VERSION, "revoked": True}
 
 

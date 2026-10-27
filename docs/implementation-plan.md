@@ -41,6 +41,14 @@ AGY 复审后修复扣非取数异常封装、离线实验优化模式拒绝与�
 
 完整发布记录见 `git show 7076091:docs/implementation-plan.md`；Skills 安装身份、配置与回退由其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) 维护。
 
+### 2026-10-27 长期研究 API Key（本地完成，待上线）
+
+独立 `api_keys` 表只存哈希与管理元数据，owner 本地 CLI 创建/列出/撤销；Key 持续有效直到撤销，兼容旧短期 Agent 令牌。浏览器会话隔离、合同版本和幂等语义不变。未变更生产凭据、生产服务或活动客户端。
+
+Research 140 项测试通过；Skills 候选 18 项 CLI 测试、1,018 项研究/监控测试、Ruff 与 Skill 验证通过，独立只读审查无阻断问题。隔离本地 HTTP 验证了重启、浏览器登录、具名 Key 并存/轮换、两种撤销路径、撤销后 CLI 401、未知版本拒绝、原 request-id 复用；读取茅台与长江电力真实旧报告正常。新 Key 发起茅台真实研究，本地 run 19 / report 13 复核通过并经 Skills 读取，未创建账户数据库。当前安装的 Skills 0.1.23 同样能使用新 Key，不依赖客户端升级才可稳定认证。
+
+候选镜像为 `a-share-research-web:api-key-candidate`、`a-share-research-worker:api-key-candidate`，未覆盖生产标签；两镜像各 33 个应用文件哈希与工作树一致，无网络、无生产挂载的容器内 Key 鉴权/撤销检查通过。临时验收记录在 `/tmp/asr-api-key-e2e/`；Skills 的 401 提示和接入文档在隔离副本 `/tmp/a-stock-agent-skills-api-key/`，尚未激活。上线应先备份并确认无进行中任务，再切换服务、签发正式 Key、只更新 Skills 私有配置中的研究凭据，验证读取后撤销旧凭据。回退旧服务需恢复可用的短期 Agent 令牌，不删除新增表或研究数据。
+
 ## 当前部署
 
 入口 [stock.keyi.win](https://stock.keyi.win)，Web 与 worker 已于 **2026-10-27 13:55 部署 `5123d2e`**（先 `docker compose build`，逐文件核对镜像代码与提交一致、任务与批次空闲后 `docker compose up -d --no-build --no-deps web worker`）。本次包含只读已有研究搜索（`/research-library`）及首页入口、显式报告前后对照（`_comparison.html` / `reading.comparison`）上线报告页与公司页，以及 Codex 审查指出的残缺指标行导致 `sorted(excluded)` 抛 `TypeError` 的容错修复与分页 URL 优化。无数据库迁移；Skills 仍为 0.1.23。上一版为 `5bd0571`（部署记录见 `git show 5123d2e:docs/implementation-plan.md`）。

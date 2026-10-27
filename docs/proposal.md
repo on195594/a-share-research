@@ -76,6 +76,7 @@ a-stock-tracker 只作只读参考：可读代码、算法和提示词，不读�
 
 - GitHub OAuth，只放行本人的数字 ID；会话由服务端登记，`HttpOnly`、`Secure`、`SameSite=Lax`，8 小时到期，可退出。
 - AI/脚本验收用 `python -m a_share_research.login_token` 在宿主或容器内直接签发短期会话（1–480 分钟），不经 HTTP；能执行它已等同于有数据目录权限。
+- Skills 长期接入使用独立的具名研究 API Key：只存哈希，持续有效直到撤销，由 owner 本地 CLI 创建/列出/撤销；兼容临时 Agent 令牌，管理与轮换见 [README](../README.md#agent-研究-api)。
 - POST 校验 CSRF 令牌和同源；Host 校验；CSP `default-src 'self'`；私有页 `no-store`。
 - Jinja 自动转义；模型文本、引文、来源 URL 只作纯文本。
 - web 进程不持模型和行情凭据；凭据只在 `.env`（不进 Git、不进镜像）。
