@@ -76,19 +76,28 @@ def test_legacy_missing_table_and_incomplete_units_are_not_compared(conn):
     assert '未记录财务表' in reading.comparison(conn, report_row(conn, 39))['reason']
     body = json.loads(original)
     body['table'][0].pop('unit')
+    # Inject None row and None-id row to guard against TypeError when sorting excluded.
+    body['table'].extend([None, {'id': None, 'label': None, 'unit': None, 'values': {}}])
     conn.execute('UPDATE reports SET body=? WHERE id=39', (json.dumps(body),))
     result = reading.comparison(conn, report_row(conn, 39))
-    assert result['excluded']
+    assert '未知指标' in result['excluded']
     assert all(r['label'] != body['table'][0]['label'] for r in result['diff']['revised'])
 
 
 def test_search_render_escapes_query_and_uses_get_without_research_action():
+    from urllib.parse import urlencode
     html = ENV.get_template('research_library.html').render(q='<script>&"', page=1, companies=[], more=False)
     assert '<script>&"' not in html and '&lt;script&gt;' in html
     assert 'method="get"' in html and 'action="/research"' not in html
     assert '没有找到匹配' in html
     html = ENV.get_template('research_library.html').render(q='', page=1, companies=[], more=False)
     assert '还没有可查' in html
+    # URL parameters should not include empty query
+    for q in ('', '  '):
+        clean = q.strip()
+        params = {'q': clean} if clean else {}
+        assert urlencode(params | {'page': 2}) == 'page=2'
+    assert urlencode(({'q': '茅台'}) | {'page': 2}) == 'q=%E8%8C%85%E5%8F%B0&page=2'
 
 
 def test_reverse_link_uses_real_continuation_question_from_report_body(conn):

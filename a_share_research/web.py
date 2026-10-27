@@ -266,9 +266,10 @@ def research_library(request: Request, q: str = "", page: int = Query(1, ge=1, l
     q = q.strip()
     error = "请将查询缩短到 100 个字符以内。" if len(q) > 100 else ""
     rows, more = reading.search_reports(conn, q, page) if not error else ([], False)
+    params = {"q": q} if q else {}
     return render(request, "research_library.html", session, companies=rows, q=q, page=page, more=more,
-                  error=error, previous_url="/research-library?" + urlencode({"q": q, "page": page - 1}),
-                  next_url="/research-library?" + urlencode({"q": q, "page": page + 1}))
+                  error=error, previous_url="/research-library?" + urlencode(params | {"page": page - 1}),
+                  next_url="/research-library?" + urlencode(params | {"page": page + 1}))
 
 
 def recent_report(code: str):

@@ -57,13 +57,13 @@ def comparison(conn, report) -> dict:
     # K2's deterministic comparison assumes identical row semantics. Exclude mismatched
     # units/labels and incomplete legacy rows instead of comparing unlike quantities.
     def valid(row):
-        return all(row.get(k) for k in ('id', 'label', 'unit')) and isinstance(row.get('values'), dict)
+        return isinstance(row, dict) and all(row.get(k) for k in ('id', 'label', 'unit')) and isinstance(row.get('values'), dict)
     old_map = {r['id']: r for r in old_rows if valid(r)}
     new_map = {r['id']: r for r in new_rows if valid(r)}
     incompatible = {key for key in old_map.keys() & new_map.keys()
                     if any(old_map[key][k] != new_map[key][k] for k in ('unit', 'label'))}
-    excluded = sorted({r.get('label') or r.get('id', '未知指标') for r in old_rows + new_rows
-                       if not valid(r) or r.get('id') in incompatible})
+    excluded = sorted({(r.get('label') or r.get('id') or '未知指标') if isinstance(r, dict) else '未知指标'
+                       for r in old_rows + new_rows if not valid(r) or r.get('id') in incompatible})
     old_table = [r for key, r in old_map.items() if key not in incompatible]
     new_table = [r for key, r in new_map.items() if key not in incompatible]
     if not old_table or not new_table:
