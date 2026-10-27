@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-10-27。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页维护工作状态、当前部署与回退；历史逐轮记录保留于 `git show 73a0a05:docs/implementation-plan.md`，原始证据在仓库外的 `~/.local/share/a-share-research-evaluations/`。
+更新：2026-10-28。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页维护工作状态、当前部署与回退；历史逐轮记录保留于 `git show 73a0a05:docs/implementation-plan.md`，原始证据在仓库外的 `~/.local/share/a-share-research-evaluations/`。
 
 ## 工作包与状态
 
@@ -21,9 +21,15 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。2026-10-27 部署 **Research `042a4ad`**，配对激活 Skills 0.1.24 / `5154986`；前版分别为 `5123d2e` 和 0.1.23。同日 Skills 单独升级为 **0.1.25 / `04dbc6c`**（精简研究上下文与盘后简报，`research-v1` 接口和凭据不变），身份与回退见其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record)。下表为 0.1.24 配对验收；之后的文档或源码整理不代表再次部署。
+入口 [stock.keyi.win](https://stock.keyi.win)。2026-10-28 仅切换 **worker 至 Research `47ebdf3`**，web 仍为 `042a4ad`；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra`，推理强度 `high`。worker 镜像为 `sha256:fb347b972ea2198eeced8ddea38dd29752f937a3fd0df6279de13b951e197e60`，原 worker 镜像为 `sha256:8c8577a0600c3272250b06d6713300aef8420089cf8884de06d92b14b21eb90e`。
 
-| 项目 | 当前结果 |
+切换前独立评估集非金融公司 9/10 通过；五粮液因遗漏可计算的第三季度重大不利变化未通过复核，招商银行作为范围外反例按预期拒绝。用户知悉并接受该风险后授权上线。与旧模型未做同材料隔离对照，不能据此认定新模型质量更高或更低。切换后真实 API 研究五粮液：任务 57、报告 40 通过，7 次调用均记录目标模型与 `high`；临时验收令牌已撤销。切换前后完整性巡检通过，停止受理期间的七张表指纹一致，恢复后公网登录页 HTTP 200。
+
+候选评估、私有数据库与 PDF 快照、旧环境配置、哈希清单和上线证据在 `~/.local/share/a-share-research-evaluations/terra-high-20261027-233921/`（含凭据配置，不公开）；回退以其中 `cutover/env-before` 和原 worker 镜像为依据，不以旧数据库覆盖上线后的新数据。切换和回退均须遵守 [AGENTS.md](../AGENTS.md) 授权及空闲、备份门禁。
+
+上一次配对部署：2026-10-27 部署 Research `042a4ad`，配对激活 Skills 0.1.24 / `5154986`；前版分别为 `5123d2e` 和 0.1.23。同日 Skills 单独升级为 **0.1.25 / `04dbc6c`**（精简研究上下文与盘后简报，`research-v1` 接口和凭据不变），身份与回退见其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record)。下表是历史 0.1.24 配对验收，不代表当前 worker 版本。
+
+| 项目 | 历史配对验收结果 |
 |---|---|
 | 镜像与客户端 | Web/worker 的 `:042a4ad` 与 `latest` 指向已验收镜像，33 个应用文件哈希一致；Skills 26 个 runtime 文件、九个 Skill 树一致，三个 CLI help 正常；Hermes 保留 canonical 允许目录 |
 | 数据与凭据 | 空闲门禁、备份、切换前后完整性检查通过；旧研究记录未改写，仅新增 `api_keys` 表。正式 `skills-runtime`（Key ID 1）持续有效直到撤销，原 0600 `runtime.env` 只替换研究 token；旧令牌和验收 Key 已撤销 |
