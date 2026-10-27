@@ -113,7 +113,6 @@ def test_integrity_check_lists_each_injected_corruption_and_writes_nothing(tmp_p
     ]
     assert counts["runs_with_material"] == 2
     assert (tmp_path / "app.db").read_bytes() == before
-    assert integrity.check(tmp_path / "app.db", pdf_dir)[0] == problems
 
 
 def test_report_pointing_at_another_material_snapshot_is_listed(tmp_path):

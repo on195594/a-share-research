@@ -25,8 +25,6 @@ class ModelError(Exception):
 @dataclass
 class Completion:
     text: str
-    provider: str
-    model: str
     usage: dict[str, Any] | None
     seconds: float
     identity: dict
@@ -103,5 +101,5 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000,
             raise ValueError("model identity mismatch")
     except Exception as exc:
         raise ModelError(str(exc), identity, time.monotonic() - started) from exc
-    return Completion(out["text"], out["provider"], out["model"], out["usage"],
+    return Completion(out["text"], out["usage"],
                       time.monotonic() - started, identity, out["message"])
