@@ -70,7 +70,7 @@ def test_relationship_and_feedback_only_use_explicit_fields():
     html = str(MACROS.research_context('什么价格区间可以买入', 34, None))
     assert '后续追问' in html and 'href="/reports/34"' in html
     html = str(MACROS.research_context(None, 34, '什么价格区间可以买入'))
-    assert '纠错核查' in html and '核查问题：什么价格区间可以买入' in html
+    assert '核查' in html and '核查问题：什么价格区间可以买入' in html
     html = str(MACROS.followup_link({'id': 51, 'question': '什么价格区间可以买入'}))
     assert 'href="/runs/51"' in html and '后续追问：什么价格区间可以买入' in html
 
@@ -94,7 +94,7 @@ def test_context_queries_execute_against_current_schema_without_writing_research
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'execute' and node.args:
             query = node.args[0]
             if isinstance(query, ast.Constant) and isinstance(query.value, str) and ' AS question' in query.value:
-                cursor = conn.execute(query.value, (35 if 'FROM runs' in query.value else '601899.SH',))
+                cursor = conn.execute(query.value, (('601899.SH', 35, '601899.SH', 35, 35) if 'FROM runs' in query.value else ('601899.SH',)))
                 columns = {column[0] for column in cursor.description}
                 assert {'question', 'feedback_text'} <= columns
                 assert cursor.fetchall() == []

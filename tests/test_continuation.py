@@ -11,7 +11,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import a_share_research
-from a_share_research import db, screening
+from a_share_research import db, screening, reading
 from a_share_research.research import _prior_report, _research_context, _verified_facts, prior_question, since_prior
 from test_check import report
 
@@ -89,16 +89,20 @@ def render(name: str, **context) -> str:
     return env.get_template(name).render(csrf="", steps={}, request_id="r", **context)
 
 
-def test_report_pages_render_for_reports_before_and_after_checkpoints():
+def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):
+    conn = db.connect(tmp_path / "render.db")
+    load(conn)
     for report_id in (37, 39):
         record = next(r["report"] for r in RECORDS if r["report"]["id"] == report_id)
         body = record["body"]
         html = render("report.html", report=record, body=body, feedback=None, feedback_label="", replay_of=None,
                       rows={r["id"]: r for r in body["table"]}, price=None, followups=[],
+                      comparison=reading.comparison(conn, conn.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()),
                       market=[r for r in body["table"] if r["id"].startswith("M.")],
                       fin=[r for r in body["table"] if r["id"].startswith("T.")])
         assert ('id="checkpoints"' in html) == (report_id == 39)
         assert ("与上次研究对照" in html) == (report_id == 39)
+    conn.close()
 
 
 def test_checkpoint_finding_keeps_other_reviewed_facts_but_never_the_checkpoints():

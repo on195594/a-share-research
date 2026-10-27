@@ -3,6 +3,7 @@
 {% block main %}
 <section class="start">
   <h1>研究一家公司</h1>
+  <p><a href="/research-library">查已有研究</a> · 阅读已有档案，无需开始新研究。</p>
   <form method="post" action="/research" class="search">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request_id" value="{{ request_id }}">

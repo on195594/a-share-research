@@ -1,0 +1,42 @@
+<section aria-labelledby="comparison">
+  <h2 id="comparison" tabindex="-1">前后变化对照</h2>
+  {% if comparison.old %}
+  <p><a href="/reports/{{ comparison.old.id }}">原报告 {{ comparison.old.created_at[:16].replace('T', ' ') }}</a> → <a href="/reports/{{ comparison.new.id }}">本次报告 {{ comparison.new.created_at[:16].replace('T', ' ') }}</a></p>
+  <p class="hint">只对照明确关联的报告；问题范围可能不同，结论措辞变化不等于公司整体判断反转，也不解释变化原因。</p>
+  <details>
+    <summary>研究问题与结论{% if comparison.old_question and comparison.new_question %} · {{ '问题相同' if comparison.old_question == comparison.new_question else '问题不同' }}{% else %} · 问题记录不完整{% endif %}</summary>
+    <p>原问题：{{ comparison.old_question or '未记录具体问题' }}</p>
+    <p>本次问题：{{ comparison.new_question or '未记录具体问题' }}</p>
+    <p>原结论：{{ (comparison.old.verdict or '未记录结论') if comparison.old_ready and comparison.old.passed else '未通过完整核查或尚未就绪，不展示结论' }}；本次结论：{{ (comparison.new.verdict or '未记录结论') if comparison.new_ready and comparison.new.passed else '未通过完整核查或尚未就绪，不展示结论' }}。</p>
+  </details>
+  <details>
+    <summary>基础披露与来源</summary>
+    {% if comparison.old_document and comparison.new_document and comparison.old_document.sha256 and comparison.new_document.sha256 %}
+    <p>已记录的基础披露内容{{ '相同' if comparison.old_document.sha256 == comparison.new_document.sha256 else '不同' }}（按内容哈希核对）；补读材料仍须在各报告出处核对。</p>
+    {% else %}<p>基础披露内容哈希未完整记录，不能确认材料是否相同。</p>{% endif %}
+    {% for label, document in [('原报告', comparison.old_document), ('本次报告', comparison.new_document)] %}
+    <p>{{ label }}：{% if document %}{{ document.title or '标题未记录' }} · {{ document.period or '期间未记录' }}{% else %}基础披露信息未记录{% endif %}。请在上方对应报告的原文与出处中核对完整材料。</p>
+    {% endfor %}
+  </details>
+  {% endif %}
+  {% if comparison.reason %}<p class="muted">{{ comparison.reason }}</p>{% endif %}
+  {% if comparison.diff %}
+  {% set diff = comparison.diff %}
+  {% set moved = diff.valuation | rejectattr('unchanged') | list %}
+  <details>
+    <summary>程序核对的指标变化</summary>
+    <p class="hint">仅比较同指标、同单位、同期间的已记录值；不同期间的累计值不相减，缺失值不按零处理。</p>
+    <ul>
+      <li>新增财务数据覆盖期：{{ diff.disclosed | join('、') if diff.disclosed else '无' }}（不代表已完整阅读新披露原文）。</li>
+      {% if diff.backfilled %}<li>补齐比较期：{{ diff.backfilled | join('、') }}（不是新披露）。</li>{% endif %}
+      {% for r in diff.revised %}<li>同口径记录值变化：{{ r.label }} {{ r.period }}，{{ r.before }} → {{ r.after }} {{ r.unit }}（不据此推断修订原因）。</li>{% endfor %}
+      {% for v in moved %}<li>{{ v.label }}：{{ v.before[1] }}（{{ v.before[0] }}）→ {{ v.after[1] }}（{{ v.after[0] }}）{{ v.unit }}，估值快照变化，不是收益。</li>{% endfor %}
+      {% if diff.uncollected %}<li>上次未采集：{{ diff.uncollected | join('、') }}。</li>{% endif %}
+      {% if comparison.missing %}<li>本次未记录部分旧指标或期间：{{ comparison.missing | join('、') }}，不能认定没有变化。</li>{% endif %}
+      {% if not (diff.disclosed or diff.backfilled or diff.revised or diff.uncollected or moved) %}<li>可比的已记录指标未发现变化；缺失字段不在此判断内。</li>{% endif %}
+    </ul>
+  </details>
+  {% endif %}
+  {% if comparison.excluded %}<p class="muted">口径不一致或字段不完整，未比较：{{ comparison.excluded | join('、') }}。</p>{% endif %}
+  <p class="hint">旧风险是否缓解或关闭，只以报告中带出处的核查记录为准；此对照不推断风险已解决。</p>
+</section>

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}查已有研究 · 个股研究{% endblock %}
+{% block main %}
+<h1>查已有研究</h1>
+<p class="muted">查找主动研究与初筛深挖的公司。这里只读取已有记录，不会启动研究；不含材料重放。</p>
+<form method="get" action="/research-library" class="search" role="search">
+  <label for="search-query">公司名称或代码</label>
+  <div class="row"><input id="search-query" name="q" value="{{ q }}" maxlength="100" placeholder="例如：紫金 或 601899" enterkeyhint="search"><button class="btn" type="submit">查找</button></div>
+</form>
+<p class="hint">留空查看全部。每页最多 20 家，按最新报告排序。<a href="/research-library">清空查询</a></p>
+{% if error %}<p role="alert" class="notice caution">{{ error }}</p>{% endif %}
+<h2 id="results" tabindex="-1">{{ '“' ~ q ~ '”的结果' if q else '全部已有研究' }} · 第 {{ page }} 页</h2>
+{% if companies %}
+<ul class="list companies">
+{% for c in companies %}
+<li>
+  <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name or c.code }}</strong> <span class="code">{{ c.code }}</span></a>
+  <p class="small">{{ '主动研究过' if c.own else '仅初筛深挖' }} · 最新报告{{ '来自初筛' if c.from_batch else '来自主动研究' }}</p>
+  <p><span class="date">资料至 {{ c.coverage or '未记录' }}</span> · <span class="date">研究于 {{ c.created_at[:10] }}</span></p>
+  <p><a href="/reports/{{ c.id }}">阅读 {{ c.name or c.code }} 的最新报告</a> · {{ c.verdict if c.passed else '复核未通过' }}</p>
+</li>
+{% endfor %}
+</ul>
+{% elif not error %}
+<p role="status" class="notice">{% if page > 1 %}这一页没有记录，请返回上一页或重新查询。{% elif q %}没有找到匹配的已有研究。可换用公司简称或六位代码；查询没有创建新任务。{% else %}还没有可查的研究记录。{% endif %}</p>
+{% endif %}
+<nav class="actions" aria-label="搜索结果分页">
+{% if page > 1 %}<a class="btn secondary" href="{{ previous_url }}">上一页</a>{% endif %}
+{% if more %}<a class="btn secondary" href="{{ next_url }}">下一页</a>{% endif %}
+</nav>
+<p class="actions"><a href="/">返回首页 / 新建研究</a></p>
+{% endblock %}

@@ -19,13 +19,13 @@ from typing import Self
 from urllib.parse import urlencode, urlparse
 
 import requests
-from fastapi import FastAPI, Form, Request, HTTPException
+from fastapi import FastAPI, Form, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, research, screening, sources, service
+from a_share_research import db, research, screening, sources, service, reading
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -259,6 +259,18 @@ def latest_reports() -> tuple[list, int]:
     return [r for r in rows if r["own"]], sum(1 for r in rows if not r["own"])
 
 
+@app.get("/research-library")
+def research_library(request: Request, q: str = "", page: int = Query(1, ge=1, le=10000)):
+    if not (session := current_session(request)):
+        return login_required()
+    q = q.strip()
+    error = "请将查询缩短到 100 个字符以内。" if len(q) > 100 else ""
+    rows, more = reading.search_reports(conn, q, page) if not error else ([], False)
+    return render(request, "research_library.html", session, companies=rows, q=q, page=page, more=more,
+                  error=error, previous_url="/research-library?" + urlencode({"q": q, "page": page - 1}),
+                  next_url="/research-library?" + urlencode({"q": q, "page": page + 1}))
+
+
 def recent_report(code: str):
     today = datetime.now(db.SHANGHAI).date().isoformat()
     return conn.execute(
@@ -376,7 +388,7 @@ def report_page(request: Request, report_id: int):
     if not service.ready(run["status"], row["passed"]):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
-    feedback = json.loads(run["request"] or "{}").get("feedback")
+    feedback = (json.loads(run["request"] or "{}") or {}).get("feedback")
     feedback_label = ""
     if feedback:
         section, _, index = feedback["location"].partition("[")
@@ -386,16 +398,21 @@ def report_page(request: Request, report_id: int):
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body,
-                  feedback=feedback, feedback_label=feedback_label,
+                  feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
                   replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]),
                   followups=conn.execute(
-                      "SELECT id, status, json_extract(request, '$.question') AS question,"
-                      " json_extract(request, '$.feedback.text') AS feedback_text FROM runs"
-                      " WHERE json_extract(request, '$.parent_report_id') = ? ORDER BY id DESC",
-                      (report_id,)).fetchall())
+                      "SELECT u.id, u.status, COALESCE(NULLIF(json_extract(u.request, '$.question'), ''),"
+                      " json_extract(f.body, '$.question')) AS question,"
+                      " json_extract(u.request, '$.feedback.text') AS feedback_text,"
+                      " json_extract(f.body, '$.prior.report_id') AS prior_report_id"
+                      " FROM runs u LEFT JOIN reports f ON f.run_id = u.id"
+                      " WHERE u.code = ? AND (json_extract(u.request, '$.parent_report_id') = ? OR"
+                      " (f.code = ? AND (json_extract(f.body, '$.parent_report_id') = ? OR"
+                      " json_extract(f.body, '$.prior.report_id') = ?))) ORDER BY u.id DESC",
+                      (row['code'], report_id, row['code'], report_id, report_id)).fetchall())
 
 
 @app.post("/reports/{report_id}/feedback")
@@ -409,7 +426,7 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
         run_id = service.submit(conn, "", request_id, parent_report_id=report_id,
                                 feedback={"location": location, "text": text})
     except service.RequestError as exc:
-        return message(request, session, "无法提交纠错", str(exc), exc.status)
+        return message(request, session, "无法提交核查请求", str(exc), exc.status)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
@@ -520,14 +537,8 @@ def stock_page(request: Request, code: str):
     ).fetchall()
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
-    since = None
-    if prior := json.loads(reports[0]["body"]).get("prior"):
-        old = conn.execute("SELECT created_at, body FROM reports WHERE id = ?", (prior["report_id"],)).fetchone()
-        if old:  # the comparison is skipped, not the page, if the earlier report is gone
-            since = research.since_prior(json.loads(old["body"])["table"], json.loads(reports[0]["body"])["table"]) | {
-                "report_id": prior["report_id"], "researched": old["created_at"][:10]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
-                  price=latest_price(code), since=since)
+                  price=latest_price(code), comparison=reading.comparison(conn, reports[0]))
 
 
 def latest_price(code: str) -> dict | None:

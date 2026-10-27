@@ -28,7 +28,7 @@
   </header>
   <hr class="perforation">
   {% set content = body if report.passed else body.facts %}
-  {% set answer_title = '纠错核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
+  {% set answer_title = '核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
   <nav aria-label="报告章节">
     <ul class="toc">
       {% if body.question %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
@@ -37,6 +37,7 @@
       <li><a href="#business">业务</a></li>
       <li><a href="#financial">财务</a></li>
       <li><a href="#data">财务数据</a></li>
+      <li><a href="#comparison">前后变化对照</a></li>
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
     </ul>
@@ -92,7 +93,7 @@
   {% if report.passed and body.methods %}
   <section>
     <h2>本次可复用的方法</h2>
-    <p class="muted">来自本次纠错核查，使用时仍须核对适用条件；可以通过下方纠错提出反证。</p>
+    <p class="muted">来自本次核查，使用时仍须核对适用条件；可以通过下方请求核查提出反证。</p>
     {{ items(body.methods, rows, "研究方法", documents) }}
   </section>
   {% endif %}
@@ -120,6 +121,8 @@
     {% if body.gaps %}<p>仍有缺口：</p><ul>{% for gap in body.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% endif %}
   </details>
 
+  {% include "_comparison.html" %}
+
   <section id="more">
     <h2>继续研究</h2>
     <form method="post" action="/research" class="search">
@@ -132,7 +135,7 @@
       <button class="btn" type="submit">继续追问</button>
     </form>
     <details>
-      <summary>指出报告中的错误</summary>
+      <summary>请求核查</summary>
       <form method="post" action="/reports/{{ report.id }}/feedback" class="search">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="request_id" value="{{ request_id }}-feedback">
@@ -145,7 +148,7 @@
         </select>
         <label for="feedback">具体问题与依据</label>
         <textarea id="feedback" name="text" rows="3" maxlength="4000" required></textarea>
-        <p class="hint">会重新核查并生成关联报告，原报告保留。</p>
+        <p class="hint">先核对事实与原因，再判断是否需要纠正；提交后生成关联报告，原报告保留。</p>
         <button class="btn secondary" type="submit">提交核查</button>
       </form>
     </details>

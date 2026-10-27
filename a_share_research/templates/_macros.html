@@ -96,7 +96,7 @@
 {% macro research_context(question, parent_report_id, feedback_text, prior_report_id=None) -%}
 {% set text = feedback_text or question %}
 {% if parent_report_id or text %}
-<p class="small muted">{% if parent_report_id %}{{ '纠错核查' if feedback_text else '后续追问' }} · <a href="/reports/{{ parent_report_id }}">查看原报告</a>{% elif prior_report_id %}接续上次研究 · <a href="/reports/{{ prior_report_id }}">查看上次报告</a>{% else %}未关联原报告{% endif %}</p>
+<p class="small muted">{% if parent_report_id %}{{ '核查' if feedback_text else '后续追问' }} · <a href="/reports/{{ parent_report_id }}">查看原报告</a>{% elif prior_report_id %}接续上次研究 · <a href="/reports/{{ prior_report_id }}">查看上次报告</a>{% else %}未关联原报告{% endif %}</p>
 {% if text %}
   {% if text | length > 100 %}<details><summary>{{ '核查问题' if feedback_text else '研究问题' }}：{{ text[:100] }}…（展开全文）</summary><p>{{ text }}</p></details>
   {% else %}<p>{{ '核查问题' if feedback_text else '研究问题' }}：{{ text }}</p>{% endif %}
@@ -106,5 +106,5 @@
 
 {% macro followup_link(followup) -%}
 {% set text = followup.feedback_text or followup.question %}
-<a href="/runs/{{ followup.id }}">{{ '纠错核查' if followup.feedback_text else '后续追问' }}：{{ (text[:100] ~ ('…' if text | length > 100 else '')) if text else ('查看任务 ' ~ followup.id ~ '（未记录问题）') }}</a>
+<a href="/runs/{{ followup.id }}">{{ '核查' if followup.feedback_text else ('接续研究' if followup.prior_report_id else '后续追问') }}：{{ (text[:100] ~ ('…' if text | length > 100 else '')) if text else ('查看任务 ' ~ followup.id ~ '（未记录问题）') }}</a>
 {%- endmacro %}
