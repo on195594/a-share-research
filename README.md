@@ -4,11 +4,12 @@
 
 本项目负责公司财报研究与阅读；`a-stock-agent-skills` 负责 Agent 投研、持仓与风险，两者独立运行并共用 `a-stock-lib`。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
-- 产品方向与现有流程：[重构方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
+- 产品方向与现有流程：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
 - 三项目职责与协作：[项目契约](docs/project-contract.md)。
 - AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
 - 候选发现与研究实验：[方案](docs/screening-experiment.md)，用法见下文[候选初筛](#候选初筛)。
-- 基本面深度与选股信号升级（F1–F3a、F2 已完成，F3b 后置）：[方案](docs/investment-upgrade.md)。
+- 基本面深度、经营序列与投资论证：[升级方案](docs/investment-upgrade.md)。
+- 接续研究、检查点与归因复盘：[积累方案](docs/research-accumulation.md)。
 - 当前批次与验收：[工作包与状态](docs/implementation-plan.md#工作包与状态)；生产版本与回退：[当前部署](docs/implementation-plan.md#当前部署)。
 
 ## 项目目录
@@ -22,7 +23,7 @@
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
 | `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
 
-`.pytest_cache/` 和 `__pycache__/` 可重建；`data/`、`.env*`、真实测试样本和仓库外评估证据不是临时文件。
+`.pytest_cache/`、`.ruff_cache/` 和 `__pycache__/` 可重建；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
 
 ## 运行
 
@@ -73,7 +74,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 
 相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial/methods/checkpoints` 的实际零基下标，例如 `financial[0]`。报告的 `passed` 与任务状态一起判断；失败报告不提供已通过的结论，可保留的事实范围见[产品方案](docs/proposal.md#2-从用户角度的取舍)。
 
-财务表覆盖三表、现金流与债务；字段、单位和缺失值规则见[三表口径](docs/investment-upgrade.md#21-结构化三表扩展)。旧报告不回填新增指标，缺失不当作零。
+财务表覆盖三表、现金流与债务；字段、单位和缺失值规则见[三表口径](docs/investment-upgrade.md#21-结构化三表扩展)。通过报告的 `report.series` 是只供阅读的经营序列，不属于可引用的 `evidence`。旧报告不回填新增指标，缺失不当作零。
 
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 

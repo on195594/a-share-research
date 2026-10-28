@@ -43,11 +43,6 @@ def report(**changes):
     return deepcopy(base | changes)
 
 
-def test_valid_report_passes():
-    # 72.53 亿元 is the 元 figure in the quote rescaled; quotes may wrap lines and pages.
-    assert check(report(), MATERIAL) == []
-
-
 def test_number_missing_from_cited_source_is_flagged():
     bad = report(risks=[{"text": "经营现金流降至600.00亿元。", "cites": [{"ref": "T.op_cash"}]}])
     assert [p["where"] for p in check(bad, MATERIAL)] == ["risks[0]"]
@@ -73,7 +68,8 @@ def test_snapshot_preserves_prompt_and_checks():
     restored = Material.from_snapshot(snapshot)
     assert restored.prompt_block() == MATERIAL.prompt_block()
     assert restored.raw_pages == MATERIAL.raw_pages
-    assert check(report(), restored) == []
+    # Check unit conversion and wrapped quotes on both original and replayed material.
+    assert check(report(), restored) == check(report(), MATERIAL) == []
     snapshot["data"]["table"].pop()
     with pytest.raises(ResearchError, match="哈希"):
         Material.from_snapshot(snapshot)
