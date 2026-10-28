@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import escape
 
 import a_share_research
 from a_share_research import db, screening, reading
@@ -103,6 +104,47 @@ def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):
         assert ('id="checkpoints"' in html) == (report_id == 39)
         assert ("与上次研究对照" in html) == (report_id == 39)
         assert "本报告未记录经营序列" in html
+        # Keep the complete risk block near the conclusion, before a potentially long answer.
+        start = html.index('<section id="risks"')
+        risks = html[start:html.index('</section>', start)]
+        assert html.index('class="conclusion"') < start
+        if body.get('question'):
+            assert start < html.index('<section id="answer"')
+            assert html.index('href="#risks"') < html.index('href="#answer"')
+        positions = []
+        for i, risk in enumerate(body['risks']):
+            paragraph = f'<p>{escape(risk["text"])}</p>'
+            assert risks.count(paragraph) == 1 and html.count(paragraph) == 1
+            positions.append(risks.index(paragraph))
+            for cite in risk['cites']:
+                if cite.get('quote'):
+                    assert str(escape(cite['quote'])) in risks
+            assert f'value="risks[{i}]"' in html  # Correction locations retain the original indices.
+        assert positions == sorted(positions)
+        assert html.count('id="risks"') == 1 and 'tabindex="-1"' in risks
+    conn.close()
+
+
+def test_report_risk_layout_preserves_missing_legacy_fields(tmp_path):
+    conn = db.connect(tmp_path / "legacy-layout.db")
+    load(conn)
+    record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
+    for field, value in [('risks', None), ('risks', []), ('summary', None)]:
+        body = json.loads(json.dumps(record['body']))
+        if value is None:
+            body.pop(field)
+        else:
+            body[field] = value
+        html = render("report.html", report=record, body=body, feedback=None, feedback_label="", replay_of=None,
+                      rows={r['id']: r for r in body['table']}, price=None, followups=[],
+                      comparison=reading.comparison(conn, conn.execute('SELECT * FROM reports WHERE id=39').fetchone()),
+                      market=[], fin=[r for r in body['table'] if r['id'].startswith('T.')])
+        assert html.count('id="risks"') == 1
+        assert ('没有可列出的风险' in html) == (field == 'risks')
+        assert '<section id="answer">' in html
+        if field == 'summary':
+            assert '<p class="conclusion"></p>' in html
+            assert str(escape(record['body']['risks'][0]['text'])) in html
     conn.close()
 
 

@@ -31,8 +31,8 @@
   {% set answer_title = '核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
   <nav aria-label="报告章节">
     <ul class="toc">
-      {% if body.question %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
       <li><a href="#risks">风险与反证</a></li>
+      {% if body.question %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
       {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点</a></li>{% endif %}
       <li><a href="#business">业务</a></li>
       <li><a href="#financial">财务</a></li>
@@ -45,6 +45,10 @@
   </nav>
 
   {% set documents = dict(body.sources or {}, D0=dict(document=body.document)) %}
+  <section id="risks" class="risks" tabindex="-1">
+    <h2>主要风险与反证</h2>
+    {{ items(content.risks or [], rows, "可列出的风险", documents) }}
+  </section>
   {% if body.question %}
   <section id="answer">
     <h2>{{ answer_title }}</h2>
@@ -55,10 +59,6 @@
     {{ items(content.answer or [], rows, "可核查的回答", documents) }}
   </section>
   {% endif %}
-  <section id="risks" class="risks">
-    <h2>主要风险与反证</h2>
-    {{ items(content.risks or [], rows, "可列出的风险", documents) }}
-  </section>
   {% if content.checkpoints %}
   <section id="checkpoints" tabindex="-1">
     <h2>下期检查点</h2>
