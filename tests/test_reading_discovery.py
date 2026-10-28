@@ -89,7 +89,9 @@ def test_search_render_escapes_query_and_uses_get_without_research_action():
     assert '<script>&"' not in html and '&lt;script&gt;' in html
     assert 'method="get"' in html and 'action="/research"' not in html
     assert 'autocomplete="off"' in html
-    assert '<button type="reset" class="link">还原本页查询</button>' in html
+    assert 'data-library-search' in html
+    assert '返回后浏览器可能保留未提交的文字，请以下方结果为准。' in html
+    assert '<button type="reset" class="link">还原与本页结果一致的关键词</button>' in html
     assert '没有找到匹配' in html
     html = ENV.get_template('research_library.html').render(q='', page=1, companies=[], more=False)
     assert '还没有可查' in html

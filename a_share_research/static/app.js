@@ -25,7 +25,7 @@ document.addEventListener("submit", (event) => {
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) document.querySelectorAll("button[aria-busy]").forEach(release);
   setTimeout(() => {
-    const query = document.getElementById("search-query");
+    const query = document.querySelector('form[data-library-search] input[name="q"]');
     if (query) query.value = query.defaultValue;
   }, 0);
 });
