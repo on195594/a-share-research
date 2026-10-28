@@ -38,6 +38,7 @@
       <li><a href="#financial">财务</a></li>
       <li><a href="#data">财务数据</a></li>
       <li><a href="#comparison">前后变化对照</a></li>
+      <li><a href="#series">经营序列</a></li>
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
     </ul>
@@ -122,6 +123,7 @@
   </details>
 
   {% include "_comparison.html" %}
+  {% include "_series.html" %}
 
   <section id="more">
     <h2>继续研究</h2>

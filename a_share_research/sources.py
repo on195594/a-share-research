@@ -219,7 +219,7 @@ def _frame(result) -> pd.DataFrame:
     return result.value
 
 
-def financials(code: str, years: int = 4) -> dict[str, pd.DataFrame]:
+def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
     try:

@@ -1,0 +1,45 @@
+<section aria-labelledby="series">
+  <h2 id="series" tabindex="-1">经营序列</h2>
+  {% if body.series %}
+  <p class="muted small">金额为亿元。年度与单季按相同期间同比；基期非正或缺失时不计算增速。TTM 为截至当期的近 12 个月，期末值单列。缺失不补零。</p>
+  <p class="muted small">按原始元值计算，与财务表四舍五入后数值的差额可能有尾差。</p>
+  {% for kind, title in [('annual', '年度'), ('quarterly', '单季'), ('ttm', 'TTM'), ('balance', '期末')] %}
+  {% set group = body.series[kind] %}
+  <details open>
+    <summary>{{ title }}</summary>
+    {% if kind == 'quarterly' %}<p class="small muted">单季由同年相邻累计期相减，一季度直接取值；任一输入缺失则该季留空。</p>
+    {% elif kind == 'ttm' %}<p class="small muted">年报直接取全年；其他报告期按本年累计 + 上年全年 − 上年同期累计计算。</p>
+    {% elif kind == 'balance' %}<p class="small muted">近 5 个年度末与近 8 个报告期末，重复期间只列一次；时点值不相减推导单季。</p>{% endif %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="{{ title }}经营序列">
+      <table>
+        <thead><tr><th scope="col">指标（亿元）</th>{% for p in group.periods | reverse %}<th scope="col" class="num"><time datetime="{{ p }}">{% if kind == 'annual' %}{{ p[:4] }} 年{% elif kind == 'quarterly' %}{{ p[:4] }} Q{{ {'03-31': 1, '06-30': 2, '09-30': 3, '12-31': 4}[p[5:]] }}{% else %}{{ p }}{% endif %}</time></th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for row in group.rows %}
+          <tr><th scope="row">{{ row.label }}</th>
+          {% for p in group.periods | reverse %}{% set cell = row['values'][p] %}
+            <td class="num">{{ cell.display if cell.display is not none else '—' }}{% if cell.corrected %}<br><small>含更正</small>{% endif %}
+              {% if cell.yoy %}<br><small>同比 {{ cell.yoy.value ~ '%' if cell.yoy.value is not none else '—' }}{% if cell.yoy.base.corrected %}（基期含更正）{% endif %}</small>{% endif %}</td>
+          {% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <details class="source">
+      <summary>{{ title }}的取数与计算输入</summary>
+      {% for row in group.rows %}
+      <p><strong>{{ row.label }}</strong></p>
+      <ul>
+        {% for p in group.periods | reverse %}{% set cell = row['values'][p] %}
+        <li>{{ p }}：{{ cell.value ~ ' 元' if cell.value is not none else '缺失' }}{% if cell.missing %}（缺少 {{ cell.missing | join('、') }} 的完整输入）{% endif %}。
+          {% for input in cell.inputs %}<br>{{ '+' if input.weight > 0 else '−' }} {{ input.statement }}.{{ input.column }}（{{ input.period }}）：{{ input.value ~ ' 元' if input.value is not none else '缺失' }}；公告 {{ input.ann_date or '未记录' }}，实际公告 {{ input.f_ann_date or '未记录' }}，更新标志 {{ input.update_flag or '未记录' }}。{% endfor %}
+          {% if cell.yoy %}<br>同比基期 {{ cell.yoy.period }}：{{ cell.yoy.base.value ~ ' 元' if cell.yoy.base.value is not none else '缺失' }}。{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    </details>
+  </details>
+  {% endfor %}
+  <p class="hint">来源：{{ body.series.source.provider }}，取得于 {{ body.series.source.retrieved_at[:16].replace('T', ' ') }}。采用采集时的最新公开版本；“含更正”表示实际公告日晚于公告日，或同一期记录值存在差异。经营现金流减购建长期资产现金不等于可分配现金。</p>
+  {% else %}<p class="muted">本报告未记录经营序列。</p>{% endif %}
+</section>

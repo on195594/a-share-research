@@ -146,9 +146,22 @@ def _latest_rows(frame: pd.DataFrame, *, consolidated: bool) -> pd.DataFrame:
     return frame.sort_values(order, na_position="first").groupby("end_date").tail(1).set_index("end_date")
 
 
-def _financial_value(frame: pd.DataFrame, period: str, column: str) -> Decimal | None:
-    raw = frame[column].get(period) if column in frame else None
+def _financial_value(row, column: str) -> Decimal | None:
+    raw = row.get(column)
     return Decimal(str(raw)) if raw is not None and pd.notna(raw) else None
+
+
+def _financial_metric(row, key: str, column: str) -> tuple[Decimal | None, list[tuple[str, int]]]:
+    columns = [(column, 1)]
+    if key == "fcf":
+        columns = [("n_cashflow_act", 1), ("c_pay_acq_const_fiolta", -1)]
+    elif key == "interest_debt":
+        columns = [(c, 1) for c in ("st_borr", "non_cur_liab_due_1y", "lt_borr", "bond_payable")]
+    elif key == "receivables" and _financial_value(row, column) is None:
+        columns = [("notes_receiv", 1), ("accounts_receiv", 1)]
+    values = [_financial_value(row, c) for c, _ in columns]
+    value = sum(v * weight for v, (_, weight) in zip(values, columns)) if all(v is not None for v in values) else None
+    return value, columns
 
 
 def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
@@ -157,24 +170,15 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     ends = sorted(statements["income"].index)
     annual = [e for e in ends if e.endswith("12-31")][-3:]
     latest = ends[-1]
-    prior = f"{int(latest[:4]) - 1}{latest[4:]}"
-    periods = sorted(set(annual + [latest] + ([prior] if prior in ends else [])))
+    current = [p for p in ends if p[:4] == latest[:4]]
+    prior = [f"{int(p[:4]) - 1}{p[4:]}" for p in current]
+    periods = sorted(set(annual + current + [p for p in prior if p in ends]))
     table = []
     for key, label, unit, statement, column, divisor in METRICS:
         frame = statements.get(statement, pd.DataFrame())
         values = {}
         for p in periods:
-            raw = _financial_value(frame, p, column)
-            if key == "fcf":
-                cash = _financial_value(frame, p, "n_cashflow_act")
-                capex = _financial_value(frame, p, "c_pay_acq_const_fiolta")
-                raw = cash - capex if cash is not None and capex is not None else None
-            elif key == "interest_debt":
-                parts = [_financial_value(frame, p, c) for c in ("st_borr", "non_cur_liab_due_1y", "lt_borr", "bond_payable")]
-                raw = sum(parts) if all(v is not None for v in parts) else None
-            elif key == "receivables" and raw is None:
-                parts = [_financial_value(frame, p, c) for c in ("notes_receiv", "accounts_receiv")]
-                raw = sum(parts) if all(v is not None for v in parts) else None
+            raw, _ = _financial_metric(frame.loc[p] if p in frame.index else {}, key, column)
             if raw is not None:
                 values[p] = f"{raw / Decimal(str(divisor)):.2f}"
         table.append({"id": f"T.{key}", "label": label, "unit": unit, "values": values})
@@ -183,6 +187,86 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
             table.append({"id": f"M.{key}", "label": label, "unit": unit,
                           "values": {market["trade_date"]: f"{float(market[key]) / divisor:.2f}"}})
     return table
+
+
+def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str) -> dict:
+    """Human-readable operating history; exact yuan inputs stay outside the model evidence table."""
+    latest = {k: _latest_rows(v, consolidated=k in ("income", "cashflow", "balance")) for k, v in fin.items()}
+    quarters = ("03-31", "06-30", "09-30", "12-31")
+
+    def recent_quarters(end: str) -> list[str]:
+        number = int(end[:4]) * 4 + quarters.index(end[5:])
+        return [f"{n // 4}-{quarters[n % 4]}" for n in range(number - 7, number + 1)]
+
+    def annual_periods(ends) -> list[str]:
+        years = [int(p[:4]) for p in ends if p.endswith("12-31")]
+        return [f"{year}-12-31" for year in range(max(years) - 4, max(years) + 1)] if years else []
+
+    income_ends = sorted(latest["income"].index)
+    end = income_ends[-1]
+    balance_ends = sorted(latest.get("balance", pd.DataFrame()).index)
+    periods = {"annual": annual_periods(income_ends), "quarterly": recent_quarters(end), "ttm": [end],
+               "balance": sorted(set(annual_periods(balance_ends) + (recent_quarters(balance_ends[-1]) if balance_ends else [])))}
+    result = {kind: {"periods": dates, "rows": []} for kind, dates in periods.items()}
+    result["source"] = {"provider": "TuShare", "code": code, "retrieved_at": retrieved_at}
+
+    for key, label, _, statement, column, divisor in METRICS:
+        if divisor != 1e8:
+            continue  # Cumulative ratios are not quarterly flow measures.
+        frame = latest.get(statement, pd.DataFrame())
+        versions = fin.get(statement, pd.DataFrame())
+        if statement in ("income", "cashflow", "balance") and not versions.empty:
+            versions = versions[versions["report_type"].astype(str) == "1"]
+        cells = {}
+        for p, row in frame.iterrows():
+            raw, columns = _financial_metric(row, key, column)
+            history = versions[versions["end_date"] == p]
+            historical = {_financial_metric(v, key, column)[0] for _, v in history.iterrows()}
+            historical.discard(None)
+            metadata = {name: str(row[name]) if name in row and pd.notna(row[name]) else None
+                        for name in ("ann_date", "f_ann_date", "update_flag")}
+            later = bool(metadata["f_ann_date"] and metadata["ann_date"]
+                         and metadata["f_ann_date"] > metadata["ann_date"])
+            inputs = []
+            for c, weight in columns:
+                past = {_financial_value(v, c) for _, v in history.iterrows()}
+                past.discard(None)
+                value = _financial_value(row, c)
+                inputs.append({"statement": statement, "column": c, "period": p, "weight": weight,
+                               "value": str(value) if value is not None else None, **metadata,
+                               "retrieved_at": retrieved_at, "corrected": later or len(past) > 1})
+            cells[p] = {"value": raw, "inputs": inputs,
+                        "corrected": len(historical) > 1 or any(item["corrected"] for item in inputs)}
+
+        def measure(kind: str, p: str) -> dict:
+            year, quarter = int(p[:4]), quarters.index(p[5:])
+            terms = [(p, 1)]
+            if kind == "quarterly" and quarter:
+                terms += [(f"{year}-{quarters[quarter - 1]}", -1)]
+            elif kind == "ttm" and quarter != 3:
+                terms += [(f"{year - 1}-12-31", 1), (f"{year - 1}-{quarters[quarter]}", -1)]
+            selected = [cells.get(date, {"value": None, "inputs": [], "corrected": False}) for date, _ in terms]
+            raw = sum(cell["value"] * weight for cell, (_, weight) in zip(selected, terms)) if all(cell["value"] is not None for cell in selected) else None
+            return {"value": str(raw) if raw is not None else None,
+                    "display": f"{raw / Decimal('1e8'):.2f}" if raw is not None else None,
+                    "inputs": [item | {"weight": item["weight"] * weight}
+                               for cell, (_, weight) in zip(selected, terms) for item in cell["inputs"]],
+                    "missing": [date for (date, _), cell in zip(terms, selected) if cell["value"] is None],
+                    "corrected": any(cell["corrected"] for cell in selected)}
+
+        for kind in ("balance",) if statement == "balance" else ("annual", "quarterly", "ttm"):
+            values = {}
+            for p in periods[kind]:
+                cell = measure(kind, p)
+                if kind != "balance":
+                    base_period = f"{int(p[:4]) - 1}{p[4:]}"
+                    base = measure(kind, base_period)
+                    base_raw = Decimal(base["value"]) if base["value"] is not None else None
+                    cell["yoy"] = {"value": f"{(Decimal(cell['value']) / base_raw - 1) * 100:+.2f}" if cell["value"] is not None and base_raw is not None and base_raw > 0 else None,
+                                   "period": base_period, "base": base}
+                values[p] = cell
+            result[kind]["rows"].append({"id": key, "label": label, "values": values})
+    return result
 
 
 # Titles never quote; a wrapped cross-reference like 第四节“经营情况讨论与分析”之… does.
@@ -272,6 +356,7 @@ def mdna_pages(doc: Document) -> dict[int, str]:
 
 def gather(code: str) -> Material:
     fin = sources.financials(code)
+    retrieved_at = db.now()
     income = fin["income"].sort_values("end_date")
     if str(income["comp_type"].iloc[-1]) != "1":
         raise ScopeError("银行、保险、券商等金融类公司暂不支持")
@@ -283,13 +368,14 @@ def gather(code: str) -> Material:
     market = sources.valuation(code)
     table = financial_table(fin, market)
     for row in table:
-        row["source"] = {"provider": "TuShare", "code": annual.code, "retrieved_at": db.now()}
+        row["source"] = {"provider": "TuShare", "code": annual.code, "retrieved_at": retrieved_at}
     return Material(
         code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=(pages := mdna_pages(annual)),
         raw_pages={n: annual.raw_pages[n - 1] for n in pages},
         table=table, market_date=str(market["trade_date"]),
         extra={"catalog": {"D0" if d.url == annual.url else f"D{i + 1}": d.info()
-                           for i, d in enumerate(docs)}, "sources": {}, "gaps": []},
+                           for i, d in enumerate(docs)}, "sources": {}, "gaps": [],
+               "series": financial_series(fin, annual.code, retrieved_at)},
     )
 
 
@@ -736,6 +822,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "methods_used": material.extra.get("methods_used", []),
             "replay_of": replay_of, "material_sha256": material_sha256,
         }
+        if "series" in material.extra:
+            body["series"] = material.extra["series"]
         if prior := material.extra.get("prior"):
             # Derived from the frozen question so replays, including of older snapshots, keep the label.
             body["prior"] = {"report_id": prior["report_id"], "period": prior["period"],

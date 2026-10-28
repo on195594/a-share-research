@@ -102,6 +102,7 @@ def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):
                       fin=[r for r in body["table"] if r["id"].startswith("T.")])
         assert ('id="checkpoints"' in html) == (report_id == 39)
         assert ("与上次研究对照" in html) == (report_id == 39)
+        assert "本报告未记录经营序列" in html
     conn.close()
 
 
