@@ -21,7 +21,7 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。2026-10-28 仅切换 **worker 至 Research `47ebdf3`**，web 仍为 `042a4ad`；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra`，推理强度 `high`。worker 镜像为 `sha256:fb347b972ea2198eeced8ddea38dd29752f937a3fd0df6279de13b951e197e60`，原 worker 镜像为 `sha256:8c8577a0600c3272250b06d6713300aef8420089cf8884de06d92b14b21eb90e`。
+入口 [stock.keyi.win](https://stock.keyi.win)。2026-10-28 仅切换 **worker 至 Research `47ebdf3`**，web 仍为 `042a4ad`；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra`，推理强度 `high`。worker 镜像为 `sha256:fb347b972ea2198eeced8ddea38dd29752f937a3fd0df6279de13b951e197e60`，原 worker 镜像为 `sha256:8c8577a0600c3272250b06d6713300aef8420089cf8884de06d92b14b21eb90e`。同日 08:37 由所有者优化服务器性能时为 worker 加入 `cpus: 0.6`（镜像不变；主机 2 核、与其他服务共用）。同镜像一次性容器实测最大的 77MB 年报全文抽取 2.3s → 4.0s，研究耗时以模型调用为主，影响可忽略；回退只需删除该行并重建 worker。
 
 切换前独立评估集非金融公司 9/10 通过；五粮液因遗漏可计算的第三季度重大不利变化未通过复核，招商银行作为范围外反例按预期拒绝。用户知悉并接受该风险后授权上线。与旧模型未做同材料隔离对照，不能据此认定新模型质量更高或更低。切换后真实 API 研究五粮液：任务 57、报告 40 通过，7 次调用均记录目标模型与 `high`；临时验收令牌已撤销。切换前后完整性巡检通过，停止受理期间的七张表指纹一致，恢复后公网登录页 HTTP 200。
 

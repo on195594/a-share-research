@@ -26,6 +26,7 @@ services:
       target: worker
     container_name: a-share-research-worker
     restart: unless-stopped
+    cpus: 0.6  # 2-core host shared with other services; model calls dominate research time
     labels:
       com.centurylinklabs.watchtower.enable: "false"  # locally built image; no registry to pull from
     env_file: .env  # TUSHARE_TOKEN, MODEL_PROVIDER, MODEL_ID, PI_*
