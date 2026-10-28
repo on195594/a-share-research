@@ -26,6 +26,26 @@ def test_financial_periods_preserve_source_dates_and_explain_coverage():
     assert '资产负债为期末时点值' in template
 
 
+def test_financial_table_keeps_comparable_periods_after_preceding_periods_expand():
+    import re
+    from a_share_research.research import financial_table
+    from test_financial_series import CAPTURES, frames
+    template = (TEMPLATES / 'report.html').read_text()
+    start = template.index('  <section id="data">')
+    end = template.index('  </section>', start) + len('  </section>')
+    table = ENV.from_string('{% from "_macros.html" import financial_period %}' + template[start:end])
+    captured = CAPTURES['000858']
+    for cutoff, expected in [
+        ('2026-09-30', ['2024-12-31', '2025-09-30', '2025-12-31', '2026-09-30']),
+        ('2025-12-31', ['2024-12-31', '2025-12-31']),
+        ('2026-03-31', ['2024-12-31', '2025-03-31', '2025-12-31', '2026-03-31']),
+    ]:
+        fin = {k: frame[frame.end_date <= cutoff] for k, frame in frames(captured).items()}
+        html = table.render(fin=financial_table(fin, {}))
+        assert re.findall(r'<time datetime="([\d-]+)"', html) == expected
+        assert ('更正版本待核对</small>' in html) == (cutoff != '2025-12-31')
+
+
 def navigation(**present):
     template = (TEMPLATES / 'batch.html').read_text()
     start = template.index('{% if results or batch.l5')

@@ -85,6 +85,8 @@ def _operand(side: dict, rows: dict, material) -> dict:
         raise ValueError("计算输入须为对象")
     if set(side) == {"ref", "period"}:
         row = rows[side["ref"]]
+        if reason := row.get("unavailable", {}).get(side["period"]):
+            raise ValueError(f"{side['period']} 更正版本待核对：{reason}")
         return {"ref": side["ref"], "period": side["period"], "label": row["label"],
                 "value": row["values"][side["period"]], "unit": row["unit"]}
     if {"page", "quote", "value", "unit"} <= set(side) and "ref" not in side:

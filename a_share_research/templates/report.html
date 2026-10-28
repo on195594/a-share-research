@@ -77,18 +77,24 @@
 
   <section id="data">
     <h2>财务数据</h2>
-    {% set periods = (fin[0]["values"].keys() | list)[-4:] if fin else [] %}
+    {% set selected = namespace(available=[], annual=[]) %}
+    {% for r in fin %}{% set selected.available = selected.available + (r["values"].keys() | list) + (r.get('unavailable', {}).keys() | list) %}{% endfor %}
+    {% set available = selected.available | unique | sort %}
+    {% for p in available if p.endswith('-12-31') %}{% set selected.annual = selected.annual + [p] %}{% endfor %}
+    {% set latest = available[-1] if available else '' %}
+    {% set prior = ((latest[:4] | int) - 1) ~ latest[4:] %}
+    {% set periods = (selected.annual[-2:] + [latest, prior]) | select('in', available) | unique | sort %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="财务数据表">
     <table>
       <thead><tr><th scope="col">指标</th>{% for p in periods %}<th scope="col" class="num">{{ financial_period(p) }}</th>{% endfor %}</tr></thead>
       <tbody>
       {% for r in fin %}
-        <tr><th scope="row">{{ r.label }}<small>{{ r.unit }}</small></th>{% for p in periods %}<td class="num">{{ r["values"].get(p, "—") }}</td>{% endfor %}</tr>
+        <tr><th scope="row">{{ r.label }}<small>{{ r.unit }}</small></th>{% for p in periods %}<td class="num">{{ r["values"].get(p, "—") }}{% if r.get('unavailable', {}).get(p) %}<br><small>更正版本待核对</small>{% endif %}</td>{% endfor %}</tr>
       {% endfor %}
       </tbody>
     </table>
     </div>
-    <p class="muted small">来源：TuShare 合并报表与财务指标，显示最近四个报告期。收入、利润和现金流为年初至报告期末累计值，并非单季值；资产负债为期末时点值，比率按指标口径。完整期间数据可在出处中查看。</p>
+    <p class="muted small">来源：TuShare 合并报表与财务指标，显示最新期、上年同期及最近两个年度，重复期间只列一次。收入、利润和现金流为年初至报告期末累计值，并非单季值；资产负债为期末时点值，比率按指标口径。更正版本待核对的数值暂不展示；完整期间和缺口见出处。</p>
   </section>
 
   {% if report.passed and body.methods %}

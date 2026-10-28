@@ -146,6 +146,19 @@ def _latest_rows(frame: pd.DataFrame, *, consolidated: bool) -> pd.DataFrame:
     return frame.sort_values(order, na_position="first").groupby("end_date").tail(1).set_index("end_date")
 
 
+def _unreconciled_periods(frame: pd.DataFrame) -> dict[str, str]:
+    """A later correction in the same financial year makes older versions uncertain, not zero."""
+    corrections = {}
+    for period, row in frame.iterrows():
+        announced, actual = row.get("ann_date"), row.get("f_ann_date")
+        if pd.notna(announced) and pd.notna(actual) and str(actual) > str(announced):
+            corrections[period[:4]] = max(corrections.get(period[:4], ""), str(actual))
+    return {period: corrections[period[:4]] for period, row in frame.iterrows()
+            if period[:4] in corrections and
+            (str(row["f_ann_date"]) if pd.notna(row.get("f_ann_date")) else str(row.get("ann_date", "")))
+            < corrections[period[:4]]}
+
+
 def _financial_value(row, column: str) -> Decimal | None:
     raw = row.get(column)
     return Decimal(str(raw)) if raw is not None and pd.notna(raw) else None
@@ -176,12 +189,18 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     table = []
     for key, label, unit, statement, column, divisor in METRICS:
         frame = statements.get(statement, pd.DataFrame())
+        uncertain = _unreconciled_periods(frame) if statement in ("income", "cashflow") else {}
         values = {}
         for p in periods:
             raw, _ = _financial_metric(frame.loc[p] if p in frame.index else {}, key, column)
-            if raw is not None:
+            if raw is not None and p not in uncertain:
                 values[p] = f"{raw / Decimal(str(divisor)):.2f}"
-        table.append({"id": f"T.{key}", "label": label, "unit": unit, "values": values})
+        row = {"id": f"T.{key}", "label": label, "unit": unit, "values": values}
+        if unavailable := {p: f"同年{'利润表' if statement == 'income' else '现金流量表'}于 {uncertain[p]} 有更正，"
+                              "本期未见同步版本，暂不作为可比数值；须补读披露核对。"
+                           for p in periods if p in uncertain}:
+            row["unavailable"] = unavailable
+        table.append(row)
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
             table.append({"id": f"M.{key}", "label": label, "unit": unit,
@@ -214,6 +233,7 @@ def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str)
         if divisor != 1e8:
             continue  # Cumulative ratios are not quarterly flow measures.
         frame = latest.get(statement, pd.DataFrame())
+        uncertain = _unreconciled_periods(frame) if statement in ("income", "cashflow") else {}
         versions = fin.get(statement, pd.DataFrame())
         if statement in ("income", "cashflow", "balance") and not versions.empty:
             versions = versions[versions["report_type"].astype(str) == "1"]
@@ -236,7 +256,8 @@ def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str)
                                "value": str(value) if value is not None else None, **metadata,
                                "retrieved_at": retrieved_at, "corrected": later or len(past) > 1})
             cells[p] = {"value": raw, "inputs": inputs,
-                        "corrected": len(historical) > 1 or any(item["corrected"] for item in inputs)}
+                        "corrected": len(historical) > 1 or any(item["corrected"] for item in inputs),
+                        "unreconciled_since": uncertain.get(p)}
 
         def measure(kind: str, p: str) -> dict:
             year, quarter = int(p[:4]), quarters.index(p[5:])
@@ -246,13 +267,16 @@ def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str)
             elif kind == "ttm" and quarter != 3:
                 terms += [(f"{year - 1}-12-31", 1), (f"{year - 1}-{quarters[quarter]}", -1)]
             selected = [cells.get(date, {"value": None, "inputs": [], "corrected": False}) for date, _ in terms]
-            raw = sum(cell["value"] * weight for cell, (_, weight) in zip(selected, terms)) if all(cell["value"] is not None for cell in selected) else None
+            unreconciled = {date: cell["unreconciled_since"] for (date, _), cell in zip(terms, selected)
+                            if cell.get("unreconciled_since")}
+            raw = sum(cell["value"] * weight for cell, (_, weight) in zip(selected, terms)) if not unreconciled and all(cell["value"] is not None for cell in selected) else None
             return {"value": str(raw) if raw is not None else None,
                     "display": f"{raw / Decimal('1e8'):.2f}" if raw is not None else None,
                     "inputs": [item | {"weight": item["weight"] * weight}
                                for cell, (_, weight) in zip(selected, terms) for item in cell["inputs"]],
                     "missing": [date for (date, _), cell in zip(terms, selected) if cell["value"] is None],
-                    "corrected": any(cell["corrected"] for cell in selected)}
+                    "corrected": any(cell["corrected"] for cell in selected),
+                    **({"unreconciled": unreconciled} if unreconciled else {})}
 
         for kind in ("balance",) if statement == "balance" else ("annual", "quarterly", "ttm"):
             values = {}
@@ -374,7 +398,8 @@ def gather(code: str) -> Material:
         raw_pages={n: annual.raw_pages[n - 1] for n in pages},
         table=table, market_date=str(market["trade_date"]),
         extra={"catalog": {"D0" if d.url == annual.url else f"D{i + 1}": d.info()
-                           for i, d in enumerate(docs)}, "sources": {}, "gaps": [],
+                           for i, d in enumerate(docs)}, "sources": {},
+               "gaps": sorted({f"{p}：{reason}" for row in table for p, reason in row.get("unavailable", {}).items()}),
                "series": financial_series(fin, annual.code, retrieved_at)},
     )
 

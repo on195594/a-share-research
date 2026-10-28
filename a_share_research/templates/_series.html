@@ -3,6 +3,7 @@
   {% if body.series %}
   <p class="muted small">金额为亿元。年度与单季按相同期间同比；基期非正或缺失时不计算增速。TTM 为截至当期的近 12 个月，期末值单列。缺失不补零。</p>
   <p class="muted small">按原始元值计算，与财务表四舍五入后数值的差额可能有尾差。</p>
+  <p class="muted small">同年部分累计期已更正、其他期未见同步版本时，相关数值和同比暂不计算，标为“更正版本待核对”。原始输入仍可展开查看。</p>
   {% for kind, title in [('annual', '年度'), ('quarterly', '单季'), ('ttm', 'TTM'), ('balance', '期末')] %}
   {% set group = body.series[kind] %}
   <details open>
@@ -17,8 +18,8 @@
         {% for row in group.rows %}
           <tr><th scope="row">{{ row.label }}</th>
           {% for p in group.periods | reverse %}{% set cell = row['values'][p] %}
-            <td class="num">{{ cell.display if cell.display is not none else '—' }}{% if cell.corrected %}<br><small>含更正</small>{% endif %}
-              {% if cell.yoy %}<br><small>同比 {{ cell.yoy.value ~ '%' if cell.yoy.value is not none else '—' }}{% if cell.yoy.base.corrected %}（基期含更正）{% endif %}</small>{% endif %}</td>
+            <td class="num">{{ cell.display if cell.display is not none else '—' }}{% if cell.unreconciled %}<br><small>更正版本待核对</small>{% elif cell.corrected %}<br><small>含更正</small>{% endif %}
+              {% if cell.yoy %}<br><small>同比 {{ cell.yoy.value ~ '%' if cell.yoy.value is not none else '—' }}{% if cell.yoy.base.unreconciled %}（基期更正版本待核对）{% elif cell.yoy.base.corrected %}（基期含更正）{% endif %}</small>{% endif %}</td>
           {% endfor %}</tr>
         {% endfor %}
         </tbody>
@@ -30,9 +31,11 @@
       <p><strong>{{ row.label }}</strong></p>
       <ul>
         {% for p in group.periods | reverse %}{% set cell = row['values'][p] %}
-        <li>{{ p }}：{{ cell.value ~ ' 元' if cell.value is not none else '缺失' }}{% if cell.missing %}（缺少 {{ cell.missing | join('、') }} 的完整输入）{% endif %}。
+        <li>{{ p }}：{{ cell.value ~ ' 元' if cell.value is not none else ('暂不计算' if cell.unreconciled else '缺失') }}{% if cell.missing %}（缺少 {{ cell.missing | join('、') }} 的完整输入）{% endif %}。
+          {% for period, corrected_at in (cell.unreconciled or {}).items() %}<br>{{ period }} 未见与同年 {{ corrected_at }} 更正同步的版本，暂不计算。{% endfor %}
           {% for input in cell.inputs %}<br>{{ '+' if input.weight > 0 else '−' }} {{ input.statement }}.{{ input.column }}（{{ input.period }}）：{{ input.value ~ ' 元' if input.value is not none else '缺失' }}；公告 {{ input.ann_date or '未记录' }}，实际公告 {{ input.f_ann_date or '未记录' }}，更新标志 {{ input.update_flag or '未记录' }}。{% endfor %}
-          {% if cell.yoy %}<br>同比基期 {{ cell.yoy.period }}：{{ cell.yoy.base.value ~ ' 元' if cell.yoy.base.value is not none else '缺失' }}。{% endif %}
+          {% if cell.yoy %}<br>同比基期 {{ cell.yoy.period }}：{{ cell.yoy.base.value ~ ' 元' if cell.yoy.base.value is not none else ('更正版本待核对' if cell.yoy.base.unreconciled else '缺失') }}。
+          {% for period, corrected_at in (cell.yoy.base.unreconciled or {}).items() %}<br>{{ period }} 未见与同年 {{ corrected_at }} 更正同步的版本，暂不计算同比。{% endfor %}{% endif %}
         </li>
         {% endfor %}
       </ul>

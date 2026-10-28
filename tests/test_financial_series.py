@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from a_share_research.research import Material, financial_series, financial_table, since_prior
@@ -41,7 +42,13 @@ def test_q3_and_q4_match_real_single_quarter_statements_without_rounding_inputs(
                 p = row["end_date"]
                 p = f"{p[:4]}-{p[4:6]}-{p[6:]}"
                 for field, key in fields[statement].items():
-                    assert Decimal(cell(series, "quarterly", key, p)["value"]) == Decimal(str(row[field]))
+                    value = cell(series, "quarterly", key, p)
+                    assert sum(Decimal(i["value"]) * i["weight"] for i in value["inputs"]) == Decimal(str(row[field]))
+                    if code == "000858" and statement == "cashflow" and p == "2025-12-31":
+                        # Matching numbers alone do not reconcile the older Q3 publication version.
+                        assert value["value"] is None and value["unreconciled"] == {"2025-09-30": "2026-04-30"}
+                    else:
+                        assert Decimal(value["value"]) == Decimal(str(row[field]))
         assert {r["id"] for r in series["balance"]["rows"]} == {
             "cash", "interest_debt", "receivables", "inventory", "contract_liab", "goodwill"}
     assert cell(build(), "quarterly", "revenue", "2026-09-30")["display"] == "44.42"
@@ -55,7 +62,9 @@ def test_ttm_has_exact_inputs_and_annual_ttm_uses_the_full_year():
     assert [(i["period"], i["weight"]) for i in ttm["inputs"]] == [
         ("2026-09-30", 1), ("2025-12-31", 1), ("2025-09-30", -1)]
     assert sum(Decimal(i["value"]) * i["weight"] for i in ttm["inputs"]) == Decimal(ttm["value"])
-    assert cell(series, "ttm", "fcf", "2026-09-30")["value"] == "368330585.55"
+    cash = cell(series, "ttm", "fcf", "2026-09-30")
+    assert cash["value"] is None and cash["unreconciled"] == {"2025-09-30": "2026-04-30"}
+    assert sum(Decimal(i["value"]) * i["weight"] for i in cash["inputs"]) == Decimal("368330585.55")
     captured = CAPTURES["000858"]
     fin = {k: frame[frame.end_date <= "2025-12-31"] for k, frame in frames(captured).items()}
     annual = financial_series(fin, captured["code"], captured["retrieved_at"])
@@ -95,10 +104,37 @@ def test_missing_periods_and_nonpositive_bases_remain_missing():
     assert cell(build(), "balance", "contract_liab", "2025-03-31")["value"] is None
 
 
+def test_partial_restatements_cannot_mix_cumulative_versions_or_yoy_bases():
+    series = build()
+    for key in ("revenue", "net_profit", "op_cash", "capex", "fcf"):
+        quarter = cell(series, "quarterly", key, "2025-06-30")
+        assert quarter["value"] is None and quarter["missing"] == []
+        assert quarter["unreconciled"] == {"2025-03-31": "2026-04-30"}
+        assert all(i["value"] is not None for i in quarter["inputs"])
+        current = cell(series, "quarterly", key, "2026-03-31")
+        assert current["value"] is not None and current["yoy"]["value"] is None
+        assert current["yoy"]["base"]["unreconciled"] == quarter["unreconciled"]
+    captured = CAPTURES["000858"]
+    fin = {k: frame[frame.end_date <= "2026-03-31"] for k, frame in frames(captured).items()}
+    cutoff = financial_series(fin, captured["code"], captured["retrieved_at"])
+    assert cell(cutoff, "ttm", "revenue", "2026-03-31")["value"] is None
+    table = financial_table(frames(captured), {})
+    revenue = next(r for r in table if r["id"] == "T.revenue")
+    assert "2025-03-31" not in revenue["values"] and "2025-03-31" in revenue["unavailable"]
+    with pytest.raises(ValueError, match="更正版本待核对"):
+        calculate(table, "Q2收入", "difference", {"ref": "T.revenue", "period": "2025-06-30"},
+                  {"ref": "T.revenue", "period": "2025-03-31"})
+    normal = build("002648")
+    assert all("unreconciled" not in value and "unreconciled" not in value.get("yoy", {}).get("base", {})
+               for kind in ("annual", "quarterly", "ttm", "balance")
+               for row in normal[kind]["rows"] for value in row["values"].values())
+
+
 def test_preceding_cumulative_periods_support_the_existing_calculator_and_backfill():
     table = financial_table(frames(CAPTURES["000858"]), {})
     cash = next(row for row in table if row["id"] == "T.op_cash")
-    assert {"2025-03-31", "2025-06-30", "2025-09-30", "2026-03-31", "2026-06-30", "2026-09-30"} <= cash["values"].keys()
+    assert {"2025-06-30", "2026-03-31", "2026-06-30", "2026-09-30"} <= cash["values"].keys()
+    assert cash["unavailable"].keys() == {"2025-03-31", "2025-09-30"}
     calculated = calculate(table, "Q3经营现金流", "difference", {"ref": "T.op_cash", "period": "2026-09-30"},
                            {"ref": "T.op_cash", "period": "2026-06-30"})
     # T.* retains its established two-decimal precision; the series calculates from raw yuan.
@@ -126,4 +162,5 @@ def test_series_survives_snapshot_but_stays_outside_model_evidence_and_renders_l
     assert html.count('<details open>') == 4
     assert html.index('2026 Q3') < html.index('2026 Q2')
     assert '44.42' in html and '同比 -37.68%' in html and '基期含更正' in html
+    assert '基期更正版本待核对' in html and '−134.30' not in html and '-134.30' not in html
     assert '本报告未记录经营序列' in template.render(body={})
