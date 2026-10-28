@@ -53,18 +53,16 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `17efa09`**，10-28 17:34 发布；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `b99f137`**，10-28 22:43 发布；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
 
 | 已上线镜像 | 镜像 SHA256 |
 |---|---|
-| `a-share-research-web:17efa09` | `e0a8480e039c46ca524b2dc1fdca1efab9ef9eb66dabe37b9c778ef2a71499b6` |
-| `a-share-research-worker:17efa09` | `2f22809c5697241452e967c3e60951553bfb212db7a538f6e74cfc687a3238d2` |
+| `a-share-research-web:b99f137` | `816dbf6694c6e69a7db9bad9139815cf334a7a946768bd60c2228cfaa8a982d0` |
+| `a-share-research-worker:b99f137` | `0b0e9294bc60be22bdf2e6fc0fc6c9cbbcbe3e388f6a10a8377b239e6b9d99ed` |
 
-发布按空闲 → 暂停受理并复查 → 备份巡检 → 切换两类 `:latest` → 主流程验收执行。两镜像的 34 个应用文件与提交一致，worker 镜像内复核了 411 个真实数值及同比基期的输入和。批次在 17:30 取数后处于重试等待，切换未改变其状态。无数据库迁移或旧报告回填；七张业务表切换前后指纹一致，环境、挂载和资源限额未变，web 不持研究凭据。首次健康检查未携带正式 Host，触发 403 后自动回退，旧数据未变；修正部署检查脚本后完成切换。
+发布按空闲 → 暂停受理并复查 → 备份巡检 → 切换两类 `:latest` → 主流程验收执行。镜像内 34 个应用文件与提交一致，单元与预检测试全部通过（162 passed）。切换前业务数据库与 PDF 巡检一致（42 份报告、137 份 PDF），切换后七张业务表数据指纹一致。公共入口与容器端到端验证通过。
 
-生产验收：网页提交五粮液任务 **59 → 报告 42**，164 秒、9 次调用，经一次修复通过复核。一季度采用更正后可比口径（营收 +33.67%、归母 +82.57%）；187 个序列值及同比基期与原始输入和一致，35 个版本未同步的值/基期保持待核对。正式 Skills CLI 读取与数据库正文一致，`research-v1` 兼容。公网登录、批次 1、万华化学报告 41、旧报告 40、新报告 42、公司页、手机/桌面及禁用 JS 阅读通过；临时会话已撤销。原有业务记录未变，最终完整性巡检结果见部署证据。未重走 GitHub OAuth 或模型评估集；本次上线验收不替代 K2 剩余跨期对照。
-
-**证据与回退**：证据在 `deploy-review-fixes-20261028-172422/`，备份为 `~/a-share-research-data/backup-pre-17efa09-20261028-173357.db`。直接回退镜像为 `a-share-research-web:pre-review-fixes-20261028-172422` 与 `a-share-research-worker:pre-review-fixes-20261028-172422`（均为 `31ae2dd`）；分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。不恢复旧数据库覆盖新增研究；回退授权、空闲和备份要求仍按 [AGENTS.md](../AGENTS.md)。前次发布证据仍在 `deploy-series-20261028-135626/`。
+**证据与回退**：证据在 `deploy-b99f137-20261028-224500/`，备份为 `~/a-share-research-data/backup-pre-b99f137-20261028-224500.db`。直接回退镜像为 `a-share-research-web:17efa09` 与 `a-share-research-worker:17efa09`；分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。前次发布证据在 `deploy-review-fixes-20261028-172422/`。
 
 **既有模型限制**：此前切换模型时，非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 重大不利变化未通过，所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型对照，不据此判断模型优劣。评估与切换证据在 `terra-high-20261027-233921/`（含私有配置）。
 
