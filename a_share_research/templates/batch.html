@@ -108,6 +108,7 @@
 <section>
   <h2 id="candidates" tabindex="-1">候选 {{ batch.q20 | length }} 家</h2>
   <p class="muted small">行业内分位加权：扣非 ROE、现金含量、扣非利润增速各 20%，低市盈率 40%。分位只是排序，不代表预期收益。</p>
+  <p class="muted small">因子口径：扣非 ROE 为近 3 个年报扣非 ROE 的平均值；现金含量为这 3 年经营现金流合计 ÷ 合并净利润合计；扣非增速为扣非净利润的 3 年复合增速；市盈率为初筛日的 PE（TTM，归母口径）。</p>
   {% if batch.status == "proposed" %}<form method="post" action="/batches/{{ batch.id }}/freeze" class="freeze">
   <input type="hidden" name="csrf" value="{{ csrf }}">{% endif %}
   <ol class="candidates">
@@ -124,11 +125,19 @@
         {% if r.code in q5 %}<span class="badge quiet">机械前五</span>{% endif %}
       </div>
       <p class="muted small">{{ r.industry }}{% if r.small_group %} · <span class="flag">行业样本不足 {{ r.group_size }} 家</span>{% endif %} · 总分 {{ "%.2f" | format(r.score) }}</p>
+      {% set years = r.get("years") or [] %}
+      {% set profits = r.get("profit_dedt") or [] %}
+      {% set has_history = years | length == 4 and profits | length == 4 %}
       <dl class="factors">
-        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.roe_pct) }}</dd></div>
-        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.cash_pct) }}</dd></div>
-        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.growth_pct) }}</dd></div>
-        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.pe_pct) }}</dd></div>
+        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.roe_pct) }}</dd>
+          {% if has_history %}<dd class="pct">{{ years[1] }}–{{ years[-1] }}</dd>{% endif %}</div>
+        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.cash_pct) }}</dd>
+          {% if has_history %}<dd class="pct">{{ years[1] }}–{{ years[-1] }}</dd>{% endif %}</div>
+        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.growth_pct) }}</dd>
+          {% if has_history %}<dd class="pct">{{ years[0] }}→{{ years[-1] }}</dd>
+          {% if profits[0] is number %}<dd class="pct">基数 {{ "%.2f" | format(profits[0] / 100000000) }} 亿</dd>{% endif %}{% endif %}</div>
+        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.pe_pct) }}</dd>
+          {% if batch.as_of %}<dd class="pct">初筛日 <span class="date">{{ b.day(batch.as_of) }}</span></dd>{% endif %}</div>
       </dl>
       {% if r.return_60d is defined %}<p class="small">近 60 个交易日 {{ b.pct(r.return_60d) }}{% if r.drawdown %} · <span class="flag">跌幅超过 30%，冻结前核对原因</span>{% endif %}</p>{% endif %}
       {% if r.windfall %}<p class="small"><span class="flag">利润跳升且市盈率低</span> <span class="muted">· 三年扣非增速 ≥{{ "%.0f" | format(r.windfall.min_growth * 100) }}%、市盈率 &lt; {{ r.windfall.max_pe }}，核对是否为一次性或周期高点利润</span></p>{% endif %}

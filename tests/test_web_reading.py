@@ -56,6 +56,29 @@ def test_candidate_links_include_the_real_company_name():
     assert '>紫金矿业：复核未通过</a>' in html
 
 
+def test_candidate_factor_periods_and_base_from_frozen_batch():
+    captured = json.loads((ROOT / 'tests/data/batch-factor-labels.json').read_text())
+    template = (TEMPLATES / 'batch.html').read_text()
+    start = template.index('{% set years =')
+    end = template.index('</dl>', start) + len('</dl>')
+    factors = ENV.from_string('{% import "_batch.html" as b %}' + template[start:end])
+    for row in captured['rows']:
+        html = factors.render(r=row, batch=captured)
+        assert html.count('2023–2025') == 2
+        assert '2022→2025' in html and '初筛日 <span class="date">2026-10-23</span>' in html
+        expected = ('1.82', '+31.7%', '282.13') if row['code'] == '300750.SZ' else ('1.30', '+163.7%', '2.50')
+        assert f'>{expected[0]}</dd>' in html and f'>{expected[1]}</dd>' in html
+        assert f'基数 {expected[2]} 亿' in html
+        for missing in ('years', 'profit_dedt'):
+            legacy = {key: value for key, value in row.items() if key != missing}
+            html = factors.render(r=legacy, batch=captured)
+            assert '2023–2025' not in html and '2022→2025' not in html and '基数' not in html
+            assert f'>{expected[0]}</dd>' in html and f'>{expected[1]}</dd>' in html
+    assert '经营现金流合计 ÷ 合并净利润合计' in template
+    assert '扣非净利润的 3 年复合增速' in template
+    assert 'PE（TTM，归母口径）' in template
+
+
 def test_history_shows_observed_question_without_inferring_a_parent():
     html = str(MACROS.research_context('什么价格区间可以买入', None, None))
     assert '研究问题：什么价格区间可以买入' in html
