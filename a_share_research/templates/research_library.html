@@ -3,9 +3,10 @@
 {% block main %}
 <h1>查已有研究</h1>
 <p class="muted">查找主动研究与初筛深挖的公司。这里只读取已有记录，不会启动研究；不含材料重放。</p>
-<form method="get" action="/research-library" class="search" role="search">
+<form method="get" action="/research-library" class="search" role="search" autocomplete="off">
   <label for="search-query">公司名称或代码</label>
   <div class="row"><input id="search-query" name="q" value="{{ q }}" maxlength="100" placeholder="例如：紫金 或 601899" enterkeyhint="search"><button class="btn" type="submit">查找</button></div>
+  <noscript><p class="hint">返回后若输入与下方结果标题不同，可<button type="reset" class="link">还原本页查询</button>。</p></noscript>
 </form>
 <p class="hint">留空查看全部。每页最多 20 家，按最新报告排序。<a href="/research-library">清空查询</a></p>
 {% if error %}<p role="alert" class="notice caution">{{ error }}</p>{% endif %}

@@ -1,3 +1,6 @@
+{% macro calculation_inputs(inputs) %}
+  {% for input in inputs %}<br>{{ '+' if input.weight > 0 else '−' }} {{ input.statement }}.{{ input.column }}（{{ input.period }}）：{{ input.value ~ ' 元' if input.value is not none else '缺失' }}；公告 {{ input.ann_date or '未记录' }}，实际公告 {{ input.f_ann_date or '未记录' }}，更新标志 {{ input.update_flag or '未记录' }}。{% endfor %}
+{% endmacro %}
 <section aria-labelledby="series">
   <h2 id="series" tabindex="-1">经营序列</h2>
   {% if body.series %}
@@ -11,7 +14,7 @@
     {% if kind == 'quarterly' %}<p class="small muted">单季由同年相邻累计期相减，一季度直接取值；任一输入缺失则该季留空。</p>
     {% elif kind == 'ttm' %}<p class="small muted">年报直接取全年；其他报告期按本年累计 + 上年全年 − 上年同期累计计算。</p>
     {% elif kind == 'balance' %}<p class="small muted">近 5 个年度末与近 8 个报告期末，重复期间只列一次；时点值不相减推导单季。</p>{% endif %}
-    <div class="table-wrap" tabindex="0" role="region" aria-label="{{ title }}经营序列">
+    <div class="table-wrap series-table" tabindex="0" role="region" aria-label="{{ title }}经营序列">
       <table>
         <thead><tr><th scope="col">指标（亿元）</th>{% for p in group.periods | reverse %}<th scope="col" class="num"><time datetime="{{ p }}">{% if kind == 'annual' %}{{ p[:4] }} 年{% elif kind == 'quarterly' %}{{ p[:4] }} Q{{ {'03-31': 1, '06-30': 2, '09-30': 3, '12-31': 4}[p[5:]] }}{% else %}{{ p }}{% endif %}</time></th>{% endfor %}</tr></thead>
         <tbody>
@@ -33,9 +36,11 @@
         {% for p in group.periods | reverse %}{% set cell = row['values'][p] %}
         <li>{{ p }}：{{ cell.value ~ ' 元' if cell.value is not none else ('暂不计算' if cell.unreconciled else '缺失') }}{% if cell.missing %}（缺少 {{ cell.missing | join('、') }} 的完整输入）{% endif %}。
           {% for period, corrected_at in (cell.unreconciled or {}).items() %}<br>{{ period }} 未见与同年 {{ corrected_at }} 更正同步的版本，暂不计算。{% endfor %}
-          {% for input in cell.inputs %}<br>{{ '+' if input.weight > 0 else '−' }} {{ input.statement }}.{{ input.column }}（{{ input.period }}）：{{ input.value ~ ' 元' if input.value is not none else '缺失' }}；公告 {{ input.ann_date or '未记录' }}，实际公告 {{ input.f_ann_date or '未记录' }}，更新标志 {{ input.update_flag or '未记录' }}。{% endfor %}
+          {{ calculation_inputs(cell.inputs) }}
           {% if cell.yoy %}<br>同比基期 {{ cell.yoy.period }}：{{ cell.yoy.base.value ~ ' 元' if cell.yoy.base.value is not none else ('更正版本待核对' if cell.yoy.base.unreconciled else '缺失') }}。
-          {% for period, corrected_at in (cell.yoy.base.unreconciled or {}).items() %}<br>{{ period }} 未见与同年 {{ corrected_at }} 更正同步的版本，暂不计算同比。{% endfor %}{% endif %}
+          {% for period, corrected_at in (cell.yoy.base.unreconciled or {}).items() %}<br>{{ period }} 未见与同年 {{ corrected_at }} 更正同步的版本，暂不计算同比。{% endfor %}
+          {% if cell.yoy.base.missing %}<br>基期缺少 {{ cell.yoy.base.missing | join('、') }} 的完整输入。{% endif %}
+          {{ calculation_inputs(cell.yoy.base.inputs) }}{% endif %}
         </li>
         {% endfor %}
       </ul>

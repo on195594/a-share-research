@@ -185,6 +185,7 @@ summary:hover { color: var(--accent-strong); text-decoration: underline; text-un
 .about p { font-size: 14px; overflow-wrap: anywhere; }
 
 .table-wrap { overflow-x: auto; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+.series-table th:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg); border-right: 1px solid var(--line); }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 td.num, th.num { text-align: right; }

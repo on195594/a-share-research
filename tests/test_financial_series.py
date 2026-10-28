@@ -1,6 +1,7 @@
 """Exact financial history checked against captured TuShare single-quarter statements."""
 
 import json
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -164,3 +165,45 @@ def test_series_survives_snapshot_but_stays_outside_model_evidence_and_renders_l
     assert '44.42' in html and '同比 -37.68%' in html and '基期含更正' in html
     assert '基期更正版本待核对' in html and '−134.30' not in html and '-134.30' not in html
     assert '本报告未记录经营序列' in template.render(body={})
+
+
+def test_yoy_sources_show_window_outside_inputs_and_quarter_ttm_formulas():
+    series = build()
+    before = json.dumps(series, ensure_ascii=False)
+    env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
+    html = env.get_template("_series.html").render(body={"series": series})
+
+    def source(title, period):
+        group = html.split(f"<summary>{title}</summary>", 1)[1]
+        return re.search(rf"<li>{period}：.*?</li>", group, re.S)[0]
+
+    # FY2020 is outside the five annual columns, but still supplies FY2021's growth base.
+    annual = source("年度", "2021-12-31")
+    assert "同比基期 2020-12-31：57321059453.15 元" in annual
+    assert "+ income.total_revenue（2020-12-31）：57321059453.15 元" in annual
+    assert "公告 2021-04-28，实际公告 2021-04-28，更新标志 1" in annual
+    quarter = source("单季", "2024-12-31")
+    assert "+ income.total_revenue（2023-12-31）：83272067317.19 元" in quarter
+    assert "− income.total_revenue（2023-09-30）：62536387639.06 元" in quarter
+    ttm = source("TTM", "2026-09-30")
+    for term in ("+ income.total_revenue（2025-09-30）：30637727654.97 元",
+                 "+ income.total_revenue（2024-12-31）：89175178322.7 元",
+                 "− income.total_revenue（2024-09-30）：67915580112.25 元"):
+        assert term in ttm
+    # Exposing the original input does not endorse a base whose version is unresolved.
+    q1 = source("单季", "2026-03-31")
+    assert "同比基期 2025-03-31：更正版本待核对" in q1 and "暂不计算同比" in q1
+    assert "+ income.total_revenue（2025-03-31）：36940356116.35 元" in q1
+    assert "同比基期" not in html.split("<summary>期末</summary>", 1)[1]
+    assert json.dumps(series, ensure_ascii=False) == before
+
+
+def test_yoy_source_missing_and_nonpositive_bases_are_not_replaced_or_hidden():
+    captured = json.loads((ROOT / "tests/data/600519-three-statements.json").read_text())
+    fin = {k: frame[frame.end_date <= "2023-06-30"] for k, frame in frames(captured).items()}
+    series = financial_series(fin, "600519.SH", "2026-10-26")
+    env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
+    html = env.get_template("_series.html").render(body={"series": series})
+    assert "基期缺少 2020-12-31 的完整输入" in html
+    assert "+ cashflow.n_cashflow_act（2022-03-31）：-6876059093.79 元" in html
+    assert cell(series, "quarterly", "op_cash", "2023-03-31")["yoy"]["value"] is None

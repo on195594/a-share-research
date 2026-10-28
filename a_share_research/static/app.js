@@ -20,9 +20,14 @@ document.addEventListener("submit", (event) => {
   });
 });
 
-// Returning through the back/forward cache must not leave buttons stuck.
+// Returning through history must match the server-rendered results, not the next
+// query typed into that page before leaving. Run after native form restoration.
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) document.querySelectorAll("button[aria-busy]").forEach(release);
+  setTimeout(() => {
+    const query = document.getElementById("search-query");
+    if (query) query.value = query.defaultValue;
+  }, 0);
 });
 
 // Elapsed timers count locally between server updates.
