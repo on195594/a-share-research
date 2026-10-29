@@ -9,7 +9,7 @@
 | D0、I1–I6、R0–R3 | 项目契约、运行身份、材料重放、共用 API、自主补证、纠错与方法复用已上线；Skills 已使用长期 Key | [项目契约](project-contract.md)、[路线图](roadmap.md) |
 | E 候选发现与研究实验 | P1–P3 已上线；首批 10-26 入场、20/20 成交并跟踪；P4 完成 118 批点时回测，未证明规则有效 | [实验方案](screening-experiment.md)；11 月批次待发起，既有冻结批次不改规则 |
 | F 基本面深度与信号升级 | F1/F3a、步骤 0、1a/1c、1b 历史快照阅读及 `peers` 同业发现已上线；步骤 2 第一阶段已上线；F2 保留原规则 | [升级方案](investment-upgrade.md)；逐值公告映射、F3b、步骤 2 后续及 3–4 待确认 |
-| K 研究积累与降噪 | K1、K2 已部署；双组有限对照与 K3 完成；标题修复后补齐华东医药事实，并覆盖真实跨期检查点回应；K4 保留规则已写入 | 标题修复未部署；真实关闭及关闭后不再继承未覆盖，见下方与[积累方案](research-accumulation.md) |
+| K 研究积累与降噪 | K1、K2 及标题修复已执行部署；双组有限对照与 K3 完成；补齐华东医药事实，并覆盖真实跨期检查点回应；K4 保留规则已写入 | 本次部署按要求未验证；真实关闭及关闭后不再继承未覆盖，见下方与[积累方案](research-accumulation.md) |
 
 ### F 推进记录
 
@@ -64,7 +64,7 @@ Claude Opus 5.5 定向复查无阻断项。设计见[升级方案 7.4–7.5](inv
 
 证据在 `k2-k3-20261029-183129/`：`k3-followup.md` 保存逐项归因，`required-facts.json` 为事前事实表，`runs/` 保存独立数据库、初始/终版材料与报告，`verification.json` 和 `archive-checks.json` 保存验证与归档核对。两组单次结果不证明接续普遍提升，也不代表当前生产版本的完整效果。
 
-**10-29 标题修复与 K2 跨期补验**：`4b83a7f` 修复巨潮“一季度报告”“三季度报告”缺少“第”字时期间为空的问题。六条真实目录记录进入回归；修复前两条华东案例失败，修复后 39 项公告、日期、研究工具及接续测试通过。真实目录和 PDF 验证通过，华东医药 2026 Q1/Q3、2025 Q3 均可进入定期报告目录，东方电缆标准标题正常。该提交尚未部署。
+**10-29 标题修复与 K2 跨期补验**：`4b83a7f` 修复巨潮“一季度报告”“三季度报告”缺少“第”字时期间为空的问题。六条真实目录记录进入回归；修复前两条华东案例失败，修复后 39 项公告、日期、研究工具及接续测试通过。真实目录和 PDF 验证通过，华东医药 2026 Q1/Q3、2025 Q3 均可进入定期报告目录，东方电缆标准标题正常。随后随 `6faeb5c` 执行部署，部署记录见下方。
 
 固定修复版各运行一次华东医药、东方电缆，共 14 次模型调用，均经一次原有机械修复后通过复核。华东医药仍从原快照接续报告 36，H1–H5 均覆盖，`answer[4]` 直接引用三季报 p18 的联营/合营收益转正，上轮遗漏已补齐。东方电缆从 `accumulation-k2-20261027/live/` 的独立副本接续报告 40（10-27、半年报、3 条检查点），新三季报使此次成为真实跨期回应；现金风险仍在、存货部分缓解但应收/票据压力增加、订单兑现无法逐项判断，均有出处。两份新报告均为各自隔离库的 41，不是生产报告。
 
@@ -80,16 +80,18 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。最近发布记录：**web 与 worker 均为 Research `4eee2f5`**，10-29 18:04 上线 `peers` 同业发现工具。研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 为 `cpus: 0.6`；成文/复核契约未变。
+入口 [stock.keyi.win](https://stock.keyi.win)。最近发布记录：**Research `6faeb5c`**，10-29 19:27 完成 web、worker 镜像切换，包含 `4b83a7f` 季报标题修复。Compose 返回两容器启动完成；按所有者当次明确要求，**跳过全部验证，未确认部署后的运行与业务状态**。研究与批次比较配置沿用 `openai-codex/gpt-6.1-terra/high`，worker 为 `cpus: 0.6`；成文/复核契约未变。
 
-| 已上线镜像 | 镜像 SHA256 |
+| 本次构建并切换的镜像 | 构建返回的镜像 SHA256 |
 |---|---|
-| `a-share-research-web:4eee2f5` | `c238659f4ceaa3cbe6c6068e575bde66dbd4ddc4ababcdd7be71bc59551b6190` |
-| `a-share-research-worker:4eee2f5` | `6a5dbf0583d31dac6aa9c81b389995ff57856f5fa1f6adb00e3a40e480a091b1` |
+| `a-share-research-web:6faeb5c` | `14de001fd3955b1391616ecf3a470db6c1832ec5f66210709edbf7ef5edc43ba` |
+| `a-share-research-worker:6faeb5c` | `008d85242a314a056470f4cad2d1b05675a4fa570a5706bc864ceae0c903f34b` |
 
-验证：完整 248 项测试；发布工具完成镜像源码核对、空闲检查、备份、七张表指纹与完整性巡检（43 份报告、138 份 PDF）。生产验收：公网 Chromium 390×844 提交万华化学同业问题（run 61 → 报告 44），研究员调用 `peers`（聚氨酯）后自选沧州大化、红宝丽、美思德取数并计算，报告通过复核；页面“已存同行快照对照”展示 3 家、无横向溢出，临时会话已退出。
+本次直接从已提交推送的 Git 归档构建，保留运行中的旧镜像标签，停止两服务、备份数据库、切换镜像并执行 Compose 启动；没有调用包含自动验证的发布工具，没有运行测试、空闲检查、源码核对、表指纹/完整性巡检、健康检查、浏览器或真实研究验收。上述修复阶段的既有测试与研究结果不代表部署后验证。
 
-**证据与回退**：证据在 `deploy-4eee2f5-20261029-180437/`，备份为 `~/a-share-research-data/backup-pre-4eee2f5-20261029-180439.db`。直接回退镜像为 `a-share-research-web:rollback-4eee2f5` 与 `a-share-research-worker:rollback-4eee2f5`（均为 `cd6aed0`）；经当次授权、空闲检查与备份后，分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。只回退应用，不覆盖新数据；流程见 [README](../README.md#部署)。更早镜像、验收与备份记录见页首 Git 历史入口，既有备份和证据未删除。
+**证据与回退**：构建日志、部署命令记录在 `deploy-6faeb5c-20261029-192619/`，备份为 `~/a-share-research-data/backup-pre-6faeb5c-20261029-192619.db`。直接回退镜像为 `a-share-research-web:rollback-6faeb5c` 与 `a-share-research-worker:rollback-6faeb5c`（均来自原运行的 `4eee2f5`）；经当次授权后，分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。只回退应用，不覆盖新数据；常规流程见 [README](../README.md#部署)，本次跳过验证仅适用于当次指令。
+
+前次 `4eee2f5` 于 10-29 18:04 上线 `peers`，其 248 项测试、完整性巡检与万华化学生产验收记录见 `git show 6faeb5c:docs/implementation-plan.md`。证据在 `deploy-4eee2f5-20261029-180437/`，备份为 `~/a-share-research-data/backup-pre-4eee2f5-20261029-180439.db`。更早记录见页首历史入口，既有备份和证据未删除。
 
 前次 `cd6aed0` 已将本地 `calculate` 从取证额度中分离，并修复 web 启动期连接重置的就绪判断；东方电缆与长江电力真实研究通过。证据在 `deploy-cd6aed0-20261029-165546/`。
 
