@@ -138,8 +138,8 @@ def test_preceding_cumulative_periods_support_the_existing_calculator_and_backfi
     assert cash["unavailable"].keys() == {"2025-03-31", "2025-09-30"}
     calculated = calculate(table, "Q3经营现金流", "difference", {"ref": "T.op_cash", "period": "2026-09-30"},
                            {"ref": "T.op_cash", "period": "2026-06-30"})
-    # T.* retains its established two-decimal precision; the series calculates from raw yuan.
-    assert calculated["values"] == {"result": "22.01"}
+    # Calculations and the reading series now share source precision, not rounded display inputs.
+    assert calculated["values"] == {"result": "22.00"}
     assert cell(build(), "quarterly", "op_cash", "2026-09-30")["display"] == "22.00"
     captured = json.loads((ROOT / "tests/data/600519-three-statements.json").read_text())
     old = json.loads((ROOT / "tests/data/since-prior-600519.json").read_text())["tables"]["8"]

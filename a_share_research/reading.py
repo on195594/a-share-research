@@ -111,21 +111,26 @@ def peer_snapshots(body: dict) -> list[dict]:
                     or row.get('unit') != '倍' or not isinstance(operands, list) or len(operands) != 2):
                 continue
             if any(not isinstance(v, dict) or v.get('ref') != c['ref'] or v.get('period') != period
-                   or v.get('unit') != '亿元' or number(v.get('value')) != number(c['value'])
+                   or v.get('unit') != '亿元' or v.get('value_field', 'values') not in ('values', 'exact_values')
                    for v, c in zip(operands, (cash, profit))):
+                continue
+            expected_inputs = [number(mapping(indexed[c['ref']][0], v.get('value_field', 'values')).get(period))
+                               for v, c in zip(operands, (cash, profit))]
+            if any(expected is None or number(v.get('value')) != expected
+                   for v, expected in zip(operands, expected_inputs)):
                 continue
             if period_conflict(row, calculation, *operands):
                 continue
             normalized = calculation.get('normalized_inputs')
             if normalized is not None and (not isinstance(normalized, list) or len(normalized) != 2 or
-                    any(not isinstance(v, dict) or v.get('unit') != '亿元' or number(v.get('value')) != number(c['value'])
-                        for v, c in zip(normalized, (cash, profit)))):
+                    any(not isinstance(v, dict) or v.get('unit') != '亿元' or number(v.get('value')) != expected
+                        for v, expected in zip(normalized, expected_inputs))):
                 continue
             if normalized is not None and period_conflict(*normalized):
                 continue
             value = mapping(row, 'values').get('result')
             try:
-                expected = (number(cash['value']) / number(profit['value'])).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+                expected = (expected_inputs[0] / expected_inputs[1]).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
             except DecimalException:
                 continue
             if number(value) == expected:

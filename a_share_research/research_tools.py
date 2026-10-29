@@ -34,7 +34,7 @@ TOOLS = [
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
                     "required": ["code"], "additionalProperties": False}},
-    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。left/right 可传表格行 {ref, period}，或直接传已读披露原文中的原数 {source, page, quote, value, unit, period(可选), label(可选)}（value 必须与 quote 中的数字及正负号完全一致，元/千元/万元/百万元/亿元可自动换算）。growth_pct 要求同指标同月日同比且基期为正；difference/sum/ratio/ratio_pct 要求同单位或同为货币单位。",
+    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。表格输入优先使用未舍入值；label 仅记录计算目的，结果按运算类型命名，财务含义须结合输入出处解释。left/right 可传表格行 {ref, period}，或直接传已读披露原文中的原数 {source, page, quote, value, unit, period(可选), label(可选)}（value 必须与 quote 中的数字及正负号完全一致，元/千元/万元/百万元/亿元可自动换算）。growth_pct 要求同指标同月日同比且基期为正；difference/sum/ratio/ratio_pct 要求同单位或同为货币单位。",
      "parameters": {"type": "object", "properties": {
          "label": {"type": "string"},
          "operation": {"type": "string", "enum": ["difference", "sum", "growth_pct", "ratio", "ratio_pct"]},
@@ -52,6 +52,8 @@ CURRENCY_UNITS = {
     "百万元": Decimal("1e6"), "亿元": Decimal("1e8"),
 }
 DECLARED_UNIT = re.compile(r"单位\s*[：:]\s*(?:人民币)?(亿元|百万元|万元|千元|元)")
+OPERATION_NAMES = {"difference": "差额", "sum": "合计", "growth_pct": "相对变动率",
+                   "ratio": "比值", "ratio_pct": "比值（百分比）"}
 
 
 def research_methods(conn, query: str) -> list[dict]:
@@ -91,8 +93,9 @@ def _operand(side: dict, rows: dict, material) -> dict:
         row = rows[side["ref"]]
         if reason := row.get("unavailable", {}).get(side["period"]):
             raise ValueError(f"{side['period']} 更正版本待核对：{reason}")
+        value_field = "exact_values" if "exact_values" in row else "values"
         return {"ref": side["ref"], "period": side["period"], "label": row["label"],
-                "value": row["values"][side["period"]], "unit": row["unit"]}
+                "value": row[value_field][side["period"]], "unit": row["unit"], "value_field": value_field}
     if {"page", "quote", "value", "unit"} <= set(side) and "ref" not in side:
         from a_share_research.research import NUMBER, _quote_found
         if material is None or not _quote_found(side, material):
@@ -173,11 +176,15 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
             result, formula, unit = result * 100, "left / right * 100", "%"
     else:
         raise ValueError("未知计算操作")
-    return {"id": f"C.{1 + sum(r['id'].startswith('C.') for r in table)}", "label": label,
+    precision = "基于所列输入计算，显示结果四舍五入到两位"
+    if any(value.get("value_field") == "values" for value in inputs):
+        precision += "；部分输入仅有已保存表值，精度受该表值限制"
+    return {"id": f"C.{1 + sum(r['id'].startswith('C.') for r in table)}", "label": OPERATION_NAMES[operation],
             "unit": unit, "values": {"result": str(result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))},
-            "calculation": {"operation": operation, "formula": formula, "inputs": inputs,
+            "exact_values": {"result": str(result)},
+            "calculation": {"operation": operation, "formula": formula, "inputs": inputs, "requested_label": label,
                             "normalized_inputs": normalized_inputs,
-                            "precision": "基于所列输入精确计算，结果四舍五入到两位"}}
+                            "precision": precision}}
 
 
 class ResearchTools:

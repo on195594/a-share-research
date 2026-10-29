@@ -40,6 +40,28 @@ def test_captured_pair_preserves_values_negative_cash_and_exact_saved_ratios():
     assert '分母为归母净利润，范围不完全对应' in html
 
 
+def test_ratios_from_original_precision_still_map_to_the_saved_peer_rows():
+    from a_share_research.research import financial_table
+    from a_share_research.research_tools import calculate
+    from test_financial_series import CAPTURES, frames
+    from test_financial_table import DATA
+
+    body = captured()
+    body['table'] = [r for r in body['table'] if not r['id'].startswith('C.')]
+    for prefix, source in (('', DATA), ('P000858.', CAPTURES['000858'])):
+        original = {r['id']: r for r in financial_table(frames(source), {})}
+        for key in ('T.net_profit', 'T.op_cash'):
+            row(body, prefix + key)['exact_values'] = original[key]['exact_values']
+        ratio = calculate(body['table'], '经营现金与利润比', 'ratio',
+                          {'ref': prefix + 'T.op_cash', 'period': '2026-06-30'},
+                          {'ref': prefix + 'T.net_profit', 'period': '2026-06-30'})
+        assert ratio['calculation']['inputs'][0]['value'] != row(body, prefix + 'T.op_cash')['values']['2026-06-30']
+        body['table'].append(ratio)
+    peer, = reading.peer_snapshots(body)
+    assert not peer['ratio_missing']
+    assert [c['value'] for c in peer['rows'][-1]['cells']] == ['1.59', '-0.25']
+
+
 def test_no_peer_or_old_empty_report_does_not_add_an_empty_shell():
     for body in (BODY[37], {}, {'table': None}):
         assert reading.peer_snapshots(body) == []

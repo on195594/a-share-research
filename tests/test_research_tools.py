@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from a_share_research import db, service
 from a_share_research.research import Material, check, financial_table, _research_context, _verified_facts, _review_issues
 from a_share_research.research_tools import calculate
+from a_share_research.sources import Document
 from test_check import MATERIAL, report
 from test_financial_table import DATA
 
@@ -20,10 +21,11 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     table = financial_table({k: pd.DataFrame(v) for k, v in DATA["financials"].items()}, DATA["market"])
     left, right = {"ref": "T.op_cash", "period": "2025-12-31"}, {"ref": "T.op_cash", "period": "2024-12-31"}
     row = calculate(table, "经营现金流同比", "growth_pct", left, right)
-    values = next(r["values"] for r in table if r["id"] == "T.op_cash")
+    values = next(r["exact_values"] for r in table if r["id"] == "T.op_cash")
     expected = ((Decimal(values[left["period"]]) / Decimal(values[right["period"]]) - 1) * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     assert row["values"] == {"result": str(expected)}
     assert row["calculation"]["inputs"][1]["value"] == values["2024-12-31"]
+    assert row["label"] == "相对变动率" and row["calculation"]["requested_label"] == "经营现金流同比"
     with pytest.raises(ValueError, match="同月日"):
         calculate(table, "不可比", "growth_pct", left | {"period": "2026-06-30"}, right)
     with pytest.raises(ValueError, match="单位"):
@@ -70,6 +72,47 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     with pytest.raises(ValueError, match="同一指标"):
         calculate(MATERIAL.table, "不同科目同比", "growth_pct",
                   pdf_2025, pdf_2024 | {"label": "管理费用"}, material=MATERIAL)
+
+
+def test_huadong_calculations_keep_source_precision_and_legacy_material_limits():
+    captured = json.loads((Path(__file__).parent / "data/calculation-precision.json").read_text())["000963"]
+    table = financial_table({k: pd.DataFrame(v) for k, v in captured["financials"].items()}, {})
+    current = {"ref": "T.op_cash", "period": "2026-09-30"}
+    half = {"ref": "T.op_cash", "period": "2026-06-30"}
+    profit = {"ref": "T.net_profit", "period": "2026-09-30"}
+    cash = next(row for row in table if row["id"] == "T.op_cash")
+    assert cash["values"]["2026-09-30"] == "18.61"
+    quarter = calculate(table, "单季经营现金流", "difference", current, half)
+    assert quarter["values"]["result"] == "-6.39"
+    assert Decimal(quarter["exact_values"]["result"]) * Decimal("1e8") == Decimal("-638637273.00")
+    assert quarter["calculation"]["inputs"][0]["value"] == "18.6078225763"
+    assert calculate(table, "现金与利润比", "ratio_pct", current, profit)["values"]["result"] == "67.13"
+    # Reusing the computed quarter must not reintroduce its rounded display value.
+    combined = calculate(table + [quarter], "累计经营现金流", "sum",
+                         {"ref": quarter["id"], "period": "result"}, half)
+    assert Decimal(combined["exact_values"]["result"]) == Decimal("18.6078225763")
+    historical = calculate(captured["saved_table"], "单季经营现金流", "difference", current, half)
+    assert historical["values"]["result"] == "-6.38"
+    assert "精度受该表值限制" in historical["calculation"]["precision"]
+    assert historical["calculation"]["inputs"][0]["value_field"] == "values"
+
+
+def test_real_pdf_ratio_does_not_promote_the_requested_metric_name():
+    captured = json.loads((Path(__file__).parent / "data/calculation-precision.json").read_text())["603606"]
+    doc = Document(**captured["document"])
+    material = Material(doc.code, doc.name, doc, {}, {}, [], "2026-10-29",
+                        {"sources": {"D1": {k: captured[k] for k in ("document", "pages", "raw_pages")}}})
+    row = calculate(material.table, **captured["request"], material=material)
+    assert row["values"]["result"] == "11.13"
+    assert row["label"] == "比值（百分比）"
+    assert row["calculation"]["requested_label"] == "三季度营业利润率"
+    material.table.append(row)
+    assert Material.from_snapshot(json.loads(json.dumps(material.snapshot()))).table == material.table
+    env = Environment(loader=FileSystemLoader(Path(__file__).parents[1] / "a_share_research/templates"), autoescape=True)
+    template = env.from_string('{% from "_macros.html" import cites %}{{ cites(item, rows) }}')
+    html = template.render(item={"cites": [{"ref": row["id"]}]}, rows={row["id"]: row})
+    assert "比值（百分比）" in html and "三季度营业利润率" not in html
+    assert "归母净利润" in html and "营业收入" in html
 
 
 def test_multisource_and_calculation_replay_keeps_real_evidence():

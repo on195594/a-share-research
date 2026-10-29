@@ -190,12 +190,13 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     for key, label, unit, statement, column, divisor in METRICS:
         frame = statements.get(statement, pd.DataFrame())
         uncertain = _unreconciled_periods(frame) if statement in ("income", "cashflow") else {}
-        values = {}
+        values, exact_values = {}, {}
         for p in periods:
             raw, _ = _financial_metric(frame.loc[p] if p in frame.index else {}, key, column)
             if raw is not None and p not in uncertain:
                 values[p] = f"{raw / Decimal(str(divisor)):.2f}"
-        row = {"id": f"T.{key}", "label": label, "unit": unit, "values": values}
+                exact_values[p] = str(raw / Decimal(str(divisor)))
+        row = {"id": f"T.{key}", "label": label, "unit": unit, "values": values, "exact_values": exact_values}
         if unavailable := {p: f"同年{'利润表' if statement == 'income' else '现金流量表'}于 {uncertain[p]} 有更正，"
                               "本期未见同步版本，暂不作为可比数值；须补读披露核对。"
                            for p in periods if p in uncertain}:
@@ -203,13 +204,15 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
         table.append(row)
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
+            value = Decimal(str(market[key])) / Decimal(str(divisor))
             table.append({"id": f"M.{key}", "label": label, "unit": unit,
-                          "values": {market["trade_date"]: f"{float(market[key]) / divisor:.2f}"}})
+                          "values": {market["trade_date"]: f"{value:.2f}"},
+                          "exact_values": {market["trade_date"]: str(value)}})
     return table
 
 
 def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str) -> dict:
-    """Human-readable operating history; exact yuan inputs stay outside the model evidence table."""
+    """Human-readable operating history; the series itself stays outside model evidence."""
     latest = {k: _latest_rows(v, consolidated=k in ("income", "cashflow", "balance")) for k, v in fin.items()}
     quarters = ("03-31", "06-30", "09-30", "12-31")
 
@@ -434,8 +437,9 @@ def _candidates(cites: list[dict], material: Material) -> list[float]:
     values = []
     for cite in cites:
         if "ref" in cite and cite["ref"] in rows:
-            cited = rows[cite["ref"]]["values"]
-            values += [float(v) for p, v in cited.items() if not cite.get("period") or cite["period"] == p]
+            for field in ("values", "exact_values"):
+                cited = rows[cite["ref"]].get(field, {})
+                values += [float(v) for p, v in cited.items() if not cite.get("period") or cite["period"] == p]
         elif "quote" in cite:
             values += [v for v, _ in _numbers(cite["quote"])]
     return values
@@ -506,7 +510,9 @@ def check(report: dict, material: Material) -> list[dict]:
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
-    candidates = _candidates(all_cites, material) + [float(v) for r in material.table for v in r["values"].values()]
+    candidates = _candidates(all_cites, material) + [float(v) for r in material.table
+                                                   for field in ("values", "exact_values")
+                                                   for v in r.get(field, {}).values()]
     for value, decimals in _numbers(summary):
         if not _supported(value, decimals, candidates):
             problems.append({"where": "summary", "problem": f"数字 {value:g} 在报告出处与表中找不到"})
