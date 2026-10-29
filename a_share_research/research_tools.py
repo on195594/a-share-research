@@ -290,6 +290,14 @@ class ResearchTools:
         return row
 
 
+FETCH_LIMIT = 24  # evidence-gathering tool calls per run; rounds, time and staleness bound the rest
+CALL_LIMIT = 72  # runaway guard only, so calculations cannot swell the prompt without bound
+
+
+def _fetches(traces: list[dict]) -> int:
+    return sum(t["tool"] != "calculate" for t in traces)
+
+
 def explore(runner, material, *, budget_seconds: float = 900):
     from a_share_research.research import RULES, output_schema, _parse, compose
     toolkit = ResearchTools(material, runner.conn)
@@ -318,7 +326,7 @@ def explore(runner, material, *, budget_seconds: float = 900):
     seen: set[str] = set()
     stale = 0
     for _ in range(12):
-        if time.monotonic() >= deadline or len(traces) >= 24 or stale >= 2:
+        if time.monotonic() >= deadline or _fetches(traces) >= FETCH_LIMIT or stale >= 2:
             material.extra["gaps"].append("探索已到停止条件，回答仅依据已取得证据；未完成的取证仍未知。")
             break
         payload = json.dumps({"messages": messages, "tools": TOOLS}, ensure_ascii=False)
@@ -336,7 +344,9 @@ def explore(runner, material, *, budget_seconds: float = 900):
             any_new |= sig not in seen
             seen.add(sig)
             try:
-                if len(traces) >= 24 or time.monotonic() >= deadline:
+                # calculate is local exact arithmetic over evidence already in hand; only fetches spend the budget.
+                if ((call["name"] != "calculate" and _fetches(traces) >= FETCH_LIMIT)
+                        or len(traces) >= CALL_LIMIT or time.monotonic() >= deadline):
                     raise ValueError("本次探索预算已用尽，请据已有材料回答并说明缺口")
                 if call.get("argumentsError"):
                     raise ValueError(call["argumentsError"])
