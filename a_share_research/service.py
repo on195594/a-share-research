@@ -97,7 +97,14 @@ def retry_feedback(conn, run_id: int, request_id: str) -> int:
     return submit(conn, run['code'], request_id, **payload)
 
 
-def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
+def _table_periods(body: dict) -> list[str]:
+    rows = body.get("table")
+    return sorted({p for row in (rows if isinstance(rows, list) else [])
+                   if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"].startswith("T.")
+                   and isinstance(row.get("values"), dict) for p in row["values"] if isinstance(p, str)})
+
+
+def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = False) -> dict:
     # One SELECT gives a consistent task/report snapshot while a worker is saving a result.
     row = conn.execute(
         "SELECT r.*, u.status, u.error, u.identity, u.material, u.request,"
@@ -117,10 +124,10 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
                 "methods_used": extra.get("methods_used", [])}
     evidence["sources"] = {"D0": {"document": data.get("doc", body.get("document")),
                                      "pages": data.get("pages", {})}, **evidence["sources"]}
-    return {"version": VERSION, "id": row["id"], "run_id": row["run_id"], "code": row["code"],
+    result = {"version": VERSION, "id": row["id"], "run_id": row["run_id"], "code": row["code"],
             "name": row["name"], "created_at": row["created_at"], "status": row["status"],
             "passed": bool(row["passed"]), "error": row["error"],
-            "question": json.loads(row["request"] or "{}").get("question", ""),
+            "question": (json.loads(row["request"] or "{}") or {}).get("question", ""),
             "report": body if row["passed"] else {"facts": body.get("facts", {}),
                                                    "facts_reviewed": body.get("facts_reviewed"),
                                                    "problems": body.get("problems", [])},
@@ -129,8 +136,107 @@ def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}
                             if (identity := json.loads(value or "null")) else None
                             for value in json.loads(row["call_identities"])],
-            "coverage": {"periods": sorted({p for r in evidence["table"] if r["id"].startswith("T.")
-                                             for p in r["values"]}),
+            "coverage": {"periods": _table_periods(body),
                          "missing": body.get("gaps", extra.get("gaps", [])),
                          "announcement_searches": extra.get("announcement_searches", []),
                          "limits": "覆盖已读取的披露和财务数据；公告检索范围单独列出，不代表全部公告、新闻或账户事实。历史结果不自动刷新。"}}
+    if not compact:
+        return result  # Keep the original full evidence wire contract.
+    result["view"] = "compact"
+    result["report"] = ({key: body[key] for key in
+                         ("verdict", "summary", "answer", "risks", "business", "financial", "methods", "checkpoints")
+                         if key in body} if row["passed"] else result["report"])
+    result["evidence"] = {"market_date": evidence["market_date"],
+                          "material_sha256": evidence["material_sha256"],
+                          "sources": {key: {"document": source["document"],
+                                              "pages_available": list(source.get("pages", {}))}
+                                      for key, source in evidence["sources"].items()}}
+    result.pop("identity")
+    result.pop("model_calls")
+    result["budget"] = run_budget(conn, row["run_id"])
+    result["diagnostics"] = diagnostics(row["status"], body, gaps=extra.get("gaps"),
+                                        announcement_searches=extra.get("announcement_searches"))
+    result["continuation"] = continuation(conn, row, body, extra)
+    return result
+
+
+def run_budget(conn, run_id: int | None = None) -> dict:
+    from a_share_research.research import MAX_CALLS
+
+    count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
+    return {"model_call_limit": MAX_CALLS, "model_calls_recorded": count, "run_id": run_id,
+            "scope": "run" if run_id is not None else "configuration",
+            "limit_kind": "loop_guard_not_money_cap", "cost": None, "cost_status": "unavailable",
+            "automatic_paid_restart": False,
+            "note": "调用上限不是金额预算；无法据调用次数推算账单。失败后不自动创建新任务。"}
+
+
+def diagnostics(status: str, body: dict, *, gaps: list | None = None,
+                announcement_searches: list | None = None, report_available: bool = True) -> dict:
+    problems = body.get("problems", [])
+    missing = body.get("gaps", gaps or [])
+    gaps_basis = "report" if "gaps" in body else "material_snapshot" if gaps is not None else "unavailable"
+    next_step = "历史报告不自动刷新；追问先核查是否有新披露。"
+    if status in {"queued", "running"}:
+        next_step = "任务处理中；按原任务编号间隔查询，不重新提交。"
+    elif status == "failed":
+        next_step = ("先查看 error、具体核查问题与已取证材料，缩小到一个关键缺口；继续研究须另行确认，不自动重跑。"
+                     if report_available else "尚未形成报告；先查看 error 与 diagnostics.gaps，缩小到一个关键缺口；继续研究须另行确认，不自动重跑。")
+    return {"status": "passed" if status == "done" else "review_failed" if status == "failed" and problems else status,
+            "problems": problems, "gaps": missing, "gaps_basis": gaps_basis, "next_step": next_step,
+            "announcement_searches": body.get("announcement_searches", announcement_searches or []),
+            "limits": "缺口与预算提示不是失败根因判定；不据此推断未披露或清除投资门禁。"}
+
+
+def continuation(conn, row, body: dict, extra: dict) -> dict:
+    from a_share_research import reading
+
+    compared = reading.comparison(conn, row)
+    parent = compared.get("old", {})
+    previous = json.loads(parent["body"]) if parent else {}
+    baseline_status = compared["baseline_status"]
+    changes = {key: compared[key] for key in ("diff", "excluded", "missing", "reason") if key in compared}
+    if not row["passed"] or baseline_status != "ready":
+        changes.pop("diff", None)
+        changes.setdefault("reason", "至少一份报告未通过核查，不形成已核查报告差值。")
+    documents = [source["document"] for source in extra.get("sources", {}).values()]
+    documents += [body.get("document") or {}]
+    return {"parent_report_id": compared["parent_report_id"],
+            "baseline_status": baseline_status,
+            "baseline": {"generated_at": parent.get("created_at"),
+                         "financial_period": max([parent.get("period") or "", *_table_periods(previous)]) or None,
+                         "market_date": previous.get("market_date"),
+                         "document": previous.get("document"),
+                         "announcement_searches": previous.get("announcement_searches", []),
+                         "status": parent.get("status"), "passed": bool(parent["passed"]) if parent else None},
+            "previous_checkpoints": previous.get("checkpoints", []) if baseline_status == "ready" else [],
+            "previous_checkpoints_basis": "agenda_to_recheck_not_current_facts",
+            "current_checkpoints": body.get("checkpoints", []) if row["passed"] else [],
+            "table_changes": changes,
+            "generated_at": row["created_at"], "financial_period": max([row["period"], *_table_periods(body)]),
+            "market_date": body.get("market_date"),
+            "disclosures": [{key: doc.get(key) for key in ("title", "period", "announced", "url")}
+                            for doc in documents if doc],
+            "announcement_searches": extra.get("announcement_searches", []),
+            "freshness_status": "historical_not_live_checked",
+            "limits": "表格变化不是投资理由变化；观察条件须重新取证，不自动写入 L3 或账户。"}
+
+
+def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) -> dict:
+    if request_id is not None and not 1 <= len(request_id) <= 128:
+        raise RequestError("请求编号须为 1–128 字")
+    field, value = ("request_id", request_id) if request_id is not None else ("id", run_id)
+    row = conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
+                       " u.material, r.id AS report_id, r.body AS report_body FROM runs u LEFT JOIN reports r ON r.run_id = u.id"
+                       f" WHERE u.{field} = ? AND u.kind = 'research'", (value,)).fetchone()
+    if row is None:
+        raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
+    body = json.loads(row["report_body"]) if row["report_body"] else {}
+    material = (json.loads(row["material"]) or {}) if row["material"] else {}
+    extra = material.get("data", {}).get("extra", {})
+    public = {key: row[key] for key in row.keys() if key not in {"report_body", "material"}}
+    return {"version": VERSION, **public,
+            "budget": run_budget(conn, row["id"]),
+            "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),
+                                       announcement_searches=extra.get("announcement_searches"),
+                                       report_available=row["report_id"] is not None)}

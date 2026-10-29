@@ -90,17 +90,23 @@ def comparison(conn, report) -> dict:
     request = (json.loads(run['request'] or '{}') or {}) if run else {}
     parents = {x for x in (request.get('parent_report_id'), body.get('parent_report_id')) if isinstance(x, int)}
     if len(parents) > 1:
-        return {'reason': '关联原报告记录不一致，无法可靠对照。'}
+        return {'parent_report_id': None, 'baseline_status': 'conflict',
+                'reason': '关联原报告记录不一致，无法可靠对照。'}
     parent = next(iter(parents), None) or (body.get('prior') or {}).get('report_id')
     if not isinstance(parent, int) or parent == report['id']:
-        return {'reason': '未记录明确关联的原报告，不能按研究时间自动配对。'}
+        return {'parent_report_id': None, 'baseline_status': 'not_linked',
+                'reason': '未记录明确关联的原报告，不能按研究时间自动配对。'}
     old = conn.execute('SELECT r.*, u.request, u.status FROM reports r JOIN runs u ON u.id = r.run_id'
-                       ' WHERE r.id = ? AND r.code = ?', (parent, report['code'])).fetchone()
-    if old is None:
-        return {'reason': '关联原报告不存在或不属于同一家公司，无法对照。'}
+                       ' WHERE r.id = ?', (parent,)).fetchone()
+    if old is None or old['code'] != report['code']:
+        return {'parent_report_id': parent, 'baseline_status': 'missing' if old is None else 'not_same_code',
+                'reason': '关联原报告不存在或不属于同一家公司，无法对照。'}
     before = json.loads(old['body'])
     previous_request = json.loads(old['request'] or '{}') or {}
-    result = {'old': dict(old), 'new': dict(report),
+    baseline_status = ('ready' if old['status'] == 'done' and old['passed']
+                       else 'failed' if old['status'] == 'failed' and not old['passed'] else 'not_ready')
+    result = {'parent_report_id': parent, 'baseline_status': baseline_status,
+              'old': dict(old), 'new': dict(report),
               'old_question': previous_request.get('question') or before.get('question'),
               'new_question': request.get('question') or body.get('question'),
               'old_document': before.get('document'), 'new_document': body.get('document'),
@@ -109,18 +115,21 @@ def comparison(conn, report) -> dict:
     if not run or not service.ready(run['status'], report['passed']) or not service.ready(old['status'], old['passed']):
         return result | {'reason': '至少一份报告尚未就绪，暂不能对照。'}
     old_rows, new_rows = before.get('table'), body.get('table')
-    if not old_rows or not new_rows:
+    if not isinstance(old_rows, list) or not isinstance(new_rows, list) or not old_rows or not new_rows:
         return result | {'reason': '至少一份报告未记录财务表，无法计算指标变化。'}
     # K2's deterministic comparison assumes identical row semantics. Exclude mismatched
     # units/labels and incomplete legacy rows instead of comparing unlike quantities.
     def valid(row):
-        return isinstance(row, dict) and all(row.get(k) for k in ('id', 'label', 'unit')) and isinstance(row.get('values'), dict)
+        return (isinstance(row, dict) and all(isinstance(row.get(k), str) and row[k] for k in ('id', 'label', 'unit'))
+                and isinstance(row.get('values'), dict))
     old_map = {r['id']: r for r in old_rows if valid(r)}
     new_map = {r['id']: r for r in new_rows if valid(r)}
     incompatible = {key for key in old_map.keys() & new_map.keys()
                     if any(old_map[key][k] != new_map[key][k] for k in ('unit', 'label'))}
-    excluded = sorted({(r.get('label') or r.get('id') or '未知指标') if isinstance(r, dict) else '未知指标'
-                       for r in old_rows + new_rows if not valid(r) or r.get('id') in incompatible})
+    def label(row):
+        return next((row[k] for k in ('label', 'id') if isinstance(row, dict)
+                     and isinstance(row.get(k), str) and row[k]), '未知指标')
+    excluded = sorted({label(r) for r in old_rows + new_rows if not valid(r) or r.get('id') in incompatible})
     old_table = [r for key, r in old_map.items() if key not in incompatible]
     new_table = [r for key, r in new_map.items() if key not in incompatible]
     if not old_table or not new_table:

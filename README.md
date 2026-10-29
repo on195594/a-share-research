@@ -67,10 +67,24 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 |---|---|
 | `POST /api/research` | `{"code":"600519","question":"最新财报改变了什么？","request_id":"本次唯一编号"}` → 202 与 `run_id` |
 | `GET /api/runs/{run_id}` | 排队/研究/成功/失败、步骤、错误和 `report_id`；成功状态为 `done` |
+| `GET /api/request?request_id=...` | 只读找回原请求的任务、诊断与调用计数；404 不证明原提交失败，不自动重提或重启失败任务 |
+| `GET /api/research/budget` | 模型调用上限（循环保护而非金额预算）；费用未知，不按调用次数推算实付 |
 | `GET /api/reports?code=600519` | 最近 100 份报告的身份、时间、状态 |
 | `GET /api/reports/{report_id}` | `research-v1` 信封、核验结果、回答、来源页、表格及计算输入；GET 不刷新数据 |
+| `GET /api/reports/{report_id}?compact=true` | 精简正文与来源目录（不含整页原文）、失败 `diagnostics`、`budget`、`continuation`；完整读取保持原合同 |
 | `POST /api/research`（追问） | 上述输入加 `parent_report_id`，必须同公司，创建关联新任务 |
 | `POST /api/reports/{id}/feedback` | `{"request_id":"新编号","location":"financial[0]","text":"具体问题与依据"}` → 核查任务 |
+
+request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。
+精简视图中的 `continuation` 区分生成日、财务覆盖期、行情日、披露与公告检索范围；
+`historical_not_live_checked` 不承诺当前最新。旧检查点是待核查议程，不是当期事实；
+`baseline_status` 明确区分可用、失败、未就绪、缺失等基线，并携带基线财报期、生成日、行情日和公告范围。
+表格差值复用网页同一 `reading.comparison` → `since_prior` 入口；`excluded/missing/reason` 保留单位、名称、旧格式和缺失值限制，不把不同累计期间相减，也不推断投资理由已改变。精简视图额外要求两份报告均通过核查，否则不给 `diff`；这比网页的程序表格对照更保守。
+失败时返回已有核查问题和缺口；异常中断尚未保存报告时仍读取已落盘材料中的缺口，不曝光材料全文或未通过正文；预算提示不等于已确定根因。
+`cost=null/cost_status=unavailable` 不是零费用，硬金额上限无法保证时消费者应停止澄清；
+读取不触发付费重跑，不写真实账户或 L3。
+全局预算为 `scope=configuration`，`model_calls_recorded=null`；有具体任务时为 `scope=run` 并携带 `run_id` 和该任务调用计数。
+获得上线授权后须先部署服务端，再激活配套 runtime/Skills；旧服务缺接口不得解释为任务不存在或自动重开研究。
 
 相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial/methods/checkpoints` 的实际零基下标，例如 `financial[0]`。报告的 `passed` 与任务状态一起判断；失败报告不提供已通过的结论，可保留的事实范围见[产品方案](docs/proposal.md#2-从用户角度的取舍)。
 

@@ -506,6 +506,18 @@ def api_research(request: Request, body: ResearchRequest):
     return {"version": service.VERSION, "run_id": run_id}
 
 
+@app.get("/api/request")
+def api_request(request: Request, request_id: str):
+    api_session(request)
+    return service.run_view(conn, request_id=request_id)
+
+
+@app.get("/api/research/budget")
+def api_research_budget(request: Request):
+    api_session(request)
+    return {"version": service.VERSION, "budget": service.run_budget(conn)}
+
+
 @app.get("/api/runs/{run_id}")
 def api_run(request: Request, run_id: int):
     api_session(request)
@@ -528,9 +540,9 @@ def api_reports(request: Request, code: str):
 
 
 @app.get("/api/reports/{report_id}")
-def api_report(request: Request, report_id: int):
+def api_report(request: Request, report_id: int, compact: bool = False):
     api_session(request)
-    return service.report_view(conn, report_id)
+    return service.report_view(conn, report_id, compact=compact)
 
 
 @app.post("/api/reports/{report_id}/feedback", status_code=202)
