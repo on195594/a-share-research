@@ -83,7 +83,7 @@ def wait_ready() -> None:
                 return
         except HTTPError:
             raise  # An application error is not startup connection refusal.
-        except (URLError, TimeoutError) as exc:
+        except (URLError, TimeoutError, ConnectionError) as exc:  # a starting server may refuse or reset
             if time.monotonic() >= deadline:
                 raise RuntimeError("本机健康检查未就绪") from exc
             log.debug("等待本机服务启动：%s", exc)
