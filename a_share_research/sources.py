@@ -76,6 +76,52 @@ def company(code: str) -> dict:
     return found
 
 
+SW_LEVELS = ("l1", "l2", "l3")
+
+
+def peer_members(subject: pd.DataFrame, members: pd.DataFrame, level: str) -> dict:
+    """Current SW2021 membership of one company and its industry at `level`, validated at the boundary."""
+    row = _membership(subject, level)
+    _membership(members, level, single=False)
+    if (members[f"{level}_code"] != row[f"{level}_code"]).any():
+        raise SourceError("申万行业成分返回了其他行业的公司")
+    return {
+        "classification": "SW2021", "level": level, "source": "TuShare index_member_all (is_new=Y)",
+        "retrieved_at": datetime.now(SHANGHAI).isoformat(timespec="seconds"),
+        "industry": {lv: row[f"{lv}_name"] for lv in SW_LEVELS},
+        "members": sorted(
+            ({"code": str(m.ts_code)[:6], "name": str(m.name), "l3": str(m.l3_name)}
+             for m in members.drop_duplicates("ts_code").itertuples() if m.ts_code != row.ts_code),
+            key=lambda m: m["code"]),
+    }
+
+
+def _membership(frame, level: str, *, single: bool = True):
+    """Check an index_member_all response; with single, return the one company row."""
+    if level not in SW_LEVELS:
+        raise SourceError(f"申万行业层级须为 {'/'.join(SW_LEVELS)}")
+    need = {"ts_code", "name", *(f"{lv}_{k}" for lv in SW_LEVELS for k in ("code", "name"))}
+    if not isinstance(frame, pd.DataFrame) or not need <= set(frame.columns):
+        raise SourceError("TuShare index_member_all 返回数据缺少必要列")
+    if single and len(frame) != 1:
+        raise SourceError(f"申万行业成分中该公司记录数为 {len(frame)}，无法确定所属行业")
+    return frame.iloc[0] if single else None
+
+
+def industry_peers(code: str, level: str = "l3") -> dict:
+    """Companies in the same current SW2021 industry (TuShare), the screen's own classification."""
+    try:
+        pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
+        subject = pro.query("index_member_all", ts_code=to_tushare_stock_code(code), is_new="Y")
+        row = _membership(subject, level)
+        members = pro.query("index_member_all", **{f"{level}_code": row[f"{level}_code"]}, is_new="Y")
+    except SourceError:
+        raise
+    except Exception as exc:
+        raise SourceError(f"TuShare index_member_all: {exc}") from exc
+    return peer_members(subject, members, level)
+
+
 def _query_announcements(code: str, days: int, query: str, category: str, max_pages: int) -> tuple[list[dict], dict]:
     org = company(code)
     end = datetime.now(SHANGHAI).date()
