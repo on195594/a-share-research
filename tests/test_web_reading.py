@@ -5,12 +5,46 @@ Condition-only cases exercise template branches, not invented research results.
 import json
 from pathlib import Path
 
+import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import escape
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / 'a_share_research/templates'
 ENV = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape())
 MACROS = ENV.get_template('_macros.html').module
+
+
+@pytest.mark.parametrize('source_kind', ['base', 'supplement'])
+@pytest.mark.parametrize('page_state', ['recorded', 'empty', 'missing', 'null'])
+def test_report_scope_distinguishes_unrecorded_pages_and_keeps_source_links(source_kind, page_state):
+    records = json.loads((ROOT / 'tests/data/continuation-records.json').read_text())['records']
+    body = next(r['report']['body'] for r in records if r['report']['id'] == 37)
+    source = body if source_kind == 'base' else next(iter(body['sources'].values()))
+    original_pages = source['pages']
+    assert original_pages
+    # Exercise only metadata-presence branches on a captured report, not new research content.
+    if page_state == 'missing':
+        source.pop('pages')
+    elif page_state != 'recorded':
+        source['pages'] = [] if page_state == 'empty' else None
+    before = json.dumps(body, sort_keys=True)
+    template = (TEMPLATES / 'report.html').read_text()
+    start = template.index('  <details class="about" id="research-scope"')
+    end = template.index('  </details>', start) + len('  </details>')
+    html = ENV.from_string(template[start:end]).render(body=body)
+    label = '基础原文' if source_kind == 'base' else '补充原文'
+    paragraph = next(p.split('</p>', 1)[0] for p in html.split('<p>') if p.startswith(label + '：'))
+    assert f'href="{escape(source["document"]["url"])}"' in paragraph
+    assert str(escape(source['document']['title'])) in paragraph
+    if page_state == 'recorded':
+        assert '已读取页码：' + '、'.join(map(str, original_pages)) + '。' in paragraph
+        assert '未记录已读页码' not in paragraph
+    else:
+        assert '未记录已读页码。' in paragraph
+        assert '已读取页码：' not in paragraph
+    assert '已读取页码：。' not in html
+    assert json.dumps(body, sort_keys=True) == before
 
 
 def test_financial_periods_preserve_source_dates_and_explain_coverage():

@@ -132,8 +132,8 @@
 
   <details class="about" id="research-scope" tabindex="-1" {% if request and request.query_params.get('scope') == '1' %}open{% endif %}>
     <summary>研究范围与原文</summary>
-    <p>基础原文：{% if body.document and body.document.url %}<a href="{{ body.document.url }}" rel="noreferrer noopener">{{ body.document.title }}（PDF，巨潮资讯）</a>，公告日 {{ body.document.announced or '未记录' }}，已读取页码：{{ body.pages | join('、') }}。{% else %}未记录原文链接。{% endif %}</p>
-    {% for source in (body.sources or {}).values() %}<p>补充原文：<a href="{{ source.document.url }}" rel="noreferrer noopener">{{ source.document.title }}</a>（{{ source.document.announced }} 披露），已读取页码：{{ source.pages | join('、') }}。</p>{% endfor %}
+    <p>基础原文：{% if body.document and body.document.url %}<a href="{{ body.document.url }}" rel="noreferrer noopener">{{ body.document.title }}（PDF，巨潮资讯）</a>，公告日 {{ body.document.announced or '未记录' }}，{% if body.pages %}已读取页码：{{ body.pages | join('、') }}{% else %}未记录已读页码{% endif %}。{% else %}未记录原文链接。{% endif %}</p>
+    {% for source in (body.sources or {}).values() %}<p>补充原文：<a href="{{ source.document.url }}" rel="noreferrer noopener">{{ source.document.title }}</a>（{{ source.document.announced }} 披露），{% if source.pages %}已读取页码：{{ source.pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
     {% if body.document %}<p class="muted small">抓取于 {{ body.document.retrieved_at or '未记录' }} · SHA-256 {{ body.document.sha256[:16] if body.document.sha256 else '未记录' }} · 模型调用 {{ body.calls }} 次</p>{% endif %}
     {% if body.problems %}
     <p>复核意见：</p>
