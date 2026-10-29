@@ -43,20 +43,16 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-**本地候选，未发布**：10-29 在 `53a4019` 上推进[步骤 2 第一阶段](investment-upgrade.md#77-步骤-2首页事项与报告阅读)：首页只列可证明的待核查请求、折叠主动公司列表；有待办时折叠新研究，无待办或输入错误时展开。失败核查任务和未通过报告提供关联重试，由服务端保留原父报告与反馈，同组后续通过后退出清单；普通研究不变。报告区分流程/判断，分别标明财务覆盖、已存披露公告日、抓取和生成时间；靠近结论展示“本报告记录的缺口”，明确未重新核验，不推断程序/模型来源类别。公告日期不完整在折叠标题提示，原文/缺口链接可无 JS 定位并展开。补 answer 焦点及缺字段回归。不新增模型、外部数据或提醒调度；新证据/到期事件、同业、完整投资判断闭环、市场背景仍受方案依赖约束。K2/K3 剩余验收不因本轮界面改动而完成；发布需另行确认。
-
-本地验证：179 项测试通过；真实 Chromium 1165/390px、JS 开关、搜索返回/前进两轮及刷新、旧报告/缺字段、重复请求、更正保护和固定首列通过。报告 37/39 为已有捕获；真实核查请求在隔离库通过原生 POST 走完失败→重试失败→生成未通过报告→再重试→成功退出清单，验证 CSRF、幂等、原父报告及反馈保留。结果由已捕获响应和本地状态驱动，未运行 worker 或模型，不代表重新验证研究质量。未验证生产、真实手机、大规模请求性能或 30 秒/2 分钟用户理解目标。截图和脚本在本次执行环境 `scratchpad/attention-acceptance-20261029/`，不属于生产部署证据。
-
-入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `3cd2f7e`**，10-29 08:51 发布（应用代码同 `10420bd`：报告页把“主要风险与反证”置于问题回答/核查之前，章节索引同步）；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `559ac9c`**，10-29 12:50 发布（包含 `b5022ff`、`79e000f`、`bcc68eb` 与 `559ac9c`：待办事项与反馈保留、可恢复的紧凑交付与证据接续、测试等待超时容忍）；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
 
 | 已上线镜像 | 镜像 SHA256 |
 |---|---|
-| `a-share-research-web:3cd2f7e` | `5a62b8889a997776f14e90672381b0842ac9365d73e1b43687ddf45e9466b8e0` |
-| `a-share-research-worker:3cd2f7e` | `469bf522777fedceed2ea57634b190f2c2a8259f6175eb18488b212e271d6a93` |
+| `a-share-research-web:559ac9c` | `cc3c963b031f67a461048eefcdfea7269268c1c925a0aecf0add7908a8f47cd6` |
+| `a-share-research-worker:559ac9c` | `d1a0b80dade3883adf3ca556bb480f6636200b367010d4a1e29c9318162850a3` |
 
-发布按空闲 → 依次停 web、worker 并复查 → 备份巡检 → 切换两类 `:latest` 执行：两镜像 34 个应用文件与提交一致，163 项测试通过；切换前后七张业务表指纹一致，备份与切换后巡检均通过（42 份报告、137 份 PDF），挂载、端口与资源限额未变。验收：公网登录页 200；临时会话读取报告 42、39，风险节先于回答节，390 宽无横向溢出，索引跳转聚焦风险节；会话已撤销。未改数据、接口或模型流程，无数据库迁移。
+发布按空闲 → 依次停 web、worker 并复查 → 备份巡检 → 切换两类 `:latest` 执行：两镜像应用文件与提交一致，199 项测试全部通过；修复了源码宿主 umask 导致镜像内文件非 root 读权限问题；切换前后七张业务表指纹一致（runs, calls, reports, prices, batches, sessions, api_keys），备份与切换后巡检均通过（43 份报告、138 份 PDF），挂载、端口与资源限额未变。验收：公网入口 https://stock.keyi.win/login 200；临时会话读取首页与报告 43、42 正常（200），会话已撤销。无破坏性数据库迁移。
 
-**证据与回退**：证据在 `deploy-3cd2f7e-20261029-085037/`，备份为 `~/a-share-research-data/backup-pre-3cd2f7e-20261029-085037.db`。直接回退镜像为 `a-share-research-web:b99f137` 与 `a-share-research-worker:b99f137`；分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。回退授权、空闲和备份要求仍按 [AGENTS.md](../AGENTS.md)。前次发布证据在 `deploy-b99f137-20261028-224500/`。
+**证据与回退**：证据在 `deploy-559ac9c-20261029/`，备份为 `~/a-share-research-data/backup-pre-559ac9c-20261029-124921.db`。直接回退镜像为 `a-share-research-web:3cd2f7e` 与 `a-share-research-worker:3cd2f7e`（或对应临时标签 `pre-bcc68eb`）；分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。回退授权、空闲和备份要求仍按 [AGENTS.md](../AGENTS.md)。前次发布证据在 `deploy-3cd2f7e-20261029-085037/`。
 
 **既有模型限制**：此前切换模型时，非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 重大不利变化未通过，所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型对照，不据此判断模型优劣。评估与切换证据在 `terra-high-20261027-233921/`（含私有配置）。
 
