@@ -43,18 +43,16 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `b99f137`**，10-28 22:43 发布；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `3cd2f7e`**，10-29 08:51 发布（应用代码同 `10420bd`：报告页把“主要风险与反证”置于问题回答/核查之前，章节索引同步）；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
 
 | 已上线镜像 | 镜像 SHA256 |
 |---|---|
-| `a-share-research-web:b99f137` | `816dbf6694c6e69a7db9bad9139815cf334a7a946768bd60c2228cfaa8a982d0` |
-| `a-share-research-worker:b99f137` | `0b0e9294bc60be22bdf2e6fc0fc6c9cbbcbe3e388f6a10a8377b239e6b9d99ed` |
+| `a-share-research-web:3cd2f7e` | `5a62b8889a997776f14e90672381b0842ac9365d73e1b43687ddf45e9466b8e0` |
+| `a-share-research-worker:3cd2f7e` | `469bf522777fedceed2ea57634b190f2c2a8259f6175eb18488b212e271d6a93` |
 
-发布按空闲 → 暂停受理并复查 → 备份巡检 → 切换两类 `:latest` → 主流程验收执行。镜像内 34 个应用文件与提交一致，单元与预检测试全部通过（162 passed）。切换前业务数据库与 PDF 巡检一致（42 份报告、137 份 PDF），切换后七张业务表数据指纹一致。公共入口与容器端到端验证通过。
+发布按空闲 → 依次停 web、worker 并复查 → 备份巡检 → 切换两类 `:latest` 执行：两镜像 34 个应用文件与提交一致，163 项测试通过；切换前后七张业务表指纹一致，备份与切换后巡检均通过（42 份报告、137 份 PDF），挂载、端口与资源限额未变。验收：公网登录页 200；临时会话读取报告 42、39，风险节先于回答节，390 宽无横向溢出，索引跳转聚焦风险节；会话已撤销。未改数据、接口或模型流程，无数据库迁移。
 
-**未部署的提交**：`10420bd` 仅把报告页“主要风险与反证”移到“你的问题/核查”之前（章节索引同步），不改数据、接口或模型流程；本机 163 项测试通过，尚未发布，上线需当次授权。
-
-**证据与回退**：证据在 `deploy-b99f137-20261028-224500/`，备份为 `~/a-share-research-data/backup-pre-b99f137-20261028-224500.db`。直接回退镜像为 `a-share-research-web:17efa09` 与 `a-share-research-worker:17efa09`；分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。前次发布证据在 `deploy-review-fixes-20261028-172422/`。
+**证据与回退**：证据在 `deploy-3cd2f7e-20261029-085037/`，备份为 `~/a-share-research-data/backup-pre-3cd2f7e-20261029-085037.db`。直接回退镜像为 `a-share-research-web:b99f137` 与 `a-share-research-worker:b99f137`；分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。回退授权、空闲和备份要求仍按 [AGENTS.md](../AGENTS.md)。前次发布证据在 `deploy-b99f137-20261028-224500/`。
 
 **既有模型限制**：此前切换模型时，非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 重大不利变化未通过，所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型对照，不据此判断模型优劣。评估与切换证据在 `terra-high-20261027-233921/`（含私有配置）。
 
