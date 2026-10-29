@@ -1,6 +1,6 @@
 # a-share-research 开发约束
 
-收盘后的 A 股个股研究助手，产品与现有流程见 [重构方案](docs/proposal.md)，跨项目职责见 [项目契约](docs/project-contract.md)，后续工作见 [路线图](docs/roadmap.md)和[实施计划](docs/implementation-plan.md)。代码说明已实现能力，规划项按需求与验收条件推进；本文件只放长期约束。
+收盘后的 A 股个股研究助手，产品与现有流程见 [产品方案](docs/proposal.md)，跨项目职责见 [项目契约](docs/project-contract.md)，后续工作见 [路线图](docs/roadmap.md)和[实施计划](docs/implementation-plan.md)。代码说明已实现能力，规划项按需求与验收条件推进；本文件只放长期约束。
 
 ## 授权
 

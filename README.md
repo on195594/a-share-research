@@ -23,7 +23,7 @@
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
 | `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
 
-`.pytest_cache/`、`.ruff_cache/` 和 `__pycache__/` 可重建；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
+`.pytest_cache/` 和应用、测试目录下的 `__pycache__/` 可重建；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
 
 ## 运行
 
@@ -50,9 +50,7 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## 报告阅读
 
-当前源码在通过报告的“财务数据”后按需展开“已存同行快照对照”；无同行记录时不显示。仅复用报告已存的归母净利润、经营现金流和可精确映射的已有比率，逐家选择与主体的最近共同期间，不重新取数、补算或排名。
-
-显式期间口径冲突或结构化不可用标记会阻断数值；缺期间元数据只沿用生成时契约。归母净利润非正时保留金额、隐藏比率并解释原因。历史版本未重新核对，顶部链接可查看本报告记录的缺口；不保证已覆盖后续更正。发布状态与验收只在[实施计划](docs/implementation-plan.md#当前部署)维护，详细准入与限制见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业对照表后置)。
+研究员可用 `peers` 发现申万行业内的公司，自主选择是否补取同行证据。通过报告的“财务数据”后可展开“已存同行快照对照”（有同行记录时显示）：按最近共同期间读取归母净利润、经营现金流和已有比率，显示口径与历史版本限制。浏览时不取数、补算或排名；详细边界见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业发现与快照对照)，部署与验收见[实施计划](docs/implementation-plan.md#当前部署)。
 
 ## Agent 研究 API
 
@@ -70,7 +68,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 
 临时验收仍可用 `python -m a_share_research.login_token --agent --minutes 60`（1–480 分钟，不续期）。两种凭据均通过 `Authorization: Bearer ...` 发送，与浏览器 cookie 隔离；`POST /api/session/revoke` 仅撤销当前凭据。API 无需模型或行情凭据。
 
-请求使用 `Content-Type: application/json`；可带 `X-Research-Version: research-v1`，未知版本返回 400。升级只新增 `api_keys` 表；旧服务不识别长期 Key，回退流程见[当前部署](docs/implementation-plan.md#当前部署)。
+请求使用 `Content-Type: application/json`；可带 `X-Research-Version: research-v1`，未知版本返回 400。
 
 | 路由 | 输入/结果 |
 |---|---|

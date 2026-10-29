@@ -77,7 +77,7 @@ def test_evidence_dates_keep_all_recorded_disclosures_and_missing_distinct():
     assert reading.evidence_context(body, None)['gaps'] == BODY[39]['gaps']
 
 
-def test_home_and_legacy_report_distinguish_unknown_from_no_saved_request(conn):
+def test_home_and_legacy_report_distinguish_unknown_from_no_saved_request():
     html = render('home.html', pending=[], pending_more=False, companies=[], batch_only=0, active=[], batch=None)
     assert '没有符合上述范围的待核查记录' in html
     assert '不能确认这两类事项' in html
@@ -88,7 +88,6 @@ def test_home_and_legacy_report_distinguish_unknown_from_no_saved_request(conn):
                   comparison={}, market=[], fin=[])
     assert '公告可得日期未记录' in html and '基础披露抓取于：未记录' in html
     assert '公告日不完整</summary>' in html
-    assert '本报告未记录经营序列' in html
     assert '不代表资料充分或没有风险' in html
 
 

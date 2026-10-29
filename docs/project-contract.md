@@ -1,6 +1,6 @@
 # A 股研究系统项目契约
 
-更新：2026-10-28。覆盖 `a-share-research`、`a-stock-agent-skills`、`a-stock-lib`。
+更新：2026-10-29。覆盖 `a-share-research`、`a-stock-agent-skills`、`a-stock-lib`。
 
 本文件是三个项目的职责与协作边界单一来源；[路线图](roadmap.md)定义演进条件，[实施计划](implementation-plan.md)定义工作包与验收。现行接口以各 owner 的代码和合同为准，标为“规划”的能力尚未实现。本文不改变投资规则，也不扩展各仓库 `AGENTS.md` 中的授权。
 
@@ -81,7 +81,7 @@ QA 通过只表示正文满足相应流程规则。报告核验、流程合规�
 
 ## 5. 执行与授权
 
-- Research 保持一个 Python 包、SQLite、PDF 目录、web/worker 两个进程和 pi。worker 开放官方定期报告、临时公告、财务查询、程序计算及已核查方法检索工具；保存调用、材料和失败。重启后中断任务失败、由用户重跑，不承诺断点恢复。
+- Research 保持一个 Python 包、SQLite、PDF 目录、web/worker 两个进程和 pi。worker 开放官方定期报告、临时公告、同业发现、财务查询、程序计算及已核查方法检索工具；保存调用、材料和失败。重启后中断任务失败、由用户重跑，不承诺断点恢复。
 - Skills 保持客户端中立；首次研究、持仓监控、QA 分开路由。只读查询与 W1 账户/分析状态写入分开，W1 延续具体用户确认和全局 `--confirm-write` 门禁。
 - 报告结论、QA 结果或模型建议均不能代替账户事实、政策确认或动作授权；已成交事实的记录沿用现有记账规则。
 - 自动交易不在本路线范围。定时研究、通知、新运行平台尚未纳入本批；worker 内领域工具已由本次需求明确纳入。
@@ -97,7 +97,7 @@ QA 通过只表示正文满足相应流程规则。报告核验、流程合规�
 
 | 维护内容 | 当前入口 |
 |---|---|
-| Research 产品与流程、运行与开发约束 | [重构方案](proposal.md)、[README](../README.md)、[AGENTS](../AGENTS.md) |
+| Research 产品与流程、运行与开发约束 | [产品方案](proposal.md)、[README](../README.md)、[AGENTS](../AGENTS.md) |
 | Research 当前部署、回退与后续实施 | [部署记录](implementation-plan.md#当前部署)、[工作包与状态](implementation-plan.md#工作包与状态) |
 | Skills 状态合同、验证与实际部署 | [runtime contracts](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/architecture/runtime-contracts.md)、[development](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/development.md)、[operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md) |
 | Lib 公共数据语义与发版 | [Provider 合同](https://github.com/on195594/a-stock-lib/blob/master/docs/TUSHARE_PRIMARY_PROVIDERS.md)、[发版清单](https://github.com/on195594/a-stock-lib/blob/master/docs/RELEASE_CHECKLIST.md) |

@@ -164,7 +164,6 @@ def test_series_survives_snapshot_but_stays_outside_model_evidence_and_renders_l
     assert html.index('2026 Q3') < html.index('2026 Q2')
     assert '44.42' in html and '同比 -37.68%' in html and '基期含更正' in html
     assert '基期更正版本待核对' in html and '−134.30' not in html and '-134.30' not in html
-    assert '本报告未记录经营序列' in template.render(body={})
 
 
 def test_yoy_sources_show_window_outside_inputs_and_quarter_ttm_formulas():

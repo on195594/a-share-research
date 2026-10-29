@@ -133,8 +133,8 @@ def test_draft_is_saved_and_frozen_together(tmp_path):
     # An unfreezable draft is kept, with the reason, for the owner.
     conn.execute("INSERT INTO batches (status, created_at, rule, q20, q5) SELECT 'selecting', created_at, rule, q20, q5 FROM batches")
     screening._auto_freeze(conn, 2, {"draft": {"picks": [{"code": "000000.SZ"}]}})
-    row = conn.execute("SELECT status, selection FROM batches WHERE id = 2").fetchone()
-    assert row["status"] == "proposed" and "freeze_error" in json.loads(row["selection"])
+    row = conn.execute("SELECT status, selection, l5 FROM batches WHERE id = 2").fetchone()
+    assert row["status"] == "proposed" and row["l5"] is None and "freeze_error" in json.loads(row["selection"])
 
 
 def test_a_proposed_draft_left_by_a_restart_is_frozen_by_the_worker(tmp_path):

@@ -143,9 +143,7 @@ def test_report_without_recorded_risks_still_renders_risk_and_answer_sections(tm
     conn.close()
 
 
-def test_report_empty_risks_and_missing_summary_keep_unknown_explicit(tmp_path):
-    conn = db.connect(tmp_path / 'missing-fields.db')
-    load(conn)
+def test_report_empty_risks_and_missing_summary_keep_unknown_explicit():
     record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
     body = json.loads(json.dumps(record['body']))
     body['risks'] = []
@@ -158,7 +156,6 @@ def test_report_empty_risks_and_missing_summary_keep_unknown_explicit(tmp_path):
     assert '本报告未记录一句话结论' in html
     assert '不代表资料充分或没有风险' in html
     assert '研究流程：已完成并通过复核' in html
-    conn.close()
 
 
 def test_checkpoint_finding_keeps_other_reviewed_facts_but_never_the_checkpoints():

@@ -124,15 +124,10 @@ def test_frozen_q20_not_changed_by_stale_momentum_backfill(connections, monkeypa
     assert snapshot(worker) == after_owner[0]
 
 
-def test_auto_freeze_failure_and_exception_are_transactional(connections, monkeypatch):
+def test_auto_freeze_exception_is_transactional(connections, monkeypatch):
     worker, _ = connections
-    candidates, selection = proposed(worker)
+    _, selection = proposed(worker)
     worker.execute("UPDATE batches SET status='selecting', selection=NULL WHERE id=1")
-    bad = {'draft': {'picks': [{'code': '999999.SZ'}]}}
-    assert s._auto_freeze(worker, 1, bad)
-    result = s.load(worker.execute('SELECT * FROM batches').fetchone())
-    assert result['status'] == 'proposed' and result['l5'] is None and result['selection']['freeze_error']
-    worker.execute("UPDATE batches SET status='selecting',selection=NULL,error=NULL WHERE id=1")
     before = snapshot(worker)
     def unexpected(*args, **kwargs):
         raise RuntimeError('synthetic storage failure')
