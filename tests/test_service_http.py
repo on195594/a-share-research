@@ -44,7 +44,7 @@ def server(tmp_path):
             try:
                 if client.get(url + "/api/research/budget", timeout=1).status_code == 200:
                     break
-            except requests.ConnectionError:
+            except (requests.ConnectionError, requests.Timeout):
                 pass
             time.sleep(0.05)
         else:
