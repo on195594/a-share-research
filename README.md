@@ -45,6 +45,12 @@ uv run python -m a_share_research.login_token --minutes 30                      
 docker exec a-share-research-web python -m a_share_research.login_token --minutes 30         # 生产
 ```
 
+## 报告阅读
+
+当前源码在通过报告的“财务数据”后按需展开“已存同行快照对照”；无同行记录时不显示。仅复用报告已存的归母净利润、经营现金流和可精确映射的已有比率，逐家选择与主体的最近共同期间，不重新取数、补算或排名。
+
+显式期间口径冲突或结构化不可用标记会阻断数值；缺期间元数据只沿用生成时契约。归母净利润非正时保留金额、隐藏比率并解释原因。历史版本未重新核对，顶部链接可查看本报告记录的缺口；不保证已覆盖后续更正。该视图为本地候选，发布状态见[实施计划](docs/implementation-plan.md#1b-只读数据盘点与本地候选)，详细准入与限制见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业对照表后置)。
+
 ## Agent 研究 API
 
 Skills 等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
