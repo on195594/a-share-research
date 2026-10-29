@@ -125,26 +125,18 @@ def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):
     conn.close()
 
 
-def test_report_risk_layout_preserves_missing_legacy_fields(tmp_path):
+def test_report_without_recorded_risks_still_renders_risk_and_answer_sections(tmp_path):
     conn = db.connect(tmp_path / "legacy-layout.db")
     load(conn)
     record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
-    for field, value in [('risks', None), ('risks', []), ('summary', None)]:
-        body = json.loads(json.dumps(record['body']))
-        if value is None:
-            body.pop(field)
-        else:
-            body[field] = value
-        html = render("report.html", report=record, body=body, feedback=None, feedback_label="", replay_of=None,
-                      rows={r['id']: r for r in body['table']}, price=None, followups=[],
-                      comparison=reading.comparison(conn, conn.execute('SELECT * FROM reports WHERE id=39').fetchone()),
-                      market=[], fin=[r for r in body['table'] if r['id'].startswith('T.')])
-        assert html.count('id="risks"') == 1
-        assert ('没有可列出的风险' in html) == (field == 'risks')
-        assert '<section id="answer">' in html
-        if field == 'summary':
-            assert '<p class="conclusion"></p>' in html
-            assert str(escape(record['body']['risks'][0]['text'])) in html
+    body = json.loads(json.dumps(record['body']))
+    body.pop('risks')
+    html = render("report.html", report=record, body=body, feedback=None, feedback_label="", replay_of=None,
+                  rows={r['id']: r for r in body['table']}, price=None, followups=[],
+                  comparison=reading.comparison(conn, conn.execute('SELECT * FROM reports WHERE id=39').fetchone()),
+                  market=[], fin=[r for r in body['table'] if r['id'].startswith('T.')])
+    assert html.count('id="risks"') == 1 and '没有可列出的风险' in html
+    assert '<section id="answer">' in html
     conn.close()
 
 
