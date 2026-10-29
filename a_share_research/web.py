@@ -418,6 +418,7 @@ def report_page(request: Request, report_id: int):
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body,
                   evidence=reading.evidence_context(body, row['coverage']),
+                  peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
                   replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),

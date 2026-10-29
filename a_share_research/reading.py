@@ -1,10 +1,145 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
 import json
+import re
 from datetime import date
+from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
 from a_share_research import db, research, service
 
 PAGE_SIZE = 20
+
+
+def peer_snapshots(body: dict) -> list[dict]:
+    """Read saved cumulative snapshots only; never infer peers or produce values.
+
+    The two known T.* definitions are deliberately narrower than financial_table.
+    A C.* ratio must map to those exact saved operands, not a model-written label.
+    """
+    metrics = (('net_profit', '归母净利润'), ('op_cash', '经营活动现金流净额'))
+    table = [r for r in (body.get('table') or []) if isinstance(r, dict)]
+    indexed = {}
+    for row in table:
+        if isinstance(row.get('id'), str):
+            indexed.setdefault(row['id'], []).append(row)
+
+    def code(value):
+        match = re.fullmatch(r'(\d{6})(?:\.(?:SH|SZ|BJ))?', str(value))
+        return match[1] if match else None
+
+    def number(value):
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = Decimal(value)
+            return parsed if parsed.is_finite() else None
+        except DecimalException:
+            return None
+
+    def mapping(row, key):
+        return row[key] if isinstance(row.get(key), dict) else {}
+
+    def periods(prefix):
+        result = set()
+        for key, _ in metrics:
+            for row in indexed.get(prefix + 'T.' + key, []):
+                for period in mapping(row, 'values').keys() | mapping(row, 'unavailable').keys():
+                    if isinstance(period, str) and len(period) == 10 and period[5:] in ('03-31', '06-30', '09-30', '12-31'):
+                        try:
+                            result.add(date.fromisoformat(period).isoformat())
+                        except ValueError:
+                            pass  # An unknown period cannot become a comparison date.
+        return result
+
+    def cell(prefix, company, key, label, period):
+        ref = prefix + 'T.' + key
+        candidates = indexed.get(ref, [])
+        result = {'ref': ref, 'value': None, 'reason': '未记录该指标'}
+        if len(candidates) != 1:
+            return result | {'reason': '记录标识重复，无法确定口径' if candidates else result['reason']}
+        row = candidates[0]
+        row_label = row.get('label', '')
+        known_label = (isinstance(row_label, str) and
+                       (row_label == label if not prefix else row_label.endswith('·' + label) and row_label != '·' + label))
+        if not known_label or row.get('unit') != '亿元':
+            return result | {'reason': '指标定义或单位不一致'}
+        source = row.get('source')
+        if not isinstance(source, dict) or source.get('provider') != 'TuShare' or code(source.get('code')) != company:
+            return result | {'reason': '来源或公司标识不完整/不一致'}
+        if mapping(row, 'unavailable').get(period):
+            return result | {'reason': row['unavailable'][period]}
+        value = mapping(row, 'values').get(period)
+        if number(value) is None:
+            return result | {'reason': '该共同期间未记录有效数值'}
+        return result | {'value': value, 'reason': '', 'source': source, 'label': row_label}
+
+    def ratio(cells, period):
+        result = {'value': None, 'reason': '未记录可确切映射的同期间程序计算'}
+        if any(c['value'] is None for c in cells):
+            return result | {'reason': '计算所需的同口径原值不完整'}
+        profit, cash = cells
+        if number(profit['value']) == 0:
+            return result | {'reason': '归母净利润为零，比率不适用'}
+        matches = []
+        for row in table:
+            calculation = row.get('calculation')
+            if (not isinstance(row.get('id'), str) or not row['id'].startswith('C.')
+                    or len(indexed[row['id']]) != 1 or not isinstance(calculation, dict)):
+                continue
+            operands = calculation.get('inputs')
+            if (calculation.get('operation') != 'ratio' or calculation.get('formula') != 'left / right'
+                    or row.get('unit') != '倍' or not isinstance(operands, list) or len(operands) != 2):
+                continue
+            if any(not isinstance(v, dict) or v.get('ref') != c['ref'] or v.get('period') != period
+                   or v.get('unit') != '亿元' or number(v.get('value')) != number(c['value'])
+                   for v, c in zip(operands, (cash, profit))):
+                continue
+            normalized = calculation.get('normalized_inputs')
+            if normalized is not None and (not isinstance(normalized, list) or len(normalized) != 2 or
+                    any(not isinstance(v, dict) or v.get('unit') != '亿元' or number(v.get('value')) != number(c['value'])
+                        for v, c in zip(normalized, (cash, profit)))):
+                continue
+            value = mapping(row, 'values').get('result')
+            try:
+                expected = (number(cash['value']) / number(profit['value'])).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+            except DecimalException:
+                continue
+            if number(value) == expected:
+                matches.append(result | {'value': value, 'reason': '', 'ref': row['id'],
+                                         'calculation': calculation})
+        return matches[0] if len(matches) == 1 else result | {
+            'reason': '存在多条匹配计算，未自动选择' if matches else result['reason']}
+
+    subject = code(body.get('code'))
+    if not subject:
+        return []
+    peers = list(dict.fromkeys(m[1] for ref in indexed if (m := re.fullmatch(r'P(\d{6})\.T\..+', ref)) and m[1] != subject))
+    snapshots = []
+    for peer in peers:
+        prefix = f'P{peer}.'
+        names = {r['label'].rsplit('·', 1)[0] for key, label in metrics
+                 for r in indexed.get(prefix + 'T.' + key, [])
+                 if isinstance(r.get('label'), str) and r['label'].endswith('·' + label)}
+        name = next(iter(names)) if len(names) == 1 else peer
+        item = {'name': name, 'code': peer, 'subject_name': body.get('name') or subject, 'subject_code': subject}
+        common = periods('') & periods(prefix)
+        if not common:
+            snapshots.append(item | {'reason': '未记录可对齐的共同累计期间。', 'rows': []})
+            continue
+        period = max(common)
+        rows = [{'label': label, 'unit': '亿元', 'cells': [cell('', subject, key, label, period),
+                                                        cell(prefix, peer, key, label, period)]}
+                for key, label in metrics]
+        comparable = any(all(c['value'] is not None for c in row['cells']) for row in rows)
+        # A lone company value is not a comparison. Keep the reasons, not an empty numeric table.
+        if not comparable:
+            reasons = list(dict.fromkeys(c['reason'] for row in rows for c in row['cells'] if c['reason']))
+            snapshots.append(item | {'period': period, 'reason': '；'.join(reasons), 'rows': []})
+            continue
+        calculations = [ratio([r['cells'][i] for r in rows], period) for i in (0, 1)]
+        if any(c['value'] is not None for c in calculations):
+            rows.append({'label': '合并经营现金流 / 归母净利润', 'unit': '倍', 'calculated': True, 'cells': calculations})
+        snapshots.append(item | {'period': period, 'rows': rows, 'ratio_missing': not any(c['value'] is not None for c in calculations)})
+    return snapshots
 
 
 def pending_reviews(conn, limit: int = PAGE_SIZE) -> tuple[list, bool]:
