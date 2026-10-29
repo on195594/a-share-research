@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import research_form %}
+{% from "_macros.html" import research_form, feedback_retry_form %}
 {% set refresh = 4 if run.status in ("queued", "running") else none %}
 {% set refresh_key = [run.status, run.step, ahead] | join("|") %}
 {% block title %}{{ run.name or run.code }} · {{ {'queued':'排队中','failed':'未完成'}.get(run.status, '研究中') }}{% endblock %}
@@ -23,8 +23,10 @@
     <p class="muted">已用 <span data-elapsed="{{ elapsed }}">{{ elapsed // 60 }} 分 {{ elapsed % 60 }} 秒</span>，页面每 4 秒自动刷新。可以离开，稍后在首页查看。</p>
   {% else %}
     <p class="notice caution" role="alert">没有完成：{{ run.error }}</p>
+    {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{% endif %}
     <div class="actions">
-      {{ research_form(run.code[:6], csrf, request_id, "重新研究", cls="btn") }}
+      {% if feedback_retry %}{{ feedback_retry_form(run.id, csrf, request_id) }}
+      {% else %}{{ research_form(run.code[:6], csrf, request_id, "重新研究", cls="btn") }}{% endif %}
       <a class="link" href="/">返回首页</a>
     </div>
   {% endif %}

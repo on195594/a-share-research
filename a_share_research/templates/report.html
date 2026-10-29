@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import items, research_form, price_block, snapshot_date_notice, financial_period, followup_link %}
+{% from "_macros.html" import items, research_form, price_block, snapshot_date_notice, financial_period, followup_link, feedback_retry_form %}
 {% block title %}{{ report.name }} · 研究报告{% endblock %}
 {% block main %}
 <article class="report">
@@ -19,16 +19,18 @@
       {% else %}
       <p class="notice caution" role="status">研究未通过完整核查，不展示结论。以下资料仅供核对，不应视为已获独立复核认可的事实。</p>
       {% endif %}
+      {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
     {% endif %}
     <p class="small">研究问题：{% if body.question %}{{ body.question | truncate(90, true, '…') }} <a href="#answer">完整问题与回答</a>{% else %}未记录具体问题。{% endif %}</p>
-    <details id="evidence" tabindex="-1">
-      <summary>证据日期与缺口{% if evidence and evidence.gaps %} · {{ evidence.gaps|length }} 项已记录缺口{% else %} · 缺口未记录{% endif %}</summary>
+    <details id="evidence" tabindex="-1" {% if request and request.query_params.get('evidence') == '1' %}open{% endif %}>
+      <summary>证据日期与本报告记录的缺口{% if evidence and evidence.gaps %} · {{ evidence.gaps|length }} 项{% else %} · 缺口未记录{% endif %}{% if evidence and evidence.missing_dates %} · 公告日不完整{% endif %}</summary>
       <p>基础披露：{{ body.document.title if body.document else '未记录' }}。财务覆盖期不代表相应原文已全部阅读。</p>
       {% if evidence and evidence.announced %}<p>已存披露记录的公告日：{{ evidence.announced | join('、') }}。</p>{% else %}<p>公告可得日期未记录，不能用报告生成时间补足。</p>{% endif %}
       {% if evidence and evidence.missing_dates and evidence.announced %}<p>另有 {{ evidence.missing_dates }} 处披露日期记录不完整，以上日期并不完整。</p>{% endif %}
       <p>基础披露抓取于：{{ body.document.retrieved_at if body.document and body.document.retrieved_at else '未记录' }}。这些日期只对应已保存资料，不代表全部证据截至此日。</p>
+      <p>以下缺口沿用本报告保存的文字，本页未重新核验；可能包含程序提示和模型记录。本页不区分各项来源，也不判断是否已解决。</p>
       {% if evidence and evidence.gaps %}<ul>{% for gap in evidence.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% else %}<p>未记录明确的证据缺口，不代表资料充分或没有风险。</p>{% endif %}
-      <a href="#research-scope">查看完整研究范围与原文</a>
+      <a href="?scope=1#research-scope">展开完整研究范围与原文</a>
     </details>
     {% if market %}
     <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
@@ -127,7 +129,7 @@
 
   {% if report.passed %}{{ price_block(price, report.code, csrf, request_id) }}{% endif %}
 
-  <details class="about" id="research-scope" tabindex="-1">
+  <details class="about" id="research-scope" tabindex="-1" {% if request and request.query_params.get('scope') == '1' %}open{% endif %}>
     <summary>研究范围与原文</summary>
     <p>基础原文：{% if body.document and body.document.url %}<a href="{{ body.document.url }}" rel="noreferrer noopener">{{ body.document.title }}（PDF，巨潮资讯）</a>，公告日 {{ body.document.announced or '未记录' }}，已读取页码：{{ body.pages | join('、') }}。{% else %}未记录原文链接。{% endif %}</p>
     {% for source in (body.sources or {}).values() %}<p>补充原文：<a href="{{ source.document.url }}" rel="noreferrer noopener">{{ source.document.title }}</a>（{{ source.document.announced }} 披露），已读取页码：{{ source.pages | join('、') }}。</p>{% endfor %}
@@ -138,7 +140,7 @@
     {% endif %}
     <p>覆盖上述已读取的披露及财务数据，不代表全部公告、新闻或账户事实。</p>
     {% for search in body.announcement_searches or [] %}<p>公告检索：{{ search.code }}，{{ search.since }} 至 {{ search.until }}，{{ '关键词「' ~ search.query ~ '」' if search.query else '全部标题' }}。{% if search.truncated %}结果未列全，仍需缩小范围。{% endif %}</p>{% endfor %}
-    <p><a href="#evidence">查看证据日期与已记录缺口</a></p>
+    <p><a href="?evidence=1#evidence">展开证据日期与本报告记录的缺口</a></p>
   </details>
 
   {% include "_comparison.html" %}

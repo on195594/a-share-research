@@ -354,7 +354,7 @@ def run_page(request: Request, run_id: int):
     if not (session := current_session(request)):
         return login_required()
     run = conn.execute(
-        "SELECT id, kind, code, name, status, step, error, started_at, finished_at FROM runs WHERE id = ?",
+        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, identity FROM runs WHERE id = ?",
         (run_id,),
     ).fetchone()
     if run is None:
@@ -372,7 +372,21 @@ def run_page(request: Request, run_id: int):
         " ((u.request_id LIKE 'batch-%') < me.batch OR ((u.request_id LIKE 'batch-%') = me.batch AND u.id < ?))))",
         (run_id, run_id, run_id)).fetchone()[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
+                  feedback_retry=service.feedback_retry_payload(run) is not None,
                   request_id=uuid.uuid4().hex)
+
+
+@app.post('/runs/{run_id}/retry-feedback')
+def retry_feedback(request: Request, run_id: int, request_id: str = Form(''), csrf: str = Form('')):
+    if not (session := current_session(request)):
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, '页面已过期', '请返回核查任务重新提交。', 403)
+    try:
+        next_run = service.retry_feedback(conn, run_id, request_id)
+    except service.RequestError as exc:
+        return message(request, session, '无法重试核查', str(exc), exc.status)
+    return RedirectResponse(f'/runs/{next_run}', status_code=303)
 
 
 def _elapsed(run) -> int | None:
@@ -389,7 +403,7 @@ def report_page(request: Request, report_id: int):
     row = conn.execute(f"SELECT r.*, {db.COVERAGE} AS coverage FROM reports r WHERE id = ?", (report_id,)).fetchone()
     if row is None:
         return not_found(request, session)
-    run = conn.execute("SELECT status, request, identity FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
+    run = conn.execute("SELECT kind, status, request, identity FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
     if not service.ready(run["status"], row["passed"]):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
@@ -404,6 +418,7 @@ def report_page(request: Request, report_id: int):
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body,
                   evidence=reading.evidence_context(body, row['coverage']),
+                  feedback_retry=service.feedback_retry_payload(run) is not None,
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
                   replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,

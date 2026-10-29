@@ -9,6 +9,14 @@
 </form>
 {% endmacro %}
 
+{% macro feedback_retry_form(run_id, csrf, request_id) %}
+<form method="post" action="/runs/{{ run_id }}/retry-feedback" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="request_id" value="{{ request_id }}">
+  <button class="btn" type="submit">重试原核查</button>
+</form>
+{% endmacro %}
+
 {% macro cites(item, rows, sources={}) %}
 {% if item.cites %}
 <details class="source">

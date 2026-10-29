@@ -23,7 +23,7 @@
   <details><summary>新证据与检查点的提醒范围</summary><p>尚未接入持续的新公告监测，检查点也未记录可自动判定的到期日期。当前不能确认这两类事项，不代表没有新证据或风险。关联记录缺失的核查无法纳入本清单，可从公司档案核对历史任务。</p></details>
   <p><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
 </section>
-<details class="start" {% if error or choices or recent or q %}open{% endif %}>
+<details class="start" {% if not pending or error or choices or recent or q %}open{% endif %}>
   <summary>开始新的研究</summary>
   <form method="post" action="/research" class="search">
     <input type="hidden" name="csrf" value="{{ csrf }}">

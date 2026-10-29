@@ -70,6 +70,33 @@ def ready(status: str, passed: int) -> bool:
     return (status, passed) in (("done", 1), ("failed", 0))
 
 
+def feedback_retry_payload(run) -> dict | None:
+    """Only an explicitly saved, failed feedback task can retry its original question."""
+    if run['kind'] != 'research' or run['status'] != 'failed':
+        return None
+    if (json.loads(run['identity'] or '{}') or {}).get('replay_of') is not None:
+        return None
+    request = json.loads(run['request'] or '{}') or {}
+    parent, feedback = request.get('parent_report_id'), request.get('feedback')
+    if type(parent) is not int or not isinstance(feedback, dict):
+        return None
+    if not all(isinstance(feedback.get(key), str) and feedback[key].strip() for key in ('location', 'text')):
+        return None
+    return {'parent_report_id': parent, 'feedback': feedback}
+
+
+def retry_feedback(conn, run_id: int, request_id: str) -> int:
+    run = conn.execute('SELECT kind, code, status, request, identity FROM runs WHERE id=?', (run_id,)).fetchone()
+    if run is None:
+        raise RequestError('核查任务不存在', 404)
+    payload = feedback_retry_payload(run)
+    if payload is None:
+        raise RequestError('仅支持重试已失败且保留完整原反馈的核查任务', 409)
+    # submit revalidates parent readiness, company and claim position. The browser
+    # supplies neither a replacement parent nor edited feedback on this route.
+    return submit(conn, run['code'], request_id, **payload)
+
+
 def report_view(conn: sqlite3.Connection, report_id: int) -> dict:
     # One SELECT gives a consistent task/report snapshot while a worker is saving a result.
     row = conn.execute(
