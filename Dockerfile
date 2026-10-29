@@ -6,6 +6,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY a_share_research ./a_share_research
+RUN chmod -R a+rX a_share_research
 
 # Frontend Web service: serves HTML & handles OAuth, holds no model/market credentials
 FROM base AS web

@@ -1,3 +1,5 @@
+import hashlib
+import json
 import sys
 import time
 
@@ -65,3 +67,44 @@ def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, caps
         assert web.api_session(bearer(replacement)) == "key:" + web._hash(replacement)
     finally:
         web.conn.close()
+
+
+@pytest.mark.parametrize("origin,secure", [("http://127.0.0.1:8617", False), ("https://stock.keyi.win", True)])
+def test_storage_state_is_private_and_does_not_overwrite_or_print_credentials(tmp_path, monkeypatch, capsys, origin, secure):
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    monkeypatch.setenv("PUBLIC_BASE_URL", origin)
+    destination = tmp_path / "browser.json"
+    monkeypatch.setattr(sys, "argv", ["login_token", "--minutes", "1", "--storage-state", str(destination)])
+    login_token.main()
+    assert capsys.readouterr().out == ""
+    state = json.loads(destination.read_text())
+    cookie, = state["cookies"]
+    assert state["origins"] == [] and cookie["name"] == "session"
+    assert cookie["domain"] == ("stock.keyi.win" if secure else "127.0.0.1")
+    assert cookie["secure"] is secure and cookie["httpOnly"] and cookie["sameSite"] == "Lax"
+    assert destination.stat().st_mode & 0o777 == 0o600
+    conn = db.connect()
+    try:
+        hashed, expires = conn.execute("SELECT token_hash, expires_at FROM sessions").fetchone()
+        assert hashed == hashlib.sha256(cookie["value"].encode()).hexdigest()
+        assert abs(expires - cookie["expires"]) < 1
+        original = destination.read_bytes()
+        with pytest.raises(FileExistsError):
+            login_token.main()
+        assert destination.read_bytes() == original
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("origin,extra", [("", []), ("https://stock.keyi.win", ["--agent"]),
+                                        ("https://user:secret@stock.keyi.win", [])])
+def test_invalid_storage_state_request_creates_no_session_or_file(tmp_path, monkeypatch, origin, extra):
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    monkeypatch.setenv("PUBLIC_BASE_URL", origin)
+    destination = tmp_path / "browser.json"
+    monkeypatch.setattr(sys, "argv", ["login_token", "--storage-state", str(destination), *extra])
+    with pytest.raises(SystemExit) as error:
+        login_token.main()
+    assert error.value.code == 2
+    assert not destination.exists() and not (tmp_path / "app.db").exists()

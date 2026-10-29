@@ -38,18 +38,21 @@ uv run pytest -q tests
 
 `.env.web`（本机开发可用 `.env.web.dev`）只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 
-AI 或脚本做浏览器验收时不走 GitHub：在能访问数据目录的机器上签发一个短期会话，把输出作为 `session` cookie 注入浏览器，用完点“退出”即作废（不经 HTTP 暴露，能执行它即已有主人权限）：
+AI 或脚本做浏览器验收时不走 GitHub。使用当前源码的工具，在能访问数据目录的宿主签发短期浏览器会话；`--storage-state` 独占创建 0600 文件，不把令牌打印到工具输出：
 
 ```bash
-uv run python -m a_share_research.login_token --minutes 30                                    # 本机开发实例
-docker exec a-share-research-web python -m a_share_research.login_token --minutes 30         # 生产
+release_browser_dir=$(mktemp -d /tmp/a-share-browser.XXXXXX)
+DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_share_research.login_token \
+  --minutes 15 --storage-state "$release_browser_dir/state.json"
 ```
+
+本机开发改用开发库及 `.env.web.dev`。Playwright 直接使用 `browser.newContext({storageState: '/tmp/实际目录/state.json'})`；无需动态导入文件模块、打印令牌或手写会话 SQL。验收后通过页面“退出”撤销该会话，再删除本次临时文件。原有令牌输出和 `--agent` 接口仍保留，`--agent` 不与浏览器文件输出混用。
 
 ## 报告阅读
 
 当前源码在通过报告的“财务数据”后按需展开“已存同行快照对照”；无同行记录时不显示。仅复用报告已存的归母净利润、经营现金流和可精确映射的已有比率，逐家选择与主体的最近共同期间，不重新取数、补算或排名。
 
-显式期间口径冲突或结构化不可用标记会阻断数值；缺期间元数据只沿用生成时契约。归母净利润非正时保留金额、隐藏比率并解释原因。历史版本未重新核对，顶部链接可查看本报告记录的缺口；不保证已覆盖后续更正。该视图已上线，发布与验收见[实施计划](docs/implementation-plan.md#当前部署)，详细准入与限制见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业对照表后置)。
+显式期间口径冲突或结构化不可用标记会阻断数值；缺期间元数据只沿用生成时契约。归母净利润非正时保留金额、隐藏比率并解释原因。历史版本未重新核对，顶部链接可查看本报告记录的缺口；不保证已覆盖后续更正。发布状态与验收只在[实施计划](docs/implementation-plan.md#当前部署)维护，详细准入与限制见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业对照表后置)。
 
 ## Agent 研究 API
 
@@ -161,11 +164,26 @@ Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
 - worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口。
 
-经当次上线授权后，从已提交、已推送的 main 构建并核对镜像。确认研究任务和批次空闲，暂停受理后复查、备份与巡检，再启动候选；验证主流程后记录版本与回退依据。构建和切换分开执行：
+发布复用以下固定入口。先按改动范围完成一次必要验证；同一应用源码与依赖已有通过结果时直接沿用，不因进入发布阶段再跑全集。纯文档更新只提交推送。当前版本、证据和回退只更新[实施计划](docs/implementation-plan.md#当前部署)，产品与能力文档不重复维护上线状态。
+
+从已提交、已推送的 main 构建两份版本化镜像。Git 归档直接作为 Docker 上下文，无临时解压或权限修补脚本；源码可读权限在 Dockerfile 中固定：
 
 ```bash
-docker compose build
-docker compose up -d --no-build --no-deps web worker
+set -o pipefail
+release_code=$(git rev-parse --short HEAD)
+git archive "$release_code" | docker build --target web -t "a-share-research-web:$release_code" -
+git archive "$release_code" | docker build --target worker -t "a-share-research-worker:$release_code" -
 ```
 
-这两条命令不代替空闲检查、备份或验收；具体版本、证据与回退见[当前部署](docs/implementation-plan.md#当前部署)。开发工作树改动不会自动影响运行中的镜像。
+获得当次生产切换授权后，调用仓库内的发布工具；不再从历史证据目录复制脚本，也不重新编写临时 SQL：
+
+```bash
+uv run python -m a_share_research.deploy "$release_code" \
+  "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
+```
+
+工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查 → 暂停受理并复查 → 备份巡检 → 切换 → 本机健康检查与完整性巡检。失败恢复原应用镜像，保留数据和证据；不自动恢复数据库或删除备份。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据或数据库迁移变更需要单独安排回退，不使用此工具。
+
+业务表指纹只在两服务停止的窗口内比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `pi_infer.mjs` 的 `reasoning` 分别记录，模型未变时不追加模型配置检查或研究调用。
+
+最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
