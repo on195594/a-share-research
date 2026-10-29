@@ -38,6 +38,18 @@ def peer_snapshots(body: dict) -> list[dict]:
     def mapping(row, key):
         return row[key] if isinstance(row.get(key), dict) else {}
 
+    def period_conflict(*records):
+        # Old T.* rows inherit the generator's cumulative/consolidated contract.
+        # Explicit contrary (or unrecognised) metadata must never be overridden by a date.
+        for record in records:
+            for metadata in (record, mapping(record, 'source')):
+                kind, report_type = metadata.get('period_type'), metadata.get('report_type')
+                if kind is not None and kind != 'cumulative':
+                    return True
+                if report_type is not None and (type(report_type) not in (str, int) or str(report_type) != '1'):
+                    return True
+        return False
+
     def periods(prefix):
         result = set()
         for key, _ in metrics:
@@ -65,20 +77,29 @@ def peer_snapshots(body: dict) -> list[dict]:
         source = row.get('source')
         if not isinstance(source, dict) or source.get('provider') != 'TuShare' or code(source.get('code')) != company:
             return result | {'reason': '来源或公司标识不完整/不一致'}
-        if mapping(row, 'unavailable').get(period):
-            return result | {'reason': row['unavailable'][period]}
+        if period_conflict(row):
+            return result | {'reason': '显式期间或报表类型与累计合并口径不一致或无法识别'}
+        unavailable = mapping(row, 'unavailable')
+        if period in unavailable:
+            reason = unavailable[period]
+            return result | {'reason': reason if isinstance(reason, str) and reason.strip()
+                             else '该期间已标记不可用，原因未记录'}
         value = mapping(row, 'values').get(period)
         if number(value) is None:
             return result | {'reason': '该共同期间未记录有效数值'}
-        return result | {'value': value, 'reason': '', 'source': source, 'label': row_label}
+        period_note = ('原行明确记录累计期间类型；本页未重新核对原始资料。'
+                       if row.get('period_type') == 'cumulative' or source.get('period_type') == 'cumulative'
+                       else '累计口径沿用生成时契约，原行未保存独立期间类型。')
+        return result | {'value': value, 'reason': '', 'source': source, 'label': row_label, 'period_note': period_note}
 
     def ratio(cells, period):
         result = {'value': None, 'reason': '未记录可确切映射的同期间程序计算'}
+        profit, cash = cells
+        if profit['value'] is not None and number(profit['value']) <= 0:
+            return result | {'reason': '归母净利润为零，比率不适用' if number(profit['value']) == 0
+                             else '归母净利润为负，比率不适用；保留原金额供核对'}
         if any(c['value'] is None for c in cells):
             return result | {'reason': '计算所需的同口径原值不完整'}
-        profit, cash = cells
-        if number(profit['value']) == 0:
-            return result | {'reason': '归母净利润为零，比率不适用'}
         matches = []
         for row in table:
             calculation = row.get('calculation')
@@ -93,10 +114,14 @@ def peer_snapshots(body: dict) -> list[dict]:
                    or v.get('unit') != '亿元' or number(v.get('value')) != number(c['value'])
                    for v, c in zip(operands, (cash, profit))):
                 continue
+            if period_conflict(row, calculation, *operands):
+                continue
             normalized = calculation.get('normalized_inputs')
             if normalized is not None and (not isinstance(normalized, list) or len(normalized) != 2 or
                     any(not isinstance(v, dict) or v.get('unit') != '亿元' or number(v.get('value')) != number(c['value'])
                         for v, c in zip(normalized, (cash, profit)))):
+                continue
+            if normalized is not None and period_conflict(*normalized):
                 continue
             value = mapping(row, 'values').get('result')
             try:
@@ -138,7 +163,8 @@ def peer_snapshots(body: dict) -> list[dict]:
         calculations = [ratio([r['cells'][i] for r in rows], period) for i in (0, 1)]
         if any(c['value'] is not None for c in calculations):
             rows.append({'label': '合并经营现金流 / 归母净利润', 'unit': '倍', 'calculated': True, 'cells': calculations})
-        snapshots.append(item | {'period': period, 'rows': rows, 'ratio_missing': not any(c['value'] is not None for c in calculations)})
+        snapshots.append(item | {'period': period, 'rows': rows, 'ratio_missing': not any(c['value'] is not None for c in calculations),
+                                 'ratio_reasons': calculations})
     return snapshots
 
 

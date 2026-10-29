@@ -1,10 +1,12 @@
 {% if peer_snapshots %}
 <details class="peer-snapshots" id="peer-snapshots" tabindex="-1">
   <summary>已存同行快照对照 · {{ peer_snapshots|length }} 家同行</summary>
+  <p class="notice caution small">历史版本未经重新核对，不保证已覆盖后续更正。<a href="?evidence=1#evidence">查看本报告记录的缺口</a>。</p>
   <p class="small">仅列本报告原研究范围中已查询的公司，未重新选择同行或刷新资料；不推断选择理由或完整可比组，请结合<a href="{{ '#answer' if body.question else '#financial' }}">{{ '原研究问题与回答' if body.question else '原报告正文' }}</a>阅读。同名指标不代表业务、集团范围或现金流来源相同，不据高低排名。</p>
   {% for peer in peer_snapshots %}
   <h3>{{ peer.subject_name }}与{{ peer.name }}</h3>
-  {% if peer.period %}<p class="small">对照期：{{ financial_period(peer.period) }} · 年初至期末累计。仅取所选指标中已存的最近共同期间，不代表两家公司当前最新资料。</p>{% endif %}
+  {% if peer.period and peer.rows %}<p class="small">对照期：{{ financial_period(peer.period) }} · 累计口径沿用生成时契约，并非逐行重新证明。仅取所选指标中已存的最近共同期间，各对公司可能不同期，不代表当前最新资料。</p>
+  {% elif peer.period %}<p class="small">记录中的共同日期：<time datetime="{{ peer.period }}">{{ peer.period }}</time>，该日期不等于期间口径已确认。</p>{% endif %}
   {% if peer.rows %}
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{ peer.subject_name }}与{{ peer.name }}历史快照对照">
     <table class="peer-table">
@@ -15,7 +17,7 @@
       </tr>{% endfor %}</tbody>
     </table>
   </div>
-  {% if peer.ratio_missing %}<p class="small">未纳入比率：没有可确切对应上述同期间原值的已有程序计算。</p>{% endif %}
+  {% if peer.ratio_missing %}<p class="small">比率未展示：</p><ul class="small">{% for result in peer.ratio_reasons %}<li>{{ peer.subject_name if loop.first else peer.name }}：{{ result.reason }}。</li>{% endfor %}</ul>{% endif %}
   <p class="small">金额来自 TuShare 历史快照；本视图未建立逐值公告映射。比率仅复用已有程序计算，分子为合并经营现金流、分母为归母净利润，范围不完全对应，也不等于盈利质量评分。</p>
   <details class="peer-inputs">
     <summary>所用记录与计算输入</summary>
@@ -27,7 +29,7 @@
       {% if metric.calculated %}
         {% for input in cell.calculation.inputs %}<span>{{ input.ref }}（{{ input.period }}）{{ input.value }} {{ input.unit }}{% if not loop.last %} ÷ {% endif %}</span>{% endfor %}。
         {{ cell.calculation.precision or '原记录未说明计算精度。' }}
-      {% else %}来源：{{ cell.source.provider }} · {{ cell.source.code }}，抓取于 {{ cell.source.retrieved_at or '未记录' }}；逐期公告日与版本未在此行记录。{% endif %}
+      {% else %}来源：{{ cell.source.provider }} · {{ cell.source.code }}，抓取于 {{ cell.source.retrieved_at or '未记录' }}；逐期公告日与版本未在此行记录。{{ cell.period_note }}{% endif %}
       {% endif %}
     </li>{% endfor %}</ul>
     {% endfor %}
