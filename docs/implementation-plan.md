@@ -86,18 +86,20 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。最近发布记录：**Research `6faeb5c`**，10-29 19:27 完成 web、worker 镜像切换，包含 `4b83a7f` 季报标题修复。Compose 返回两容器启动完成；按所有者当次明确要求，**跳过全部验证，未确认部署后的运行与业务状态**。研究与批次比较配置沿用 `openai-codex/gpt-6.1-terra/high`，worker 为 `cpus: 0.6`；成文/复核契约未变。
+入口 [stock.keyi.win](https://stock.keyi.win)。最近发布记录：**Research `096aa2d`**，10-29 19:55 完成 web、worker 镜像切换，包含 K2 工程收尾及计算精度、命名修复。Compose 返回两容器启动完成；按所有者当次明确要求，**跳过全部部署验证，未确认部署后的运行与业务状态**。研究与批次比较配置沿用 `openai-codex/gpt-6.1-terra/high`，worker 为 `cpus: 0.6`；成文/复核契约未变。
 
 | 本次构建并切换的镜像 | 构建返回的镜像 SHA256 |
 |---|---|
-| `a-share-research-web:6faeb5c` | `14de001fd3955b1391616ecf3a470db6c1832ec5f66210709edbf7ef5edc43ba` |
-| `a-share-research-worker:6faeb5c` | `008d85242a314a056470f4cad2d1b05675a4fa570a5706bc864ceae0c903f34b` |
+| `a-share-research-web:096aa2d` | `7ecf8cbf43ea2e154986857916395226bf523e8ba8cf2e3942c9b3cbc4b2780d` |
+| `a-share-research-worker:096aa2d` | `727b6a671ba89fbe17b2fdc2e6bc0cef9ce164551b55ade8a0399c3874f02a95` |
 
-本次直接从已提交推送的 Git 归档构建，保留运行中的旧镜像标签，停止两服务、备份数据库、切换镜像并执行 Compose 启动；没有调用包含自动验证的发布工具，没有运行测试、空闲检查、源码核对、表指纹/完整性巡检、健康检查、浏览器或真实研究验收。上述修复阶段的既有测试与研究结果不代表部署后验证。
+本次直接从已提交推送的 Git 归档构建，保留运行中的旧镜像标签，停止两服务、备份数据库、切换镜像并执行 Compose 启动；没有调用包含自动验证的发布工具，部署阶段没有运行测试、空闲检查、源码核对、表指纹/完整性巡检、健康检查、浏览器或真实研究验收。上述开发阶段的测试与历史研究结果不代表部署后验证。
 
-**证据与回退**：构建日志、部署命令记录在 `deploy-6faeb5c-20261029-192619/`，备份为 `~/a-share-research-data/backup-pre-6faeb5c-20261029-192619.db`。直接回退镜像为 `a-share-research-web:rollback-6faeb5c` 与 `a-share-research-worker:rollback-6faeb5c`（均来自原运行的 `4eee2f5`）；经当次授权后，分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。只回退应用，不覆盖新数据；常规流程见 [README](../README.md#部署)，本次跳过验证仅适用于当次指令。
+**证据与回退**：构建日志、部署命令记录在 `deploy-096aa2d-20261029-195453/`，备份为 `~/a-share-research-data/backup-pre-096aa2d-20261029-195453.db`。直接回退镜像为 `a-share-research-web:rollback-096aa2d` 与 `a-share-research-worker:rollback-096aa2d`（均来自原运行的 `6faeb5c`）；经当次授权后，分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。只回退应用，不覆盖新数据；常规流程见 [README](../README.md#部署)，本次跳过验证仅适用于当次指令。
 
-前次 `4eee2f5` 于 10-29 18:04 上线 `peers`，其 248 项测试、完整性巡检与万华化学生产验收记录见 `git show 6faeb5c:docs/implementation-plan.md`。证据在 `deploy-4eee2f5-20261029-180437/`，备份为 `~/a-share-research-data/backup-pre-4eee2f5-20261029-180439.db`。更早记录见页首历史入口，既有备份和证据未删除。
+前次 `6faeb5c` 于 10-29 19:27 部署季报标题修复，同样按当次要求未做部署验证；记录见 `git show b76b30e:docs/implementation-plan.md`，证据在 `deploy-6faeb5c-20261029-192619/`。
+
+更早 `4eee2f5` 于 10-29 18:04 上线 `peers`，其 248 项测试、完整性巡检与万华化学生产验收记录见 `git show 6faeb5c:docs/implementation-plan.md`。证据在 `deploy-4eee2f5-20261029-180437/`，备份为 `~/a-share-research-data/backup-pre-4eee2f5-20261029-180439.db`。更早记录见页首历史入口，既有备份和证据未删除。
 
 前次 `cd6aed0` 已将本地 `calculate` 从取证额度中分离，并修复 web 启动期连接重置的就绪判断；东方电缆与长江电力真实研究通过。证据在 `deploy-cd6aed0-20261029-165546/`。
 
