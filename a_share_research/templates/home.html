@@ -1,9 +1,30 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
+{% macro review_items(rows) %}
+<ul class="list">
+{% for r in rows %}
+  <li><a href="/runs/{{ r.id }}">{{ r.name or r.code }} · {{ r.label }}</a>
+    <p class="small">原报告 <a href="/reports/{{ r.parent_id }}{{ r.anchor }}">{{ r.parent_id }} 对应内容</a> · 已提交的核查请求，不表示原判断已被推翻。</p>
+    <details><summary>核查问题</summary><p>{{ r.question }}</p></details>
+  </li>
+{% endfor %}
+</ul>
+{% endmacro %}
 {% block main %}
-<section class="start">
-  <h1>研究一家公司</h1>
-  <p><a href="/research-library">查已有研究</a> · 阅读已有档案，无需开始新研究。</p>
+<h1>研究首页</h1>
+<section aria-labelledby="attention">
+  <h2 id="attention" tabindex="-1">待处理事项</h2>
+  <p class="hint">仅列原报告存在且就绪、尚未通过复核的已提交核查；完成不等于已读，也不表示投资判断正确。</p>
+  {% if pending %}
+    {{ review_items(pending[:3]) }}
+    {% if pending|length > 3 %}<details><summary>展开本页其余 {{ pending|length - 3 }} 项核查</summary>{{ review_items(pending[3:]) }}</details>{% endif %}
+    {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
+  {% else %}<p>没有符合上述范围的待核查记录。</p>{% endif %}
+  <details><summary>新证据与检查点的提醒范围</summary><p>尚未接入持续的新公告监测，检查点也未记录可自动判定的到期日期。当前不能确认这两类事项，不代表没有新证据或风险。关联记录缺失的核查无法纳入本清单，可从公司档案核对历史任务。</p></details>
+  <p><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
+</section>
+<details class="start" {% if error or choices or recent or q %}open{% endif %}>
+  <summary>开始新的研究</summary>
   <form method="post" action="/research" class="search">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request_id" value="{{ request_id }}">
@@ -32,7 +53,7 @@
     </div>
   </div>
   {% endif %}
-</section>
+</details>
 
 <section>
   <h2>候选初筛</h2>
@@ -58,16 +79,17 @@
 {% endif %}
 
 <section>
-  <h2>研究过的公司</h2>
+  <details>
+  <summary>主动研究过的公司 · {{ companies|length }} 家</summary>
   {% if companies %}
   <ul class="list companies">
   {% for c in companies %}
     <li>
       <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
-      <p>{% if c.passed %}{{ c.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
-        <span class="muted">· <span class="date">资料至 {{ c.coverage }}</span> · <span class="date">研究于 {{ c.created_at[:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}</span></p>
-      {% if c.checkpoint %}<p class="small">检查点：{{ c.checkpoint }}</p>{% endif %}
-      {% if c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过）</p>{% endif %}
+      <p>{% if c.passed %}研究判断：{{ c.verdict }}{% else %}<span class="flag">流程：复核未通过，不展示研究判断</span>{% endif %}
+        <span class="muted">· <span class="date">财务覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 {{ c.created_at[:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}</span></p>
+      {% if c.checkpoint %}<p class="small"><a href="/reports/{{ c.id }}#checkpoints">查看检查点</a>（尚不能自动判定到期）</p>{% endif %}
+      {% if c.coverage and c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
     </li>
   {% endfor %}
   </ul>
@@ -75,5 +97,6 @@
   <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
   {% endif %}
   {% if batch_only %}<p class="muted">另有 {{ batch_only }} 家只在初筛中深挖过，见<a href="/batches">各批次</a>。</p>{% endif %}
+  </details>
 </section>
 {% endblock %}

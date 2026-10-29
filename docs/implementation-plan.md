@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-10-28。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页维护当前状态、剩余验收、部署与直接回退；逐次部署和评估历史见 `git show 6773b62:docs/implementation-plan.md`。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
+更新：2026-10-29。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页维护当前状态、剩余验收、部署与直接回退；逐次部署和评估历史见 `git show 6773b62:docs/implementation-plan.md`。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
 
 ## 工作包与状态
 
@@ -42,6 +42,10 @@
 Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及方法修订已验证。当前 Skills 记录为 **0.1.25 / `04dbc6c`**，使用长期 API Key，`research-v1` 接口兼容；最近一次生产读取为下方五粮液报告 42。客户端身份、配置、安装与回退由其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record) 维护；配对发布证据在 `api-key-20261027-154133/`。
 
 ## 当前部署
+
+**本地候选，未发布**：10-29 在 `53a4019` 上推进[步骤 2 第一阶段](investment-upgrade.md#77-步骤-2首页事项与报告阅读)：首页只列可证明的待核查请求、折叠新研究和主动公司列表；报告区分流程/判断，标明财务覆盖、已存披露公告日、抓取和生成时间，靠近结论展开缺口。补 answer 锚点焦点及缺字段回归。不新增模型、外部数据或提醒调度；新证据/到期事件、同业、完整判断闭环、市场背景仍受方案依赖约束。K2/K3 剩余验收不因本轮界面改动而完成；发布需另行确认。
+
+本地验证：174 项测试通过；真实 Chromium 1165/390px、JS 开关、搜索返回/前进两轮及刷新、旧报告/缺字段、重复请求与失败/完成边界、更正保护和固定首列通过。报告 37/39 为已有捕获；待核查状态用真实反馈请求的本地生命周期边界验证，没有新生成研究。未验证生产、真实手机、大规模请求性能或 30 秒/2 分钟用户理解目标。截图和脚本在本次执行环境 `scratchpad/attention-acceptance-20261029/`，不属于生产部署证据。
 
 入口 [stock.keyi.win](https://stock.keyi.win)。**web 与 worker 均为 Research `3cd2f7e`**，10-29 08:51 发布（应用代码同 `10420bd`：报告页把“主要风险与反证”置于问题回答/核查之前，章节索引同步）；研究与批次比较经 pi 使用 `openai-codex/gpt-6.1-terra/high`，worker 保持 `cpus: 0.6`。
 

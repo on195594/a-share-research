@@ -87,6 +87,8 @@ def test_home_lists_own_research_and_counts_batch_only_companies(tmp_path, monke
 def render(name: str, **context) -> str:
     env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
     env.globals["asset_version"] = "test"
+    if name == 'report.html':
+        context['evidence'] = reading.evidence_context(context['body'], context['report'].get('period'))
     return env.get_template(name).render(csrf="", steps={}, request_id="r", **context)
 
 
@@ -110,7 +112,8 @@ def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):
         assert html.index('class="conclusion"') < start
         if body.get('question'):
             assert start < html.index('<section id="answer"')
-            assert html.index('href="#risks"') < html.index('href="#answer"')
+            nav = html[html.index('<nav aria-label="报告章节">'):html.index('</nav>')]
+            assert nav.index('href="#risks"') < nav.index('href="#answer"')
         positions = []
         for i, risk in enumerate(body['risks']):
             paragraph = f'<p>{escape(risk["text"])}</p>'
@@ -135,8 +138,26 @@ def test_report_without_recorded_risks_still_renders_risk_and_answer_sections(tm
                   rows={r['id']: r for r in body['table']}, price=None, followups=[],
                   comparison=reading.comparison(conn, conn.execute('SELECT * FROM reports WHERE id=39').fetchone()),
                   market=[], fin=[r for r in body['table'] if r['id'].startswith('T.')])
-    assert html.count('id="risks"') == 1 and '没有可列出的风险' in html
-    assert '<section id="answer">' in html
+    assert html.count('id="risks"') == 1 and '本报告未记录可列出的风险，不代表没有风险' in html
+    assert '<section id="answer" tabindex="-1">' in html
+    conn.close()
+
+
+def test_report_empty_risks_and_missing_summary_keep_unknown_explicit(tmp_path):
+    conn = db.connect(tmp_path / 'missing-fields.db')
+    load(conn)
+    record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
+    body = json.loads(json.dumps(record['body']))
+    body['risks'] = []
+    body.pop('summary')
+    body.pop('gaps')
+    html = render('report.html', report=record, body=body, feedback=None, feedback_label='', replay_of=None,
+                  rows={r['id']: r for r in body['table']}, price=None, followups=[],
+                  comparison={}, market=[], fin=[])
+    assert '本报告未记录可列出的风险，不代表没有风险' in html
+    assert '本报告未记录一句话结论' in html
+    assert '不代表资料充分或没有风险' in html
+    assert '研究流程：已完成并通过复核' in html
     conn.close()
 
 

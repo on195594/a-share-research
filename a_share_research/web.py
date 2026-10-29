@@ -291,8 +291,12 @@ def active_runs() -> list:
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
     batch = conn.execute("SELECT id, status, created_at FROM batches ORDER BY id DESC LIMIT 1").fetchone()
     companies, batch_only = latest_reports()
+    pending, pending_more = reading.pending_reviews(conn)
+    listed = {r['id'] for r in pending}
     return render(request, "home.html", session, status, companies=companies, batch_only=batch_only,
-                  due=sources.due_report(datetime.now(db.SHANGHAI).date()), active=active_runs(), batch=batch, **context)
+                  pending=pending, pending_more=pending_more,
+                  due=sources.due_report(datetime.now(db.SHANGHAI).date()),
+                  active=[r for r in active_runs() if r['id'] not in listed], batch=batch, **context)
 
 
 @app.get("/")
@@ -382,7 +386,7 @@ def _elapsed(run) -> int | None:
 def report_page(request: Request, report_id: int):
     if not (session := current_session(request)):
         return login_required()
-    row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+    row = conn.execute(f"SELECT r.*, {db.COVERAGE} AS coverage FROM reports r WHERE id = ?", (report_id,)).fetchone()
     if row is None:
         return not_found(request, session)
     run = conn.execute("SELECT status, request, identity FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
@@ -399,6 +403,7 @@ def report_page(request: Request, report_id: int):
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     return render(request, "report.html", session, report=row, body=body,
+                  evidence=reading.evidence_context(body, row['coverage']),
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
                   replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),
                   rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,

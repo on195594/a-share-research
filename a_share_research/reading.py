@@ -1,9 +1,66 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
 import json
+from datetime import date
 
 from a_share_research import db, research, service
 
 PAGE_SIZE = 20
+
+
+def pending_reviews(conn, limit: int = PAGE_SIZE) -> tuple[list, bool]:
+    """Saved feedback requests only; no inferred events, due dates or read status.
+
+    The latest identical request supersedes retries. A passed result closes only
+    that exact parent/location/text, never every question about the same report.
+    SQL returns bounded summaries rather than report bodies.
+    """
+    rows = conn.execute(
+        "WITH requests AS (SELECT u.id, u.status, p.id AS parent_id, p.code, p.name,"
+        " json_extract(u.request, '$.feedback.text') AS question,"
+        " json_extract(u.request, '$.feedback.location') AS location,"
+        " f.id AS result_id, f.passed,"
+        " ROW_NUMBER() OVER (PARTITION BY p.id, json_extract(u.request, '$.feedback.location'),"
+        " json_extract(u.request, '$.feedback.text') ORDER BY u.id DESC) AS attempt"
+        " FROM runs u JOIN reports p ON p.id = json_extract(u.request, '$.parent_report_id')"
+        " JOIN runs original ON original.id = p.run_id"
+        " LEFT JOIN reports f ON f.run_id = u.id AND f.code = p.code"
+        " WHERE u.kind = 'research' AND substr(u.code, 1, 6) = substr(p.code, 1, 6)"
+        " AND json_extract(u.identity, '$.replay_of') IS NULL"
+        " AND json_type(u.request, '$.feedback') = 'object'"
+        " AND length(trim(json_extract(u.request, '$.feedback.text'))) > 0"
+        " AND length(trim(json_extract(u.request, '$.feedback.location'))) > 0"
+        " AND ((original.status = 'done' AND p.passed = 1)"
+        " OR (original.status = 'failed' AND p.passed = 0)))"
+        " SELECT * FROM requests WHERE attempt = 1"
+        " AND NOT (status = 'done' AND COALESCE(passed, 0) = 1)"
+        " ORDER BY id DESC LIMIT ?", (limit + 1,),
+    ).fetchall()
+    labels = {'queued': '核查排队中', 'running': '核查进行中', 'failed': '核查未完成'}
+    anchors = {'risks': '#risks', 'answer': '#answer', 'business': '#business',
+               'financial': '#financial', 'checkpoints': '#checkpoints'}
+    return [dict(r) | {'label': ('核查未通过' if r['status'] == 'failed' and r['passed'] == 0
+                               else labels.get(r['status'], '核查结果未就绪')),
+                      'anchor': anchors.get(r['location'].split('[')[0], '')}
+            for r in rows[:limit]], len(rows) > limit
+
+
+def evidence_context(body: dict, coverage: str | None) -> dict:
+    """Keep report dates separate. A partial source set is never an evidence cutoff."""
+    documents = [body.get('document')] + [s.get('document') for s in (body.get('sources') or {}).values()]
+    dates = set()
+    missing = 0
+    for document in documents:
+        raw = document.get('announced') if isinstance(document, dict) else None
+        try:
+            parsed = date.fromisoformat(raw) if isinstance(raw, str) and len(raw) == 10 else None
+        except ValueError:
+            parsed = None
+        if parsed:
+            dates.add(parsed.isoformat())
+        else:
+            missing += 1
+    return {'coverage': coverage, 'announced': sorted(dates), 'missing_dates': missing,
+            'gaps': list(dict.fromkeys(body.get('gaps') or []))}
 
 
 def search_reports(conn, query: str, page: int = 1, *, page_size: int = PAGE_SIZE) -> tuple[list, bool]:
