@@ -30,9 +30,9 @@ SESSION.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://www.cni
 SESSION.mount("https://", HTTPAdapter(max_retries=Retry(
     total=3, backoff_factor=1, status_forcelist=(500, 502, 503, 504), allowed_methods=("GET", "POST"),
 )))
-KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "第一季度报告": "03-31", "第三季度报告": "09-30"}
+KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "一季度报告": "03-31", "三季度报告": "09-30"}
 PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.IGNORECASE)
-TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第一季度报告|第三季度报告)")
+TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[一三]季度报告)")
 
 
 class SourceError(Exception):
@@ -173,7 +173,7 @@ def announcement_document(raw: dict, code: str) -> Document | None:
     match = TITLE_RE.search(title)
     return Document(
         code=to_tushare_stock_code(code), name=raw.get("secName", ""), title=title,
-        period=f"{match[1]}-{KINDS[match[2]]}" if match else "",
+        period=f"{match[1]}-{KINDS[match[2].removeprefix('第')]}" if match else "",
         announced=datetime.fromtimestamp(raw["announcementTime"] / 1000, SHANGHAI).date().isoformat(),
         url="https://static.cninfo.com.cn/" + raw["adjunctUrl"],
     )
