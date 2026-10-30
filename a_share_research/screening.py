@@ -444,7 +444,7 @@ def _report_digest(conn, report_id: int | None) -> dict | None:
     present = {r["id"]: r["values"] for r in metrics}
     return {"verdict": body.get("verdict"), "summary": body.get("summary"), "answer": texts("answer"),
             "risks": texts("risks"), "financial": texts("financial"), "business": texts("business"),
-            "gaps": body.get("gaps", []), "metrics": metrics,
+            "checkpoints": texts("checkpoints"), "gaps": body.get("gaps", []), "metrics": metrics,
             "missing_metrics": {f"T.{m[0]}": sorted(periods - present.get(f"T.{m[0]}", {}).keys())
                                 for m in METRICS if periods - present.get(f"T.{m[0]}", {}).keys()}}
 

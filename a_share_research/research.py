@@ -410,6 +410,7 @@ def gather(code: str) -> Material:
 # ---------- mechanical checks ----------
 
 NUMBER = re.compile(r"[-−+]?\d[\d,]*(?:\.\d+)?(?![\d.])(?!\s*[年月日])")
+ISO_DATE = re.compile(r"(?<!\d)(?:19|20)\d{2}[-/](?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
 SCALES = (1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e2, 1e4)
 SQUASH = re.compile(r"\s+")
 REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a-z_]+)")
@@ -417,7 +418,7 @@ REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a
 
 def _numbers(text: str) -> list[tuple[float, int]]:
     out = []
-    for token in NUMBER.findall(text):
+    for token in NUMBER.findall(ISO_DATE.sub(" ", text)):
         clean = token.replace(",", "").replace("−", "-")
         decimals = len(clean.split(".")[1]) if "." in clean else 0
         value = abs(float(clean))
@@ -432,14 +433,24 @@ def _supported(value: float, decimals: int, candidates: list[float]) -> bool:
     return any(abs(abs(c) * s - value) <= tolerance for c in candidates for s in SCALES)
 
 
+def _known_codes(material: Material) -> list[float]:
+    codes = {material.code[:6]} | {r["id"][1:7] for r in material.table if re.match(r"^P\d{6}\.", r["id"])}
+    return [float(c) for c in codes if c.isdigit()]
+
+
 def _candidates(cites: list[dict], material: Material) -> list[float]:
     rows = {r["id"]: r for r in material.table}
-    values = []
+    values = _known_codes(material)
     for cite in cites:
         if "ref" in cite and cite["ref"] in rows:
+            row = rows[cite["ref"]]
             for field in ("values", "exact_values"):
-                cited = rows[cite["ref"]].get(field, {})
-                values += [float(v) for p, v in cited.items() if not cite.get("period") or cite["period"] == p]
+                cited = row.get(field, {})
+                values += [float(v) for p, v in cited.items()
+                           if not cite.get("period") or cite["period"] == p or row["id"].startswith("C.")]
+            calc = row.get("calculation") or {}
+            for group in ("inputs", "normalized_inputs"):
+                values += [float(i["value"]) for i in calc.get(group, []) if "value" in i]
         elif "quote" in cite:
             values += [v for v, _ in _numbers(cite["quote"])]
     return values
@@ -502,7 +513,10 @@ def check(report: dict, material: Material) -> list[dict]:
                     if cite["ref"] not in rows:
                         problems.append({"where": where, "problem": f"表中没有 {cite['ref']}"})
                     elif cite.get("period") and cite["period"] not in rows[cite["ref"]]:
-                        problems.append({"where": where, "problem": "所引数据不含指定期间"})
+                        row_obj = next((r for r in material.table if r["id"] == cite["ref"]), {})
+                        calc_periods = {i.get("period") for i in (row_obj.get("calculation") or {}).get("inputs", [])}
+                        if not (cite["ref"].startswith("C.") and cite["period"] in calc_periods):
+                            problems.append({"where": where, "problem": "所引数据不含指定期间"})
                 elif not _quote_found(cite, material):
                     problems.append({"where": where, "problem": f"第 {cite.get('page')} 页找不到引文：{str(cite.get('quote', ''))[:60]}"})
             candidates = _candidates(cites, material)

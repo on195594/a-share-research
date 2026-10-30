@@ -28,6 +28,11 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     assert row["label"] == "相对变动率" and row["calculation"]["requested_label"] == "经营现金流同比"
     with pytest.raises(ValueError, match="同月日"):
         calculate(table, "不可比", "growth_pct", left | {"period": "2026-06-30"}, right)
+    # Cross-period / sequential relative change and chained C.n references without explicit period.
+    seq = calculate(table, "半年较上年全年相对变动", "change_pct", left | {"period": "2026-06-30"}, right)
+    assert seq["unit"] == "%" and seq["calculation"]["operation"] == "change_pct"
+    chained = calculate(table + [row], "同比增速占ROE比", "ratio", {"ref": row["id"]}, {"ref": "T.roe", "period": "2025-12-31"})
+    assert chained["calculation"]["inputs"][0]["period"] == "result"
     with pytest.raises(ValueError, match="单位"):
         calculate(table, "不同单位", "ratio", left, {"ref": "T.roe", "period": "2025-12-31"})
     with pytest.raises(KeyError):

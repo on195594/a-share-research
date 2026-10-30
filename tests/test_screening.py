@@ -184,6 +184,7 @@ def test_comparison_keeps_real_calculations_and_marks_legacy_gaps(tmp_path):
     report_id = conn.execute('SELECT id FROM reports').fetchone()[0]
     digest = screening._report_digest(conn, report_id)
     assert digest['business'] == [r['text'] for r in body['business']]
+    assert digest['checkpoints'] == [r['text'] for r in body['checkpoints']]
     assert next(r for r in digest['metrics'] if r['id'] == calculation['id']) == calculation
     assert digest['missing_metrics']['T.capex'] == ['2024-12-31', '2025-12-31']
     conn.close()

@@ -19,8 +19,20 @@ def test_quote_not_in_cited_page_is_flagged():
 
 
 def test_years_and_months_are_not_checked_as_figures():
-    ok = report(business=[{"text": "2025年12月销售费用增加主要因为广告宣传。", "cites": [SALES]}])
+    ok = report(business=[{"text": "截至2025-12-31，600519在2025年12月销售费用增加主要因为广告宣传。", "cites": [SALES]}])
     assert check(ok, MATERIAL) == []
+
+
+def test_cited_calculation_supports_its_verified_inputs_and_input_periods():
+    from a_share_research.research_tools import calculate
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    calc = calculate(material.table, "现金流差额", "difference",
+                     {"ref": "T.op_cash", "period": "2025-12-31"},
+                     {"ref": "T.op_cash", "period": "2024-12-31"})
+    material.table.append(calc)
+    ok = report(financial=[{"text": f"经营现金流由924.64亿元变为615.22亿元，差额为{calc['values']['result']}亿元。",
+                            "cites": [{"ref": "C.1", "period": "2025-12-31"}]}])
+    assert check(ok, material) == []
 
 
 def test_reference_ids_in_text_are_flagged():

@@ -34,10 +34,10 @@ TOOLS = [
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
                     "required": ["code"], "additionalProperties": False}},
-    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。表格输入优先使用未舍入值；label 仅记录计算目的，结果按运算类型命名，财务含义须结合输入出处解释。left/right 可传表格行 {ref, period}，或直接传已读披露原文中的原数 {source, page, quote, value, unit, period(可选), label(可选)}（value 必须与 quote 中的数字及正负号完全一致，元/千元/万元/百万元/亿元可自动换算）。growth_pct 要求同指标同月日同比且基期为正；difference/sum/ratio/ratio_pct 要求同单位或同为货币单位。",
+    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。表格输入优先使用未舍入值；label 仅记录计算目的，结果按运算类型命名，财务含义须结合输入出处解释。left/right 可传表格或前序计算行 {ref, period(引用 C.n 时可省略)}，或直接传已读披露原文中的原数 {source, page, quote, value, unit, period(可选), label(可选)}（value 必须与 quote 中的数字及正负号完全一致，元/千元/万元/百万元/亿元可自动换算）。growth_pct 要求同指标相邻年度同月日同比且基期为正；change_pct 用于环比、期末较期初、跨多年累计、预实偏离或同业相对变动率（(left/right - 1)*100，要求基数为正且同单位或同为货币单位）；difference/sum/ratio/ratio_pct 要求同单位或同为货币单位。",
      "parameters": {"type": "object", "properties": {
          "label": {"type": "string"},
-         "operation": {"type": "string", "enum": ["difference", "sum", "growth_pct", "ratio", "ratio_pct"]},
+         "operation": {"type": "string", "enum": ["difference", "sum", "growth_pct", "change_pct", "ratio", "ratio_pct"]},
          **{side: {"type": "object", "properties": {
              "ref": {"type": "string"}, "period": {"type": "string"},
              "source": {"type": "string"}, "page": {"type": "integer", "minimum": 1},
@@ -53,7 +53,7 @@ CURRENCY_UNITS = {
 }
 DECLARED_UNIT = re.compile(r"单位\s*[：:]\s*(?:人民币)?(亿元|百万元|万元|千元|元)")
 OPERATION_NAMES = {"difference": "差额", "sum": "合计", "growth_pct": "相对变动率",
-                   "ratio": "比值", "ratio_pct": "比值（百分比）"}
+                   "change_pct": "相对变动率", "ratio": "比值", "ratio_pct": "比值（百分比）"}
 
 
 def research_methods(conn, query: str) -> list[dict]:
@@ -89,14 +89,18 @@ def research_methods(conn, query: str) -> list[dict]:
 def _operand(side: dict, rows: dict, material) -> dict:
     if not isinstance(side, dict):
         raise ValueError("计算输入须为对象")
-    if set(side) == {"ref", "period"}:
-        row = rows[side["ref"]]
-        if reason := row.get("unavailable", {}).get(side["period"]):
-            raise ValueError(f"{side['period']} 更正版本待核对：{reason}")
+    clean = {k: v for k, v in side.items() if v is not None and v != ""}
+    if set(clean) <= {"ref", "period"} and "ref" in clean and not (set(side) - {"ref", "period", "source", "page", "quote", "value", "unit", "label"}):
+        row = rows[clean["ref"]]
         value_field = "exact_values" if "exact_values" in row else "values"
-        return {"ref": side["ref"], "period": side["period"], "label": row["label"],
-                "value": row[value_field][side["period"]], "unit": row["unit"], "value_field": value_field}
-    if {"page", "quote", "value", "unit"} <= set(side) and "ref" not in side:
+        period = clean.get("period") or ("result" if set(row.get(value_field, {})) == {"result"} else None)
+        if not period:
+            raise ValueError("表格输入须指定 period")
+        if reason := row.get("unavailable", {}).get(period):
+            raise ValueError(f"{period} 更正版本待核对：{reason}")
+        return {"ref": clean["ref"], "period": period, "label": row["label"],
+                "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
+    if {"page", "quote", "value", "unit"} <= set(clean) and not clean.get("ref"):
         from a_share_research.research import NUMBER, _quote_found
         if material is None or not _quote_found(side, material):
             raise ValueError("计算输入的原文引文在已读取页面中找不到")
@@ -116,14 +120,18 @@ def _operand(side: dict, rows: dict, material) -> dict:
         doc = {"pages": material.pages} if source == "D0" else material.extra.get("sources", {}).get(source, {})
         pages = doc.get("pages", {})
         page_text = "\n".join(pages.get(p) or pages.get(str(p), "") for p in (page - 1, page, page + 1))
-        inline = re.search(re.escape(str(side["value"]).strip()) + r"\s*(亿元|百万元|万元|千元|元|%)", str(side["quote"]))
+        quote_text = str(side["quote"])
+        quote_no_comma = re.sub(r"(?<=\d),(?=\d{3}\b)", "", quote_text)
+        inline = (re.search(re.escape(str(side["value"]).strip()) + r"\s*(亿元|百万元|万元|千元|元|%)", quote_text)
+                  or re.search(re.escape(raw) + r"\s*(亿元|百万元|万元|千元|元|%)", quote_no_comma))
         if inline and inline[1] != unit:
             raise ValueError(f"计算输入单位与原文紧邻单位（{inline[1]}）不一致")
         if not inline:
-            declared = DECLARED_UNIT.findall(page_text)
-            if declared and unit in CURRENCY_UNITS and unit not in declared:
-                raise ValueError(f"页面声明单位为 {declared[0]}，不能按 {unit} 输入")
-            if unit != "元" and unit not in page_text:
+            if unit not in quote_text:
+                declared = DECLARED_UNIT.findall(page_text)
+                if declared and unit in CURRENCY_UNITS and unit not in declared:
+                    raise ValueError(f"页面声明单位为 {declared[0]}，不能按 {unit} 输入")
+            if unit != "元" and unit not in page_text and unit not in quote_text:
                 raise ValueError(f"所引页面中未见单位 {unit}")
         loc = f"{source}第{page}页"
         return {"source": source, "page": page, "quote": side["quote"],
@@ -159,14 +167,18 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
     elif operation == "growth_pct":
         lp, rp = inputs[0]["period"], inputs[1]["period"]
         same_metric = (
-            left["ref"] == right["ref"] if ("ref" in left and "ref" in right)
-            else ("ref" not in left and "ref" not in right and bool(left.get("label")) and left.get("label") == right.get("label"))
+            inputs[0]["ref"] == inputs[1]["ref"] if ("ref" in inputs[0] and "ref" in inputs[1])
+            else (bool(left.get("label") or right.get("label")) and inputs[0]["label"].split("·")[-1] == inputs[1]["label"].split("·")[-1])
         )
         if (not same_metric or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", lp) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", rp)
                 or lp[4:] != rp[4:] or int(lp[:4]) != int(rp[:4]) + 1):
-            raise ValueError("同比须为同一指标、同月日口径且本期晚于基期")
+            raise ValueError("同比须为同一指标、同月日口径且本期晚于基期；跨期、环比或异源变动请用 change_pct")
         if b <= 0:
             raise ValueError("基期非正数，增速不适用；请用差额并解释")
+        result, formula, unit = (a / b - 1) * 100, "(left / right - 1) * 100", "%"
+    elif operation == "change_pct":
+        if b <= 0:
+            raise ValueError("基数非正数，相对变动率不适用；请用差额并解释")
         result, formula, unit = (a / b - 1) * 100, "(left / right - 1) * 100", "%"
     elif operation in ("ratio", "ratio_pct"):
         if b == 0:
