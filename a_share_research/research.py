@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
-MAX_CALLS = 18  # loop guard, not a cost limit: 12 exploration turns plus compose/review/repair
+MAX_CALLS = 21  # loop guard, not a cost limit: 12 exploration turns, compose, 3 reviews (+1 format retry each), 2 repairs
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 # (id, label, unit, statement, column, divisor)
 METRICS = [
@@ -644,8 +644,13 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
 
 # 资料
 {material.prompt_block()}"""
-    return ledger.accept(_parse(runner.ask("review", prompt)), report, material.source_registry(),
-                         material.table, material.snapshot()["sha256"])
+    registry, material_sha256 = material.source_registry(), material.snapshot()["sha256"]
+    try:
+        return ledger.accept(_parse(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
+    except ReviewFormatError as exc:
+        # The ledger is unchanged on rejection; the reviewer gets the exact defect once, as with tool errors.
+        prompt += f"\n\n# 上一次复核输出被拒\n{exc}\n请修正该处后重新输出完整 JSON 对象，其余判断不必因此改变。"
+        return ledger.accept(_parse(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
 
 
 def _review_issues(text: str) -> list[dict]:
@@ -914,12 +919,15 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     except Exception as exc:
         if not isinstance(exc, ScopeError | ResearchError | ModelStageError | sources.SourceError | evidence.EvidenceError):
             log.exception("run %s failed", run_id)
-        category = ("source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or runner.stage == "gather"
+        category = ("out_of_scope" if isinstance(exc, ScopeError)
+                    else "source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or runner.stage == "gather"
                     else "run_limit" if isinstance(exc, ResearchError)
                     else "model_error" if isinstance(exc, ModelStageError) else "pipeline_error")
-        # Model/transport exceptions can contain internal details; callers receive stage/category, not prompts or credentials.
+        # Our own errors are written to be actionable and are kept. Model/transport exceptions can contain
+        # internal details; callers receive stage/category, not prompts or credentials.
+        own = isinstance(exc, ScopeError | ResearchError | sources.SourceError | evidence.EvidenceError) and str(exc)
         failure = {"stage": runner.stage, "category": category,
-                   "message": "来源输入未能完成，请核对已保存资料。" if category == "source_input"
+                   "message": str(exc) if own else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
                    else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
         db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=failure["message"])
         identity["failure"] = failure

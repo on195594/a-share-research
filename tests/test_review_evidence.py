@@ -374,3 +374,68 @@ def test_full_api_keeps_report_sources_when_old_material_has_no_supplements(tmp_
     assert conn.execute("SELECT body FROM reports WHERE id=37").fetchone()[0] == row["body"]
     assert conn.total_changes == changes
     conn.close()
+
+
+def test_issue_on_a_deleted_item_closes_with_empty_targets_but_an_omission_cannot():
+    ledger = ReviewLedger()
+    draft = REVIEW["report"]
+    flagged = issue() | {"type": "claim", "where": "risks[2]"}
+    accept(ledger, payload(ledger, draft, issues=[flagged, issue()]))
+    claim_id, omission_id = (i["id"] for i in ledger.pending())
+    ledger.protect_risks(draft)
+    repaired = deepcopy(draft)
+    del repaired["risks"][2]  # Structural deletion of the captured flagged claim, not a model repair.
+    risks = [{"id": key, "status": "dismissed", "reason": issue()["problem"], "evidence": issue()["evidence"]}
+             for key in ledger.risk_changes(repaired)]
+    removed = {"status": "resolved", "reason": issue()["problem"], "targets": [], "evidence": issue()["evidence"]}
+    # Mutation: "[]" means the criticised item was deleted, which can never satisfy a missing-content finding.
+    with pytest.raises(ReviewFormatError, match=omission_id):
+        accept(ledger, payload(ledger, repaired, resolutions=[removed | {"id": claim_id}, removed | {"id": omission_id}],
+                               risk_resolutions=risks), repaired)
+    keep = {"id": omission_id, "status": "unresolved", "reason": issue()["problem"]}
+    pending = accept(ledger, payload(ledger, repaired, resolutions=[removed | {"id": claim_id}, keep],
+                                     risk_resolutions=risks), repaired)
+    assert [i["id"] for i in pending] == [omission_id]
+
+
+class Replies:
+    """Feeds fixed protocol responses to review(); it renders no financial content of its own."""
+
+    def __init__(self, *texts):
+        self.texts, self.prompts = list(texts), []
+
+    def ask(self, step, prompt):
+        self.prompts.append(prompt)
+        return self.texts.pop(0)
+
+
+def test_rejected_review_gets_one_correction_with_the_exact_defect():
+    from a_share_research.research import review
+    draft = report()
+    bound = {"version": 1, "draft_sha256": digest(draft), "material_sha256": MATERIAL.snapshot()["sha256"],
+             "resolutions": [], "risk_resolutions": []}
+    question = {"type": "question", "problem": REVIEW["problems"][0]["problem"],
+                "importance": REVIEW["problems"][0]["problem"], "evidence": []}
+    combined = json.dumps(bound | {"issues": [question | {"where": "risks[0] / risks[1]"}]}, ensure_ascii=False)
+    fixed = json.dumps(bound | {"issues": [question | {"where": "risks[0]"}]}, ensure_ascii=False)
+    ledger, runner = ReviewLedger(), Replies(combined, fixed)
+    assert [i["where"] for i in review(runner, MATERIAL, draft, ledger)] == ["risks[0]"]
+    assert "issues[0]" in runner.prompts[1] and len(ledger.rounds) == 1
+    # A second malformed answer still fails closed with nothing recorded.
+    ledger, runner = ReviewLedger(), Replies(combined, combined)
+    with pytest.raises(ReviewFormatError):
+        review(runner, MATERIAL, draft, ledger)
+    assert ledger.snapshot()["issues"] == [] and ledger.rounds == []
+
+
+def test_own_failure_reason_reaches_the_run_instead_of_a_generic_notice(tmp_path):
+    from a_share_research.research import execute
+    conn = db.connect(tmp_path / "isolated.db")
+    source = db.create_run(conn, BODY["code"], status="failed")  # No material snapshot was ever saved.
+    run = db.create_run(conn, BODY["code"])
+    execute(conn, run, replay_of=source)
+    row = conn.execute("SELECT error, identity FROM runs WHERE id=?", (run,)).fetchone()
+    assert row["error"] == f"任务 {source} 没有完整材料快照，不能重放；不会重新取数补齐"
+    assert json.loads(row["identity"])["failure"]["category"] == "source_input"
+    assert conn.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
+    conn.close()

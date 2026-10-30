@@ -24,7 +24,7 @@
   {% else %}
     <p class="notice caution" role="alert">没有完成：{{ run.error }}</p>
     {% if diagnostics and diagnostics.failure %}
-    <p>停止阶段：{{ steps.get(diagnostics.failure.stage, '程序检查与保存') }}。{{ {'source_input': '来源输入未完成或存在冲突', 'model_error': '模型调用未完成', 'run_limit': '达到本次运行上限', 'pipeline_error': '处理阶段异常'}.get(diagnostics.failure.category, '流程未完成') }}；不会自动重试。</p>
+    <p>停止阶段：{{ steps.get(diagnostics.failure.stage, '程序检查与保存') }}。{{ {'out_of_scope': '不在研究范围内', 'source_input': '来源输入未完成或存在冲突', 'model_error': '模型调用未完成', 'run_limit': '达到本次运行上限', 'pipeline_error': '处理阶段异常'}.get(diagnostics.failure.category, '流程未完成') }}；不会自动重试。</p>
     {% if diagnostics.problems %}<details><summary>中断前仍未解决的核查意见</summary><p>以下为核查意见，不是可信投资结论；本次中断不表示这些问题已解决。</p><ul>{% for issue in diagnostics.problems %}<li>{{ issue.problem }}</li>{% endfor %}</ul></details>{% endif %}
     <p>先核对已保存材料与阶段日志；不要直接重复提交整项研究。</p>
     {% endif %}

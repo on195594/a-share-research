@@ -127,22 +127,28 @@ class ReviewLedger:
                 or not all(isinstance(payload.get(k), list) for k in ("issues", "resolutions", "risk_resolutions"))):
             raise ReviewFormatError("复核格式或草稿/材料绑定无效，未接受解决声明")
 
-        def proof(item, *, targets=False):
+        def proof(item, *, targets=False, removable=False):
+            label = f"{item['id']}："
             if not _text(item.get("reason")):
-                raise ReviewFormatError("复核决定缺少理由")
+                raise ReviewFormatError(label + "复核决定缺少理由")
             cites = item.get("evidence")
-            if not cites or citation_errors(cites, registry, table):
-                raise ReviewFormatError("复核决定缺少有效已存证据")
-            if targets and (not isinstance(item.get("targets"), list) or not item["targets"]
-                            or not all(isinstance(t, str) and target_exists(t, report) for t in item["targets"])):
-                raise ReviewFormatError("复核决定缺少新版条目去向")
+            if not cites:
+                raise ReviewFormatError(label + "复核决定缺少已存证据")
+            if errors := citation_errors(cites, registry, table):
+                raise ReviewFormatError(label + "复核决定证据无效：" + "；".join(errors))
+            listed = item.get("targets")
+            # An empty list records that the flagged item itself was deleted from the new draft.
+            if targets and (not isinstance(listed, list) or not (listed or removable)
+                            or not all(isinstance(t, str) and target_exists(t, report) for t in listed)):
+                raise ReviewFormatError(label + "复核决定缺少新版条目去向（targets 须为新报告中存在的位置"
+                                        + ("；原条目已删除时为 []" if removable else "") + "）")
 
         def decisions(items, expected):
             if any(not isinstance(i, dict) or not isinstance(i.get("id"), str) for i in items):
                 raise ReviewFormatError("复核决定 ID 无效")
             ids = [i["id"] for i in items]
             if len(ids) != len(set(ids)) or set(ids) != set(expected):
-                raise ReviewFormatError("复核决定包含未知/重复 ID 或遗漏未解决项")
+                raise ReviewFormatError(f"复核决定 ID 须恰好为 {sorted(expected)}，实际为 {ids}")
 
         pending = {i["id"]: i for i in self.pending()}
         decisions(payload["resolutions"], pending)
@@ -150,9 +156,9 @@ class ReviewLedger:
         for resolution in payload["resolutions"]:
             status = resolution.get("status")
             if status not in ("resolved", "unresolved", "dismissed") or not _text(resolution.get("reason")):
-                raise ReviewFormatError("复核问题状态或理由无效")
+                raise ReviewFormatError(f"{resolution['id']}：复核问题状态须为 resolved/unresolved/dismissed 且附理由")
             if status != "unresolved":
-                proof(resolution, targets=status == "resolved")
+                proof(resolution, targets=status == "resolved", removable=pending[resolution["id"]]["where"] != "missing")
             updated[resolution["id"]] |= {"status": status, "resolution": _decision_view(resolution),
                                            "reviewed_draft_sha256": draft}
 
@@ -160,7 +166,7 @@ class ReviewLedger:
         decisions(payload["risk_resolutions"], changes)
         for resolution in payload["risk_resolutions"]:
             if resolution.get("status") not in ("retained", "merged", "dismissed"):
-                raise ReviewFormatError("原风险去向无效")
+                raise ReviewFormatError(f"{resolution['id']}：原风险去向须为 retained/merged/dismissed")
             proof(resolution, targets=resolution["status"] != "dismissed")
 
         # IDs are assigned here, not by the writer or reviewer. New issues cannot impersonate old ones.
@@ -169,11 +175,12 @@ class ReviewLedger:
             if (not isinstance(issue, dict) or "id" in issue or issue.get("type") not in ("omission", "claim", "question")
                     or not all(_text(issue.get(k)) for k in ("where", "problem", "importance"))
                     or issue["where"] != "missing" and not target_exists(issue["where"], report)):
-                raise ReviewFormatError("新增复核问题缺少类型、位置或重要性依据")
+                raise ReviewFormatError(f"issues[{index}]：须有 type、problem、importance，where 须为新报告中存在的单个位置或 missing")
             cites = issue.get("evidence")
-            if (not isinstance(cites, list) or citation_errors(cites, registry, table)
+            if (not isinstance(cites, list) or (errors := citation_errors(cites, registry, table))
                     or issue["type"] != "question" and not cites):
-                raise ReviewFormatError("实质复核问题必须指向有效的已存证据")
+                raise ReviewFormatError(f"issues[{index}]：omission/claim 必须指向有效的已存证据"
+                                        + ("：" + "；".join(errors) if isinstance(cites, list) and errors else ""))
             clean_issue = issue_view(issue)
             key = digest(clean_issue)
             if key in seen:
@@ -199,10 +206,11 @@ def legacy_issue_view(issues):
 
 PROTOCOL = """输出一个 JSON 对象，version=1，逐字返回下方 draft_sha256 和 material_sha256。
 issues: 新发现的实质问题数组，每项 {type: omission/claim/question, where: 条目位置或 missing,
-problem: 具体问题, importance: 为什么会影响本次问题或结论, evidence: 已存出处数组}。
+problem: 具体问题, importance: 为什么会影响本次问题或结论, evidence: 已存出处数组}；
+where 是单个位置，如 risks[0]、business[1]、summary、verdict，或 missing。
 omission/claim 必须给支持批评的已读原文/表格/程序计算出处，不能只凭经验列风险清单；question 可无出处。
 resolutions: 对下方每个 unresolved_issues 的 ID 恰好一项 {id, status: resolved/unresolved/dismissed,
-reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据；
+reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；
 dismissed 表示原批评不成立，必须用证据说明理由；unresolved 保留阻断并说明仍缺什么。不能因修复者声称完成或本轮未再提起就关闭。
 risk_resolutions: 对下方每个 changed_risks 的 ID 恰好一项 {id, status: retained/merged/dismissed,
 reason, targets, evidence}；可有依据地改写、合并或反驳原风险，多项可指向同一新版条目，不按条数或措辞机械否决。
