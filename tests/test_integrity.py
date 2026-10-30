@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, integrity, price, sources
-from a_share_research.research import _material_hash, publish
+from a_share_research.research import publish
+from a_share_research.evidence import material_hash
 from support.reports import MATERIAL
 from support.continuation import RECORDS
 from test_price import DATA as PRICES
@@ -156,7 +157,7 @@ def test_exploration_progress_keeps_the_identity_hash_in_step(tmp_path):
     conn, run_id = research_db(tmp_path)
     progressed = MATERIAL.snapshot()
     progressed["data"]["market_date"] = "2026-10-21"
-    progressed["sha256"] = _material_hash(progressed["data"])
+    progressed["sha256"] = material_hash(progressed["data"])
     db.save_material(conn, run_id, progressed)
     conn.close()
     assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == []

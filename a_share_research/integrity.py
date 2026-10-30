@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 from a_share_research import db
-from a_share_research.research import _material_hash
+from a_share_research.evidence import material_hash
 
 
 def check(database: Path, pdf_dir: Path) -> tuple[list[str], dict]:
@@ -56,7 +56,7 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
             continue
         sha = snapshot["sha256"]
         materials[run["id"]] = sha
-        if _material_hash(snapshot["data"]) != sha:
+        if material_hash(snapshot["data"]) != sha:
             problems.append(f"任务 {run['id']}：材料快照内容与其哈希不符")
         identity = _object(run["identity"])
         if identity is None:

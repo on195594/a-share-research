@@ -2,7 +2,7 @@
 
 Charts redraw values already saved in a report, batch or price reference: report charts reuse saved
 display strings, while batch charts format saved candidate numbers (deducted profit in 亿元, 60-day
-return in percent, and each selected company's return via the same screening.group_return as the
+return in percent, and each selected company's return via the same batches.group_return as the
 portfolios). Every chart also returns its readouts as `data`, the HTML equivalent listed under it.
 The page CSP forbids inline styles, so templates draw with SVG attributes: x in percent of the
 figure width (the chart follows the column on any screen) and y in pixels (text keeps its size).
@@ -11,7 +11,7 @@ import math
 from datetime import date
 from decimal import Decimal, DecimalException
 
-from a_share_research import screening
+from a_share_research import batches
 
 # Column charts: label band above the plot, plot, then period labels.
 TOP, PLOT, BOTTOM = 22, 92, 26
@@ -757,7 +757,7 @@ def _brief(text: str, limit: int = 40) -> str:
 def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None:
     """Cumulative portfolio returns and each selected company's own net return since entry.
 
-    A company's return is computed here, on request, with screening.group_return over the saved
+    A company's return is computed here, on request, with batches.group_return over the saved
     entry and latest mark as a one-seat group, so it carries the same cost as the portfolios."""
     if not results:
         return None
@@ -771,7 +771,7 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
     mark = batch["marks"]["latest"]
     members = []
     for code in batch["l5"]["codes"]:
-        value = screening.group_return(batch["entry"], mark, [code], 1, batch["rule"]["cost"])
+        value = batches.group_return(batch["entry"], mark, [code], 1, batch["rule"]["cost"])
         filled = batch["entry"]["prices"].get(code, {}).get("filled")
         members.append({"label": names.get(code, code), "value": value * 100 if filled else None,
                         "text": f"{value * 100:+.2f}%" if filled else "未成交",
@@ -787,7 +787,7 @@ def funnel(batch: dict, labels: list[tuple[str, str]]) -> dict | None:
 
 
 def batch_overview(batch: dict) -> dict | None:
-    """Industry distribution and 60-day pre-screening returns across the 20 batch candidates."""
+    """Industry distribution and 60-day pre-batches returns across the 20 batch candidates."""
     q20 = batch.get("q20") or []
     if not q20:
         return None

@@ -63,7 +63,9 @@ def test_home_lists_own_research_and_counts_batch_only_companies(tmp_path, monke
     web = importlib.import_module("a_share_research.web")
     try:
         load(web.conn)
-        companies, batch_only = web.latest_reports()
+        latest = reading.latest_reports(web.conn)
+        companies = [r for r in latest if r['own']]
+        batch_only = sum(1 for r in latest if not r['own'])
         assert [(c["code"], c["id"]) for c in companies] == [("603606.SH", 39), ("600519.SH", 12)]
         assert batch_only == 1  # 格力: a batch report plus a replay, never researched on its own
         assert companies[0]["checkpoint"] == BODY[39]["checkpoints"][0]["text"]

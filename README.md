@@ -14,6 +14,8 @@
 
 ## 项目目录
 
+`web.py` 负责鉴权、参数与渲染，页面数据查询集中在只读的 `reading.py`，提交写入由 `service.py` 承接。`companies.py`、`batches.py` 与 `evidence.py` 提供共享资料和纯函数，网页不加载行情供应商依赖。
+
 | 路径 | 内容 |
 |---|---|
 | `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |

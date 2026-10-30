@@ -1,10 +1,10 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
-from a_share_research import charts, db, research, service
+from a_share_research import charts, db, service
 
 PAGE_SIZE = 20
 
@@ -192,7 +192,7 @@ def pending_reviews(conn, limit: int = PAGE_SIZE) -> tuple[list, bool]:
         " JOIN runs original ON original.id = p.run_id"
         " LEFT JOIN reports f ON f.run_id = u.id AND f.code = p.code"
         " WHERE u.kind = 'research' AND substr(u.code, 1, 6) = substr(p.code, 1, 6)"
-        " AND json_extract(u.identity, '$.replay_of') IS NULL"
+        " AND u.replay_of IS NULL"
         " AND json_type(u.request, '$.feedback') = 'object'"
         " AND length(trim(json_extract(u.request, '$.feedback.text'))) > 0"
         " AND length(trim(json_extract(u.request, '$.feedback.location'))) > 0"
@@ -245,24 +245,60 @@ def evidence_ledger(content: dict, rows: dict, evidence: dict) -> dict:
             'quotes': len(quotes), 'calculations': len(calculations), 'gaps': len(evidence.get('gaps') or [])}
 
 
-def search_reports(conn, query: str, page: int = 1, *, page_size: int = PAGE_SIZE) -> tuple[list, bool]:
-    # Match literal text, including %, _ and quotes. Keep bodies out of the result;
-    # SQLite derives coverage for only the selected page, as on the K1 home page.
-    rows = conn.execute(
+def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
+                   passed: bool = False, since: str | None = None, code_prefix: str | None = None,
+                   limit: int = -1, offset: int = 0) -> list:
+    """Newest non-replay report per company among eligible reports, with bounded summaries.
+
+    Search matches any historical name/code literally; source counts exclude replays.
+    Filters apply before selecting the newest report, including passed/date constraints.
+    """
+    where, params = ["u.replay_of IS NULL"], []
+    if codes is not None:
+        if not codes:
+            return []
+        where.append(f"p.code IN ({','.join('?' for _ in codes)})")
+        params.extend(codes)
+    if passed:
+        where.append("p.passed = 1")
+    if since is not None:
+        where.append("p.created_at >= ?")
+        params.append(since)
+    if code_prefix is not None:
+        where.append("p.code LIKE ?")
+        params.append(code_prefix[:6] + ".%")
+    return conn.execute(
         "WITH latest AS (SELECT p.code, MAX(p.id) AS id,"
         " SUM(COALESCE(u.request_id, '') NOT LIKE 'batch-%') AS own"
-        " FROM reports p JOIN runs u ON u.id = p.run_id"
-        " WHERE json_extract(u.identity, '$.replay_of') IS NULL"
+        " FROM reports p JOIN runs u ON u.id = p.run_id WHERE " + " AND ".join(where) +
         " GROUP BY p.code HAVING MAX(instr(lower(COALESCE(p.name, '')), lower(?)) > 0"
         " OR instr(lower(p.code), lower(?)) > 0)),"
         " selected AS (SELECT * FROM latest ORDER BY id DESC LIMIT ? OFFSET ?)"
         " SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, s.own,"
-        " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch,"
-        f" {db.COVERAGE} AS coverage FROM selected s JOIN reports r ON r.id = s.id"
+        " json_extract(r.body, '$.checkpoints[0].text') AS checkpoint,"
+        " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch, r.coverage"
+        " FROM selected s JOIN reports r ON r.id = s.id"
         " JOIN runs u ON u.id = r.run_id ORDER BY r.id DESC",
-        (query, query, page_size + 1, (page - 1) * page_size),
+        (*params, query, query, limit, offset),
     ).fetchall()
+
+
+def search_reports(conn, query: str, page: int = 1, *, page_size: int = PAGE_SIZE) -> tuple[list, bool]:
+    rows = latest_reports(conn, query=query, limit=page_size + 1, offset=(page - 1) * page_size)
     return rows[:page_size], len(rows) > page_size
+
+
+def recent_report(conn, code: str):
+    rows = latest_reports(conn, code_prefix=code, passed=True,
+                          since=datetime.now(db.SHANGHAI).date().isoformat(), limit=1)
+    return report(conn, rows[0]["id"]) if rows else None
+
+
+def report_bodies(conn, ids: list[int]) -> dict:
+    if not ids:
+        return {}
+    return {r["id"]: json.loads(r["body"]) for r in conn.execute(
+        f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
 
 
 def comparison(conn, report) -> dict:
@@ -316,7 +352,7 @@ def comparison(conn, report) -> dict:
     new_table = [r for key, r in new_map.items() if key not in incompatible]
     if not old_table or not new_table:
         return result | {'reason': '缺少口径完整且可比较的指标，不能计算变化。', 'excluded': excluded}
-    diff = research.since_prior(old_table, new_table)
+    diff = since_prior(old_table, new_table)
     # Empty market snapshots are missing observations, not comparable values.
     diff['valuation'] = [v for v in diff['valuation'] if v['before'] and v['after']]
     missing = sorted({r['label'] for r in old_table if r['id'] not in new_map or
@@ -387,3 +423,144 @@ def card(report, body: dict, last_passed=None) -> dict:
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
             'period': period_label, 'created_at': created_at, 'coverage': coverage,
             'market_date': day, 'last_passed': dict(last_passed) if last_passed else None}
+
+
+VALUATION = ("M.pe_ttm", "M.pb", "M.dv_ttm")
+
+
+def since_prior(old: list[dict], new: list[dict]) -> dict:
+    """What changed in the program tables between two reports; shown to people, never cited by the model.
+
+    Values are compared only within the same row and period: cumulative figures of different periods are
+    not subtracted, and a row the old report never collected is listed rather than treated as zero.
+    """
+    before = {r["id"]: r["values"] for r in old}
+    rows = [r for r in new if r["id"].startswith("T.")]
+    seen = {p for r in old if r["id"].startswith("T.") for p in r["values"]}
+    added = sorted({p for r in rows for p in r["values"]} - seen)
+    newest = max(seen, default="")
+    return {
+        "disclosed": [p for p in added if p > newest],
+        "backfilled": [p for p in added if p <= newest],  # comparison periods, not new disclosures
+        "revised": [{"label": r["label"], "unit": r["unit"], "period": p, "before": before[r["id"]][p], "after": v}
+                    for r in rows if r["id"] in before for p, v in r["values"].items()
+                    if p in before[r["id"]] and before[r["id"]][p] != v],
+        # Rows usually stay in the table with an empty value, so absence is per row and period.
+        "uncollected": [r["label"] for r in new
+                        if (r["id"].startswith("T.") and any(p in seen and p not in before.get(r["id"], {}) for p in r["values"]))
+                        or (r["id"] in VALUATION and r["values"] and r["id"] not in before)],
+        "valuation": [{"label": r["label"], "unit": r["unit"], "before": next(iter(before[r["id"]].items()), None),
+                       "after": next(iter(r["values"].items()), None), "unchanged": before[r["id"]] == r["values"]}
+                      for r in new if r["id"] in VALUATION and r["id"] in before],
+    }
+
+
+def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
+    """(all finished, rows with current status/report) for the linked runs."""
+    done = True
+    for row in q20:
+        run = conn.execute("SELECT u.status, u.error, r.id AS report_id, r.passed, r.verdict, r.body"
+                           " FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?",
+                           (row["run_id"],)).fetchone()
+        row["research_status"] = run["status"]
+        row["report_id"] = run["report_id"]
+        row["verdict"] = run["verdict"] if run["passed"] else None
+        row["research_error"] = run["error"]
+        if run["status"] in ("queued", "running"):
+            done = False
+    return done, q20
+
+
+def active_runs(conn) -> list:
+    return conn.execute(
+        "SELECT id, code, name, status, step FROM runs WHERE status IN ('queued', 'running') ORDER BY id"
+    ).fetchall()
+
+
+def latest_price(conn, code: str) -> dict | None:
+    row = conn.execute("SELECT body FROM prices WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+    if row is None:
+        return None
+    body = json.loads(row["body"])
+    # Levels are only shown while valid; afterwards the reference is history, not an action line.
+    body["expired"] = datetime.now(db.SHANGHAI).date().isoformat() > body["expires"]
+    body["ladder"] = charts.price_ladder(body["levels"])
+    return body
+
+
+def latest_batch(conn):
+    return conn.execute("SELECT * FROM batches ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def run(conn, run_id: int):
+    return conn.execute(
+        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, replay_of FROM runs WHERE id = ?",
+        (run_id,),
+    ).fetchone()
+
+
+def report_for_run(conn, run_id: int):
+    return conn.execute("SELECT id FROM reports WHERE run_id = ?", (run_id,)).fetchone()
+
+
+def queue_ahead(conn, run_id: int):
+    return conn.execute(
+        "SELECT COUNT(*) FROM runs u, (SELECT request_id LIKE 'batch-%' AS batch FROM runs WHERE id = ?) me"
+        " WHERE u.request_id IS NOT NULL AND u.id != ? AND (u.status = 'running' OR (u.status = 'queued' AND"
+        " ((u.request_id LIKE 'batch-%') < me.batch OR ((u.request_id LIKE 'batch-%') = me.batch AND u.id < ?))))",
+        (run_id, run_id, run_id)).fetchone()
+
+
+def report(conn, report_id: int):
+    return conn.execute("SELECT r.* FROM reports r WHERE id = ?", (report_id,)).fetchone()
+
+
+def report_run(conn, run_id: int):
+    return conn.execute("SELECT kind, status, request, identity, replay_of, material FROM runs WHERE id = ?", (run_id,)).fetchone()
+
+
+def followups(conn, code: str, report_id: int):
+    return conn.execute(
+        "SELECT u.id, u.status, COALESCE(NULLIF(json_extract(u.request, '$.question'), ''),"
+        " json_extract(f.body, '$.question')) AS question,"
+        " json_extract(u.request, '$.feedback.text') AS feedback_text,"
+        " json_extract(f.body, '$.prior.report_id') AS prior_report_id"
+        " FROM runs u LEFT JOIN reports f ON f.run_id = u.id"
+        " WHERE u.code = ? AND (json_extract(u.request, '$.parent_report_id') = ? OR"
+        " (f.code = ? AND (json_extract(f.body, '$.parent_report_id') = ? OR"
+        " json_extract(f.body, '$.prior.report_id') = ?))) ORDER BY u.id DESC",
+        (code, report_id, code, report_id, report_id)).fetchall()
+
+
+def request_run(conn, request_id: str):
+    return conn.execute("SELECT id FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+
+
+def api_run(conn, run_id: int):
+    return conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
+        " r.id AS report_id FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?", (run_id,)).fetchone()
+
+
+def api_reports(conn, code: str):
+    return conn.execute("SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, u.status"
+        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE substr(r.code, 1, 6) = ?"
+        " ORDER BY r.id DESC LIMIT 100", (code,)).fetchall()
+
+
+def stock_reports(conn, code: str):
+    return conn.execute(
+        "SELECT r.*, u.replay_of AS replay_of,"
+        " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
+        " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
+        " json_extract(u.request, '$.feedback.text') AS feedback_text,"
+        " json_extract(r.body, '$.prior.report_id') AS prior_report_id FROM reports r"
+        " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
+    ).fetchall()
+
+
+def batch_list(conn):
+    return conn.execute("SELECT id, status, error, created_at, as_of, l5, frozen_at FROM batches ORDER BY id DESC").fetchall()
+
+
+def batch(conn, batch_id: int):
+    return conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()

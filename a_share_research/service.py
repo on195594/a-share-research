@@ -3,12 +3,14 @@
 import json
 import re
 import sqlite3
+from datetime import datetime
 
-from a_share_research import db
+from a_share_research import batches, db
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view
 
 VERSION = "research-v1"
+MAX_CALLS = 21  # Loop guard, not a cost limit; shared with the worker.
 
 
 class RequestError(ValueError):
@@ -76,7 +78,7 @@ def feedback_retry_payload(run) -> dict | None:
     """Only an explicitly saved, failed feedback task can retry its original question."""
     if run['kind'] != 'research' or run['status'] != 'failed':
         return None
-    if (json.loads(run['identity'] or '{}') or {}).get('replay_of') is not None:
+    if run['replay_of'] is not None:
         return None
     request = json.loads(run['request'] or '{}') or {}
     parent, feedback = request.get('parent_report_id'), request.get('feedback')
@@ -88,7 +90,7 @@ def feedback_retry_payload(run) -> dict | None:
 
 
 def retry_feedback(conn, run_id: int, request_id: str) -> int:
-    run = conn.execute('SELECT kind, code, status, request, identity FROM runs WHERE id=?', (run_id,)).fetchone()
+    run = conn.execute('SELECT kind, code, status, request, replay_of FROM runs WHERE id=?', (run_id,)).fetchone()
     if run is None:
         raise RequestError('核查任务不存在', 404)
     payload = feedback_retry_payload(run)
@@ -169,8 +171,6 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
 
 
 def run_budget(conn, run_id: int | None = None) -> dict:
-    from a_share_research.research import MAX_CALLS
-
     count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
     return {"model_call_limit": MAX_CALLS, "model_calls_recorded": count, "run_id": run_id,
             "scope": "run" if run_id is not None else "configuration",
@@ -256,3 +256,58 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
             "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),
                                        announcement_searches=extra.get("announcement_searches"),
                                        report_available=row["report_id"] is not None)}
+
+
+def create_batch(conn, request_id: str) -> int:
+    """Queue a batch; one live batch per calendar month (failed ones do not count)."""
+    month = datetime.now(db.SHANGHAI).strftime("%Y-%m")
+    row = conn.execute(
+        "INSERT INTO batches (request_id, status, created_at, rule) SELECT ?, 'queued', ?, ?"
+        " WHERE NOT EXISTS (SELECT 1 FROM batches WHERE substr(created_at, 1, 7) = ? AND status != 'failed')"
+        " ON CONFLICT(request_id) DO NOTHING RETURNING id",
+        (request_id, db.now(), json.dumps(batches.RULE, ensure_ascii=False), month),
+    ).fetchone()
+    if row:
+        return row["id"]
+    existing = conn.execute("SELECT id FROM batches WHERE request_id = ?", (request_id,)).fetchone()
+    if existing:
+        return existing["id"]
+    raise RequestError("本月已有批次；每月一个独立批次", 409)
+
+
+def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "owner") -> None:
+    """Final picks; validated against the batch and frozen once. `by` is a FROZEN_BY key."""
+    row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+    if row is None:
+        raise RequestError("批次不存在", 404)
+    batch = batches.load(row)
+    if batch["status"] != "proposed":
+        raise RequestError("批次不在待确认状态", 409)
+    rule = batch["rule"]
+    allowed = {r["code"]: r for r in batch["q20"] if r.get("verdict") and r["verdict"] != "暂不值得"}
+    codes = list(dict.fromkeys(codes))
+    if not codes or len(codes) > rule["picks"] or any(c not in allowed for c in codes):
+        raise RequestError(f"请从研究通过的候选中选择 1–{rule['picks']} 家")
+    counts: dict[str, int] = {}
+    for code in codes:
+        counts[allowed[code]["industry"]] = counts.get(allowed[code]["industry"], 0) + 1
+    if max(counts.values()) > rule["picks_per_industry"]:
+        raise RequestError(f"同一行业最多 {rule['picks_per_industry']} 家")
+    if len(note) > 2000:
+        raise RequestError("说明不超过 2000 字")
+    draft = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
+    l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
+          "frozen_by": by}
+    # RETURNING, not rowcount: the web connection is shared and other writes change its counters.
+    updated = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
+                           " WHERE id = ? AND status = 'proposed' RETURNING id",
+                           (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id)).fetchone()
+    if updated is None:
+        raise RequestError("批次已被冻结", 409)
+
+
+def submit_price(conn, code: str, request_id: str) -> int:
+    report = conn.execute("SELECT name FROM reports WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+    if report is None:
+        raise RequestError("请先研究这家公司。", 404)
+    return db.create_run(conn, code, request_id or None, kind="price", name=report["name"])

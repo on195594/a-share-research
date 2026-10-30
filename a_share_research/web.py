@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import charts, db, screening, sources, service, reading, progress
+from a_share_research import charts, db, batches, companies as company_data, service, reading, progress
 from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
@@ -244,25 +244,6 @@ def logout(request: Request, csrf: str = Form("")):
 
 # ---------- pages ----------
 
-def latest_reports() -> tuple[list, int]:
-    """Companies with research of their own (not only batch deep dives), and how many are batch-only.
-
-    Each row is the company's latest non-replay report, whichever source produced it.
-    """
-    rows = conn.execute(
-        "SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, l.own,"
-        " json_extract(r.body, '$.checkpoints[0].text') AS checkpoint,"
-        " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch,"
-        f" {db.COVERAGE} AS coverage"
-        " FROM reports r JOIN runs u ON u.id = r.run_id"
-        " JOIN (SELECT p.code, MAX(p.id) AS id, SUM(COALESCE(q.request_id, '') NOT LIKE 'batch-%') AS own"
-        " FROM reports p JOIN runs q ON q.id = p.run_id WHERE json_extract(q.identity, '$.replay_of') IS NULL"
-        " GROUP BY p.code) l ON r.id = l.id"
-        " ORDER BY r.id DESC"
-    ).fetchall()
-    return [r for r in rows if r["own"]], sum(1 for r in rows if not r["own"])
-
-
 @app.get("/research-library")
 def research_library(request: Request, q: str = "", page: int = Query(1, ge=1, le=10000)):
     if not (session := current_session(request)):
@@ -276,39 +257,21 @@ def research_library(request: Request, q: str = "", page: int = Query(1, ge=1, l
                   next_url="/research-library?" + urlencode(params | {"page": page + 1}))
 
 
-def recent_report(code: str):
-    today = datetime.now(db.SHANGHAI).date().isoformat()
-    return conn.execute(
-        "SELECT r.* FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.code LIKE ? AND r.passed = 1 AND r.created_at >= ?"
-        " AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC LIMIT 1",
-        (code[:6] + ".%", today),
-    ).fetchone()
-
-
-def active_runs() -> list:
-    return conn.execute(
-        "SELECT id, code, name, status, step FROM runs WHERE status IN ('queued', 'running') ORDER BY id"
-    ).fetchall()
-
-
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
-    batch = conn.execute("SELECT * FROM batches ORDER BY id DESC LIMIT 1").fetchone()
+    batch = reading.latest_batch(conn)
     performance = None
     if batch and batch["status"] == "tracking":
-        loaded = screening.load(batch)
-        performance = charts.batch_returns(loaded, screening.returns(loaded),
+        loaded = batches.load(batch)
+        performance = charts.batch_returns(loaded, batches.returns(loaded),
                                            {r["code"]: r["name"] for r in loaded["q20"] or []})
-    companies, batch_only = latest_reports()
+    latest = reading.latest_reports(conn)
+    companies = [r for r in latest if r["own"]]
+    batch_only = sum(1 for r in latest if not r["own"])
     pending, pending_more = reading.pending_reviews(conn)
     if companies:
-        bodies = {r["id"]: json.loads(r["body"]) for r in conn.execute(
-            f"SELECT id, body FROM reports WHERE id IN ({','.join('?' * len(companies))})", [c["id"] for c in companies])}
-        passed_before = {}
-        for r in conn.execute(
-                "SELECT r.id, r.code, r.verdict, r.created_at FROM reports r JOIN runs u ON u.id = r.run_id"
-                " WHERE r.passed = 1 AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC"):
-            passed_before.setdefault(r["code"], r)
+        bodies = reading.report_bodies(conn, [c["id"] for c in companies])
+        passed_before = {r["code"]: r for r in reading.latest_reports(
+            conn, codes=[c["code"] for c in companies], passed=True)}
         cards = [reading.card(c, bodies[c["id"]], None if c["passed"] else passed_before.get(c["code"]))
                  | {"from_batch": c["from_batch"]}
                  for c in companies]
@@ -318,8 +281,8 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     return render(request, "home.html", session, status, companies=cards, batch_only=batch_only,
                   verdict_summary=charts.verdict_summary(companies),
                   pending=pending, pending_more=pending_more,
-                  due=sources.due_report(datetime.now(db.SHANGHAI).date()),
-                  active=[r for r in active_runs() if r['id'] not in listed], batch=batch,
+                  due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
+                  active=[r for r in reading.active_runs(conn) if r['id'] not in listed], batch=batch,
                   performance=performance, **context)
 
 
@@ -333,7 +296,7 @@ def home(request: Request):
 def resolve(query: str) -> tuple[dict | None, list[dict]]:
     """A 6-digit code or a (partial) short name -> the company, or candidates when ambiguous."""
     query = re.sub(r"\s+", "", query).upper().removesuffix(".SH").removesuffix(".SZ").removesuffix(".BJ")
-    stocks = sources.stock_list()
+    stocks = company_data.stock_list()
     if query in stocks:
         return stocks[query], []
     matches = [s for s in stocks.values() if query and query in s["zwjc"].replace(" ", "")]
@@ -358,11 +321,11 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     if company is None:
         error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
         return home_page(request, session, request_id=request_id, q=q, question=question, error=error, choices=choices)
-    if sources.FINANCIAL_NAME.search(company["zwjc"]):
+    if company_data.FINANCIAL_NAME.search(company["zwjc"]):
         return home_page(request, session, request_id=request_id, q=q, question=question,
                          error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
     code = company["code"]
-    recent = recent_report(code)
+    recent = reading.recent_report(conn, code)
     if recent and not again and not question.strip() and not parent_report_id:
         return home_page(request, session, request_id=request_id, q=code, recent=recent)
     try:
@@ -377,24 +340,17 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
 def run_page(request: Request, run_id: int):
     if not (session := current_session(request)):
         return login_required()
-    run = conn.execute(
-        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, identity FROM runs WHERE id = ?",
-        (run_id,),
-    ).fetchone()
+    run = reading.run(conn, run_id)
     if run is None:
         return not_found(request, session)
     if run["kind"] == "price" and run["status"] == "done":
         return RedirectResponse(f"/stock/{run['code']}#price", status_code=303)
-    report = conn.execute("SELECT id FROM reports WHERE run_id = ?", (run_id,)).fetchone()
+    report = reading.report_for_run(conn, run_id)
     if report and run["status"] in ("done", "failed"):
         return RedirectResponse(f"/reports/{report['id']}", status_code=303)
     # Only web runs share the worker queue; command-line runs execute in their own process.
     # Same order as the worker: running first, then owner submissions, then batch research.
-    ahead = conn.execute(
-        "SELECT COUNT(*) FROM runs u, (SELECT request_id LIKE 'batch-%' AS batch FROM runs WHERE id = ?) me"
-        " WHERE u.request_id IS NOT NULL AND u.id != ? AND (u.status = 'running' OR (u.status = 'queued' AND"
-        " ((u.request_id LIKE 'batch-%') < me.batch OR ((u.request_id LIKE 'batch-%') = me.batch AND u.id < ?))))",
-        (run_id, run_id, run_id)).fetchone()[0]
+    ahead = reading.queue_ahead(conn, run_id)[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
                   diagnostics=service.run_view(conn, run_id=run_id)["diagnostics"]
                   if run["kind"] == "research" and run["status"] == "failed" else None,
@@ -426,10 +382,10 @@ def _elapsed(run) -> int | None:
 def report_page(request: Request, report_id: int):
     if not (session := current_session(request)):
         return login_required()
-    row = conn.execute(f"SELECT r.*, {db.COVERAGE} AS coverage FROM reports r WHERE id = ?", (report_id,)).fetchone()
+    row = reading.report(conn, report_id)
     if row is None:
         return not_found(request, session)
-    run = conn.execute("SELECT kind, status, request, identity, material FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
+    run = reading.report_run(conn, row["run_id"])
     if not service.ready(run["status"], row["passed"]):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
@@ -452,20 +408,11 @@ def report_page(request: Request, report_id: int):
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
-                  replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),
+                  replay_of=body.get("replay_of") or run["replay_of"],
                   rows=rows, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
-                  fin=fin, price=latest_price(row["code"]),
-                  followups=conn.execute(
-                      "SELECT u.id, u.status, COALESCE(NULLIF(json_extract(u.request, '$.question'), ''),"
-                      " json_extract(f.body, '$.question')) AS question,"
-                      " json_extract(u.request, '$.feedback.text') AS feedback_text,"
-                      " json_extract(f.body, '$.prior.report_id') AS prior_report_id"
-                      " FROM runs u LEFT JOIN reports f ON f.run_id = u.id"
-                      " WHERE u.code = ? AND (json_extract(u.request, '$.parent_report_id') = ? OR"
-                      " (f.code = ? AND (json_extract(f.body, '$.parent_report_id') = ? OR"
-                      " json_extract(f.body, '$.prior.report_id') = ?))) ORDER BY u.id DESC",
-                      (row['code'], report_id, row['code'], report_id, report_id)).fetchall())
+                  fin=fin, price=reading.latest_price(conn, row["code"]),
+                  followups=reading.followups(conn, row['code'], report_id))
 
 
 @app.post("/reports/{report_id}/feedback")
@@ -524,15 +471,15 @@ async def api_error(request: Request, exc: service.RequestError):
 @app.post("/api/research", status_code=202)
 def api_research(request: Request, body: ResearchRequest):
     api_session(request)
-    if conn.execute("SELECT id FROM runs WHERE request_id = ?", (body.request_id,)).fetchone():
+    if reading.request_run(conn, body.request_id):
         return {"version": service.VERSION, "run_id": service.submit(conn, **body.model_dump())}
     try:
-        company = sources.company(body.code)
-    except sources.SourceError as exc:
+        company = company_data.company(body.code)
+    except company_data.SourceError as exc:
         raise service.RequestError(str(exc)) from exc
     except requests.RequestException as exc:
         raise service.RequestError("暂时无法连接巨潮资讯，请稍后重试", 503) from exc
-    if sources.FINANCIAL_NAME.search(company["zwjc"]):
+    if company_data.FINANCIAL_NAME.search(company["zwjc"]):
         raise service.RequestError("金融类公司暂不支持研究")
     run_id = service.submit(conn, **body.model_dump(), name=company["zwjc"].replace(" ", ""))
     return {"version": service.VERSION, "run_id": run_id}
@@ -553,8 +500,7 @@ def api_research_budget(request: Request):
 @app.get("/api/runs/{run_id}")
 def api_run(request: Request, run_id: int):
     api_session(request)
-    row = conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
-                       " r.id AS report_id FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?", (run_id,)).fetchone()
+    row = reading.api_run(conn, run_id)
     if row is None:
         raise service.RequestError("任务不存在", 404)
     return {"version": service.VERSION, **dict(row)}
@@ -565,9 +511,7 @@ def api_reports(request: Request, code: str):
     api_session(request)
     if not re.fullmatch(r"\d{6}", code):
         raise service.RequestError("公司代码必须为六位数字")
-    rows = conn.execute("SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, u.status"
-                        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE substr(r.code, 1, 6) = ?"
-                        " ORDER BY r.id DESC LIMIT 100", (code,)).fetchall()
+    rows = reading.api_reports(conn, code)
     return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
 
 
@@ -599,17 +543,12 @@ def api_revoke(request: Request):
 def stock_page(request: Request, code: str, report: int | None = None, progress_item: int | None = None):
     if not (session := current_session(request)):
         return login_required()
-    reports = conn.execute(
-        "SELECT r.*, json_extract(u.identity, '$.replay_of') AS replay_of,"
-        " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
-        " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
-        " json_extract(u.request, '$.feedback.text') AS feedback_text,"
-        " json_extract(r.body, '$.prior.report_id') AS prior_report_id FROM reports r"
-        " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
-    ).fetchall()
+    reports = reading.stock_reports(conn, code)
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
-    selected = next((r for r in reports if r['id'] == report), None) if report is not None else next((r for r in reports if not r['replay_of']), reports[0])
+    latest = reading.latest_reports(conn, codes=[code])
+    head = next((r for r in reports if latest and r['id'] == latest[0]['id']), reports[0])
+    selected = next((r for r in reports if r['id'] == report), None) if report is not None else head
     if selected is None:
         return not_found(request, session, "这份报告不属于当前公司。")
     advancement = progress.view(conn, selected['id'])
@@ -628,15 +567,15 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
                 latest = (r, v)
                 break
     latest = latest or (None, None)
-    head = ordered[0]
-    before = next((r for r in ordered if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
+    previous = reading.latest_reports(conn, codes=[code], passed=True) if not head["passed"] else []
+    before = previous[0] if previous else None
     card = reading.card(head, parsed[0][1], before) | {
-        "coverage": conn.execute(f"SELECT {db.COVERAGE} FROM reports r WHERE id = ?", (head["id"],)).fetchone()[0],
+        "coverage": head["coverage"],
         "created_at": head["created_at"]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex, card=card,
-                  due=sources.due_report(datetime.now(db.SHANGHAI).date()),
+                  due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   vitals=latest[1], vitals_report=latest[0],
-                  price=latest_price(code), comparison=reading.comparison(conn, selected),
+                  price=reading.latest_price(conn, code), comparison=reading.comparison(conn, selected),
                   selected=selected, track=charts.verdict_track(reports), progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
 
 
@@ -650,7 +589,7 @@ def submit_progress(request: Request, report_id: int, csrf: str = Form('')):
         progress.submit(conn, report_id)
     except service.RequestError as exc:
         return message(request, session, '无法整理研究进展', str(exc), exc.status)
-    row = conn.execute('SELECT code FROM reports WHERE id=?', (report_id,)).fetchone()
+    row = reading.report(conn, report_id)
     return RedirectResponse(f'/stock/{row["code"]}?report={report_id}#research-progress', status_code=303)
 
 
@@ -667,27 +606,16 @@ def api_submit_progress(request: Request, report_id: int):
     return {'version': progress.VERSION, 'progress_id': identifier, **progress.view(conn, report_id)}
 
 
-def latest_price(code: str) -> dict | None:
-    row = conn.execute("SELECT body FROM prices WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
-    if row is None:
-        return None
-    body = json.loads(row["body"])
-    # Levels are only shown while valid; afterwards the reference is history, not an action line.
-    body["expired"] = datetime.now(db.SHANGHAI).date().isoformat() > body["expires"]
-    body["ladder"] = charts.price_ladder(body["levels"])
-    return body
-
-
 @app.post("/price")
 def start_price(request: Request, code: str = Form(""), request_id: str = Form(""), csrf: str = Form("")):
     if not (session := current_session(request)):
         return login_required()
     if not csrf_ok(session, csrf):
         return message(request, session, "页面已过期", "请返回首页重新提交。", 403)
-    report = conn.execute("SELECT name FROM reports WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
-    if report is None:
-        return not_found(request, session, "请先研究这家公司。")
-    run_id = db.create_run(conn, code, request_id or None, kind="price", name=report["name"])
+    try:
+        run_id = service.submit_price(conn, code, request_id)
+    except service.RequestError as exc:
+        return not_found(request, session, str(exc))
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
@@ -700,8 +628,8 @@ batch_writes = threading.Lock()
 def batches_page(request: Request):
     if not (session := current_session(request)):
         return login_required()
-    rows = conn.execute("SELECT id, status, error, created_at, as_of, l5, frozen_at FROM batches ORDER BY id DESC").fetchall()
-    return render(request, "batches.html", session, batches=[screening.load(r) for r in rows],
+    rows = reading.batch_list(conn)
+    return render(request, "batches.html", session, batches=[batches.load(r) for r in rows],
                   request_id=uuid.uuid4().hex)
 
 
@@ -715,7 +643,7 @@ def start_batch(request: Request, request_id: str = Form(""), csrf: str = Form("
         return message(request, session, "无法开始初筛", "请求编号无效，请返回重试。", 422)
     try:
         with batch_writes:
-            batch_id = screening.create(conn, request_id)
+            batch_id = service.create_batch(conn, request_id)
     except service.RequestError as exc:
         return message(request, session, "无法开始初筛", str(exc), exc.status)
     return RedirectResponse(f"/batches/{batch_id}", status_code=303)
@@ -725,20 +653,20 @@ def start_batch(request: Request, request_id: str = Form(""), csrf: str = Form("
 def batch_page(request: Request, batch_id: int):
     if not (session := current_session(request)):
         return login_required()
-    row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+    row = reading.batch(conn, batch_id)
     if row is None:
         return not_found(request, session)
-    batch = screening.load(row)
+    batch = batches.load(row)
     if batch["status"] == "researching":
-        batch["q20"] = screening.research_state(conn, batch["q20"])[1]
+        batch["q20"] = reading.research_state(conn, batch["q20"])[1]
     draft = ((batch["selection"] or {}).get("draft") or {})
-    results, names = screening.returns(batch), {r["code"]: r["name"] for r in batch["q20"] or []}
+    results, names = batches.returns(batch), {r["code"]: r["name"] for r in batch["q20"] or []}
     return render(request, "batch.html", session, batch=batch, draft=draft,
                   draft_codes=[p["code"] for p in draft.get("picks", [])],
                   results=results, names=names, performance=charts.batch_returns(batch, results, names),
                   overview=charts.batch_overview(batch), sparks=charts.candidate_sparks(batch.get("q20") or []),
                   market_strip=charts.market_strip(batch),
-                  frozen_by=screening.FROZEN_BY)
+                  frozen_by=batches.FROZEN_BY)
 
 
 @app.post("/batches/{batch_id}/freeze")
@@ -750,7 +678,7 @@ async def freeze_batch(request: Request, batch_id: int):
         return message(request, session, "页面已过期", "请返回批次页面重新提交。", 403)
     try:
         with batch_writes:
-            screening.freeze(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")))
+            service.freeze_batch(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")))
     except service.RequestError as exc:
         return message(request, session, "无法冻结", str(exc), exc.status)
     return RedirectResponse(f"/batches/{batch_id}", status_code=303)

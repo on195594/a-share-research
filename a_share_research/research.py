@@ -1,7 +1,6 @@
 """One company's financial-report research: gather → compose → check → review → (repair, at most twice) → save."""
 
 import argparse
-import hashlib
 import json
 import logging
 import re
@@ -14,13 +13,16 @@ import pandas as pd
 
 from a_share_research import db, model, sources, evidence
 from a_share_research.sources import Document
+from a_share_research.service import MAX_CALLS
+from a_share_research.reading import since_prior
+from a_share_research.evidence import material_hash, NUMBER
+from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 
 log = logging.getLogger(__name__)
 
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
-MAX_CALLS = 21  # loop guard, not a cost limit: 12 exploration turns, compose, 3 reviews (+1 format retry each), 2 repairs
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 # (id, label, unit, statement, column, divisor)
 METRICS = [
@@ -84,14 +86,14 @@ class Material:
         }
         if self.extra:
             data["extra"] = self.extra
-        return {"version": 2 if self.extra else 1, "sha256": _material_hash(data), "data": data}
+        return {"version": 2 if self.extra else 1, "sha256": material_hash(data), "data": data}
 
     @classmethod
     def from_snapshot(cls, snapshot: dict) -> Self:
         if snapshot.get("version") not in (1, 2):
             raise ResearchError("不支持的材料快照版本")
         data = snapshot["data"]
-        if _material_hash(data) != snapshot["sha256"]:
+        if material_hash(data) != snapshot["sha256"]:
             raise ResearchError("材料快照哈希不匹配")
         return cls(
             code=data["code"], name=data["name"], doc=Document(**data["doc"]),
@@ -123,12 +125,6 @@ class Material:
         block += "\n\n# 程序计算依据\n" + json.dumps(
             [r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False)
         return block
-
-
-def _material_hash(data: dict) -> str:
-    # Preserve input order too: page/row ordering affects the model prompt.
-    return hashlib.sha256(json.dumps(data, ensure_ascii=False, separators=(",", ":"),
-                                    allow_nan=False).encode()).hexdigest()
 
 
 def replay_material(conn, source_run: int) -> Material:
@@ -414,29 +410,8 @@ def gather(code: str) -> Material:
 
 
 # ---------- mechanical checks ----------
-
-NUMBER = re.compile(r"[-−+]?\d[\d,]*(?:\.\d+)?(?![\d.])(?!\s*[年月日])")
-ISO_DATE = re.compile(r"(?<!\d)(?:19|20)\d{2}[-/](?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
-SCALES = (1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e2, 1e4)
 SQUASH = re.compile(r"\s+")
 REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a-z_]+)")
-
-
-def _numbers(text: str) -> list[tuple[float, int]]:
-    out = []
-    for token in NUMBER.findall(ISO_DATE.sub(" ", text)):
-        clean = token.replace(",", "").replace("−", "-")
-        decimals = len(clean.split(".")[1]) if "." in clean else 0
-        value = abs(float(clean))
-        if decimals == 0 and (value <= 12 or 1900 <= value <= 2100):
-            continue  # ordinals, months, years
-        out.append((value, decimals))
-    return out
-
-
-def _supported(value: float, decimals: int, candidates: list[float]) -> bool:
-    tolerance = 0.5 * 10 ** -decimals + 1e-9
-    return any(abs(abs(c) * s - value) <= tolerance for c in candidates for s in SCALES)
 
 
 def _without_codes(text: str, material: Material) -> str:
@@ -770,9 +745,9 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
     Only its risks and checkpoints travel: no verdict or summary, so the new judgment starts from evidence.
     """
     row = conn.execute(
-        f"SELECT r.id, r.body, r.created_at, {db.COVERAGE} AS coverage FROM reports r JOIN runs u ON u.id = r.run_id"
+        "SELECT r.id, r.body, r.created_at, r.coverage FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.code = ? AND r.run_id < ? AND r.passed = 1 AND u.status = 'done'"
-        " AND json_extract(u.identity, '$.replay_of') IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
+        " AND u.replay_of IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
         " ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
     if row is None:
@@ -787,36 +762,6 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
 def prior_question(prior: dict) -> str:
     """The question a continuation asks when the user brought none."""
     return f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
-
-
-VALUATION = ("M.pe_ttm", "M.pb", "M.dv_ttm")
-
-
-def since_prior(old: list[dict], new: list[dict]) -> dict:
-    """What changed in the program tables between two reports; shown to people, never cited by the model.
-
-    Values are compared only within the same row and period: cumulative figures of different periods are
-    not subtracted, and a row the old report never collected is listed rather than treated as zero.
-    """
-    before = {r["id"]: r["values"] for r in old}
-    rows = [r for r in new if r["id"].startswith("T.")]
-    seen = {p for r in old if r["id"].startswith("T.") for p in r["values"]}
-    added = sorted({p for r in rows for p in r["values"]} - seen)
-    newest = max(seen, default="")
-    return {
-        "disclosed": [p for p in added if p > newest],
-        "backfilled": [p for p in added if p <= newest],  # comparison periods, not new disclosures
-        "revised": [{"label": r["label"], "unit": r["unit"], "period": p, "before": before[r["id"]][p], "after": v}
-                    for r in rows if r["id"] in before for p, v in r["values"].items()
-                    if p in before[r["id"]] and before[r["id"]][p] != v],
-        # Rows usually stay in the table with an empty value, so absence is per row and period.
-        "uncollected": [r["label"] for r in new
-                        if (r["id"].startswith("T.") and any(p in seen and p not in before.get(r["id"], {}) for p in r["values"]))
-                        or (r["id"] in VALUATION and r["values"] and r["id"] not in before)],
-        "valuation": [{"label": r["label"], "unit": r["unit"], "before": next(iter(before[r["id"]].items()), None),
-                       "after": next(iter(r["values"].items()), None), "unchanged": before[r["id"]] == r["values"]}
-                      for r in new if r["id"] in VALUATION and r["id"] in before],
-    }
 
 
 def publish(conn, run_id: int, material: Material, period: str, passed: bool,

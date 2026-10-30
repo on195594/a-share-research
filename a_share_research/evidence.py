@@ -1,4 +1,6 @@
 """Pure source projections over saved evidence; no fetching and no snapshot mutation."""
+import hashlib
+import json
 import re
 from urllib.parse import urldefrag, urlparse
 
@@ -228,3 +230,31 @@ def report_source_view(body, material=None):
         return {"sources": report_sources(body, material), "error": None}
     except EvidenceError:
         return {"sources": {}, "error": "已存来源身份或页码存在冲突，暂不提供原文链接；需核对原始材料记录。"}
+
+
+def material_hash(data: dict) -> str:
+    # Preserve input order too: page/row ordering affects the model prompt.
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, separators=(",", ":"),
+                                    allow_nan=False).encode()).hexdigest()
+
+
+NUMBER = re.compile(r"[-−+]?\d[\d,]*(?:\.\d+)?(?![\d.])(?!\s*[年月日])")
+ISO_DATE = re.compile(r"(?<!\d)(?:19|20)\d{2}[-/](?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
+SCALES = (1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e2, 1e4)
+
+
+def numbers(text: str) -> list[tuple[float, int]]:
+    out = []
+    for token in NUMBER.findall(ISO_DATE.sub(" ", text)):
+        clean = token.replace(",", "").replace("−", "-")
+        decimals = len(clean.split(".")[1]) if "." in clean else 0
+        value = abs(float(clean))
+        if decimals == 0 and (value <= 12 or 1900 <= value <= 2100):
+            continue  # ordinals, months, years
+        out.append((value, decimals))
+    return out
+
+
+def supported(value: float, decimals: int, candidates: list[float]) -> bool:
+    tolerance = 0.5 * 10 ** -decimals + 1e-9
+    return any(abs(abs(c) * s - value) <= tolerance for c in candidates for s in SCALES)
