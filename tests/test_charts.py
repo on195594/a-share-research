@@ -487,7 +487,8 @@ def test_vitals_falls_back_to_financial_table_and_stock_template_labels_source()
     stock_html = ENV.get_template("stock.html").render(
         reports=[report_meta], code=rec["report"]["code"], vitals=panel, vitals_report=report_meta,
         comparison={"old": None, "reason": "未记录明确关联", "diff": None, "excluded": []},
-        price=None, csrf="t", request_id="r", track=None,
+        price=None, csrf="t", request_id="r", track=None, due=None,
+        card=reading.card(rec["report"], body) | {"coverage": "2026-06-30", "created_at": rec["report"]["created_at"]},
     )
     assert "保存的财务数据表" in stock_html and "保存的经营序列" not in stock_html
 

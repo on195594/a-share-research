@@ -322,3 +322,42 @@ def comparison(conn, report) -> dict:
     missing = sorted({r['label'] for r in old_table if r['id'] not in new_map or
                       set(r['values']) - set(new_map[r['id']]['values'])})
     return result | {'diff': diff, 'excluded': excluded, 'missing': missing}
+
+
+# The valuation strip on a card: saved closing-day values, never refreshed.
+CARD_MARKET = (('M.close', '收盘价'), ('M.pe_ttm', '市盈率'), ('M.pb', '市净率'), ('M.dv_ttm', '股息率'))
+CARD_PULSE = ('营业总收入', '扣非归母净利润')
+CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
+
+
+def card(report, body: dict, last_passed=None) -> dict:
+    """One company's investment card, read from its latest saved report; nothing is fetched or recomputed.
+
+    A report that failed review shows no verdict, summary, risks, checkpoints or figures. The last
+    passed report, when the caller supplies one, is named with its own date rather than standing in.
+    """
+    passed = bool(report['passed'])
+    verdict = report['verdict'] if passed and report['verdict'] in charts.VERDICTS else None
+    summary = (body.get('summary') or '').strip() if passed else ''
+    # Summaries often open with the verdict the card already shows on its scale.
+    if verdict and summary[len(verdict):len(verdict) + 1] in ('：', ':', '，') and summary.startswith(verdict):
+        summary = summary[len(verdict) + 1:].lstrip()
+
+    def texts(key):
+        return [i['text'] for i in body.get(key) or [] if isinstance(i, dict) and i.get('text')] if passed else []
+
+    table = {r['id']: r for r in body.get('table') or [] if isinstance(r, dict) and isinstance(r.get('id'), str)}
+    day = body.get('market_date')
+    market = []
+    for key, label in CARD_MARKET if passed and day else ():
+        value = ((table.get(key) or {}).get('values') or {}).get(day)
+        if value is not None:
+            market.append({'label': label, 'value': value, 'unit': table[key].get('unit') or ''})
+    vitals = (charts.vitals(body, [r for k, r in table.items() if k.startswith('T.')]) or {}) if passed else {}
+    pulse = [r for r in vitals.get('flows') or [] if r['label'] in CARD_PULSE and r['present']]
+    bucket = verdict or '复核未通过'  # the same buckets as the home verdict strip
+    return {'id': report['id'], 'code': report['code'], 'name': report['name'], 'passed': passed,
+            'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
+            'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'market': market, 'market_date': day,
+            'pulse': pulse, 'pulse_period': vitals.get('flow_period'), 'pulse_heading': vitals.get('flow_heading'),
+            'last_passed': dict(last_passed) if last_passed else None}

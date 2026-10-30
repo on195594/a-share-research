@@ -1,0 +1,68 @@
+{% from "_charts.html" import verdict_pips, verdict_scale, spark_cols %}
+{# One company per card: the stub carries the verdict and one-line summary, the body the leading
+   counter-evidence, the next checkpoint and the saved figures. Text is never truncated; `full`
+   lists every risk and checkpoint instead of the first. #}
+{% macro invest_card(c, due=none, full=false, from_batch=false) %}
+<article class="card{{ ' full' if full }}" id="card-{{ c.code }}" data-verdict="{{ c.bucket }}" data-rank="{{ c.rank }}" data-order="{{ c.id }}" data-coverage="{{ c.coverage or '' }}">
+  <header class="card-stub">
+    <div class="card-title">
+      {% if full %}<h1>{{ c.name }}</h1>{% else %}<h3><a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong></a></h3>{% endif %}
+      <span class="code">{{ c.code }}</span>
+      {% if c.verdict and not full %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% endif %}
+    </div>
+    {% if c.verdict and full %}{{ verdict_scale(c.verdict) }}{% endif %}
+    {% if c.passed %}
+      <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
+    {% else %}
+      <p class="flag">最新一次研究复核未通过，不展示判断。</p>
+      {% if c.last_passed %}<p class="small">上次通过的判断：{{ verdict_pips(c.last_passed.verdict) }}{{ c.last_passed.verdict }} · <a href="/reports/{{ c.last_passed.id }}"><span class="date">{{ c.last_passed.created_at[:10] }} 的报告</span></a>，早于最新研究，仅供对照。</p>{% endif %}
+    {% endif %}
+    <p class="small muted card-dates"><span class="date">资料至 {{ c.coverage or '未记录' }}</span> · <span class="date">研究于 <time datetime="{{ c.created_at[:10] }}">{{ c.created_at[:10] }}</time></span>{% if from_batch %} · 来自初筛{% endif %}</p>
+    {% if due and c.coverage and c.coverage < due[0] %}<p class="flag small">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
+  </header>
+  {% if c.passed and (c.risks or c.checkpoints or c.pulse or c.market) %}
+  <div class="card-body">
+    {% if c.risks %}
+    <div class="card-risk">
+      <p class="card-label">{{ '主要风险与反证' if full else '首要反证' }}{% if not full and c.risks | length > 1 %}<a class="card-more" href="/reports/{{ c.id }}#risks">共 {{ c.risks | length }} 条</a>{% endif %}</p>
+      {% if full %}<ol class="card-list">{% for t in c.risks %}<li><a class="plain" href="/reports/{{ c.id }}?claim=risks:{{ loop.index0 }}#claim-risks-{{ loop.index0 }}">{{ t }}</a></li>{% endfor %}</ol>
+      {% else %}<p>{{ c.risks[0] }}</p>{% endif %}
+    </div>
+    {% endif %}
+    {% if c.checkpoints %}
+    <div class="card-check">
+      <p class="card-label">下期检查点{% if not full and c.checkpoints | length > 1 %}<a class="card-more" href="/reports/{{ c.id }}#checkpoints">共 {{ c.checkpoints | length }} 个</a>{% endif %}</p>
+      {% if full %}<ol class="card-list">{% for t in c.checkpoints %}<li><a class="plain" href="/reports/{{ c.id }}?claim=checkpoints:{{ loop.index0 }}#claim-checkpoints-{{ loop.index0 }}">{{ t }}</a></li>{% endfor %}</ol>
+      {% else %}<p>{{ c.checkpoints[0] }}</p>{% endif %}
+    </div>
+    {% endif %}
+    {% if c.pulse and not full %}
+    <figure class="card-pulse" data-chart>
+      <figcaption class="small muted"><span class="readout" aria-live="polite">{{ c.pulse_heading or '单季' }}走势，亿元；最新 {{ c.pulse_period }}</span></figcaption>
+      <table>
+        <tbody>
+        {% for r in c.pulse %}
+          <tr><th scope="row">{{ r.label }}</th><td class="spark-cell">{% if r.spark %}{{ spark_cols(r.spark) }}{% endif %}</td>
+            <td class="num strong">{{ r.latest or ('待核对' if r.unreconciled else '—') }}</td>
+            <td class="num">{% if r.yoy %}同比 {{ r.yoy }}%{% else %}—{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </figure>
+    {% endif %}
+    {% if c.market %}
+    <dl class="card-market" aria-label="估值快照，{{ c.market_date }} 收盘">
+      {% for m in c.market %}<div><dt>{{ m.label }}</dt><dd class="num">{{ m.value }}<small>{{ m.unit }}</small></dd></div>{% endfor %}
+    </dl>
+    <p class="small muted">研究时 <span class="date">{{ c.market_date }}</span> 收盘，市盈率与股息率为 TTM；不是实时行情。</p>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if not full %}
+  <footer class="card-foot">
+    <a href="/reports/{{ c.id }}">阅读报告</a>
+    <a href="/stock/{{ c.code }}">公司档案</a>
+  </footer>
+  {% endif %}
+</article>
+{% endmacro %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
 {% from "_charts.html" import bars, data_list, verdict_pips %}
+{% from "_card.html" import invest_card %}
 {% macro review_items(rows) %}
 <ul class="list">
 {% for r in rows %}
@@ -88,7 +89,7 @@
 
 <section aria-labelledby="companies">
   <h2 id="companies">主动研究过的公司 · {{ companies|length }} 家</h2>
-  {% if companies %}<p class="hint">右侧为最新一份报告的研究判断；未通过复核的不展示判断。检查点尚不能自动判定是否到期。</p>{% endif %}
+  {% if companies %}<p class="hint">每家一张卡，取自最新一份报告；未通过复核的不展示判断。估值与走势是研究时保存的值，检查点尚不能自动判定是否到期。</p>{% endif %}
   {% if companies %}
   {% if verdict_summary is defined and verdict_summary %}
   <div class="verdict-overview">
@@ -108,18 +109,16 @@
     <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
   </div>
   {% endif %}
-  <ul class="list companies">
-  {% for c in companies %}
-    <li data-verdict="{{ verdict_summary.buckets[c.code] if verdict_summary is defined and verdict_summary else (c.verdict if c.passed else '复核未通过') }}">
-      <div class="company-row">
-        <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
-        {% if c.passed %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% else %}<span class="company-verdict flag">复核未通过</span>{% endif %}
-      </div>
-      <p class="small muted"><span class="date">覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 <time datetime="{{ c.created_at[:10] }}">{{ c.created_at[:10] }}</time></span>{% if c.from_batch %} · 来自初筛{% endif %}{% if c.checkpoint %} · <a href="/reports/{{ c.id }}#checkpoints">检查点</a>{% endif %}</p>
-      {% if c.coverage and c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
-    </li>
-  {% endfor %}
-  </ul>
+  <div class="filter-pills card-tools" role="toolbar" aria-label="排序与显示方式" data-card-tools hidden>
+    <span class="muted small">排序</span>
+    <button type="button" class="pill active" data-card-sort="order" aria-pressed="true">最新</button>
+    <button type="button" class="pill" data-card-sort="rank" aria-pressed="false">判断</button>
+    <button type="button" class="pill" data-card-sort="coverage" aria-pressed="false">资料最旧</button>
+    <button type="button" class="pill view" data-card-compact aria-pressed="false">紧凑</button>
+  </div>
+  <div class="cards companies">
+  {% for c in companies %}{{ invest_card(c, due, from_batch=c.from_batch) }}{% endfor %}
+  </div>
   {% elif not batch_only %}
   <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
   {% endif %}

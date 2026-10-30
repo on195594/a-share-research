@@ -84,13 +84,53 @@ document.addEventListener("click", (event) => {
     });
   }
   let shown = 0;
-  document.querySelectorAll(".companies > li[data-verdict]").forEach((item) => {
+  document.querySelectorAll(".companies > [data-verdict]").forEach((item) => {
     const match = target === "all" || item.dataset.verdict === target;
     item.hidden = !match;
     if (match) shown += 1;
   });
   const status = document.querySelector("[data-filter-status]");
   if (status) status.textContent = `当前显示 ${shown} 家公司`;
+});
+
+// Home company cards: sort and a compact view. The compact choice is a per-browser convenience.
+function compactCards(on) {
+  const cards = document.querySelector(".cards");
+  const button = document.querySelector("[data-card-compact]");
+  if (!cards || !button) return;
+  cards.classList.toggle("compact", on);
+  button.classList.toggle("active", on);
+  button.setAttribute("aria-pressed", String(on));
+}
+const cardTools = document.querySelector("[data-card-tools]");
+if (cardTools) {
+  cardTools.hidden = false;
+  try { compactCards(localStorage.getItem("card-view") === "compact"); } catch { /* storage blocked: full cards */ }
+}
+document.addEventListener("click", (event) => {
+  const compact = event.target.closest?.("[data-card-compact]");
+  if (compact) {
+    const on = compact.getAttribute("aria-pressed") !== "true";
+    compactCards(on);
+    try { localStorage.setItem("card-view", on ? "compact" : "cards"); } catch { /* not remembered */ }
+    return;
+  }
+  const sort = event.target.closest?.("[data-card-sort]");
+  if (!sort) return;
+  const cards = document.querySelector(".cards");
+  const key = sort.dataset.cardSort;
+  // Newest research first; by verdict tier, newest first within a tier; or the oldest coverage first.
+  const value = (el) => key === "order" ? -Number(el.dataset.order)
+    : key === "rank" ? Number(el.dataset.rank) * 1e9 - Number(el.dataset.order) : el.dataset.coverage || "0";
+  const items = [...cards.children].sort((a, b) => {
+    const x = value(a), y = value(b);
+    return x < y ? -1 : x > y ? 1 : Number(b.dataset.order) - Number(a.dataset.order);
+  });
+  cards.append(...items);
+  sort.parentElement.querySelectorAll("[data-card-sort]").forEach((btn) => {
+    btn.classList.toggle("active", btn === sort);
+    btn.setAttribute("aria-pressed", String(btn === sort));
+  });
 });
 
 // Section-level citation expand/collapse toggle for report chapters with multiple citations.

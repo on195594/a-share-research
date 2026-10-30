@@ -215,5 +215,6 @@ def test_stock_vitals_source_uses_vitals_source_and_home_filter_live_region():
     )
     assert '保存的财务数据表' in html
     home_tpl = (TEMPLATES / 'home.html').read_text()
-    assert 'data-verdict="{{ verdict_summary.buckets[c.code]' in home_tpl
+    assert 'invest_card(c, due' in home_tpl
+    assert 'data-verdict="{{ c.bucket }}"' in (TEMPLATES / '_card.html').read_text()
     assert 'role="status" aria-live="polite" data-filter-status' in home_tpl

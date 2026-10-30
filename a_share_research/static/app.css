@@ -509,3 +509,69 @@ details.block[open] { padding-bottom: 12px; }
 .pill:hover { border-color: var(--accent); background: var(--band); }
 .pill.active { border-color: var(--accent); background: var(--band); color: var(--accent-strong); font-weight: 600; }
 .pill .num { color: var(--muted); font-size: 12px; font-weight: 400; }
+
+/* ---------- investment cards ---------- */
+/* One company per card, shaped like the report stub: verdict above, a perforation, then the
+   counter-evidence and saved figures. Flat: a hairline border, no shadow. */
+.card-tools { align-items: center; margin: 0 0 12px; }
+.card-tools .view { margin-left: auto; }
+.cards { display: grid; gap: 16px; }
+.card { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.card[hidden] { display: none; }
+.card-stub { padding: 14px 16px 12px; }
+.card-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.card-title h3 { margin: 0; font-size: 18px; line-height: 1.4; }
+.card-title h1 { margin: 0; }
+.card-title .company-verdict { margin-left: auto; }
+.card-thesis { font-size: 16px; font-weight: 600; line-height: 1.6; margin: 10px 0 6px; }
+.card.full .card-thesis { font-size: 18px; margin-top: 12px; }
+.card-dates { margin: 0; }
+.card-body { position: relative; border-top: 2px dashed var(--line); padding: 12px 16px 4px; }
+/* Ticket notches at both ends of the perforation. */
+.card-body::before, .card-body::after {
+  content: ""; position: absolute; top: -9px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.card-body::before { left: -9px; clip-path: inset(0 0 0 50%); }
+.card-body::after { right: -9px; clip-path: inset(0 50% 0 0); }
+.card-label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 4px; }
+.card-more { font-weight: 400; white-space: nowrap; }
+.card-risk { background: var(--caution-bg); color: var(--caution-ink); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.card-risk .card-label { color: var(--caution-ink); }
+.card-risk a { color: var(--caution-ink); }
+.card-risk p, .card-check p { margin: 0; overflow-wrap: anywhere; }
+.card-check { margin-bottom: 12px; }
+.card-list { margin: 0; padding-left: 20px; }
+.card-list li { margin-bottom: 8px; overflow-wrap: anywhere; }
+a.plain { color: inherit; text-decoration: none; }
+a.plain:hover { text-decoration: underline; }
+.card-pulse { margin: 0 0 10px; }
+.card-pulse figcaption { margin-bottom: 2px; }
+.card-pulse .readout { color: var(--muted); }
+.card-pulse table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.card-pulse th, .card-pulse td { padding: 3px 0; border: 0; font-size: 13px; }
+.card-pulse th { font-weight: 400; text-align: left; width: 32%; }
+.card-pulse .spark-cell { width: 28%; padding: 0 8px; }
+.card-pulse td.num { text-align: right; width: 18%; }
+.card-pulse td.num:last-child { width: 22%; color: var(--muted); font-size: 12px; }
+.card-pulse td.strong { font-weight: 700; font-size: 14px; }
+.card-market { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0 0 2px; }
+.card-market div { background: var(--bg); border-radius: var(--radius); padding: 4px 8px; min-width: 0; }
+.card-market dt { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.card-market dd { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.card-market small { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 1px; }
+.card-body > p.small { margin: 0 0 8px; }
+.card-foot { display: flex; gap: 4px 20px; border-top: 1px solid var(--line); padding: 4px 16px; font-size: 14px; }
+.card-foot a { min-height: 40px; display: inline-flex; align-items: center; }
+/* Compact view keeps the stub and the links; the full card is one tap away. */
+.cards.compact { gap: 8px; }
+.cards.compact .card-body { display: none; }
+.cards.compact .card-thesis { font-size: 15px; font-weight: 400; margin: 6px 0 4px; }
+.card.full { margin: 8px 0 20px; }
+.card.full .card-body { padding-bottom: 8px; }
+@media (max-width: 380px) { .card-market { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) {
+  /* Two columns of cards on wide screens, wider than the reading column. */
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start;
+    width: min(1120px, calc(100vw - 40px)); margin-left: calc(50% - min(560px, 50vw - 20px)); }
+}
