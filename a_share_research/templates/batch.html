@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_batch.html" as b with context %}
-{% from "_charts.html" import bars, data_list, verdict_pips %}
+{% from "_charts.html" import bars, data_list, spark_cols, verdict_pips %}
 {% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
 {% set refresh = 15 if busy else none %}
 {# updated_at moves with every batch write; research statuses come from the runs table #}
@@ -151,6 +151,24 @@
   </table>
   </div>
   <p class="legend-row small muted"><span class="pips" aria-hidden="true"><i></i><i></i><i class="on"></i></span>三格依次为暂不值得、需要谨慎、值得继续研究；× 为未通过复核或研究失败。</p>
+  {% if overview is defined and overview and (overview.industries or overview.momentum) %}
+  <div class="figures">
+    {% if overview.industries %}
+    <figure class="figure" data-chart>
+      <figcaption><strong>候选行业分布</strong><span class="readout" aria-live="polite">20 家候选所属申万一级行业（深色含选定公司）</span></figcaption>
+      {{ bars(overview.industries, "候选 20 家所属行业分布", emphasis=true) }}
+      {{ data_list(overview.industries) }}
+    </figure>
+    {% endif %}
+    {% if overview.momentum %}
+    <figure class="figure" data-chart>
+      <figcaption><strong>初筛前 60 日股价表现</strong><span class="readout" aria-live="polite">候选入围前近 60 个交易日涨跌幅（深色为选定）</span></figcaption>
+      {{ bars(overview.momentum, "候选 20 家初筛前近 60 个交易日涨跌幅", emphasis=true) }}
+      {{ data_list(overview.momentum) }}
+    </figure>
+    {% endif %}
+  </div>
+  {% endif %}
   {% if batch.status == "proposed" %}<form method="post" action="/batches/{{ batch.id }}/freeze" class="freeze">
   <input type="hidden" name="csrf" value="{{ csrf }}">{% endif %}
   <details class="block" id="candidate-details" {% if batch.status == "proposed" %}open{% endif %}>
@@ -183,6 +201,16 @@
         <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">{{ b.meter(r.pe_pct) }}分位 {{ "%.2f" | format(r.pe_pct) }}</dd>
           {% if batch.as_of %}<dd class="pct">初筛日 <span class="date">{{ b.day(batch.as_of) }}</span></dd>{% endif %}</div>
       </dl>
+      {% set sp = sparks.get(r.code) if sparks is defined and sparks else none %}
+      {% if sp and sp.spark %}
+      <div class="cand-spark" data-chart>
+        <div class="cand-spark-meta">
+          <span class="small muted">扣非净利（{{ sp.span }}，亿）</span>
+          <span class="readout small">{{ sp.base }} → <strong>{{ sp.latest }}</strong>{% if sp.roe_text %} · 扣非ROE {{ sp.roe_text }}{% endif %}</span>
+        </div>
+        {{ spark_cols(sp.spark) }}
+      </div>
+      {% endif %}
       {% if r.return_60d is defined %}<p class="small">近 60 个交易日 {{ b.pct(r.return_60d) }}{% if r.drawdown %} · <span class="flag">跌幅超过 30%，冻结前核对原因</span>{% endif %}</p>{% endif %}
       {% if r.windfall %}<p class="small"><span class="flag">利润跳升且市盈率低</span> <span class="muted">· 三年扣非增速 ≥{{ "%.0f" | format(r.windfall.min_growth * 100) }}%、市盈率 &lt; {{ r.windfall.max_pe }}，核对是否为一次性或周期高点利润</span></p>{% endif %}
       <p class="small">
@@ -229,6 +257,19 @@
   {% endif %}
   <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名（缺口不代表质量差）。</p>
   {% if batch.universe.markets %}<p class="muted small">粗筛后板块覆盖：{% for m, n in batch.universe.markets.items() %}{{ m }} {{ n }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+  {% if market_strip is defined and market_strip %}
+  <div class="market-strip" data-chart>
+    <svg width="100%" height="10" class="strip-bar" role="img" aria-label="粗筛后板块占比">
+      {% for s in market_strip.segments %}
+      <g class="slot" tabindex="0" data-tip="{{ s.tip }}">
+        <title>{{ s.tip }}</title>
+        <rect x="{{ s.x }}%" y="0" width="{{ s.w }}%" height="10" class="seg {{ s.cls }}"/>
+      </g>
+      {% endfor %}
+    </svg>
+    <p class="readout small muted">粗筛池共 {{ market_strip.total }} 家：{% for s in market_strip.segments %}<span class="seg-key"><i class="seg-dot {{ s.cls }}"></i>{{ s.label }} {{ s.pct }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  </div>
+  {% endif %}
   {% set gaps = batch.universe.rows | selectattr("status", "equalto", "gap") | list %}
   {% if gaps %}
   <details>

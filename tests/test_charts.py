@@ -318,3 +318,78 @@ def test_folded_items_keep_claim_ids_and_open_for_a_focused_claim():
     assert '<details class="more">' in str(macros.items(answers, {}, "回答", {}, "answer", "answer:2", limit=4))
     # Hiding a single entry saves nothing, so five entries stay unfolded.
     assert '<details class="more"' not in str(macros.items(answers[:5], {}, "回答", {}, "answer", "", limit=4))
+
+
+def test_waterfall_cash_bridge_and_paired_balance_structure_on_real_series_and_table():
+    series = build("000858")
+    fin = financial_table(frames(CAPTURES["000858"]), {})
+    figures = charts.financial_charts({"series": series}, fin)
+    bridge = figure(figures, "盈利与现金流转化")
+    assert bridge["kind"] == "waterfall"
+    wf = bridge["chart"]
+    assert [s["label"] for s in wf["rows"]] == [
+        "归母净利润", "扣非归母净利润", "经营活动现金流净额", "购建长期资产现金", "减购建后现金净额"
+    ]
+    assert wf["rows"][0]["role"] == "profit" and wf["rows"][3]["role"] == "step" and wf["rows"][4]["role"] == "fcf"
+    assert len(wf["connectors"]) == 2
+    html = str(ENV.get_template("_charts.html").module.figure(bridge))
+    assert "chart waterfall" in html and 'class="connector"' in html
+    # Mutation check: a missing step in waterfall draws no bar and suppresses adjacent connectors.
+    gapped = copy.deepcopy(series)
+    latest_ann = gapped["annual"]["periods"][-1]
+    next(r for r in gapped["annual"]["rows"] if r["id"] == "capex")["values"][latest_ann].update(display=None, value=None)
+    wf_gapped = figure(charts.financial_charts({"series": gapped}, fin), "盈利与现金流转化")["chart"]
+    assert wf_gapped["rows"][3]["missing"] and wf_gapped["rows"][3]["w"] == 0.0
+    assert wf_gapped["connectors"] == []
+    # Paired balance structure on series and legacy table fallback.
+    struct = figure(figures, "资金与营运结构")
+    assert struct["kind"] == "paired" and len(struct["chart"]["rows"]) >= 3
+    legacy_body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
+    legacy_fin = [r for r in legacy_body["table"] if r["id"].startswith("T.")]
+    legacy_figs = charts.financial_charts(legacy_body, legacy_fin)
+    assert figure(legacy_figs, "盈利与现金流转化")["source"] == "财务数据表"
+    assert figure(legacy_figs, "资金与营运结构")["source"] == "财务数据表"
+
+
+def test_vitals_falls_back_to_financial_table_when_series_is_absent():
+    body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
+    fin = [r for r in body["table"] if r["id"].startswith("T.")]
+    assert charts.vitals(body) is None
+    panel = charts.vitals(body, fin)
+    assert panel["flow_heading"] == "历年" and panel["source"] == "财务数据表"
+    saved_rev = next(r for r in fin if r["id"] == "T.revenue")["values"]
+    rev = vital(panel, "营业总收入")
+    latest = max(saved_rev)
+    assert rev["latest"] == saved_rev[latest]
+    # Mutation check: removing a period's value marks the spark slot missing rather than zero.
+    mutated = copy.deepcopy(fin)
+    years = sorted(p for p in saved_rev if p.endswith("-12-31"))
+    next(r for r in mutated if r["id"] == "T.revenue")["values"].pop(years[0])
+    rev_after = vital(charts.vitals(body, mutated), "营业总收入")
+    assert rev_after["spark"]["bars"][0]["missing"] and "h" not in rev_after["spark"]["bars"][0]
+
+
+def test_batch_overview_sparks_market_strip_and_verdict_summary():
+    matrix = json.loads((ROOT / "tests/data/batch-candidate-matrix.json").read_text())
+    labels = json.loads((ROOT / "tests/data/batch-factor-labels.json").read_text())
+    rows_with_ret = [{**r, "return_60d": -0.35 if r.get("drawdown") else 0.12} for r in matrix["rows"]]
+    batch = {"q20": rows_with_ret, "l5": {"codes": matrix["l5"]},
+             "universe": {"markets": {"主板": 3100, "创业板": 1350, "科创板": 580}}}
+    overview = charts.batch_overview(batch)
+    assert overview and len(overview["momentum"]["rows"]) == len(matrix["rows"])
+    assert any(r["emphasis"] for r in overview["industries"]["rows"])
+    sparks = charts.candidate_sparks(labels["rows"])
+    assert set(sparks) == {r["code"] for r in labels["rows"]}
+    for code, sp in sparks.items():
+        assert len(sp["spark"]["bars"]) == 4 and sp["spark"]["bars"][-1]["last"]
+    strip = charts.market_strip(batch)
+    assert strip["total"] == 5030 and abs(sum(s["w"] for s in strip["segments"]) - 100.0) < 0.05
+    summary = charts.verdict_summary([
+        {"verdict": "值得继续研究", "passed": 1},
+        {"verdict": "需要谨慎", "passed": 1},
+        {"verdict": "值得继续研究", "passed": 0},
+    ])
+    assert summary["total"] == 3
+    assert [(i["label"], i["count"]) for i in summary["items"]] == [
+        ("值得继续研究", 1), ("需要谨慎", 1), ("复核未通过", 1)
+    ]

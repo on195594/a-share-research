@@ -141,6 +141,58 @@ def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | Non
             "data": [r["tip"] for r in rows]}
 
 
+def waterfall(items: list[dict], start: float = 34.0, end: float = 80.0) -> dict | None:
+    """Horizontal waterfall / bridge chart on one axis (e.g. profit -> operating cash -> capex -> FCF)."""
+    values = [v for r in items for v in (r.get("from"), r.get("to")) if v is not None]
+    if len(values) < 2:
+        return None
+    ticks = nice_ticks(min(values), max(values), 3)
+    lo, hi = ticks[0], ticks[-1]
+    at = lambda v: round(start + (v - lo) / (hi - lo) * (end - start), 3)  # noqa: E731
+    zero = at(0.0)
+    out = []
+    for i, r in enumerate(items):
+        a, b = r.get("from"), r.get("to")
+        missing = a is None or b is None
+        x0, x1 = (at(a), at(b)) if not missing else (zero, zero)
+        out.append({**r, "y": i * 32, "x": round(min(x0, x1), 3),
+                    "w": max(round(abs(x1 - x0), 3), 0.8) if not missing else 0.0,
+                    "x_from": x0, "x_to": x1, "missing": missing})
+    connectors = []
+    for i, r in enumerate(out):
+        if r.get("role") == "step" and not r["missing"]:
+            if i > 0 and not out[i - 1]["missing"]:
+                connectors.append({"x": out[i - 1]["x_to"], "y1": out[i - 1]["y"] + 23, "y2": r["y"] + 9})
+            if i + 1 < len(out) and not out[i + 1]["missing"]:
+                connectors.append({"x": out[i + 1]["x_to"], "y1": r["y"] + 23, "y2": out[i + 1]["y"] + 9})
+    height = len(out) * 32
+    return {"rows": out, "connectors": connectors, "zero": zero, "height": height + 18,
+            "ticks": [{"x": at(t), "text": tick_text(t)} for t in ticks], "axis_y": height + 12,
+            "data": [r["tip"] for r in items]}
+
+
+def paired_bars(rows: list[dict], labels: tuple[str, str], mode: str = "period",
+                start: float = 32.0, end: float = 63.0) -> dict | None:
+    """Two horizontal bars per row on a shared zero-included scale (prior vs latest, or subject vs peer)."""
+    values = [v for r in rows for v in (r.get("v0"), r.get("v1")) if v is not None]
+    if not values:
+        return None
+    lo, hi = min(values + [0.0]), max(values + [0.0])
+    span = (hi - lo) or 1.0
+    at = lambda v: round(start + (v - lo) / span * (end - start), 3)  # noqa: E731
+    zero = at(0.0)
+    out = []
+    for i, r in enumerate(rows):
+        v0, v1 = r.get("v0"), r.get("v1")
+        x0, x1 = (at(v0) if v0 is not None else zero), (at(v1) if v1 is not None else zero)
+        out.append({**r, "y": i * 36,
+                    "x0": round(min(x0, zero), 3), "w0": max(round(abs(x0 - zero), 3), 0.8) if v0 is not None else 0.0,
+                    "x1": round(min(x1, zero), 3), "w1": max(round(abs(x1 - zero), 3), 0.8) if v1 is not None else 0.0,
+                    "m0": v0 is None, "m1": v1 is None})
+    return {"rows": out, "zero": zero, "labels": list(labels), "mode": mode, "height": len(out) * 36,
+            "data": [r["tip"] for r in rows]}
+
+
 def _period_label(period: str, kind: str) -> str:
     if kind == "annual":
         return period[:4]
@@ -265,9 +317,102 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
                           "note": "毛利率与加权 ROE 为年初至报告期末累计口径，ROE 不年化，只与上年同期比较；"
                                   "资产负债率为期末时点值。"}
 
+    def cash_bridge():
+        steps = (("net_profit", "归母净利润", "profit"), ("core_profit", "扣非归母净利润", "core"),
+                 ("op_cash", "经营活动现金流净额", "cash"), ("capex", "购建长期资产现金", "step"),
+                 ("fcf", "减购建后现金净额", "fcf"))
+        ttm_p = (series.get("ttm") or {}).get("periods") or []
+        ann_p = (series.get("annual") or {}).get("periods") or []
+        ttm_ok = bool(ttm_p and row("ttm", "op_cash")
+                      and (row("ttm", "op_cash")["values"].get(ttm_p[-1]) or {}).get("display") is not None)
+        kind = "ttm" if ttm_ok else ("annual" if ann_p else ("ttm" if ttm_p else None))
+        if kind and row(kind, "op_cash") and row(kind, "fcf"):
+            period = (ttm_p if kind == "ttm" else ann_p)[-1]
+            period_text = f"截至 {period} 近12月" if kind == "ttm" else f"{period[:4]} 年"
+            raw = {k: (row(kind, k)["values"].get(period) or {}) if row(kind, k) else {} for k, _, _ in steps}
+            texts = {k: c.get("display") for k, c in raw.items()}
+            tips = {k: _cell_tip(lb, period_text, raw[k], "亿元") for k, lb, _ in steps}
+            source = "经营序列"
+        else:
+            if "T.op_cash" not in table or "T.fcf" not in table:
+                return None
+            period = max((p for k, _, _ in steps if f"T.{k}" in table for p in table[f"T.{k}"]["values"]), default=None)
+            if not period:
+                return None
+            period_text = f"{period[:4]} 年{CUMULATIVE.get(period[5:], '')}"
+            texts = {k: table[f"T.{k}"]["values"].get(period) if f"T.{k}" in table else None for k, _, _ in steps}
+            tips = {k: f"{period} {lb}：{texts[k] + ' 亿元' if texts[k] is not None else '缺失'}" for k, lb, _ in steps}
+            source = "财务数据表"
+        v_ocf, v_fcf = number(texts.get("op_cash")), number(texts.get("fcf"))
+        items = []
+        for k, lb, role in steps:
+            val = number(texts.get(k))
+            if role == "step" and val is not None and v_ocf is not None and v_fcf is not None:
+                a, b = v_fcf, v_ocf
+            else:
+                a, b = (0.0, val) if val is not None else (None, None)
+            items.append({"label": lb, "from": a, "to": b, "role": role,
+                          "text": texts.get(k) or "—", "tip": tips[k]})
+        chart = waterfall(items)
+        return chart and {"kind": "waterfall", "title": f"盈利与现金流转化 · {period_text}",
+                          "headline": f"归母净利 {texts.get('net_profit') or '—'} → 经营现金流 {texts.get('op_cash') or '—'} → 减购建后 {texts.get('fcf') or '—'} 亿元",
+                          "chart": chart, "source": source,
+                          "note": "展示同期间利润、经营现金流、购建长期资产现金支出与减购建后净额的转化关系；"
+                                  "经营现金流为合并口径，归母与扣非净利为归属母公司股东口径。"}
+
+    def balance_structure():
+        group = series.get("balance") or {}
+        periods = group.get("periods") or []
+        if periods and any(row("balance", k) for k, _ in STOCKS):
+            latest = periods[-1]
+            prior = f"{int(latest[:4]) - 1}{latest[4:]}"
+            prior = prior if prior in periods else (periods[-2] if len(periods) > 1 else latest)
+            pairs = [(lb, (row("balance", k)["values"].get(prior) or {}).get("display"),
+                      (row("balance", k)["values"].get(latest) or {}).get("display"))
+                     for k, lb in STOCKS if row("balance", k)]
+            source = "经营序列"
+        else:
+            present = [table[f"T.{k}"] for k, _ in STOCKS if f"T.{k}" in table]
+            all_p = sorted({p for r in present for p in r["values"]})
+            if not all_p:
+                return None
+            latest = all_p[-1]
+            prior = f"{int(latest[:4]) - 1}{latest[4:]}"
+            prior = prior if prior in all_p else (all_p[-2] if len(all_p) > 1 else latest)
+            pairs = [(lb, table[f"T.{k}"]["values"].get(prior), table[f"T.{k}"]["values"].get(latest))
+                     for k, lb in STOCKS if f"T.{k}" in table]
+            source = "财务数据表"
+        items = [{"label": lb, "v0": number(b), "v1": number(a), "t0": b, "t1": a,
+                  "tip": f"{lb}：{prior} {b + ' 亿元' if number(b) is not None else '缺失'} → "
+                         f"{latest} {a + ' 亿元' if number(a) is not None else '缺失'}"}
+                 for lb, b, a in pairs if number(b) is not None or number(a) is not None]
+        if len(items) < 2:
+            return None
+        chart = paired_bars(items, (_period_label(prior, "balance"), _period_label(latest, "balance")), mode="period")
+        return chart and {"kind": "paired", "title": "资金与营运结构 · 同期对比",
+                          "headline": f"{latest} 对比 {prior}（同一亿元刻度，可跨行比较规模）",
+                          "chart": chart, "source": source,
+                          "note": "同一水平刻度对比货币资金、四项债务合计及应收、存货、合同负债、商誉的绝对规模与同期变化。"}
+
+    def ttm_trend():
+        group = series.get("ttm") or {}
+        periods = group.get("periods") or []
+        profit, cash = row("ttm", "net_profit"), row("ttm", "op_cash")
+        if len(periods) < 3 or not (profit and cash):
+            return None
+        texts = [[r["values"].get(p, {}).get("display") for p in periods] for r in (profit, cash)]
+        chart = lines(periods, [_period_label(p, "quarterly") for p in periods],
+                      [{"label": "归母净利润", "texts": texts[0]}, {"label": "经营活动现金流净额", "texts": texts[1]}])
+        return chart and {"kind": "lines", "title": "利润与经营现金流 · 近12月滚动", "chart": chart, "source": "经营序列",
+                          "headline": f"近 12 个月滚动值（TTM），亿元；图例为截至 {periods[-1]} 的值",
+                          "note": "滚动 12 个月消除单季淡旺季波动；年报直接取全年，其他报告期按本年累计 + 上年全年 − 上年同期累计计算。"}
+
     for figure in (
         latest_growth(),
         ratios(),
+        cash_bridge(),
+        balance_structure(),
+        ttm_trend(),
         annual_columns(["revenue"], ["营业总收入"], "营业总收入 · 年度", ""),
         annual_columns(["net_profit", "op_cash"], ["归母净利润", "经营活动现金流净额"], "利润与经营现金流 · 年度",
                        "两者口径不同：经营现金流为合并口径，归母净利润只含母公司股东部分。"),
@@ -328,14 +473,18 @@ def spark_line(periods: list[str], values: list[float | None]) -> dict | None:
             "dots": [{"x": p[0], "y": p[1], "last": i == len(points) - 1,
                       "isolated": not (i and points[i - 1]) and not (i + 1 < len(points) and points[i + 1])}
                      for i, p in enumerate(points) if p],
+            "stems": [{"x": p[0], "y": p[1]} for p in points if p],
             "slots": [{"x": bounds[i], "w": round(bounds[i + 1] - bounds[i], 3)} for i in range(len(periods))],
             "height": SPARK}
 
 
-def vitals(body: dict) -> dict | None:
+def vitals(body: dict, fin: list[dict] | None = None) -> dict | None:
     """Small multiples over the saved operating series: single-quarter flows as mini columns and
-    period-end balances as lines, each with its latest saved value. Needs the operating series."""
+    period-end balances as lines, each with its latest saved value. When a report has no operating
+    series and `fin` is supplied, falls back to the saved T.* financial table."""
     series = body.get("series") or {}
+    if not series and fin:
+        return _table_vitals(fin)
 
     def rows(kind, keys):
         group = series.get(kind) or {}
@@ -380,12 +529,69 @@ def vitals(body: dict) -> dict | None:
     # The panel shows whenever some value can be read; a trend needs two, a reading only one.
     if not any(r["present"] for r in flow_rows + stock_rows):
         return None
-    return {"flows": flow_rows, "stocks": stock_rows,
+    return {"flows": flow_rows, "stocks": stock_rows, "flow_heading": "单季", "source": "经营序列",
             "flow_period": quarters and _period_label(quarters[-1], "quarterly"),
             "flow_span": quarters and f"{_period_label(quarters[0], 'quarterly')}–{_period_label(quarters[-1], 'quarterly')}",
             "stock_period": balance and _period_label(balance[-1], "balance"),
             "year_ago": year_ago and _period_label(year_ago, "balance"),
             "stock_span": balance and f"{_period_label(balance[0], 'balance')}–{_period_label(balance[-1], 'balance')}",
+            "data": [d for r in flow_rows + stock_rows for d in r["data"]]}
+
+
+def _table_vitals(fin: list[dict]) -> dict | None:
+    """Fallback vitals panel built from saved T.* rows when a report has no operating series."""
+    table = {r["id"]: r for r in fin if isinstance(r, dict) and isinstance(r.get("id"), str)}
+    all_periods = sorted({p for r in table.values() for p in (r.get("values") or {})})
+    if not all_periods:
+        return None
+    annual = [p for p in all_periods if p.endswith("-12-31")][-8:]
+    latest = all_periods[-1]
+    yoy_keys = {"revenue": "T.revenue_yoy", "net_profit": "T.profit_yoy", "core_profit": "T.core_profit_yoy"}
+    flow_rows = []
+    if annual:
+        for key, label in FLOWS:
+            row = table.get(f"T.{key}")
+            if not row:
+                continue
+            vals = row.get("values") or {}
+            unavail = row.get("unavailable") or {}
+            tips = [f"{p[:4]} 年 {label}：{vals[p] + ' 亿元' if vals.get(p) is not None else ('更正版本待核对' if p in unavail else '缺失')}"
+                    for p in annual]
+            spark = spark_columns([number(vals.get(p)) for p in annual])
+            for bar, tip in zip(spark["bars"] if spark else [], tips):
+                bar["tip"] = tip
+            yoy_row = table.get(yoy_keys.get(key, ""))
+            yoy = (yoy_row.get("values") or {}).get(latest) if yoy_row else None
+            flow_rows.append({"label": label, "spark": spark, "latest": vals.get(latest),
+                              "unreconciled": latest in unavail, "present": spark is not None or vals.get(latest) is not None,
+                              "yoy": yoy, "data": tips})
+    stock_periods = all_periods[-8:]
+    year_ago = f"{int(latest[:4]) - 1}{latest[4:]}"
+    year_ago = year_ago if year_ago in all_periods else None
+    stock_rows = []
+    for key, label in STOCKS:
+        row = table.get(f"T.{key}")
+        if not row:
+            continue
+        vals = row.get("values") or {}
+        unavail = row.get("unavailable") or {}
+        values = [number(vals.get(p)) for p in stock_periods]
+        spark = spark_line(stock_periods, values)
+        tips = [f"{p} {label}：{vals[p] + ' 亿元' if vals.get(p) is not None else ('更正版本待核对' if p in unavail else '缺失')}"
+                for p in stock_periods]
+        for slot, tip in zip(spark["slots"] if spark else [], tips):
+            slot["tip"] = tip
+        stock_rows.append({"label": label, "spark": spark, "latest": vals.get(latest),
+                           "unreconciled": latest in unavail, "present": any(v is not None for v in values),
+                           "year_ago": vals.get(year_ago) if year_ago else None, "data": tips})
+    if not any(r["present"] for r in flow_rows + stock_rows):
+        return None
+    return {"flows": flow_rows, "stocks": stock_rows, "flow_heading": "历年", "source": "财务数据表",
+            "flow_period": _period_label(latest, "balance"),
+            "flow_span": annual and f"{annual[0][:4]}–{annual[-1][:4]}",
+            "stock_period": _period_label(latest, "balance"),
+            "year_ago": year_ago and _period_label(year_ago, "balance"),
+            "stock_span": stock_periods and f"{_period_label(stock_periods[0], 'balance')}–{_period_label(stock_periods[-1], 'balance')}",
             "data": [d for r in flow_rows + stock_rows for d in r["data"]]}
 
 
@@ -419,13 +625,33 @@ def dumbbell(fin: list[dict], start: float = 30.0, end: float = 72.0) -> dict | 
     at = lambda v: round(start + (v - lo) / (hi - lo) * (end - start), 3)  # noqa: E731
     for i, r in enumerate(rows):
         b, a = number(r["before"]), number(r["after"])
-        r.update(y=i * 34, x_after=at(a), x_before=at(b) if b is not None else None)
+        r.update(y=i * 34, x_after=at(a), x_before=at(b) if b is not None else None,
+                 direction="up" if b is not None and a > b else ("down" if b is not None and a < b else "flat"))
         if b is not None:
             r.update(seg_x=min(r["x_before"], r["x_after"]), seg_w=round(abs(r["x_after"] - r["x_before"]), 3))
     height = len(rows) * 34
     return {"rows": rows, "latest": latest, "prior": prior, "track": (at(lo), at(hi)), "height": height + 18,
             "ticks": [{"x": at(t), "text": tick_text(t)} for t in ticks], "axis_y": height + 12,
             "data": [r["tip"] for r in rows]}
+
+
+def peer_bars(peer: dict) -> dict | None:
+    """Visual comparison for a validated peer snapshot; uses only the already-verified cell values."""
+    rows = []
+    for metric in peer.get("rows") or []:
+        if metric.get("unit") != "亿元" or len(metric.get("cells") or []) != 2:
+            continue
+        c0, c1 = metric["cells"]
+        v0, v1 = number(c0.get("value")), number(c1.get("value"))
+        if v0 is None and v1 is None:
+            continue
+        t0, t1 = c0.get("value"), c1.get("value")
+        rows.append({"label": metric["label"], "v0": v0, "v1": v1, "t0": t0, "t1": t1,
+                     "tip": f"{metric['label']}：{peer['subject_name']} {t0 + ' 亿元' if t0 is not None else '—'}；"
+                            f"{peer['name']} {t1 + ' 亿元' if t1 is not None else '—'}"})
+    if not rows:
+        return None
+    return paired_bars(rows, (peer["subject_name"], peer["name"]), mode="peer")
 
 
 def price_ladder(levels: dict) -> dict:
@@ -542,3 +768,92 @@ def funnel(batch: dict, labels: list[tuple[str, str]]) -> dict | None:
     rows = [{"label": label, "value": float(counts[key]), "text": f"{counts[key]:,}",
              "tip": f"{label}：{counts[key]:,} 家"} for key, label in labels if isinstance(counts.get(key), int)]
     return bars(rows, start=40.0, end=86.0)
+
+
+def batch_overview(batch: dict) -> dict | None:
+    """Industry distribution and 60-day pre-screening returns across the 20 batch candidates."""
+    q20 = batch.get("q20") or []
+    if not q20:
+        return None
+    l5 = set((batch.get("l5") or {}).get("codes") or [])
+    counts: dict[str, int] = {}
+    picked_industries: dict[str, int] = {}
+    for r in q20:
+        ind = r.get("industry") or "未分类"
+        counts[ind] = counts.get(ind, 0) + 1
+        if r.get("code") in l5:
+            picked_industries[ind] = picked_industries.get(ind, 0) + 1
+    ind_rows = []
+    for ind, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        p = picked_industries.get(ind, 0)
+        ind_rows.append({"label": ind, "value": float(n), "emphasis": p > 0,
+                         "text": f"{n} 家" + (f"（选 {p}）" if p else ""),
+                         "tip": f"{ind}：候选 {n} 家" + (f"，其中选定 {p} 家" if p else "")})
+    mom_rows = []
+    for r in q20:
+        ret = r.get("return_60d")
+        val = float(ret) * 100 if isinstance(ret, (int, float)) else None
+        name = r.get("name") or r.get("code", "")
+        mom_rows.append({"label": name, "value": val, "emphasis": r.get("code") in l5,
+                         "text": f"{val:+.1f}%" if val is not None else "—",
+                         "tip": f"{name}：初筛前近 60 个交易日 {f'{val:+.2f}%' if val is not None else '未记录'}"
+                                + ("（选定）" if r.get("code") in l5 else "")})
+    return {"industries": bars(ind_rows, start=30.0, end=78.0),
+            "momentum": bars(mom_rows, start=28.0, end=82.0)}
+
+
+def candidate_sparks(q20: list[dict]) -> dict[str, dict]:
+    """Four-year deducted net profit mini columns for each candidate with full history."""
+    out = {}
+    for r in q20 or []:
+        years, profits = r.get("years") or [], r.get("profit_dedt") or []
+        if len(years) == 4 and len(profits) == 4 and all(isinstance(v, (int, float)) for v in profits):
+            vals = [round(v / 1e8, 2) for v in profits]
+            spark = spark_columns(vals)
+            tips = [f"{y} 年扣非净利：{v:.2f} 亿元" for y, v in zip(years, vals)]
+            for bar, tip in zip(spark["bars"] if spark else [], tips):
+                bar["tip"] = tip
+            roes = r.get("roe_dt") or []
+            roe_text = " → ".join(f"{v:.1f}%" for v in roes) if len(roes) == 3 and all(isinstance(v, (int, float)) for v in roes) else None
+            out[r["code"]] = {"spark": spark, "span": f"{years[0]}–{years[-1]}",
+                              "latest": f"{vals[-1]:.2f}", "base": f"{vals[0]:.2f}",
+                              "roe_text": roe_text, "data": tips}
+    return out
+
+
+def market_strip(batch: dict) -> dict | None:
+    """Proportional breakdown of market boards in the screened universe."""
+    markets = (batch.get("universe") or {}).get("markets") or {}
+    items = [(k, v) for k, v in markets.items() if isinstance(v, int) and v > 0]
+    total = sum(v for _, v in items)
+    if not total:
+        return None
+    segments, cursor = [], 0.0
+    for i, (k, v) in enumerate(items):
+        pct = round(v / total * 100, 1)
+        w = round(100.0 - cursor if i == len(items) - 1 else v / total * 100, 2)
+        segments.append({"label": k, "count": v, "pct": pct, "x": round(cursor, 2), "w": max(w, 0.5),
+                         "cls": f"b{i % 4}", "tip": f"{k}：{v} 家（占粗筛池 {pct:.1f}%）"})
+        cursor += w
+    return {"segments": segments, "total": total}
+
+
+def verdict_summary(companies: list) -> dict | None:
+    """Breakdown of latest research verdicts across actively researched companies on the home page."""
+    if not companies:
+        return None
+    buckets = [("值得继续研究", "tier-2"), ("需要谨慎", "tier-1"), ("暂不值得", "tier-0"), ("复核未通过", "failed")]
+    counts = {label: 0 for label, _ in buckets}
+    for c in companies:
+        key = c["verdict"] if c["passed"] and c["verdict"] in counts else "复核未通过"
+        counts[key] = counts.get(key, 0) + 1
+    total = len(companies)
+    active = [(label, cls, counts[label]) for label, cls in buckets if counts[label] > 0]
+    items, cursor = [], 0.0
+    for i, (label, cls, count) in enumerate(active):
+        pct = round(count / total * 100, 1) if total else 0.0
+        w = round(100.0 - cursor if i == len(active) - 1 else count / total * 100, 2)
+        items.append({"label": label, "cls": cls, "count": count, "pct": pct,
+                      "x": round(cursor, 2), "w": max(w, 0.5)})
+        cursor += w
+    return {"items": items, "total": total}

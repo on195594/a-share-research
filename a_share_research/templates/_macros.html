@@ -20,8 +20,15 @@
 
 {% macro cites(item, rows, sources={}, opened=false) %}
 {% if item.cites %}
+{% set counts = namespace(quotes=0, calcs=0, tables=0) %}
+{% for c in item.cites %}
+  {% if c.ref %}
+    {% set r = rows.get(c.ref) %}
+    {% if r and r.calculation %}{% set counts.calcs = counts.calcs + 1 %}{% elif r %}{% set counts.tables = counts.tables + 1 %}{% endif %}
+  {% else %}{% set counts.quotes = counts.quotes + 1 %}{% endif %}
+{% endfor %}
 <details class="source"{% if opened %} open{% endif %}>
-  <summary>出处</summary>
+  <summary>出处{% if counts.quotes or counts.calcs or counts.tables %}<span class="cite-meta">{% if counts.quotes %}原文 {{ counts.quotes }}{% endif %}{% if counts.calcs %}{{ ' · ' if counts.quotes else '' }}计算 {{ counts.calcs }}{% endif %}{% if counts.tables %}{{ ' · ' if counts.quotes or counts.calcs else '' }}表值 {{ counts.tables }}{% endif %}</span>{% endif %}</summary>
   <ul>
   {% for c in item.cites %}
     {% if c.ref %}

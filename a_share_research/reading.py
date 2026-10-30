@@ -4,7 +4,7 @@ import re
 from datetime import date
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
-from a_share_research import db, research, service
+from a_share_research import charts, db, research, service
 
 PAGE_SIZE = 20
 
@@ -168,8 +168,9 @@ def peer_snapshots(body: dict) -> list[dict]:
         calculations = [ratio([r['cells'][i] for r in rows], period) for i in (0, 1)]
         if any(c['value'] is not None for c in calculations):
             rows.append({'label': '合并经营现金流 / 归母净利润', 'unit': '倍', 'calculated': True, 'cells': calculations})
-        snapshots.append(item | {'period': period, 'rows': rows, 'ratio_missing': not any(c['value'] is not None for c in calculations),
-                                 'ratio_reasons': calculations})
+        entry = item | {'period': period, 'rows': rows, 'ratio_missing': not any(c['value'] is not None for c in calculations),
+                        'ratio_reasons': calculations}
+        snapshots.append(entry | {'chart': charts.peer_bars(entry)})
     return snapshots
 
 

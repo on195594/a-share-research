@@ -60,7 +60,7 @@
     <rect class="hit" x="0" y="{{ r.y }}" width="100%" height="34"/>
     <text class="label" x="0" y="{{ r.y + 21 }}">{{ r.label }}</text>
     <line class="track" x1="{{ c.track[0] }}%" x2="{{ c.track[1] }}%" y1="{{ r.y + 17 }}" y2="{{ r.y + 17 }}"/>
-    {% if r.x_before is not none %}<rect class="span" x="{{ r.seg_x }}%" y="{{ r.y + 15 }}" width="{{ r.seg_w }}%" height="4" rx="2"/>{% endif %}
+    {% if r.x_before is not none %}<rect class="span {{ r.direction or 'flat' }}" x="{{ r.seg_x }}%" y="{{ r.y + 15 }}" width="{{ r.seg_w }}%" height="4" rx="2"/>{% endif %}
     <circle class="dot s0" cx="{{ r.x_after }}%" cy="{{ r.y + 17 }}" r="4.5"/>
     {% if r.x_before is not none %}<circle class="before" cx="{{ r.x_before }}%" cy="{{ r.y + 17 }}" r="7"/>{% endif %}
     <text class="value" x="100%" y="{{ r.y + 21 }}" text-anchor="end"><tspan class="muted-fill">{{ r.before or '—' }} →</tspan> <tspan class="strong">{{ r.after }}%</tspan></text>
@@ -69,6 +69,53 @@
   {% endfor %}
 </svg>
 <ul class="legend"><li><span class="key ring" aria-hidden="true"></span>上年同期 {{ c.prior }}</li><li><span class="key dotkey s0" aria-hidden="true"></span>最新期 {{ c.latest }}</li></ul>
+{% endmacro %}
+
+{# Horizontal waterfall / conversion bridge (profit -> operating cash -> capex step -> FCF). #}
+{% macro waterfall(c, title) %}
+<svg class="chart waterfall" width="100%" height="{{ c.height }}" role="img" aria-label="{{ title }}，数值见下方">
+  {% for t in c.ticks %}<line class="grid faint" x1="{{ t.x }}%" x2="{{ t.x }}%" y1="0" y2="{{ c.axis_y - 10 }}"/><text class="tick" x="{{ t.x }}%" y="{{ c.axis_y }}" dy="4" text-anchor="middle">{{ t.text }}</text>{% endfor %}
+  <line class="grid zero" x1="{{ c.zero }}%" x2="{{ c.zero }}%" y1="0" y2="{{ c.axis_y - 10 }}"/>
+  {% for conn in c.connectors %}<line class="connector" x1="{{ conn.x }}%" x2="{{ conn.x }}%" y1="{{ conn.y1 }}" y2="{{ conn.y2 }}"/>{% endfor %}
+  {% for r in c.rows %}
+  <g class="slot" data-tip="{{ r.tip }}">
+    <rect class="hit" x="0" y="{{ r.y }}" width="100%" height="32"/>
+    <text class="label{{ ' strong' if r.role in ('cash', 'fcf') }}" x="0" y="{{ r.y + 20 }}">{{ r.label }}</text>
+    {% if not r.missing %}
+    <rect class="bar {{ 'outline s1' if r.role == 'step' else ('s1' if r.role == 'fcf' else ('dim' if r.role == 'core' else 's0')) }}"
+          x="{{ r.x }}%" y="{{ r.y + 9 }}" width="{{ r.w }}%" height="14" rx="2"/>
+    {% endif %}
+    <text class="value{{ ' strong' if r.role in ('cash', 'fcf') }}" x="100%" y="{{ r.y + 20 }}" text-anchor="end">{{ r.text }}</text>
+    <title>{{ r.tip }}</title>
+  </g>
+  {% endfor %}
+</svg>
+<ul class="legend"><li><span class="key s0" aria-hidden="true"></span>利润与经营现金流</li><li><span class="key outline-key s1" aria-hidden="true"></span>购建长期资产支出</li><li><span class="key s1" aria-hidden="true"></span>减购建后净额</li></ul>
+{% endmacro %}
+
+{# Paired horizontal bars on a shared zero-included scale (prior vs latest, or subject vs peer). #}
+{% macro paired(c, title) %}
+<svg class="chart paired" width="100%" height="{{ c.height }}" role="img" aria-label="{{ title }}，数值见下方">
+  <line class="grid zero" x1="{{ c.zero }}%" x2="{{ c.zero }}%" y1="0" y2="{{ c.height }}"/>
+  {% for r in c.rows %}
+  <g class="slot" data-tip="{{ r.tip }}">
+    <rect class="hit" x="0" y="{{ r.y }}" width="100%" height="36"/>
+    <text class="label" x="0" y="{{ r.y + 22 }}">{{ r.label }}</text>
+    {% if not r.m0 %}<rect class="bar {{ 'dim' if c.mode == 'period' else 's0' }}" x="{{ r.x0 }}%" y="{{ r.y + 8 }}" width="{{ r.w0 }}%" height="8" rx="1.5"/>{% endif %}
+    {% if not r.m1 %}<rect class="bar {{ 's0' if c.mode == 'period' else 's1' }}" x="{{ r.x1 }}%" y="{{ r.y + 18 }}" width="{{ r.w1 }}%" height="8" rx="1.5"/>{% endif %}
+    {% if c.mode == 'period' %}
+    <text class="value" x="100%" y="{{ r.y + 22 }}" text-anchor="end"><tspan class="muted-fill">{{ r.t0 or '—' }} →</tspan> <tspan class="strong">{{ r.t1 or '—' }}</tspan></text>
+    {% else %}
+    <text class="value" x="100%" y="{{ r.y + 22 }}" text-anchor="end"><tspan class="strong">{{ r.t0 or '—' }}</tspan> <tspan class="muted-fill">/ {{ r.t1 or '—' }}</tspan></text>
+    {% endif %}
+    <title>{{ r.tip }}</title>
+  </g>
+  {% endfor %}
+</svg>
+<ul class="legend">
+  <li><span class="key {{ 'dim-key' if c.mode == 'period' else 's0' }}" aria-hidden="true"></span>{{ c.labels[0] }}</li>
+  <li><span class="key {{ 's0' if c.mode == 'period' else 's1' }}" aria-hidden="true"></span>{{ c.labels[1] }}</li>
+</ul>
 {% endmacro %}
 
 {# Small multiples: one row per metric, a sparkline, the latest saved value and its YoY. #}
@@ -87,6 +134,7 @@
 
 {% macro spark_line(s) %}
 <svg class="spark" width="100%" height="{{ s.height }}" aria-hidden="true">
+  {% for st in s.stems or [] %}<line class="stem" x1="{{ st.x }}%" y1="{{ st.y }}" x2="{{ st.x }}%" y2="{{ s.height - 2 }}"/>{% endfor %}
   {% for seg in s.segments %}<line class="line s0" x1="{{ seg.x1 }}%" y1="{{ seg.y1 }}" x2="{{ seg.x2 }}%" y2="{{ seg.y2 }}"/>{% endfor %}
   {% for d in s.dots if d.last or d.isolated %}<circle class="dot s0{{ ' end' if d.last }}" cx="{{ d.x }}%" cy="{{ d.y }}" r="{{ 3.5 if d.last else 2.5 }}"/>{% endfor %}
   {% for t in s.slots %}<g class="slot" data-tip="{{ t.tip }}"><rect class="hit" x="{{ t.x }}%" y="0" width="{{ t.w }}%" height="{{ s.height }}"/><title>{{ t.tip }}</title></g>{% endfor %}
@@ -94,13 +142,14 @@
 {% endmacro %}
 
 {% macro vitals(v, title="财务体征") %}
+{% set fh = v.flow_heading or '单季' %}
 <figure class="figure vitals" data-chart>
   <figcaption><strong>{{ title }}</strong>
-    <span class="caption-note">亿元{% if v.flows %}；单季 {{ v.flow_span }}{% endif %}{% if v.stocks %}，期末 {{ v.stock_span }}{% endif %}。每行按自身数值缩放，只看走势，不比较行间高度。</span>
+    <span class="caption-note">亿元{% if v.flows %}；{{ fh }} {{ v.flow_span }}{% endif %}{% if v.stocks %}，期末 {{ v.stock_span }}{% endif %}。每行按自身数值缩放，只看走势，不比较行间高度。</span>
     <span class="readout" aria-live="polite">悬停或点按走势读出每一期</span></figcaption>
   {% if v.flows %}
   <table class="vitals-table">
-    <thead><tr><th scope="col">单季</th><th scope="col"><span class="visually-hidden">近 8 季走势</span></th><th scope="col" class="num">{{ v.flow_period }}</th><th scope="col" class="num">同比</th></tr></thead>
+    <thead><tr><th scope="col">{{ fh }}</th><th scope="col"><span class="visually-hidden">近 8 期走势</span></th><th scope="col" class="num">{{ v.flow_period }}</th><th scope="col" class="num">同比</th></tr></thead>
     <tbody>
     {% for r in v.flows %}
       <tr><th scope="row">{{ r.label }}</th><td class="spark-cell">{% if r.spark %}{{ spark_cols(r.spark) }}{% else %}<span class="muted">缺失</span>{% endif %}</td>
@@ -122,7 +171,7 @@
     </tbody>
   </table>
   {% endif %}
-  <p class="figure-note">单季由同年相邻累计期相减，一季度直接取值；最深一根为最新季，同比为与上年同季比较。期末为时点值，右列为一年前同一期末的保存值，不相减推导变化。四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券。来源：经营序列。</p>
+  <p class="figure-note">{% if fh == '单季' %}单季由同年相邻累计期相减，一季度直接取值；最深一根为最新季，同比为与上年同季比较。{% else %}迷你柱为已存历年全年数值，右列为最新报告期累计值与同比。{% endif %}期末为时点值，右列为一年前同一期末的保存值，不相减推导变化。四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券。来源：{{ v.source or '经营序列' }}。</p>
   {{ data_list(v) }}
 </figure>
 {% endmacro %}
@@ -138,6 +187,8 @@
   {% if f.kind == 'columns' %}{{ columns(f.chart, f.title) }}
   {% elif f.kind == 'lines' %}{{ lines(f.chart, f.title) }}
   {% elif f.kind == 'dumbbell' %}{{ dumbbell(f.chart, f.title) }}
+  {% elif f.kind == 'waterfall' %}{{ waterfall(f.chart, f.title) }}
+  {% elif f.kind == 'paired' %}{{ paired(f.chart, f.title) }}
   {% else %}{{ bars(f.chart, f.title) }}{% endif %}
   <p class="figure-note">{{ f.note }}来源：{{ f.source }}。</p>
   {{ data_list(f.chart) }}

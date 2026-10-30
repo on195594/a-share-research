@@ -5,11 +5,11 @@
 {% block main %}
 <section class="narrow">
   <h1>{{ reports[0].name }}</h1>
-  <p class="code">{{ code }}</p>
+  <p class="code">{{ code }} · 共 {{ reports | length }} 份报告{% if vitals_report %} · 最新覆盖至 {{ vitals_report.period }}{% endif %}</p>
   {% if progress is defined %}{% include "_progress.html" %}{% endif %}
   {% if vitals %}
   {{ vitals_panel(vitals, "财务体征") }}
-  <p class="small muted">取自<a href="/reports/{{ vitals_report.id }}">{{ vitals_report.created_at[:10] }} 的报告</a>保存的经营序列，财务覆盖至 {{ vitals_report.period }}；不是实时数据。</p>
+  <p class="small muted">取自<a href="/reports/{{ vitals_report.id }}">{{ vitals_report.created_at[:10] }} 的报告</a>保存的{{ vitals_report.source_kind or "经营序列" }}，财务覆盖至 {{ vitals_report.period }}；不是实时数据。</p>
   {% endif %}
   <details><summary>查看程序数据对照</summary>{% include "_comparison.html" %}</details>
   <h2>研究记录</h2>

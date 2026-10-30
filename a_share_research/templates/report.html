@@ -58,10 +58,10 @@
   {% set focus = request.query_params.get("claim", "") if request else "" %}
   <nav aria-label="报告章节">
     <ul class="toc">
-      <li><a href="#risks">风险与反证</a></li>
-      {% if body.question or content.answer %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
-      {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点</a></li>{% endif %}
-      <li><a href="#business">业务</a></li>
+      <li><a href="#risks">风险与反证{% if content.risks %}<small class="num">{{ content.risks | length }}</small>{% endif %}</a></li>
+      {% if body.question or content.answer %}<li><a href="#answer">{{ answer_title }}{% if content.answer %}<small class="num">{{ content.answer | length }}</small>{% endif %}</a></li>{% endif %}
+      {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点<small class="num">{{ content.checkpoints | length }}</small></a></li>{% endif %}
+      <li><a href="#business">业务{% if content.business %}<small class="num">{{ content.business | length }}</small>{% endif %}</a></li>
       <li><a href="#financial">财务与走势</a></li>
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
@@ -100,8 +100,8 @@
     <h2>财务与走势</h2>
     {% if vitals %}{{ vitals_panel(vitals, "财务体征 · 近 8 期") }}{% endif %}
     {% if figures %}
-    {# With the vitals panel up front, only the same-period comparisons stay open; longer history folds. #}
-    {% set shown = 2 if vitals else 4 %}
+    {# Four core comparison/conversion figures stay open; multi-year trajectories fold. #}
+    {% set shown = 4 %}
     <div class="figures">{% for f in figures[:shown] %}{{ figure(f) }}{% endfor %}</div>
     {% if figures | length > shown %}
     <details class="block more-figures">

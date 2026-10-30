@@ -90,9 +90,26 @@
   <h2 id="companies">主动研究过的公司 · {{ companies|length }} 家</h2>
   {% if companies %}<p class="hint">右侧为最新一份报告的研究判断；未通过复核的不展示判断。检查点尚不能自动判定是否到期。</p>{% endif %}
   {% if companies %}
+  {% if verdict_summary is defined and verdict_summary %}
+  <div class="verdict-overview">
+    <svg width="100%" height="8" class="strip-bar" role="img" aria-label="主动研究过的公司最新判断分布">
+      {% for item in verdict_summary["items"] %}
+      <rect x="{{ item.x }}%" y="0" width="{{ item.w }}%" height="8" class="seg {{ item.cls }}">
+        <title>{{ item.label }}：{{ item.count }} 家（{{ item.pct }}%）</title>
+      </rect>
+      {% endfor %}
+    </svg>
+    <div class="filter-pills" role="toolbar" aria-label="按最新研究判断筛选公司">
+      <button type="button" class="pill active" data-verdict-filter="all" aria-pressed="true">全部 <span class="num">{{ verdict_summary.total }}</span></button>
+      {% for item in verdict_summary["items"] %}
+      <button type="button" class="pill" data-verdict-filter="{{ item.label }}" aria-pressed="false"><i class="seg-dot {{ item.cls }}"></i>{{ item.label }} <span class="num">{{ item.count }}</span></button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <ul class="list companies">
   {% for c in companies %}
-    <li>
+    <li data-verdict="{{ c.verdict if c.passed else '复核未通过' }}">
       <div class="company-row">
         <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
         {% if c.passed %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% else %}<span class="company-verdict flag">复核未通过</span>{% endif %}

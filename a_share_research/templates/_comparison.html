@@ -21,9 +21,19 @@
   {% if comparison.diff %}
   {% set diff = comparison.diff %}
   {% set moved = diff.valuation | rejectattr('unchanged') | list %}
-  <details>
-    <summary>程序核对的指标变化</summary>
+  <details {% if moved or diff.revised or diff.disclosed %}open{% endif %}>
+    <summary>程序核对的指标变化{% if moved or diff.revised %} · {{ (moved | length) + (diff.revised | length) }} 项变动{% endif %}</summary>
     <p class="hint">仅比较同指标、同单位、同期间的已记录值；不同期间的累计值不相减，缺失值不按零处理。</p>
+    {% if moved or diff.revised %}
+    <dl class="diff-grid">
+      {% for r in diff.revised %}
+      <div><dt>{{ r.label }} <small>{{ r.period }} · 修订</small></dt><dd class="num"><span class="muted">{{ r.before }} →</span> <strong>{{ r.after }}</strong> <small>{{ r.unit }}</small></dd></div>
+      {% endfor %}
+      {% for v in moved %}
+      <div><dt>{{ v.label }} <small>{{ v.before[0] }} → {{ v.after[0] }}</small></dt><dd class="num"><span class="muted">{{ v.before[1] }} →</span> <strong>{{ v.after[1] }}</strong> <small>{{ v.unit }}</small></dd></div>
+      {% endfor %}
+    </dl>
+    {% endif %}
     <ul>
       <li>新增财务数据覆盖期：{{ diff.disclosed | join('、') if diff.disclosed else '无' }}（不代表已完整阅读新披露原文）。</li>
       {% if diff.backfilled %}<li>补齐比较期：{{ diff.backfilled | join('、') }}（不是新披露）。</li>{% endif %}

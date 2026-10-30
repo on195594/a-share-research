@@ -70,6 +70,69 @@ function reveal() {
 window.addEventListener("hashchange", reveal);
 if (location.hash) reveal();
 
+// Home page verdict filter pills: filter the researched companies list in place.
+document.addEventListener("click", (event) => {
+  const pill = event.target.closest?.("[data-verdict-filter]");
+  if (!pill) return;
+  const target = pill.dataset.verdictFilter;
+  const bar = pill.closest(".filter-pills");
+  if (bar) {
+    bar.querySelectorAll("[data-verdict-filter]").forEach((btn) => {
+      const on = btn === pill;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    });
+  }
+  document.querySelectorAll(".companies > li[data-verdict]").forEach((item) => {
+    item.hidden = target !== "all" && item.dataset.verdict !== target;
+  });
+});
+
+// Section-level citation expand/collapse toggle for report chapters with multiple citations.
+for (const section of document.querySelectorAll("article > section[id]")) {
+  const heading = section.querySelector(":scope > h2");
+  const sources = () => [...section.querySelectorAll(":scope > .items details.source")];
+  if (!heading || sources().length < 2) continue;
+  const head = document.createElement("div");
+  head.className = "section-head";
+  heading.before(head);
+  head.append(heading);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cite-toggle";
+  const sync = () => {
+    const allOpen = sources().every((d) => d.open);
+    btn.textContent = allOpen ? "收起本节出处" : "展开本节出处";
+    btn.setAttribute("aria-expanded", String(allOpen));
+  };
+  sync();
+  btn.addEventListener("click", () => {
+    const next = !sources().every((d) => d.open);
+    sources().forEach((d) => { d.open = next; });
+    sync();
+  });
+  section.addEventListener("toggle", sync, true);
+  head.append(btn);
+}
+
+// Sticky chapter index: highlight the chapter currently in view.
+const tocLinks = [...document.querySelectorAll(".toc a[href^='#']")];
+if (tocLinks.length && "IntersectionObserver" in window) {
+  const byId = new Map(tocLinks.map((a) => [a.getAttribute("href").slice(1), a]));
+  const targets = [...byId.keys()].map((id) => document.getElementById(id)).filter(Boolean);
+  const activate = (id) => {
+    tocLinks.forEach((a) => a.classList.toggle("active", a.getAttribute("href") === `#${id}`));
+  };
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible.length) activate(visible[0].target.id);
+    },
+    { rootMargin: "-64px 0px -65% 0px", threshold: 0 }
+  );
+  targets.forEach((el) => observer.observe(el.closest("section") || el));
+}
+
 // Elapsed timers count locally between server updates.
 function tick() {
   for (const el of document.querySelectorAll("[data-elapsed]")) {

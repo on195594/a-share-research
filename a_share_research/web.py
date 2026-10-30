@@ -300,6 +300,7 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     pending, pending_more = reading.pending_reviews(conn)
     listed = {r['id'] for r in pending}
     return render(request, "home.html", session, status, companies=companies, batch_only=batch_only,
+                  verdict_summary=charts.verdict_summary(companies),
                   pending=pending, pending_more=pending_more,
                   due=sources.due_report(datetime.now(db.SHANGHAI).date()),
                   active=[r for r in active_runs() if r['id'] not in listed], batch=batch,
@@ -428,7 +429,7 @@ def report_page(request: Request, report_id: int):
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence,
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
-                  figures=charts.financial_charts(body, fin), vitals=charts.vitals(body),
+                  figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
@@ -596,8 +597,17 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
     draft = None
     if advancement['status'] == 'passed' and progress_item is not None and 0 <= progress_item < len(advancement['body']['items']):
         draft = advancement['body']['items'][progress_item]['next_step']['text']
-    # The newest report with an operating series lends its vitals to the company page.
-    latest = next(((r, v) for r in reports if (v := charts.vitals(json.loads(r["body"])))), (None, None))
+    # The newest report with an operating series lends its vitals to the company page,
+    # falling back to the newest report's saved T.* financial table when no series exists.
+    latest = next(((r, v) for r in reports if (v := charts.vitals(json.loads(r["body"])))), None)
+    if latest is None:
+        for r in reports:
+            b = json.loads(r["body"])
+            t = [x for x in (b.get("table") or []) if isinstance(x, dict) and str(x.get("id", "")).startswith("T.")]
+            if v := charts.vitals(b, t):
+                latest = (r, v)
+                break
+    latest = latest or (None, None)
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
                   vitals=latest[1], vitals_report=latest[0],
                   price=latest_price(code), comparison=reading.comparison(conn, selected),
@@ -700,6 +710,8 @@ def batch_page(request: Request, batch_id: int):
     return render(request, "batch.html", session, batch=batch, draft=draft,
                   draft_codes=[p["code"] for p in draft.get("picks", [])],
                   results=results, names=names, performance=charts.batch_returns(batch, results, names),
+                  overview=charts.batch_overview(batch), sparks=charts.candidate_sparks(batch.get("q20") or []),
+                  market_strip=charts.market_strip(batch),
                   frozen_by=screening.FROZEN_BY)
 
 

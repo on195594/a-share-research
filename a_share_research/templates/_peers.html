@@ -1,6 +1,7 @@
+{% from "_charts.html" import paired, data_list %}
 {% if peer_snapshots %}
 <details class="peer-snapshots" id="peer-snapshots" tabindex="-1">
-  <summary>已存同行快照对照 · {{ peer_snapshots|length }} 家同行</summary>
+  <summary>已存同行快照对照 · {{ peer_snapshots|length }} 家同行（{{ peer_snapshots | map(attribute='name') | join('、') }}）</summary>
   <p class="notice caution small">历史版本未经重新核对，不保证已覆盖后续更正。<a href="?evidence=1#evidence">查看本报告记录的缺口</a>。</p>
   <p class="small">仅列本报告原研究范围中已查询的公司，未重新选择同行或刷新资料；不推断选择理由或完整可比组，请结合<a href="{{ '#answer' if body.question else '#financial' }}">{{ '原研究问题与回答' if body.question else '原报告正文' }}</a>阅读。同名指标不代表业务、集团范围或现金流来源相同，不据高低排名。</p>
   {% for peer in peer_snapshots %}
@@ -8,6 +9,13 @@
   {% if peer.period and peer.rows %}<p class="small">对照期：{{ financial_period(peer.period) }} · 累计口径沿用生成时契约，并非逐行重新证明。仅取所选指标中已存的最近共同期间，各对公司可能不同期，不代表当前最新资料。</p>
   {% elif peer.period %}<p class="small">记录中的共同日期：<time datetime="{{ peer.period }}">{{ peer.period }}</time>，该日期不等于期间口径已确认。</p>{% endif %}
   {% if peer.rows %}
+  {% if peer.chart %}
+  <figure class="figure peer-figure" data-chart>
+    <figcaption><strong>{{ peer.subject_name }} 对比 {{ peer.name }} · 金额（亿元）</strong><span class="readout" aria-live="polite">同期间已存快照对比，非完整可比组</span></figcaption>
+    {{ paired(peer.chart, peer.subject_name ~ "与" ~ peer.name ~ "金额对照") }}
+    {{ data_list(peer.chart) }}
+  </figure>
+  {% endif %}
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{ peer.subject_name }}与{{ peer.name }}历史快照对照">
     <table class="peer-table">
       <thead><tr><th scope="col">指标</th><th scope="col" class="num">{{ peer.subject_name }}<small>{{ peer.subject_code }}</small></th><th scope="col" class="num">{{ peer.name }}<small>{{ peer.code }}</small></th></tr></thead>
