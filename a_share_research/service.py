@@ -6,7 +6,7 @@ import sqlite3
 
 from a_share_research import db
 from a_share_research.evidence import report_source_view, projection
-from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view
+from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
 VERSION = "research-v1"
 
@@ -195,6 +195,7 @@ def diagnostics(status: str, body: dict, *, gaps: list | None = None,
     return {"status": "passed" if status == "done" else "review_failed" if status == "failed" and problems else status,
             "problems": problems, "issue_states": legacy_issue_view(problems),
             "failure": body.get("failure"), "review_audit": audit_view(body.get("review_audit")),
+            "review_binding": binding_view(body.get("review_binding")),
             "stop_reasons": body.get("stop_reasons", []), "gaps": missing, "gaps_basis": gaps_basis, "next_step": next_step,
             "announcement_searches": body.get("announcement_searches", announcement_searches or []),
             "limits": "缺口与预算提示不是失败根因判定；不据此推断未披露或清除投资门禁。"}

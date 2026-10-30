@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
-MAX_CALLS = 21  # loop guard, not a cost limit: 12 exploration turns, compose, 3 reviews (+1 format retry each), 2 repairs
+MAX_CALLS = 21  # shared run guard, including acquisition in repairs and review format corrections
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 # (id, label, unit, statement, column, divisor)
 METRICS = [
@@ -607,14 +607,15 @@ def _parse(text: str) -> dict | None:
 
 
 class Runner:
-    def __init__(self, conn, run_id: int):
+    def __init__(self, conn, run_id: int, *, max_calls: int = MAX_CALLS):
         self.conn, self.run_id, self.calls = conn, run_id, 0
+        self.max_calls = min(max_calls, MAX_CALLS)
         self.deadline = time.monotonic() + 1800
         self.stage = "gather"
 
     def call(self, step: str, prompt: str, *, messages=None, tools=None):
         self.stage = step
-        if self.calls >= MAX_CALLS:
+        if self.calls >= self.max_calls:
             raise ResearchError("模型调用次数超过上限")
         timeout = int(min(600, self.deadline - time.monotonic()))
         if timeout <= 0:
@@ -684,7 +685,7 @@ def _review_issues(text: str) -> list[dict]:
     return verdict["issues"]
 
 
-def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict]) -> dict | None:
+def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict], *, acquisition=None) -> dict | None:
     prompt = f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请修正后输出完整的新报告。
 可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
 补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
@@ -703,6 +704,15 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 
 # 资料
 {material.prompt_block()}"""
+    if acquisition is not None:
+        prompt += """
+# 补证与引用
+先区分已有原文未引用、需要补读、仍无法取得的证据。已有页直接给支持主张的 cites；
+缺页或跨期/同业口径不全时可用同一组只读工具自主补证及 calculate，不凭表值伪造原文。
+补证与探索共用剩余额度；工具失败或无新证据时明确缺口，必要时撤回不成立的论断，
+但重要遗漏与用户要求不能靠一句“未知”自动关闭，必须接受独立复核。来源冲突不得混合。"""
+        return acquisition.write(prompt, "repair")
+    # Frozen replay and callers without an acquisition session never fetch new evidence.
     return _parse(runner.ask("repair", prompt))
 
 
@@ -831,6 +841,36 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
                           error="研究核查未通过，不展示结论")
 
 
+def revise(runner, material, report, ledger, *, acquisition=None):
+    """Check and independently review each draft; keep one ledger across evidence additions."""
+    problems: list[dict] = []
+    # Repairs may add evidence within the original session's remaining limits.
+    # Every check and review binds to the current persisted material, never the first draft's hash.
+    for attempt in range(3):
+        reviewed = False  # A changed draft never inherits an earlier independent endorsement.
+        runner.stage = "check"
+        problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON",
+                                                             "type": "generation_format"}]
+        if any(p.get("type") == "source_input" for p in problems):
+            problems += ledger.pending()
+            break  # Source identity conflicts cannot be repaired by rewriting prose.
+        if not problems:
+            try:
+                problems = review(runner, material, report, ledger)
+                reviewed = True
+            except ReviewFormatError as exc:
+                problems = ledger.pending() + [{"where": "review", "problem": str(exc), "type": "review_format"}]
+                break  # A malformed reviewer cannot be fixed by asking the writer again.
+        else:
+            problems += ledger.pending()
+        if not problems or attempt == 2:
+            break
+        ledger.protect_risks(report)
+        report = repair(runner, material, report, problems, acquisition=acquisition)
+        db.save_material(runner.conn, runner.run_id, material.snapshot())
+    return report, problems, ledger, reviewed
+
+
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, request, request_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
@@ -865,37 +905,18 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                     if not material.extra["question"]:
                         material.extra["question"] = prior_question(prior)
         save_material(material)
+        acquisition = None
         if replay_of is None:
-            from a_share_research.research_tools import explore
-            report = explore(runner, material)
+            from a_share_research.research_tools import Acquisition, explore
+            acquisition = Acquisition(runner, material)
+            report = explore(runner, material, acquisition=acquisition)
             material_sha256 = save_material(material)
         else:
             report = compose(runner, material)
             material_sha256 = identity["material_sha256"]
-        problems: list[dict] = []
         ledger = ReviewLedger()
-        # Acquisition has ended. Repair/review keep their existing, separate run-level guard.
-        for attempt in range(3):
-            reviewed = False  # A changed draft never inherits an earlier independent endorsement.
-            runner.stage = "check"
-            problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON",
-                                                                 "type": "generation_format"}]
-            if any(p.get("type") == "source_input" for p in problems):
-                problems += ledger.pending()
-                break  # Source identity conflicts cannot be repaired by rewriting prose.
-            if not problems:
-                try:
-                    problems = review(runner, material, report, ledger)
-                    reviewed = True
-                except ReviewFormatError as exc:
-                    problems = ledger.pending() + [{"where": "review", "problem": str(exc), "type": "review_format"}]
-                    break  # A malformed reviewer cannot be fixed by asking the writer again.
-            else:
-                problems += ledger.pending()
-            if not problems or attempt == 2:
-                break
-            ledger.protect_risks(report)
-            report = repair(runner, material, report, problems)
+        report, problems, ledger, reviewed = revise(runner, material, report, ledger, acquisition=acquisition)
+        material_sha256 = save_material(material)
         period = max([material.doc.period] + [p for r in material.table if r["id"].startswith("T.") for p in r["values"]])
         body = {
             "code": material.code, "name": material.name, "period": period,
@@ -903,6 +924,9 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "pages": sorted(material.pages), "table": material.table, "market_date": material.market_date,
             "calls": runner.calls,
             "review_audit": ledger.snapshot(),
+            "review_binding": {"draft_sha256": digest(report), "material_sha256": material_sha256,
+                               "completed": reviewed,
+                               "pending_issue_ids": [i["id"] for i in ledger.pending()]},
             "stop_reasons": material.extra.get("stop_reasons", []),
             "question": material.extra.get("question", ""), "parent_report_id": request.get("parent_report_id"),
             "sources": {k: {"document": v["document"], "pages": sorted(map(int, v["pages"]))}

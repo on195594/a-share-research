@@ -4,9 +4,10 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP
 
-from a_share_research import db, sources
+from a_share_research import db, sources, evidence
 
 log = logging.getLogger(__name__)
 
@@ -217,6 +218,10 @@ class ResearchTools:
         """Catalog key for a document, adding it on first sight so read_disclosure can open it."""
         catalog = self.material.extra["catalog"]
         key = next((k for k, v in catalog.items() if v["url"] == doc.url), None)
+        if key is not None:
+            for field in ("code", "period", "url", "sha256"):
+                if catalog[key].get(field) and getattr(doc, field) and catalog[key][field] != getattr(doc, field):
+                    raise evidence.EvidenceError(f"来源 {key} 的 {field} 与既有身份冲突")
         if key is None:
             key = f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
             catalog[key] = doc.info()
@@ -226,12 +231,14 @@ class ResearchTools:
     def run(self, name: str, args: dict) -> dict | list:
         if not isinstance(args, dict):
             raise ValueError("工具参数须为对象")
-        key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
-        if key in self.cache:
-            return self.cache[key]
+        # A renamed purpose does not create new arithmetic evidence or a second C.n row.
+        cache_args = {k: v for k, v in args.items() if k != "label"} if name == "calculate" else args
+        key = json.dumps([name, cache_args], sort_keys=True, ensure_ascii=False)
         spec = next((tool for tool in TOOLS if tool["name"] == name), None)
         if spec is None or set(args) - spec["parameters"]["properties"].keys() or not set(spec["parameters"]["required"]) <= args.keys():
             raise ValueError("未知工具或参数不完整")
+        if key in self.cache:
+            return self.cache[key]
         result = getattr(self, name)(**args)
         self.cache[key] = result
         return result
@@ -279,9 +286,17 @@ class ResearchTools:
         catalog = self.material.extra["catalog"]
         if not isinstance(source, str) or source not in catalog:
             raise ValueError("文档未列出，请先调用 disclosures 或 announcements")
-        doc = self.documents.setdefault(source, sources.Document(**catalog[source]))
+        # Fetch into a candidate: neither a new PDF nor conflicting pages may mutate old evidence.
+        doc = deepcopy(self.documents.get(source) or sources.Document(**catalog[source]))
+        existing = self.material.source_registry().get(source, {})
+        expected = existing.get("document", {})
         if not doc.pages:
             sources.fetch(doc)
+        for field in ("code", "period", "url", "sha256", "title", "announced"):
+            if expected.get(field) and expected[field] != getattr(doc, field):
+                raise evidence.EvidenceError(f"来源 {source} 的 {field} 与已存证据冲突，未合并新页")
+        if expected.get("retrieved_at"):
+            doc.retrieved_at = expected["retrieved_at"]
         if page > len(doc.pages):
             raise ValueError(f"文档只有 {len(doc.pages)} 页")
         terms = [re.sub(r"\s+", "", t) for t in query.split() if t]
@@ -290,13 +305,25 @@ class ResearchTools:
         selected = [p for p in hits if p >= page][:count] if terms else list(range(page, min(page + count, len(doc.pages) + 1)))
         pages = {n: doc.pages[n - 1] for n in selected}
         raw_pages = {n: doc.raw_pages[n - 1] for n in selected}
+        for mode, addition in (("pages", pages), ("raw_pages", raw_pages)):
+            old = existing.get(mode, {})
+            if any(n in old and old[n] != text for n, text in addition.items()):
+                raise evidence.EvidenceError(f"来源 {source} 的已读页内容冲突，未合并新页")
+        # Validate source identity before committing any page or document metadata.
+        candidate = deepcopy(self.material.extra["sources"])
+        if source != "D0":
+            candidate[source] = {"document": doc.info(),
+                                 "pages": existing.get("pages", {}) | pages,
+                                 "raw_pages": existing.get("raw_pages", {}) | raw_pages}
+        evidence.source_registry(doc.info() if source == "D0" else self.material.doc.info(),
+                                 self.material.pages, self.material.raw_pages, candidate, catalog)
+        self.documents[source] = doc
         if source == "D0":
+            self.material.doc = doc
             self.material.pages.update(pages)
             self.material.raw_pages.update(raw_pages)
         else:
-            saved = self.material.extra["sources"].setdefault(source, {"document": doc.info(), "pages": {}, "raw_pages": {}})
-            saved["pages"].update(pages)
-            saved["raw_pages"].update(raw_pages)
+            self.material.extra["sources"][source] = candidate[source]
         return {"source": source, "document": doc.info(), "total_pages": len(doc.pages),
                 "matched_pages": hits[:60], "pages": pages}
 
@@ -324,6 +351,8 @@ class ResearchTools:
         return row
 
 
+REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate"}
+
 FETCH_LIMIT = 24  # evidence-gathering tool calls per run; rounds, time and staleness bound the rest
 CALL_LIMIT = 72  # runaway guard only, so calculations cannot swell the prompt without bound
 
@@ -332,16 +361,124 @@ def _fetches(traces: list[dict]) -> int:
     return sum(t["tool"] != "calculate" for t in traces)
 
 
-def record_stop(material, reason):
+def record_stop(material, reason, stage="explore"):
     stops = material.extra.setdefault("stop_reasons", [])
-    entry = {"stage": "explore", "category": "acquisition_stop", "reason": reason}
+    entry = {"stage": stage, "category": "acquisition_stop", "reason": reason}
     if entry not in stops:
         stops.append(entry)
 
 
-def explore(runner, material, *, budget_seconds: float = 900):
-    from a_share_research.research import RULES, output_schema, _parse, compose
-    toolkit = ResearchTools(material, runner.conn)
+class Acquisition:
+    """One run's tool state and limits, shared by exploration and both repairs.
+
+    This is not a retry scheduler: identical failures are returned from the session cache,
+    and two turns without new evidence end acquisition. The writer then gets one tool-free
+    response within the SAME model-call limit; all unresolved issues still need review.
+    """
+
+    def __init__(self, runner, material, *, budget_seconds=900):
+        self.runner, self.material = runner, material
+        material.extra.setdefault("catalog", {"D0": material.doc.info()})
+        material.extra.setdefault("sources", {})
+        material.extra.setdefault("gaps", [])
+        self.traces = material.extra.setdefault("tools", [])
+        self.toolkit = ResearchTools(material, runner.conn)
+        self.deadline = time.monotonic() + budget_seconds
+        self.rounds = self.stale = 0
+        self.failures = {}
+
+    def evidence_key(self):
+        from a_share_research.reviewing import digest
+        return digest({"sources": self.material.source_registry(), "table": self.material.table,
+                       "methods": self.material.extra.get("methods_used", [])})
+
+    def stopped(self):
+        if time.monotonic() >= self.deadline:
+            return "time_limit"
+        if len(self.traces) >= CALL_LIMIT:
+            return "tool_limit"
+        if self.stale >= 2:
+            return "no_new_evidence"
+        if self.rounds >= 12:
+            return "round_limit"
+        return None
+
+    def tool_result(self, call, stage):
+        name, args = call["name"], call.get("arguments")
+        reason = self.stopped()
+        if not reason and name != "calculate" and _fetches(self.traces) >= FETCH_LIMIT:
+            reason = "fetch_limit"
+        if reason:
+            record_stop(self.material, reason, stage)
+            return {"error": "本次共享取证额度已用尽；按已有证据修正并明确缺口，不能宣称已解决。"}, True
+        started = time.monotonic()
+        sig = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
+        failed = False
+        conflict = None
+        try:
+            if stage == "repair" and name not in REPAIR_TOOLS:
+                raise ValueError("修正只允许发现/读取披露与核验计算，不刷新行情或整套财务数据")
+            if call.get("argumentsError"):
+                raise ValueError(call["argumentsError"])
+            if sig in self.failures:
+                return self.failures[sig], True
+            result = self.toolkit.run(name, args)
+        except evidence.EvidenceError as exc:
+            # Charge and persist the failed attempt, then fail closed without merging any source.
+            failed, result, conflict = True, {"error": str(exc)}, exc
+        except Exception as exc:
+            failed, result = True, {"error": str(exc)}
+            self.failures[sig] = result
+            log.warning("run %s tool %s: %s", self.runner.run_id, name, exc, exc_info=True)
+            gap = f"{name}：{exc}"
+            if gap not in self.material.extra["gaps"]:
+                self.material.extra["gaps"].append(gap)
+        self.traces.append({"tool": name, "arguments": args, "result": result, "error": failed,
+                            "stage": stage, "seconds": round(time.monotonic() - started, 3)})
+        db.save_material(self.runner.conn, self.runner.run_id, self.material.snapshot())
+        if conflict is not None:
+            raise conflict
+        return result, failed
+
+    def write(self, prompt, stage):
+        from a_share_research.research import _parse
+        messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
+        while True:
+            # Keep room for a final draft and a review with its existing format correction.
+            # A smaller caller-supplied limit is never raised to the default.
+            remaining = self.runner.max_calls - self.runner.calls
+            reason = self.stopped() or ("model_limit" if remaining <= 3 else None)
+            if reason:
+                record_stop(self.material, reason, stage)
+                gap = "共享取证已到停止条件；未完成的取证仍未知。"
+                if gap not in self.material.extra["gaps"]:
+                    self.material.extra["gaps"].append(gap)
+                messages.append({"role": "user", "content": gap + "请输出完整报告，不能将缺口当作证据或已解决。",
+                                 "timestamp": int(time.time() * 1000)})
+            tools = [] if reason else [t for t in TOOLS if stage != "repair" or t["name"] in REPAIR_TOOLS]
+            payload = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
+            response = self.runner.call(stage, payload, messages=messages, tools=tools)
+            messages.append(response.message)
+            calls = [c for c in response.message["content"] if c["type"] == "toolCall"]
+            if not calls:
+                db.save_material(self.runner.conn, self.runner.run_id, self.material.snapshot())
+                return _parse(response.text)
+            if reason:
+                # A tool-free final response cannot silently become another acquisition turn.
+                return None
+            before = self.evidence_key()
+            for call in calls:
+                result, failed = self.tool_result(call, stage)
+                messages.append({"role": "toolResult", "toolCallId": call["id"], "toolName": call["name"],
+                                 "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                                 "isError": failed, "timestamp": int(time.time() * 1000)})
+            self.rounds += 1
+            self.stale = self.stale + 1 if self.evidence_key() == before else 0
+
+
+def explore(runner, material, *, acquisition=None, budget_seconds: float = 900):
+    from a_share_research.research import RULES, output_schema
+    acquisition = acquisition or Acquisition(runner, material, budget_seconds=budget_seconds)
     latest = max(material.extra["catalog"].items(), key=lambda item: item[1].get("period", ""), default=None)
     latest_hint = ""
     if latest and latest[1].get("period", "") > material.doc.period:
@@ -360,56 +497,4 @@ def explore(runner, material, *, budget_seconds: float = 900):
 # 起始材料
 {material.prompt_block()}
 """
-    messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
-    deadline = time.monotonic() + budget_seconds
-    traces = material.extra.setdefault("tools", [])
-    seen: set[str] = set()
-    stale = 0
-    for _ in range(12):
-        if time.monotonic() >= deadline or _fetches(traces) >= FETCH_LIMIT or stale >= 2:
-            record_stop(material, "time_limit" if time.monotonic() >= deadline else
-                        "fetch_limit" if _fetches(traces) >= FETCH_LIMIT else "repeated_requests")
-            material.extra["gaps"].append("探索已到停止条件，回答仅依据已取得证据；未完成的取证仍未知。")
-            break
-        payload = json.dumps({"messages": messages, "tools": TOOLS}, ensure_ascii=False)
-        # Stop starting exploration at its budget; let an in-flight model call finish within the run deadline.
-        response = runner.call("explore", payload, messages=messages, tools=TOOLS)
-        messages.append(response.message)
-        calls = [c for c in response.message["content"] if c["type"] == "toolCall"]
-        if not calls:
-            return _parse(response.text)
-        any_new = False
-        for call in calls:
-            failed = False
-            started = time.monotonic()
-            sig = json.dumps([call["name"], call.get("arguments")], sort_keys=True, ensure_ascii=False)
-            any_new |= sig not in seen
-            seen.add(sig)
-            try:
-                # calculate is local exact arithmetic over evidence already in hand; only fetches spend the budget.
-                if ((call["name"] != "calculate" and _fetches(traces) >= FETCH_LIMIT)
-                        or len(traces) >= CALL_LIMIT or time.monotonic() >= deadline):
-                    record_stop(material, "time_limit" if time.monotonic() >= deadline else
-                                "tool_limit" if len(traces) >= CALL_LIMIT else "fetch_limit")
-                    raise ValueError("本次探索预算已用尽，请据已有材料回答并说明缺口")
-                if call.get("argumentsError"):
-                    raise ValueError(call["argumentsError"])
-                result = toolkit.run(call["name"], call["arguments"])
-            except Exception as exc:
-                failed, result = True, {"error": str(exc)}
-                log.warning("run %s tool %s: %s", runner.run_id, call["name"], exc, exc_info=True)
-                gap = f"{call['name']}：{exc}"
-                if gap not in material.extra["gaps"]:
-                    material.extra["gaps"].append(gap)
-            trace = {"tool": call["name"], "arguments": call["arguments"], "result": result,
-                     "error": failed, "seconds": round(time.monotonic() - started, 3)}
-            traces.append(trace)
-            messages.append({"role": "toolResult", "toolCallId": call["id"], "toolName": call["name"],
-                             "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
-                             "isError": failed, "timestamp": int(time.time() * 1000)})
-        db.save_material(runner.conn, runner.run_id, material.snapshot())
-        stale = 0 if any_new else stale + 1
-    else:
-        record_stop(material, "round_limit")
-        material.extra["gaps"].append("探索达到十二轮上限，未完成的取证仍未知。")
-    return compose(runner, material)
+    return acquisition.write(prompt, "explore")

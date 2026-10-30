@@ -24,7 +24,7 @@
 | 价格参考与技术纪律 | `test_price.py` |
 | 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py` |
 | 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_home_staleness.py` |
-| 精确计算与研究工具 | `test_research_tools.py` |
+| 精确计算与研究工具 | `test_research_tools.py`、`test_research_repair.py`（真实披露与离线协议输入验证共享补证、额度、来源冲突及跨材料账本，不代表模型语义验收） |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py` |
 | 历史回测与离线实验 | `test_backtest.py`、`test_backtest_experiment.py` |
 | 公司研究进展 | `test_progress.py`：真实捕获的引用、重复公告反例、幂等、HTTP 与隔离导入；人工绑定的结构互变样本不代表真实模型验收 |

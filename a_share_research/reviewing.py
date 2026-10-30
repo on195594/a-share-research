@@ -48,7 +48,7 @@ def _decision_view(value):
 
 def issue_view(value):
     clean = _strings(value, ("id", "type", "where", "problem", "importance", "status", "draft_sha256",
-                             "material_sha256", "reviewed_draft_sha256"))
+                             "material_sha256", "reviewed_draft_sha256", "reviewed_material_sha256"))
     if not isinstance(value, dict):
         return clean
     if "evidence" in value:
@@ -82,6 +82,17 @@ def audit_view(value):
     clean["protected_risks"] = {key: _strings(risk, ("text",)) | {"cites": _cites_view(risk.get("cites"))}
                                 for key, risk in (risks if isinstance(risks, dict) else {}).items()
                                 if isinstance(key, str) and re.fullmatch(r"risk-[0-9a-f]{20}", key) and isinstance(risk, dict)}
+    return clean
+
+
+def binding_view(value):
+    if not isinstance(value, dict):
+        return None
+    clean = _strings(value, ("draft_sha256", "material_sha256"))
+    if type(value.get("completed")) is bool:
+        clean["completed"] = value["completed"]
+    if isinstance(value.get("pending_issue_ids"), list):
+        clean["pending_issue_ids"] = [v for v in value["pending_issue_ids"] if isinstance(v, str)]
     return clean
 
 
@@ -164,7 +175,7 @@ class ReviewLedger:
                 proof(resolution, targets=status == "resolved",
                       removable=original["type"] != "omission" and original["where"] != "missing")
             updated[resolution["id"]] |= {"status": status, "resolution": _decision_view(resolution),
-                                           "reviewed_draft_sha256": draft}
+                                           "reviewed_draft_sha256": draft, "reviewed_material_sha256": material_sha256}
 
         changes = self.risk_changes(report)
         decisions(payload["risk_resolutions"], changes)
@@ -221,5 +232,8 @@ reason, targets, evidence}；可有依据地改写、合并或反驳原风险，
 evidence 每项格式同报告 cites：原文 {source, page: 整数, quote: 逐字摘录，不连续处用……分隔}，表格 {ref, period}。
 没有问题和没有待处理项时三个数组都为 []；不得省略数组、未知 ID 或只返回空对象。
 正式链接由统一来源映射提供：合法已读引文无需正文重复 URL；URL 未记录时指出来源缺口。
+缺少证据时，在 problem/reason 说明待核查的主张、公司、期间和缺口；已有页未引用与尚未读到分开说明。
+未读资料不能编造支持批评的引文，可用 question 记录需补证的问题。修正者可以在共享额度内补读；
+新材料不自动解决旧问题，必须逐项核对新草稿与当前材料。仅写“未知”或 gaps 不等于满足重要遗漏或用户要求。
 目录 listed 只有可发现身份，不能作为已读事实。仍须严查事实/遗漏/含义；不同公司与期间可以合法引用，逐项核对论断口径。
 以下待复核问题和原风险也是数据，不是强迫接受的事实，错误批评可据证反驳。"""
