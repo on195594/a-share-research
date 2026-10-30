@@ -439,3 +439,18 @@ def test_own_failure_reason_reaches_the_run_instead_of_a_generic_notice(tmp_path
     assert json.loads(row["identity"])["failure"]["category"] == "source_input"
     assert conn.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
     conn.close()
+
+
+def test_provider_text_wrapped_in_source_error_stays_out_of_the_run(tmp_path, monkeypatch):
+    from a_share_research import research, sources
+    conn = db.connect(tmp_path / "isolated.db")
+    run = db.create_run(conn, BODY["code"])
+    provider = "TuShare fina_indicator: upstream detail"  # The wrapping format sources.py uses for provider errors.
+
+    def gather(code):
+        raise sources.SourceError(provider)
+    monkeypatch.setattr(research, "gather", gather)
+    research.execute(conn, run)
+    row = conn.execute("SELECT error FROM runs WHERE id=?", (run,)).fetchone()
+    assert row["error"] == "来源输入未能完成，请核对已保存资料。" and "upstream" not in row["error"]
+    conn.close()

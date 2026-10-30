@@ -923,9 +923,9 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                     else "source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or runner.stage == "gather"
                     else "run_limit" if isinstance(exc, ResearchError)
                     else "model_error" if isinstance(exc, ModelStageError) else "pipeline_error")
-        # Our own errors are written to be actionable and are kept. Model/transport exceptions can contain
-        # internal details; callers receive stage/category, not prompts or credentials.
-        own = isinstance(exc, ScopeError | ResearchError | sources.SourceError | evidence.EvidenceError) and str(exc)
+        # Errors whose text this code writes itself are actionable and kept. SourceError can wrap provider
+        # text, and model/transport exceptions can contain internal details; those get the generic notice.
+        own = isinstance(exc, ScopeError | ResearchError | evidence.EvidenceError) and str(exc)
         failure = {"stage": runner.stage, "category": category,
                    "message": str(exc) if own else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
                    else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
