@@ -448,20 +448,22 @@ def _without_codes(text: str, material: Material) -> str:
 
 REPORT_ID = re.compile(r"(?:报告|report)\s*#?\s*\d+", re.I)
 QUESTION_THRESHOLD = re.compile(
-    r"(?:阈值|门槛|低于|高于|不低于|不高于|超过|跌破|突破|[<>≤≥]=?)\s*(-?\d+(?:\.\d+)?)")
+    r"(?:阈值|门槛|低于|高于|不低于|不高于|超过|跌破|突破|[<>≤≥]=?)\s*"
+    r"(?P<value>[-−+]?\d[\d,]*(?:\.\d+)?)(?![\d.,])\s*"
+    r"(?P<unit>(?:万亿|亿|万)?元|个百分点|[%％]|倍|天|(?!\s*[\w%％]))")
 
 
-def _question_terms(material: Material) -> list[float]:
-    """Thresholds the asker set ("是否高于150亿元", "增速<15%") are terms of the question, not claims to cite.
-    Facts the asker supplied (e.g. "由7.14亿元降至-1.57亿元") are not exempt and still need sources."""
-    return [abs(float(v)) for v in QUESTION_THRESHOLD.findall(str(material.extra.get("question") or ""))]
+def _threshold_key(match: re.Match) -> tuple[Decimal, str]:
+    # Preserve sign and unit; no rounding tolerance or unit conversion grants an exemption.
+    return (Decimal(match["value"].replace(",", "").replace("−", "-")),
+            (match["unit"] or "").replace("％", "%"))
 
 
 def _checked_figures(text: str, material: Material) -> list[tuple[float, int]]:
-    """Figures needing a source: drop identifiers (stock codes, report ids) and the question's own thresholds."""
-    terms = _question_terms(material)
-    return [(v, d) for v, d in _numbers(_without_codes(REPORT_ID.sub(" ", text), material))
-            if not any(abs(v - t) <= 0.5 * 10 ** -d + 1e-9 for t in terms)]
+    """Only the explicit threshold occurrence is a question term; equal factual amounts still need sources."""
+    terms = {_threshold_key(m) for m in QUESTION_THRESHOLD.finditer(str(material.extra.get("question") or ""))}
+    text = QUESTION_THRESHOLD.sub(lambda m: " " if _threshold_key(m) in terms else m[0], text)
+    return _numbers(_without_codes(REPORT_ID.sub(" ", text), material))
 
 
 def _candidates(cites: list[dict], material: Material) -> list[float]:
