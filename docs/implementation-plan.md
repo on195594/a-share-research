@@ -92,20 +92,20 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `350a877`** 于 2026-10-30 15:21（北京时间）完成 web、worker 切换：阅读界面深度图表化与降熵优化——新增“盈利与现金流转化”阶梯瀑布图（`.waterfall`）、“资金与营运结构”及同行快照并排双横条图（`.paired`）、近 12 个月滚动利润与现金流走势、历史报告/公司档案对 `T.*` 财务表的“财务体征”回退与迷你线垂线引针（`.stem`）、同比哑铃图方向色阶（`.span.up` / `.span.down`）；批次页新增候选行业分布与初筛前 60 日表现横条图、候选近 4 年扣非净利迷你柱（`.cand-spark`）、粗筛板块占比分段条（`.strip-bar`）；首页新增主动研究公司最新判断等比分布条与筛选胶囊（`.pill`）；报告与批次章节栏（`.toc`）改为吸顶导航并附章节条目计数与滚动高亮，出处摘要标注“原文 N · 计算 N · 表值 N”证据构成（`.cite-meta`）并提供章节级一键展开/收起本节出处（`.cite-toggle`），前后报告程序数据对照新增修订与变动指标网格（`.diff-grid`）。只改阅读层，无数据库、配置、依赖或成文/复核契约变化；例行发布按 AGENTS.md 常设授权执行，worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `1c510da`** 于 2026-10-30 15:59（北京时间）完成 web、worker 切换：在 `350a877` 阅读界面深度图表化与降熵优化基础上，完成 Claude 独立审查结论修复——吸顶章节栏（`.toc`）改为单行横向可滚并配 `scroll-margin: 60px`，消除 390px 窄屏双行吸顶遮挡目标标题与锚点；章节“展开本节出处”（`.cite-toggle`）同步展开同级 `<details class="more">` 及其内部出处；公司档案“财务体征”来源按实际采用数据源显示“保存的经营序列”或“保存的财务数据表”且排除重放报告优先；批次页板块色点图例移出 `.readout` 避免悬停覆盖、去除冗余纯文本板块统计行、修正极小板块占比宽度使分段总宽恒为 100%；瀑布图改为以连接项和终点均存在为桥接前提并恢复指标全称标签、默认展开图精简为“盈利与现金流转化”和“毛利率、ROE 与负债率”两张、去除迷你线引针（`.stem`）与同比哑铃图方向色阶；首页判断分布条改为单色阶透明度并补无障碍筛选计数播报，分桶由纯函数 `verdict_summary` 统一生成并兼容 `sqlite3.Row`。只改阅读层，无数据库、配置、依赖或成文/复核契约变化；例行发布按 AGENTS.md 常设授权执行，worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:350a877` | `03fdea1f9b2a588fcfacd57b3c0f8b78a0166f179f91aeeb7a8074f27b564b0c` |
-| `a-share-research-worker:350a877` | `bc1e9103a629fd15b3b8e3317ef9057e27b34d26f020a667a44c25866721366c` |
+| `a-share-research-web:1c510da` | `b47a62ce809cec523ee8884b82c2fe65d2cc0799afdf0caac881920aa405114e` |
+| `a-share-research-worker:1c510da` | `288bda7fcc999d6140b2083ac7005c13790403d00f31077f014c07cee99d3122` |
 
-**验证**：全集 311 项通过（新增阶梯瀑布图及缺值互变、`T.*` 财务表体征回退及缺值互变、候选行业/60日表现/4年迷你柱/板块分段条、首页判断分布 3 组确定性测试）。本机开发实例（生产库快照）在 390px 手机与 1280px 桌面视口走通首页、报告 44/41/37/9/8、批次 1、万华化学与贵州茅台公司档案及研究库，核对吸顶章节导航、一键展开/收起出处、首页判断胶囊筛选、图表读数、无内联样式（CSP 0 告警）、无控制台报错与无整页横溢。
+**验证**：全集 312 项通过（含真实批次 1 捕获数据替换合成测试输入、瀑布图缺值断桥、上年同日资产负债缺期跳过、`sqlite3.Row` 首页分桶与 `.cite-toggle` 选择器互变校验）。本机开发实例（生产库快照）在 390px 手机与 1280px 桌面视口走通首页、报告 44/37、批次 1 及东方电缆公司档案，核对 390px 吸顶章节跳转不遮挡标题与论断、展开本节出处同步打开折叠项、板块图例悬停保留、首页筛选状态播报、瀑布图 14 字全称标签无重叠与无整页横溢。
 
-**证据**：`deploy-350a877-20261030-1521/`。备份：`~/a-share-research-data/backup-pre-350a877-20261030-152045.db`。
+**证据**：`review-350a877-20261030/`、`deploy-1c510da-20261030-1558/`。备份：`~/a-share-research-data/backup-pre-1c510da-20261030-155829.db`。
 
-**直接回退**：`a-share-research-web:rollback-350a877` 与 `a-share-research-worker:rollback-350a877` 来自原运行的 `604f619`（SHA 分别为 `21c11f3fb14e8b8d832be4b6f90a19fdd23b7857452eb22ad894b8903c383d0b` 和 `dff99a6cb212de55f668fa4fd1270ff6323302010b71821b992aa9a923b6a603`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；本次无数据变化，回退只换应用。
+**直接回退**：`a-share-research-web:rollback-1c510da` 与 `a-share-research-worker:rollback-1c510da` 来自原运行的 `350a877`（SHA 分别为 `03fdea1f9b2a588fcfacd57b3c0f8b78a0166f179f91aeeb7a8074f27b564b0c` 和 `bc1e9103a629fd15b3b8e3317ef9057e27b34d26f020a667a44c25866721366c`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；本次无数据变化，回退只换应用。
 
-**历史限制**：`604f619` 的发布记录（证据 `deploy-604f619-20261030-143845/`、备份 `backup-pre-604f619-20261030-143847.db`、回退到 `251b9ff`）见 `git show 350a877:docs/implementation-plan.md`。`251b9ff` 的发布记录（证据 `deploy-251b9ff-20261030-142353/`、备份 `backup-pre-251b9ff-20261030-142355.db`、回退到 `0e54ad7`）见 `git show 604f619:docs/implementation-plan.md`。`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
+**历史限制**：`350a877` 的发布记录（证据 `deploy-350a877-20261030-1521/`、备份 `backup-pre-350a877-20261030-152045.db`、回退到 `604f619`）见 `git show e2a20fc:docs/implementation-plan.md`。`604f619` 的发布记录（证据 `deploy-604f619-20261030-143845/`、备份 `backup-pre-604f619-20261030-143847.db`、回退到 `251b9ff`）见 `git show 350a877:docs/implementation-plan.md`。`251b9ff` 的发布记录（证据 `deploy-251b9ff-20261030-142353/`、备份 `backup-pre-251b9ff-20261030-142355.db`、回退到 `0e54ad7`）见 `git show 604f619:docs/implementation-plan.md`。`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
 
 ## 尚待完成与未采用项
 
