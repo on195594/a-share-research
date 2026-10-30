@@ -12,9 +12,9 @@
   <g class="slot{{ ' latest' if g.last }}" data-tip="{{ g.tip }}">
     <rect class="hit" x="{{ g.slot_x }}%" y="0" width="{{ g.slot_w }}%" height="{{ c.height }}"/>
     {% for b in g.bars if not b.missing %}<rect class="bar s{{ b.series }}{{ ' outline' if g.outline }}" x="{{ b.x }}%" y="{{ b.y }}" width="{{ b.w }}%" height="{{ b.h }}" rx="2"/>{% endfor %}
-    {% if g.last and c.series | length == 1 and not g.bars[0].missing %}<text class="value" x="{{ g.x }}%" y="{{ g.bars[0].label_y }}" text-anchor="middle">{{ g.bars[0].text }}</text>{% endif %}
+    {% if g.last and c.series | length == 1 and not g.bars[0].missing %}<text class="value" x="99%" y="{{ g.bars[0].label_y }}" text-anchor="end">{{ g.bars[0].text }}</text>{% endif %}
     {% for b in g.bars if b.missing %}<text class="gap" x="{{ b.x + b.w / 2 }}%" y="{{ c.zero - 4 }}" text-anchor="middle">—</text>{% endfor %}
-    <text class="axis" x="{{ g.x }}%" y="{{ c.label_y }}" text-anchor="middle">{{ g.label }}</text>
+    <text class="axis" x="{{ 99 if g.last else g.x }}%" y="{{ c.label_y }}" text-anchor="{{ 'end' if g.last else 'middle' }}">{{ g.label }}</text>
     <title>{{ g.tip }}</title>
   </g>
   {% endfor %}

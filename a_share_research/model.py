@@ -48,6 +48,24 @@ def application_identity() -> dict:
 application_identity()  # Imported Python code does not follow later worktree edits.
 
 
+def preflight() -> dict:
+    """Resolve the installed runtime and configured model offline, without a completion."""
+    try:
+        proc = subprocess.run(["node", str(SCRIPT), "--check"],
+                              capture_output=True, text=True, timeout=30)
+    except FileNotFoundError as exc:
+        raise RuntimeError("Pi 启动预检失败：找不到 Node；请恢复 worker 的 Node 运行时及 PATH") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Pi 启动预检超时：请检查运行时目录与模型存储是否可读；未领取任务") from exc
+    try:
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Pi 启动预检无有效响应：请检查 Node 版本及 pi_infer.mjs 是否完整") from exc
+    if proc.returncode or not result.get("ready"):
+        raise RuntimeError(f"Pi 启动预检失败：{result.get('error') or '运行时未就绪'}")
+    return result
+
+
 def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000,
              messages: list | None = None, tools: list | None = None) -> Completion:
     request = {

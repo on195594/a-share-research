@@ -5,9 +5,12 @@ missing or unreconciled value draws no mark rather than a zero.
 """
 import copy
 import json
+import math
 import re
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 from support.templates import ENV
 from test_financial_series import CAPTURES, build, frames
@@ -18,6 +21,78 @@ from a_share_research.research import financial_table
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDS = json.loads((ROOT / "tests/data/continuation-records.json").read_text())["records"]
+
+
+@pytest.mark.parametrize("invalid", ["NaN", "sNaN", "Infinity", "-Infinity", "1e9999"])
+def test_invalid_saved_numbers_do_not_reach_svg_geometry(invalid):
+    # Corrupt a captured display cell; malformed geometry must not crash the reading page.
+    series = build("000858")
+    series["annual"]["rows"][0]["values"]["2021-12-31"]["display"] = invalid
+    assert charts.number(invalid) is None
+    json.dumps(charts.financial_charts({"series": series}, []), allow_nan=False)
+
+
+@pytest.mark.parametrize("code", CAPTURES)
+def test_captured_financial_geometry_stays_inside_plot(code):
+    series = build(code)
+    figures = charts.financial_charts({"series": series}, financial_table(frames(CAPTURES[code]), {}))
+    for figure in figures:
+        chart = figure["chart"]
+        if figure["kind"] == "columns":
+            for group in chart["groups"]:
+                for bar in group["bars"]:
+                    assert chart["gutter"] <= bar["x"] <= bar["x"] + bar["w"] <= 100
+                    assert charts.TOP <= bar["y"] <= bar["y"] + bar["h"] <= charts.TOP + charts.PLOT + 0.01
+                    assert bar["label_y"] <= chart["label_y"] - 16
+        elif figure["kind"] == "waterfall":
+            for row in chart["rows"]:
+                assert row["x"] + row["w"] == pytest.approx(max(row["x_from"], row["x_to"]), abs=0.001)
+        # A strict JSON encoding catches nonfinite geometry before it reaches SVG attributes.
+        json.dumps(chart, allow_nan=False)
+    for row in charts.vitals({"series": series})["flows"]:
+        for bar in row["spark"]["bars"] if row["spark"] else []:
+            if not bar["missing"]:
+                assert 0 <= bar["y"] <= bar["y"] + bar["h"] <= charts.SPARK
+
+
+def test_real_tiny_goodwill_and_negative_cash_keep_proportional_widths():
+    series = build("000858")
+    balance = {r["id"]: r for r in series["balance"]["rows"]}
+    # 五粮液 2021: 0.02 亿元商誉 beside the saved cash balance; previously the 0.8% floor inflated it.
+    period = "2021-12-31"
+    small, large = [float(balance[k]["values"][period]["display"]) for k in ("goodwill", "cash")]
+    rows = [{"v0": small, "v1": large, "tip": period}]
+    paired = charts.paired_bars(rows, ("商誉", "货币资金"))
+    row = paired["rows"][0]
+    assert row["w0"] < 0.8 and row["w0"] / row["w1"] == pytest.approx(small / large, abs=0.0001)
+    # An unchanged bridge has equal captured endpoints: its length must be zero.
+    bridge = charts.waterfall([{"from": small, "to": small, "tip": period}])
+    assert bridge["rows"][0]["w"] == 0
+    cash = next(r for r in series["quarterly"]["rows"] if r["id"] == "op_cash")
+    negative = cash["values"]["2026-03-31"]["display"]
+    column = charts.columns([{"label": "26Q1", "tip": negative, "points": [{"text": negative}]}], ["经营现金流"])
+    bar = column["groups"][0]["bars"][0]
+    assert bar["negative"] and bar["y"] == column["zero"]
+    assert bar["label_y"] <= column["label_y"] - 16
+    # Express the captured small amount in 万亿元; tick rounding must not collapse the axis.
+    ticks = charts.nice_ticks(0, small / 10000)
+    assert ticks[-1] > ticks[0] and all(math.isfinite(t) for t in ticks)
+
+
+def test_missing_and_zero_extent_keep_finite_geometry():
+    # Empty captured report slots remain missing; a zero bridge comes from equal saved endpoints.
+    series = build("000858")
+    cash = next(r for r in series["balance"]["rows"] if r["id"] == "cash")
+    value = float(cash["values"]["2021-12-31"]["display"])
+    zero = value - value
+    spark = charts.spark_columns([zero])
+    assert spark["bars"][0]["h"] == 0 and not spark["bars"][0]["missing"]
+    assert charts.spark_columns([None]) is None
+    column = charts.columns([{"label": "2021", "tip": "同值相减", "points": [{"text": str(zero)}]}], ["变化"])
+    assert column["groups"][0]["bars"][0]["h"] == 0
+    paired = charts.paired_bars([{"v0": zero, "v1": zero, "tip": "同值相减"}], ("前", "后"))
+    assert paired["rows"][0]["w0"] == paired["rows"][0]["w1"] == 0
+    json.dumps([spark, column, paired], allow_nan=False)
 
 
 def figure(figures, title):

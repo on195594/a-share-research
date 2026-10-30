@@ -3,13 +3,21 @@
 import logging
 import time
 
-from a_share_research import db, price, research, screening, progress
+from a_share_research import db, model, price, research, screening, progress
 
 log = logging.getLogger(__name__)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        runtime = model.preflight()
+    except RuntimeError:
+        log.exception("worker 启动已阻断；修复 Pi 运行时后重启，队列保持原状")
+        raise SystemExit(1)
+    log.info("pi ready: version=%s node=%s provider=%s model=%s source=%s",
+             runtime["pi_version"], runtime["node_version"], runtime["provider"],
+             runtime["model"], runtime["model_source"])
     conn = db.connect()
     # A web run left 'running' by a previous worker cannot be resumed; the user can start it again.
     # Command-line runs (no request_id) belong to their own process and are left alone.

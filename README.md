@@ -171,6 +171,8 @@ Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
 - worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口。
 
+worker 启动时先离线预检 Node、Pi 安装目录、模型存储及所配置模型，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `node a_share_research/pi_infer.mjs --check`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、`models-store.json` 或 `auth.json`，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
+
 发布复用以下固定入口。先按改动范围完成一次必要验证；同一应用源码与依赖已有通过结果时直接沿用，不因进入发布阶段再跑全集。纯文档更新只提交推送。当前版本、证据和回退只更新[实施计划](docs/implementation-plan.md#当前部署)，产品与能力文档不重复维护上线状态。
 
 从已提交、已推送的 main 构建两份版本化镜像。Git 归档直接作为 Docker 上下文，无临时解压或权限修补脚本；源码可读权限在 Dockerfile 中固定：

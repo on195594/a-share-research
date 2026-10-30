@@ -31,7 +31,10 @@ def number(value) -> float | None:
         parsed = Decimal(value)
     except DecimalException:
         return None
-    return float(parsed) if parsed.is_finite() else None
+    if not parsed.is_finite():
+        return None
+    value = float(parsed)
+    return value if math.isfinite(value) else None
 
 
 def nice_ticks(lo: float, hi: float, count: int = 3) -> list[float]:
@@ -43,10 +46,12 @@ def nice_ticks(lo: float, hi: float, count: int = 3) -> list[float]:
     magnitude = 10 ** math.floor(math.log10(raw))
     step = next(m * magnitude for m in (1, 2, 2.5, 5, 10) if m * magnitude >= raw)
     start, stop = math.floor(lo / step + 1e-9), math.ceil(hi / step - 1e-9)
-    return [round(i * step, 10) for i in range(start, stop + 1)]
+    return [float(f"{i * step:.12g}") for i in range(start, stop + 1)]
 
 
 def tick_text(value: float) -> str:
+    if abs(value) >= 100_000:
+        return f"{value:.2e}"
     return f"{value:,.0f}" if abs(value) >= 10 or value == 0 else f"{value:g}"
 
 
@@ -54,6 +59,11 @@ def _scale(values: list[float]):
     ticks = nice_ticks(min(values, default=0.0), max(values, default=0.0))
     lo, hi = ticks[0], ticks[-1]
     return ticks, lambda v: round(TOP + (hi - v) / (hi - lo) * PLOT, 2)
+
+
+def _gutter(ticks: list[float]) -> float:
+    # Reserve label space at a 300px plot width, including narrow desktop columns.
+    return max(GUTTER, max(text_width(tick_text(t)) for t in ticks) / 3 + 2)
 
 
 def columns(groups: list[dict], series: list[str]) -> dict | None:
@@ -66,13 +76,14 @@ def columns(groups: list[dict], series: list[str]) -> dict | None:
     if not any(v is not None for v in values):
         return None
     ticks, y = _scale([v for v in values if v is not None])
+    gutter = _gutter(ticks)
     zero = y(0.0)
-    slot = (100.0 - GUTTER) / len(groups)
+    slot = (100.0 - gutter) / len(groups)
     width = slot * (0.42 if len(series) == 1 else 0.3)
     gap = slot * 0.04
     out = []
     for index, group in enumerate(groups):
-        center = GUTTER + slot * (index + 0.5)
+        center = gutter + slot * (index + 0.5)
         span = width * len(series) + gap * (len(series) - 1)
         bars = []
         for k, point in enumerate(group["points"]):
@@ -80,14 +91,14 @@ def columns(groups: list[dict], series: list[str]) -> dict | None:
             top = y(value) if value is not None else zero
             bars.append({
                 "series": k, "x": round(center - span / 2 + k * (width + gap), 3), "w": round(width, 3),
-                "y": min(top, zero), "h": max(round(abs(zero - top), 2), 1.0 if value is not None else 0),
+                "y": min(top, zero), "h": round(abs(zero - top), 2),
                 "negative": value is not None and value < 0, "missing": value is None,
-                "text": point["text"], "label_y": round(top - 6 if value is None or value >= 0 else top + 13, 2),
+                "text": point["text"], "label_y": round(top - 6 if value is None or value >= 0 else min(top + 13, TOP + PLOT - 4), 2),
             })
         out.append({"label": group["label"], "x": round(center, 3), "slot_x": round(center - slot / 2, 3),
                     "slot_w": round(slot, 3), "bars": bars, "tip": group["tip"],
                     "outline": group.get("outline", False), "last": index == len(groups) - 1})
-    return {"groups": out, "series": series, "zero": zero, "height": HEIGHT, "gutter": GUTTER,
+    return {"groups": out, "series": series, "zero": zero, "height": HEIGHT, "gutter": gutter,
             "data": [g["tip"] for g in groups],
             "ticks": [{"y": y(t), "text": tick_text(t)} for t in ticks], "label_y": TOP + PLOT + 17}
 
@@ -98,12 +109,13 @@ def lines(periods: list[str], labels: list[str], series: list[dict]) -> dict | N
     if sum(v is not None for v in values) < 2:
         return None
     ticks, y = _scale([v for v in values if v is not None])
+    gutter = _gutter(ticks)
     # Period ends are unevenly spaced (yearly, then quarterly), so x follows the calendar.
     days = [date.fromisoformat(p).toordinal() for p in periods]
     first, span = days[0], (days[-1] - days[0]) or 1
-    inner = 100.0 - GUTTER - 6.0
-    xs = [round(GUTTER + 3.0 + (d - first) / span * inner, 3) for d in days]
-    bounds = [GUTTER] + [round((a + b) / 2, 3) for a, b in zip(xs, xs[1:])] + [100.0]
+    inner = 100.0 - gutter - 6.0
+    xs = [round(gutter + 3.0 + (d - first) / span * inner, 3) for d in days]
+    bounds = [gutter] + [round((a + b) / 2, 3) for a, b in zip(xs, xs[1:])] + [100.0]
     out = []
     for k, s in enumerate(series):
         points = [(xs[i], y(number(t))) if number(t) is not None else None for i, t in enumerate(s["texts"])]
@@ -120,7 +132,7 @@ def lines(periods: list[str], labels: list[str], series: list[dict]) -> dict | N
              "tip": f"{periods[i]}：" + "；".join(f"{s['label']} {s['texts'][i] or '—'}" for s in series)}
             for i in range(len(periods))]
     return {"series": out, "ticks": [{"y": y(t), "text": tick_text(t)} for t in ticks], "axis": axis,
-            "tips": tips, "data": [t["tip"] for t in tips], "latest_period": periods[-1], "height": HEIGHT, "gutter": GUTTER, "label_y": TOP + PLOT + 17}
+            "tips": tips, "data": [t["tip"] for t in tips], "latest_period": periods[-1], "height": HEIGHT, "gutter": gutter, "label_y": TOP + PLOT + 17}
 
 
 def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | None:
@@ -156,7 +168,7 @@ def waterfall(items: list[dict], start: float = 47.0, end: float = 82.0) -> dict
         missing = a is None or b is None
         x0, x1 = (at(a), at(b)) if not missing else (zero, zero)
         out.append({**r, "y": i * 32, "x": round(min(x0, x1), 3),
-                    "w": max(round(abs(x1 - x0), 3), 0.8) if not missing else 0.0,
+                    "w": round(abs(x1 - x0), 3) if not missing else 0.0,
                     "x_from": x0, "x_to": x1, "missing": missing})
     connectors = []
     for i, r in enumerate(out):
@@ -186,8 +198,8 @@ def paired_bars(rows: list[dict], labels: tuple[str, str], mode: str = "period",
         v0, v1 = r.get("v0"), r.get("v1")
         x0, x1 = (at(v0) if v0 is not None else zero), (at(v1) if v1 is not None else zero)
         out.append({**r, "y": i * 36,
-                    "x0": round(min(x0, zero), 3), "w0": max(round(abs(x0 - zero), 3), 0.8) if v0 is not None else 0.0,
-                    "x1": round(min(x1, zero), 3), "w1": max(round(abs(x1 - zero), 3), 0.8) if v1 is not None else 0.0,
+                    "x0": round(min(x0, zero), 3), "w0": round(abs(x0 - zero), 3),
+                    "x1": round(min(x1, zero), 3), "w1": round(abs(x1 - zero), 3),
                     "m0": v0 is None, "m1": v1 is None})
     return {"rows": out, "zero": zero, "labels": list(labels), "mode": mode, "height": len(out) * 36,
             "data": [r["tip"] for r in rows]}
@@ -437,8 +449,7 @@ def spark_columns(values: list[float | None]) -> dict | None:
         cell = {"slot_x": round(slot * i, 3), "slot_w": round(slot, 3), "missing": v is None,
                 "x": round(slot * i + (slot - width) / 2, 3), "w": round(width, 3), "last": i == len(values) - 1}
         if v is not None:
-            # A value near zero still gets 1px, grown from the zero line in its own direction.
-            h = max(round(abs(zero - y(v)), 2), 1.0)
+            h = round(abs(zero - y(v)), 2)
             cell.update(y=zero if v < 0 else round(zero - h, 2), h=h)
         out.append(cell)
     return {"bars": out, "zero": zero, "height": SPARK, "negative": lo < 0}
