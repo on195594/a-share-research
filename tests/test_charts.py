@@ -23,13 +23,35 @@ ROOT = Path(__file__).resolve().parents[1]
 RECORDS = json.loads((ROOT / "tests/data/continuation-records.json").read_text())["records"]
 
 
-@pytest.mark.parametrize("invalid", ["NaN", "sNaN", "Infinity", "-Infinity", "1e9999"])
+@pytest.mark.parametrize("invalid", ["NaN", "sNaN", "Infinity", "-Infinity", "1e9999", "1e-400", "1e-323", "-1e308", "1e308", "1.7e308"])
 def test_invalid_saved_numbers_do_not_reach_svg_geometry(invalid):
     # Corrupt a captured display cell; malformed geometry must not crash the reading page.
     series = build("000858")
     series["annual"]["rows"][0]["values"]["2021-12-31"]["display"] = invalid
     assert charts.number(invalid) is None
     json.dumps(charts.financial_charts({"series": series}, []), allow_nan=False)
+
+
+def test_corrupted_numeric_geometry_is_missing_in_every_chart_kind():
+    for invalid in (-1e308, 1e308, 1.7e308, 1e-323):
+        assert charts.columns([{"label": "", "tip": "", "points": [{"text": str(invalid)}]}], [""]) is None
+        assert charts.bars([{"value": invalid, "tip": ""}]) is None
+        assert charts.paired_bars([{"v0": invalid, "v1": -invalid, "tip": ""}], ("", "")) is None
+        assert charts.waterfall([{"from": -invalid, "to": invalid, "tip": ""}]) is None
+        assert charts.spark_columns([invalid]) is None
+        assert charts.spark_line(["2025-12-31", "2026-03-31"], [invalid, -invalid]) is None
+
+
+def test_two_year_column_labels_remain_centered_over_their_bars():
+    series = build("000858")["annual"]
+    row = series["rows"][0]
+    groups = [{"label": p[:4], "tip": p, "points": [{"text": row["values"][p]["display"]}]}
+              for p in series["periods"][-2:]]
+    chart = charts.columns(groups, [row["id"]])
+    last = chart["groups"][-1]
+    assert not last["label_edge"] and not last["value_edge"]
+    html = str(ENV.get_template("_charts.html").module.columns(chart, row["id"]))
+    assert f'x="{last["x"]}%" y="{chart["label_y"]}" text-anchor="middle"' in html
 
 
 @pytest.mark.parametrize("code", CAPTURES)
@@ -88,6 +110,11 @@ def test_missing_and_zero_extent_keep_finite_geometry():
     spark = charts.spark_columns([zero])
     assert spark["bars"][0]["h"] == 0 and not spark["bars"][0]["missing"]
     assert charts.spark_columns([None]) is None
+    mixed = charts.spark_columns([zero, None, value])
+    for bar in mixed["bars"]:
+        bar["tip"] = "真实现金值相减" if not bar["missing"] else "缺失"
+    html = str(ENV.get_template("_charts.html").module.spark_cols(mixed))
+    assert html.count('class="gap"') == 1 and '>—</text>' in html
     column = charts.columns([{"label": "2021", "tip": "同值相减", "points": [{"text": str(zero)}]}], ["变化"])
     assert column["groups"][0]["bars"][0]["h"] == 0
     paired = charts.paired_bars([{"v0": zero, "v1": zero, "tip": "同值相减"}], ("前", "后"))

@@ -146,6 +146,9 @@ def deploy(code: str, evidence: Path) -> None:
             raise RuntimeError("停服窗口内业务表发生变化；保留数据供核对")
         run("docker", "compose", "up", "-d", "--no-build", "--no-deps", *SERVICES)
         wait_ready()
+        runtime = json.loads(run("docker", "exec", "a-share-research-worker", "python", "-c",
+                                 "import json; from a_share_research.model import preflight; print(json.dumps(preflight()))"))
+        save("worker-preflight.json", runtime)
         after = {service: describe(service) for service in SERVICES}
         for service in SERVICES:
             if after[service] != before[service] | {"image": images[service]}:

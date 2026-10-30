@@ -60,7 +60,8 @@ def preflight() -> dict:
     try:
         result = json.loads(proc.stdout.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Pi 启动预检无有效响应：请检查 Node 版本及 pi_infer.mjs 是否完整") from exc
+        diagnostic = " ".join(proc.stderr.strip().splitlines()[-1:])
+        raise RuntimeError(f"Pi 启动预检无有效响应（exit {proc.returncode}）：请检查 Node 版本及 pi_infer.mjs 是否完整；{diagnostic}") from exc
     if proc.returncode or not result.get("ready"):
         raise RuntimeError(f"Pi 启动预检失败：{result.get('error') or '运行时未就绪'}")
     return result

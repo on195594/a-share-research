@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from a_share_research import backtest as bt, screening as sc
+from a_share_research import backtest as bt, screening as sc, screening_factors
 
 log = logging.getLogger(__name__)
 VARIANTS = ("baseline", "industry_l2", "quarter_guard", "cash_yield")
@@ -184,6 +184,11 @@ def summarize(batches: list[dict]) -> dict:
     return out
 
 
+def implementation_hashes() -> dict[str, str]:
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in
+            (Path(__file__), Path(bt.__file__), Path(sc.__file__), Path(screening_factors.__file__))}
+
+
 def main():
     if not __debug__:
         raise SystemExit("离线实验依赖断言核验基线，请勿使用 python -O 或 PYTHONOPTIMIZE")
@@ -211,8 +216,7 @@ def main():
     identity = {"calendar_sha256": hashlib.sha256(args.calendar.read_bytes()).hexdigest(),
                 "cache_sha256": cache_hash.hexdigest(),
                 "source": str(args.source.resolve()), "data_end": calendar["end"],
-                "code": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in
-                         (Path(__file__), Path(bt.__file__), Path(sc.__file__))},
+                "code": implementation_hashes(),
                 "batches": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths}}
     run_id = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     args.out.mkdir(parents=True, exist_ok=True)

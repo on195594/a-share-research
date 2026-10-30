@@ -384,6 +384,7 @@ details.block[open] { padding-bottom: 12px; }
 .spark .dot { stroke: var(--bg); stroke-width: 1.5; }
 .spark .dot.s0 { fill: var(--chart-1); }
 .spark .grid.zero { stroke: var(--muted); stroke-width: 1; shape-rendering: crispEdges; }
+.spark .gap { fill: var(--muted); font-size: 11px; }
 .spark .hit { fill: transparent; }
 .spark .slot.active .hit, .spark .slot:hover .hit { fill: var(--ink); fill-opacity: 0.06; }
 .spark .slot.active .bar.dim, .spark .slot:hover .bar.dim { fill: var(--chart-1); }

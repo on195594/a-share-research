@@ -23,6 +23,11 @@ CUMULATIVE = {"03-31": "一季度", "06-30": "上半年", "09-30": "前三季度
 VERDICTS = ("暂不值得", "需要谨慎", "值得继续研究")
 
 
+def _plot_value(value: float) -> float | None:
+    # Leave exponent headroom for tick rounding, differences and coordinate scaling.
+    return value if math.isfinite(value) and (value == 0 or 1e-300 <= abs(value) <= 1e300) else None
+
+
 def number(value) -> float | None:
     """A saved display string as a float for geometry; anything else is missing."""
     if not isinstance(value, str):
@@ -34,7 +39,9 @@ def number(value) -> float | None:
     if not parsed.is_finite():
         return None
     value = float(parsed)
-    return value if math.isfinite(value) else None
+    if value == 0 and parsed != 0:  # A nonzero decimal must not silently underflow to zero.
+        return None
+    return _plot_value(value)
 
 
 def nice_ticks(lo: float, hi: float, count: int = 3) -> list[float]:
@@ -97,6 +104,8 @@ def columns(groups: list[dict], series: list[str]) -> dict | None:
             })
         out.append({"label": group["label"], "x": round(center, 3), "slot_x": round(center - slot / 2, 3),
                     "slot_w": round(slot, 3), "bars": bars, "tip": group["tip"],
+                    "label_edge": center + text_width(group["label"]) / 6 > 99,
+                    "value_edge": center + text_width(str(bars[0]["text"] or "")) / 6 > 99,
                     "outline": group.get("outline", False), "last": index == len(groups) - 1})
     return {"groups": out, "series": series, "zero": zero, "height": HEIGHT, "gutter": gutter,
             "data": [g["tip"] for g in groups],
@@ -137,6 +146,7 @@ def lines(periods: list[str], labels: list[str], series: list[dict]) -> dict | N
 
 def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | None:
     """Horizontal bars from a shared zero; rows are {"label", "value": float|None, "text", "tip"}."""
+    rows = [r | {"value": _plot_value(r["value"]) if r["value"] is not None else None} for r in rows]
     values = [r["value"] for r in rows if r["value"] is not None]
     if not values:
         return None
@@ -155,6 +165,7 @@ def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | Non
 
 def waterfall(items: list[dict], start: float = 47.0, end: float = 82.0) -> dict | None:
     """Horizontal waterfall / bridge chart on one axis (e.g. profit -> operating cash -> capex -> FCF)."""
+    items = [r | {k: _plot_value(r[k]) if r.get(k) is not None else None for k in ("from", "to")} for r in items]
     values = [v for r in items for v in (r.get("from"), r.get("to")) if v is not None]
     if len(values) < 2:
         return None
@@ -186,6 +197,7 @@ def waterfall(items: list[dict], start: float = 47.0, end: float = 82.0) -> dict
 def paired_bars(rows: list[dict], labels: tuple[str, str], mode: str = "period",
                 start: float = 32.0, end: float = 63.0) -> dict | None:
     """Two horizontal bars per row on a shared zero-included scale (prior vs latest, or subject vs peer)."""
+    rows = [r | {k: _plot_value(r[k]) if r.get(k) is not None else None for k in ("v0", "v1")} for r in rows]
     values = [v for r in rows for v in (r.get("v0"), r.get("v1")) if v is not None]
     if not values:
         return None
@@ -436,6 +448,7 @@ STOCKS = (("cash", "货币资金"), ("interest_debt", "四项债务合计"), ("r
 
 def spark_columns(values: list[float | None]) -> dict | None:
     """Evenly spaced mini columns from a shared zero; the last one is the latest period."""
+    values = [_plot_value(v) if v is not None else None for v in values]
     present = [v for v in values if v is not None]
     if not present:
         return None
@@ -457,6 +470,7 @@ def spark_columns(values: list[float | None]) -> dict | None:
 
 def spark_line(periods: list[str], values: list[float | None]) -> dict | None:
     """A min–max scaled line over calendar time; gaps break the line instead of bridging it."""
+    values = [_plot_value(v) if v is not None else None for v in values]
     present = [v for v in values if v is not None]
     if len(present) < 2:
         return None

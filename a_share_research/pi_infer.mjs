@@ -11,6 +11,26 @@ const request = preflight
   : JSON.parse(await readFile(process.argv[2], "utf8"));
 const result = { pi_version: null, parameters: null, node_version: process.version,
   model_source: null, extension: null };
+
+async function readStore(path) {
+  let content;
+  try {
+    content = await readFile(path, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return {}; // Pi also accepts built-in catalogs and environment credentials.
+    throw new Error(`Cannot read ${path}; restore access: ${error.message}`);
+  }
+  try {
+    const data = content ? JSON.parse(content.replace(/^\uFEFF/, "")) : {};
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new TypeError("Expected a JSON object");
+    return data;
+  } catch (error) {
+    // JSON parse errors may echo credential text. Keep the error type and location, never that text.
+    const location = error.message.match(/position \d+(?: \(line \d+ column \d+\))?/);
+    throw new Error(`Invalid ${path}; restore valid JSON object: ${error.name}${location ? ` at ${location[0]}` : ""}`);
+  }
+}
+
 try {
   if (!request.provider || !request.model) throw new Error("Set MODEL_PROVIDER and MODEL_ID in the worker environment");
   if (!process.env.PI_AGENT_DIR) throw new Error("Set PI_AGENT_DIR to the existing pi agent directory");
@@ -22,8 +42,8 @@ try {
     let release;
     try {
       release = (await readFile(join(install, "current-version"), "utf8")).trim();
-    } catch {
-      throw new Error(`Pi install/current-version is unreadable at ${install}; restore the managed release or set PI_RUNTIME`);
+    } catch (error) {
+      throw new Error(`Pi install/current-version is unreadable at ${install}; restore the managed release or set PI_RUNTIME: ${error.message}`);
     }
     if (!release || release.includes("/") || release.includes("\\") || release === "..") {
       throw new Error("Invalid pi install/current-version; restore the managed release or set PI_RUNTIME");
@@ -33,23 +53,16 @@ try {
   try {
     result.pi_version = JSON.parse(await readFile(join(base, "package.json"), "utf8")).version;
     if (!result.pi_version) throw new Error("Missing version");
-  } catch {
-    throw new Error(`Pi runtime unavailable at ${base}; restore the managed release or correct PI_RUNTIME`);
+  } catch (error) {
+    throw new Error(`Pi runtime unavailable at ${base}; restore the managed release or correct PI_RUNTIME: ${error.message}`);
   }
-  // FileModelsStore treats a missing file as an empty catalog. Diagnose it before refresh.
   const storePath = join(process.env.PI_AGENT_DIR, "models-store.json");
-  let store;
-  try {
-    store = JSON.parse(await readFile(storePath, "utf8"));
-    if (!store || typeof store !== "object" || Array.isArray(store)) throw new Error("Invalid catalog");
-  } catch {
-    throw new Error(`Pi model store is missing, unreadable or invalid: ${storePath}; restore the existing catalog`);
-  }
+  const store = await readStore(storePath);
   const load = async name => {
     try {
       return await import(pathToFileURL(join(base, "dist/core", name)).href);
-    } catch {
-      throw new Error(`Pi module ${name} could not load; check Node compatibility and restore the runtime at ${base}`);
+    } catch (error) {
+      throw new Error(`Pi module ${name} could not load; check Node compatibility and restore the runtime at ${base}: ${error.message}`);
     }
   };
   const { ModelRuntime } = await load("model-runtime.js");
@@ -59,13 +72,7 @@ try {
   if (preflight) {
     // A health check must not create lock files or refresh persisted credentials/catalogs.
     const { AuthStorage } = await load("auth-storage.js");
-    let auth;
-    try {
-      auth = JSON.parse(await readFile(join(process.env.PI_AGENT_DIR, "auth.json"), "utf8"));
-      if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("Invalid auth store");
-    } catch {
-      throw new Error("Pi auth.json is missing, unreadable or invalid; restore the worker's existing credential store");
-    }
+    const auth = await readStore(join(process.env.PI_AGENT_DIR, "auth.json"));
     credentials = AuthStorage.inMemory(auth);
     for (const [provider, entry] of Object.entries(store)) await modelsStore.write(provider, entry);
   }
@@ -105,6 +112,10 @@ try {
   }
   if (!model) throw new Error("Configured pi model not found; check MODEL_PROVIDER, MODEL_ID, models-store.json and PI_EXTENSION");
   if (preflight) {
+    await runtime.refreshProviderAvailability(request.provider, AbortSignal.timeout(request.timeout * 1000));
+    if (!runtime.hasConfiguredAuth(request.provider)) {
+      throw new Error(`Provider ${request.provider} has no configured credentials; check auth.json or the provider's environment credentials`);
+    }
     Object.assign(result, { ready: true, provider: model.provider, model: model.id });
   } else {
     result.parameters = {

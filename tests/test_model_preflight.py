@@ -27,11 +27,13 @@ def configured():
 def test_installed_runtime_resolves_model_without_calls_or_store_writes(configured):
     paths = [Path(configured["PI_AGENT_DIR"]) / name for name in ("auth.json", "models-store.json")]
     before = [(p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
+    directory_mtime = paths[0].parent.stat().st_mtime_ns
     status, out = check(configured)
     assert status == 0 and out["ready"] is True
     assert (out["provider"], out["model"]) == (configured["MODEL_PROVIDER"], configured["MODEL_ID"])
     assert out["parameters"] is None and "usage" not in out and "message" not in out
     assert before == [(p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
+    assert paths[0].parent.stat().st_mtime_ns == directory_mtime
 
 
 def test_missing_configuration_blocks_worker_before_database_creation(tmp_path):
@@ -50,23 +52,72 @@ def test_missing_node_has_actionable_diagnostic(tmp_path):
     assert process.returncode != 0 and "找不到 Node" in process.stderr
 
 
+def test_node_startup_failure_keeps_stderr_diagnostic():
+    process = subprocess.run([sys.executable, "-c", "from a_share_research.model import preflight; preflight()"],
+                             env=os.environ | {"NODE_OPTIONS": "--not-a-node-option"},
+                             capture_output=True, text=True, timeout=30)
+    assert process.returncode != 0 and "--not-a-node-option" in process.stderr
+    assert "exit 9" in process.stderr
+
+
 def test_broken_pinned_runtime_is_not_silently_replaced(configured, tmp_path):
     missing = tmp_path / "missing-release"
     status, out = check(configured | {"PI_RUNTIME": str(missing)})
     assert status != 0 and "PI_RUNTIME" in out["error"] and str(missing) in out["error"]
 
 
-@pytest.mark.parametrize("damage", ["missing", "invalid"])
-def test_model_store_damage_is_diagnosed_before_authentication(configured, tmp_path, damage):
+def isolated_agent(configured, tmp_path):
     agent = Path(configured["PI_AGENT_DIR"])
     runtime = configured.get("PI_RUNTIME") or str(
         agent / "install/releases" / (agent / "install/current-version").read_text().strip()
         / "node_modules/@earendil-works/pi-coding-agent")
-    if damage == "invalid":
-        # Truncate a real catalog rather than inventing a provider/model fixture.
-        (tmp_path / "models-store.json").write_bytes((agent / "models-store.json").read_bytes()[:1])
-    status, out = check(configured | {"PI_AGENT_DIR": str(tmp_path), "PI_RUNTIME": runtime})
-    assert status != 0 and "model store" in out["error"] and "restore" in out["error"]
+    return agent, configured | {"PI_AGENT_DIR": str(tmp_path), "PI_RUNTIME": runtime}
+
+
+def test_invalid_model_store_has_safe_root_cause(configured, tmp_path):
+    agent, env = isolated_agent(configured, tmp_path)
+    (tmp_path / "models-store.json").write_bytes((agent / "models-store.json").read_bytes()[:1])
+    status, out = check(env)
+    assert status != 0 and "models-store.json" in out["error"] and "SyntaxError" in out["error"]
+
+
+@pytest.mark.parametrize("catalog", ["missing", "bom"])
+def test_optional_catalog_and_bom_preserve_pi_compatibility(configured, tmp_path, catalog):
+    agent, env = isolated_agent(configured, tmp_path)
+    (tmp_path / "auth.json").symlink_to(agent / "auth.json")
+    if catalog == "bom":
+        (tmp_path / "models-store.json").write_bytes(b"\xef\xbb\xbf" + (agent / "models-store.json").read_bytes())
+    else:
+        # The configured model may exist only in the saved catalog. Use an actual shipped model.
+        script = """
+import {join} from 'node:path'; import {pathToFileURL} from 'node:url';
+const load = name => import(pathToFileURL(join(process.env.PI_RUNTIME, 'dist/core', name)).href);
+const {ModelRuntime} = await load('model-runtime.js'); const {AuthStorage} = await load('auth-storage.js');
+const runtime = await ModelRuntime.create({credentials: AuthStorage.inMemory(), modelsPath: null,
+  allowModelNetwork: false, refreshOnCreate: false});
+console.log(JSON.stringify(runtime.getModels(process.env.MODEL_PROVIDER).map(m => m.id)));
+"""
+        models = json.loads(subprocess.check_output(["node", "--input-type=module", "-e", script],
+                                                    env=env | {"PI_OFFLINE": "1"}, text=True, timeout=30))
+        if not models:
+            pytest.skip("Configured provider has no shipped model catalog")
+        env["MODEL_ID"] = models[0]
+    before = tmp_path.stat().st_mtime_ns
+    status, out = check(env)
+    assert status == 0 and out["ready"]
+    assert tmp_path.stat().st_mtime_ns == before
+
+
+def test_missing_auth_is_checked_as_configuration_not_a_missing_file(configured, tmp_path):
+    agent, env = isolated_agent(configured, tmp_path)
+    (tmp_path / "models-store.json").symlink_to(agent / "models-store.json")
+    status, out = check(env)
+    # Some hosts use environment credentials only; both paths must leave the store absent.
+    if status:
+        assert "no configured credentials" in out["error"]
+    else:
+        assert out["ready"]
+    assert not (tmp_path / "auth.json").exists()
 
 
 def test_managed_release_pointer_drift_and_recovery(configured, tmp_path):

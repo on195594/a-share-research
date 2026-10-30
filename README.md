@@ -171,7 +171,9 @@ Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
 - worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口。
 
-worker 启动时先离线预检 Node、Pi 安装目录、模型存储及所配置模型，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `node a_share_research/pi_infer.mjs --check`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、`models-store.json` 或 `auth.json`，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
+worker 启动时先离线预检 Node、Pi 安装目录、模型存储、所配置模型及本地凭据配置，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `node a_share_research/pi_infer.mjs --check`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。兼容缺省存储（使用内置模型或环境凭据）与带 BOM 的 JSON；文件损坏、模型不存在或没有可用凭据配置仍会阻断。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、存储或凭据环境，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
+
+预检失败期间，价格任务与批次处理也会暂停，遗留的 `running` 任务保留原状。应先修复运行环境再恢复 worker；这些任务仍受发布空闲检查约束，不能改状态绕过检查。
 
 发布复用以下固定入口。先按改动范围完成一次必要验证；同一应用源码与依赖已有通过结果时直接沿用，不因进入发布阶段再跑全集。纯文档更新只提交推送。当前版本、证据和回退只更新[实施计划](docs/implementation-plan.md#当前部署)，产品与能力文档不重复维护上线状态。
 
@@ -191,7 +193,7 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查 → 暂停受理并复查 → 备份巡检 → 切换 → 本机健康检查与完整性巡检。失败恢复原应用镜像，保留数据和证据；不自动恢复数据库或删除备份。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据或数据库迁移变更需要单独安排回退，不使用此工具。
+工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查 → 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。失败恢复原应用镜像，保留数据和证据；不自动恢复数据库或删除备份。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据或数据库迁移变更需要单独安排回退，不使用此工具。
 
 业务表指纹只在两服务停止的窗口内比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `pi_infer.mjs` 的 `reasoning` 分别记录，模型未变时不追加模型配置检查或研究调用。
 
