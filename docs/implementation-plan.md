@@ -73,22 +73,22 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `8204d09`** 于 2026-10-30 08:29（北京时间）完成 web、worker 切换：包含 `859b62a` 页码提示修复，以及公共测试支撑整理和文档精简。模型、依赖、Compose 配置及成文/复核契约未变，worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `3d62f34`** 于 2026-10-30 09:24（北京时间）完成 web、worker 切换：包含 `a000321` 的 `change_pct`、链式 C.n 引用与日期/代码不再误判，以及 `879cd44` 的修正（股票代码只作标识从论断数字中剔除，不再按量级“支持”无关数字；`calculate` 缺行/缺期间报错列出可用期间）。`3d62f34` 起例行发布按 AGENTS.md 常设授权执行。模型、依赖、Compose 配置及成文/复核契约未变，worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:8204d09` | `4122f975e0071a5ea55143212bd5f6b159cc232dd21d83484f875f67cc5ae98b` |
-| `a-share-research-worker:8204d09` | `3f24f9b515d6cff68347b4f6de0ffbfe8ead2a61d887bca98c312d65461a731f` |
+| `a-share-research-web:3d62f34` | `280d17bb8a518407389526dda314bbb8324c19b1268f3270b1cfa688c1434a9c` |
+| `a-share-research-worker:3d62f34` | `c635a09037709b754a34a0f1b30d3f000f16f28450d9b2b0def1dd4dbbb4e020` |
 
-**验证**：沿用本轮整理已通过的 189 项选定测试（首次 186 通过、3 个漏导入失败；修复后受影响两文件 14 项通过，其余结果沿用）及文档链接检查，不重跑。按 [README 固定入口](../README.md#部署)构建并调用发布工具一次：镜像源码/读取权限、配置、空闲检查、备份完整性、停服窗口表指纹、本机健康及发布后完整性均通过。备份记录含 44 份报告、141 份 PDF；镜像切换前版本为 `096aa2d`。
+**验证**：全部 266 项测试通过；代码剔除的互变测试在 `a000321` 上失败、修复后通过。按 [README 固定入口](../README.md#部署)构建并调用发布工具一次，全部检查通过。未提交新研究，`change_pct` 与新报错的真实模型使用待后续生产研究自然观察。
 
-**生产页面**：390×844 Chromium 检查报告 44 的研究范围，沧州大化缺页码来源显示“未记录已读页码”，正常页码及原文链接保留；正常案例报告 37 页码列表保持。两页均无整页横溢；临时浏览器会话已通过“退出”撤销并删除本次状态文件。未提交研究、核查或运行模型评估；不据此声称新精度生成链路、逐值公告映射或检查点关闭已验收。
+**生产页面**：390×844 Chromium 打开首页与报告 44 均 200、无整页横溢；临时会话已“退出”撤销并删除状态文件。
 
-**证据**：`deploy-8204d09-20261030-082832/` 中保留 `manifest.json`、停服前后表指纹、`integrity-after.json` 及 `browser-acceptance.md`。备份：`~/a-share-research-data/backup-pre-8204d09-20261030-082834.db`。
+**证据**：`deploy-3d62f34-20261030-092439/`。备份：`~/a-share-research-data/backup-pre-3d62f34-20261030-092441.db`。
 
-**直接回退**：`a-share-research-web:rollback-8204d09` 与 `a-share-research-worker:rollback-8204d09` 均来自原运行的 `096aa2d`。经当次授权后，分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；只回退应用，不覆盖新数据。
+**直接回退**：`a-share-research-web:rollback-3d62f34` 与 `a-share-research-worker:rollback-3d62f34` 来自原运行的 `8204d09`。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；只回退应用，不覆盖新数据。
 
-**历史限制**：前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；旧发布、备份及回退详情见 `git show 8204d09:docs/implementation-plan.md`，既有证据和备份未删除。此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
+**历史限制**：前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；`8204d09` 及更早的发布、备份与回退详情见 `git show a000321:docs/implementation-plan.md`，既有证据和备份未删除。此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
 
 ## 尚待完成与未采用项
 
