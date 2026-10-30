@@ -9,7 +9,9 @@ import pytest
 from a_share_research import reading
 from support.continuation import BODY
 from support.templates import render
-from test_feedback_retry import web, browser_request
+from test_feedback_retry import browser_request, web
+
+_ = web  # pytest fixture from test_feedback_retry
 
 
 def captured():

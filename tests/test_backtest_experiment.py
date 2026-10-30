@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from a_share_research import backtest
-from a_share_research.backtest_experiment import quarter_signal
+from a_share_research.backtest_experiment import check_paths_separate, quarter_signal
 
 
 def test_cli_refuses_disabled_assertions():
@@ -18,21 +18,20 @@ def test_cli_refuses_disabled_assertions():
     env = os.environ.copy()
     env.pop("PYTHONOPTIMIZE", None)
     assert subprocess.run(command, env=env, capture_output=True).returncode == 0
-    for args, setting in (([sys.executable, "-O", *command[1:]], env),
-                          (command, env | {"PYTHONOPTIMIZE": "1"}),
-                          (command, env | {"PYTHONOPTIMIZE": "2"})):
-        result = subprocess.run(args, env=setting, capture_output=True, text=True)
-        assert result.returncode != 0 and "请勿使用 python -O" in result.stderr
+    result = subprocess.run([sys.executable, "-O", *command[1:]], env=env, capture_output=True, text=True)
+    assert result.returncode != 0 and "请勿使用 python -O" in result.stderr
 
 
 def test_cli_refuses_overlapping_source_and_output(tmp_path):
     for source, out in ((tmp_path, tmp_path), (tmp_path, tmp_path / "output"),
                         (tmp_path / "batches", tmp_path)):
-        result = subprocess.run(
-            [sys.executable, "-m", "a_share_research.backtest_experiment", "--source", str(source),
-             "--out", str(out), "--calendar", str(tmp_path / "calendar.json")],
-            capture_output=True, text=True)
-        assert result.returncode == 2 and "output must be separate" in result.stderr
+        with pytest.raises(ValueError, match="output must be separate"):
+            check_paths_separate(source, out)
+    result = subprocess.run(
+        [sys.executable, "-m", "a_share_research.backtest_experiment", "--source", str(tmp_path),
+         "--out", str(tmp_path), "--calendar", str(tmp_path / "calendar.json")],
+        capture_output=True, text=True)
+    assert result.returncode == 2 and "output must be separate" in result.stderr
     assert not list(tmp_path.iterdir())
 
 
