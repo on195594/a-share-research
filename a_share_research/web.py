@@ -597,12 +597,13 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
     draft = None
     if advancement['status'] == 'passed' and progress_item is not None and 0 <= progress_item < len(advancement['body']['items']):
         draft = advancement['body']['items'][progress_item]['next_step']['text']
-    # The newest report with an operating series lends its vitals to the company page,
-    # falling back to the newest report's saved T.* financial table when no series exists.
-    latest = next(((r, v) for r in reports if (v := charts.vitals(json.loads(r["body"])))), None)
+    # The newest non-replay report with an operating series lends its vitals to the company page,
+    # falling back to the newest non-replay report's saved T.* financial table when no series exists.
+    ordered = [r for r in reports if not r["replay_of"]] + [r for r in reports if r["replay_of"]]
+    parsed = [(r, json.loads(r["body"])) for r in ordered]
+    latest = next(((r, v) for r, b in parsed if (v := charts.vitals(b))), None)
     if latest is None:
-        for r in reports:
-            b = json.loads(r["body"])
+        for r, b in parsed:
             t = [x for x in (b.get("table") or []) if isinstance(x, dict) and str(x.get("id", "")).startswith("T.")]
             if v := charts.vitals(b, t):
                 latest = (r, v)

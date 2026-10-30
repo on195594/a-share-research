@@ -98,10 +98,10 @@
 
   <section id="financial" tabindex="-1">
     <h2>财务与走势</h2>
-    {% if vitals %}{{ vitals_panel(vitals, "财务体征 · 近 8 期") }}{% endif %}
+    {% if vitals %}{{ vitals_panel(vitals, "财务体征 · " ~ (vitals.span_title or "近 8 期")) }}{% endif %}
     {% if figures %}
-    {# Four core comparison/conversion figures stay open; multi-year trajectories fold. #}
-    {% set shown = 4 %}
+    {# With vitals above, two comparison/conversion figures stay open; the rest fold. #}
+    {% set shown = 2 if vitals else 4 %}
     <div class="figures">{% for f in figures[:shown] %}{{ figure(f) }}{% endfor %}</div>
     {% if figures | length > shown %}
     <details class="block more-figures">

@@ -83,15 +83,22 @@ document.addEventListener("click", (event) => {
       btn.setAttribute("aria-pressed", String(on));
     });
   }
+  let shown = 0;
   document.querySelectorAll(".companies > li[data-verdict]").forEach((item) => {
-    item.hidden = target !== "all" && item.dataset.verdict !== target;
+    const match = target === "all" || item.dataset.verdict === target;
+    item.hidden = !match;
+    if (match) shown += 1;
   });
+  const status = document.querySelector("[data-filter-status]");
+  if (status) status.textContent = `当前显示 ${shown} 家公司`;
 });
 
 // Section-level citation expand/collapse toggle for report chapters with multiple citations.
 for (const section of document.querySelectorAll("article > section[id]")) {
   const heading = section.querySelector(":scope > h2");
-  const sources = () => [...section.querySelectorAll(":scope > .items details.source")];
+  const sources = () => [
+    ...section.querySelectorAll(":scope > .items details.source, :scope > details.more details.source"),
+  ];
   if (!heading || sources().length < 2) continue;
   const head = document.createElement("div");
   head.className = "section-head";
@@ -108,6 +115,7 @@ for (const section of document.querySelectorAll("article > section[id]")) {
   sync();
   btn.addEventListener("click", () => {
     const next = !sources().every((d) => d.open);
+    if (next) section.querySelectorAll(":scope > details.more").forEach((d) => { d.open = true; });
     sources().forEach((d) => { d.open = next; });
     sync();
   });
@@ -120,17 +128,30 @@ const tocLinks = [...document.querySelectorAll(".toc a[href^='#']")];
 if (tocLinks.length && "IntersectionObserver" in window) {
   const byId = new Map(tocLinks.map((a) => [a.getAttribute("href").slice(1), a]));
   const targets = [...byId.keys()].map((id) => document.getElementById(id)).filter(Boolean);
+  const idOf = new Map(targets.map((el) => [el.closest("section") || el, el.id]));
   const activate = (id) => {
+    if (!id) return;
     tocLinks.forEach((a) => a.classList.toggle("active", a.getAttribute("href") === `#${id}`));
   };
+  tocLinks.forEach((a) => {
+    a.addEventListener("click", () => activate(a.getAttribute("href").slice(1)));
+  });
   const observer = new IntersectionObserver(
     (entries) => {
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4 && targets.length) {
+        return activate(targets[targets.length - 1].id);
+      }
       const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-      if (visible.length) activate(visible[0].target.id);
+      if (visible.length) activate(idOf.get(visible[0].target));
     },
-    { rootMargin: "-64px 0px -65% 0px", threshold: 0 }
+    { rootMargin: "-60px 0px -65% 0px", threshold: 0 }
   );
-  targets.forEach((el) => observer.observe(el.closest("section") || el));
+  idOf.forEach((_, node) => observer.observe(node));
+  window.addEventListener("scroll", () => {
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4 && targets.length) {
+      activate(targets[targets.length - 1].id);
+    }
+  }, { passive: true });
 }
 
 // Elapsed timers count locally between server updates.

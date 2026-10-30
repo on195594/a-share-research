@@ -1,11 +1,11 @@
 """Chart geometry for server-rendered SVG; pure functions over saved report and batch data.
 
-Charts redraw values already saved in a report, batch or price reference, and labels reuse the
-saved display strings; besides geometry (scales and ticks), the one value computed here is each
-selected company's own batch return, through the same screening.group_return as the portfolios.
-Every chart also returns its readouts as `data`, the HTML equivalent listed under it. The page
-CSP forbids inline styles, so templates draw with SVG attributes: x in percent of the figure
-width (the chart follows the column on any screen) and y in pixels (text keeps its size).
+Charts redraw values already saved in a report, batch or price reference: report charts reuse saved
+display strings, while batch charts format saved candidate numbers (deducted profit in 亿元, 60-day
+return in percent, and each selected company's return via the same screening.group_return as the
+portfolios). Every chart also returns its readouts as `data`, the HTML equivalent listed under it.
+The page CSP forbids inline styles, so templates draw with SVG attributes: x in percent of the
+figure width (the chart follows the column on any screen) and y in pixels (text keeps its size).
 """
 import math
 from datetime import date
@@ -141,7 +141,7 @@ def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | Non
             "data": [r["tip"] for r in rows]}
 
 
-def waterfall(items: list[dict], start: float = 34.0, end: float = 80.0) -> dict | None:
+def waterfall(items: list[dict], start: float = 47.0, end: float = 82.0) -> dict | None:
     """Horizontal waterfall / bridge chart on one axis (e.g. profit -> operating cash -> capex -> FCF)."""
     values = [v for r in items for v in (r.get("from"), r.get("to")) if v is not None]
     if len(values) < 2:
@@ -160,7 +160,7 @@ def waterfall(items: list[dict], start: float = 34.0, end: float = 80.0) -> dict
                     "x_from": x0, "x_to": x1, "missing": missing})
     connectors = []
     for i, r in enumerate(out):
-        if r.get("role") == "step" and not r["missing"]:
+        if r.get("bridged") and not r["missing"]:
             if i > 0 and not out[i - 1]["missing"]:
                 connectors.append({"x": out[i - 1]["x_to"], "y1": out[i - 1]["y"] + 23, "y2": r["y"] + 9})
             if i + 1 < len(out) and not out[i + 1]["missing"]:
@@ -319,8 +319,8 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
 
     def cash_bridge():
         steps = (("net_profit", "归母净利润", "profit"), ("core_profit", "扣非归母净利润", "core"),
-                 ("op_cash", "经营活动现金流净额", "cash"), ("capex", "购建长期资产现金", "step"),
-                 ("fcf", "减购建后现金净额", "fcf"))
+                 ("op_cash", "经营活动现金流净额", "cash"), ("capex", "购建长期资产支付的现金", "step"),
+                 ("fcf", "经营现金流减购建长期资产现金", "fcf"))
         ttm_p = (series.get("ttm") or {}).get("periods") or []
         ann_p = (series.get("annual") or {}).get("periods") or []
         ttm_ok = bool(ttm_p and row("ttm", "op_cash")
@@ -347,17 +347,18 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
         items = []
         for k, lb, role in steps:
             val = number(texts.get(k))
-            if role == "step" and val is not None and v_ocf is not None and v_fcf is not None:
-                a, b = v_fcf, v_ocf
+            bridged = bool(role == "step" and val is not None and v_ocf is not None and v_fcf is not None)
+            if role == "step":
+                a, b = (v_fcf, v_ocf) if bridged else (None, None)
             else:
                 a, b = (0.0, val) if val is not None else (None, None)
-            items.append({"label": lb, "from": a, "to": b, "role": role,
+            items.append({"label": lb, "from": a, "to": b, "role": role, "bridged": bridged,
                           "text": texts.get(k) or "—", "tip": tips[k]})
         chart = waterfall(items)
         return chart and {"kind": "waterfall", "title": f"盈利与现金流转化 · {period_text}",
-                          "headline": f"归母净利 {texts.get('net_profit') or '—'} → 经营现金流 {texts.get('op_cash') or '—'} → 减购建后 {texts.get('fcf') or '—'} 亿元",
+                          "headline": f"归母净利润 {texts.get('net_profit') or '—'} → 经营活动现金流净额 {texts.get('op_cash') or '—'} → 经营现金流减购建长期资产现金 {texts.get('fcf') or '—'} 亿元",
                           "chart": chart, "source": source,
-                          "note": "展示同期间利润、经营现金流、购建长期资产现金支出与减购建后净额的转化关系；"
+                          "note": "展示同期间利润、经营活动现金流净额、购建长期资产支付的现金与经营现金流减购建长期资产现金的转化关系；"
                                   "经营现金流为合并口径，归母与扣非净利为归属母公司股东口径。"}
 
     def balance_structure():
@@ -366,7 +367,8 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
         if periods and any(row("balance", k) for k, _ in STOCKS):
             latest = periods[-1]
             prior = f"{int(latest[:4]) - 1}{latest[4:]}"
-            prior = prior if prior in periods else (periods[-2] if len(periods) > 1 else latest)
+            if prior not in periods:
+                return None
             pairs = [(lb, (row("balance", k)["values"].get(prior) or {}).get("display"),
                       (row("balance", k)["values"].get(latest) or {}).get("display"))
                      for k, lb in STOCKS if row("balance", k)]
@@ -378,7 +380,8 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
                 return None
             latest = all_p[-1]
             prior = f"{int(latest[:4]) - 1}{latest[4:]}"
-            prior = prior if prior in all_p else (all_p[-2] if len(all_p) > 1 else latest)
+            if prior not in all_p:
+                return None
             pairs = [(lb, table[f"T.{k}"]["values"].get(prior), table[f"T.{k}"]["values"].get(latest))
                      for k, lb in STOCKS if f"T.{k}" in table]
             source = "财务数据表"
@@ -394,25 +397,11 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
                           "chart": chart, "source": source,
                           "note": "同一水平刻度对比货币资金、四项债务合计及应收、存货、合同负债、商誉的绝对规模与同期变化。"}
 
-    def ttm_trend():
-        group = series.get("ttm") or {}
-        periods = group.get("periods") or []
-        profit, cash = row("ttm", "net_profit"), row("ttm", "op_cash")
-        if len(periods) < 3 or not (profit and cash):
-            return None
-        texts = [[r["values"].get(p, {}).get("display") for p in periods] for r in (profit, cash)]
-        chart = lines(periods, [_period_label(p, "quarterly") for p in periods],
-                      [{"label": "归母净利润", "texts": texts[0]}, {"label": "经营活动现金流净额", "texts": texts[1]}])
-        return chart and {"kind": "lines", "title": "利润与经营现金流 · 近12月滚动", "chart": chart, "source": "经营序列",
-                          "headline": f"近 12 个月滚动值（TTM），亿元；图例为截至 {periods[-1]} 的值",
-                          "note": "滚动 12 个月消除单季淡旺季波动；年报直接取全年，其他报告期按本年累计 + 上年全年 − 上年同期累计计算。"}
-
     for figure in (
-        latest_growth(),
-        ratios(),
         cash_bridge(),
+        ratios(),
+        latest_growth(),
         balance_structure(),
-        ttm_trend(),
         annual_columns(["revenue"], ["营业总收入"], "营业总收入 · 年度", ""),
         annual_columns(["net_profit", "op_cash"], ["归母净利润", "经营活动现金流净额"], "利润与经营现金流 · 年度",
                        "两者口径不同：经营现金流为合并口径，归母净利润只含母公司股东部分。"),
@@ -473,7 +462,6 @@ def spark_line(periods: list[str], values: list[float | None]) -> dict | None:
             "dots": [{"x": p[0], "y": p[1], "last": i == len(points) - 1,
                       "isolated": not (i and points[i - 1]) and not (i + 1 < len(points) and points[i + 1])}
                      for i, p in enumerate(points) if p],
-            "stems": [{"x": p[0], "y": p[1]} for p in points if p],
             "slots": [{"x": bounds[i], "w": round(bounds[i + 1] - bounds[i], 3)} for i in range(len(periods))],
             "height": SPARK}
 
@@ -530,6 +518,7 @@ def vitals(body: dict, fin: list[dict] | None = None) -> dict | None:
     if not any(r["present"] for r in flow_rows + stock_rows):
         return None
     return {"flows": flow_rows, "stocks": stock_rows, "flow_heading": "单季", "source": "经营序列",
+            "span_title": f"近 {max(len(quarters), len(balance))} 期",
             "flow_period": quarters and _period_label(quarters[-1], "quarterly"),
             "flow_span": quarters and f"{_period_label(quarters[0], 'quarterly')}–{_period_label(quarters[-1], 'quarterly')}",
             "stock_period": balance and _period_label(balance[-1], "balance"),
@@ -586,8 +575,11 @@ def _table_vitals(fin: list[dict]) -> dict | None:
                            "year_ago": vals.get(year_ago) if year_ago else None, "data": tips})
     if not any(r["present"] for r in flow_rows + stock_rows):
         return None
+    flow_period = f"{latest[2:4]}年{CUMULATIVE.get(latest[5:], '')}"
+    span_title = f"历年 {len(annual)} 期与最新期" if annual else f"近 {len(stock_periods)} 期"
     return {"flows": flow_rows, "stocks": stock_rows, "flow_heading": "历年", "source": "财务数据表",
-            "flow_period": _period_label(latest, "balance"),
+            "span_title": span_title,
+            "flow_period": flow_period,
             "flow_span": annual and f"{annual[0][:4]}–{annual[-1][:4]}",
             "stock_period": _period_label(latest, "balance"),
             "year_ago": year_ago and _period_label(year_ago, "balance"),
@@ -625,8 +617,7 @@ def dumbbell(fin: list[dict], start: float = 30.0, end: float = 72.0) -> dict | 
     at = lambda v: round(start + (v - lo) / (hi - lo) * (end - start), 3)  # noqa: E731
     for i, r in enumerate(rows):
         b, a = number(r["before"]), number(r["after"])
-        r.update(y=i * 34, x_after=at(a), x_before=at(b) if b is not None else None,
-                 direction="up" if b is not None and a > b else ("down" if b is not None and a < b else "flat"))
+        r.update(y=i * 34, x_after=at(a), x_before=at(b) if b is not None else None)
         if b is not None:
             r.update(seg_x=min(r["x_before"], r["x_after"]), seg_w=round(abs(r["x_after"] - r["x_before"]), 3))
     height = len(rows) * 34
@@ -832,7 +823,7 @@ def market_strip(batch: dict) -> dict | None:
     for i, (k, v) in enumerate(items):
         pct = round(v / total * 100, 1)
         w = round(100.0 - cursor if i == len(items) - 1 else v / total * 100, 2)
-        segments.append({"label": k, "count": v, "pct": pct, "x": round(cursor, 2), "w": max(w, 0.5),
+        segments.append({"label": k, "count": v, "pct": pct, "x": round(cursor, 2), "w": max(w, 0.0),
                          "cls": f"b{i % 4}", "tip": f"{k}：{v} 家（占粗筛池 {pct:.1f}%）"})
         cursor += w
     return {"segments": segments, "total": total}
@@ -842,18 +833,20 @@ def verdict_summary(companies: list) -> dict | None:
     """Breakdown of latest research verdicts across actively researched companies on the home page."""
     if not companies:
         return None
-    buckets = [("值得继续研究", "tier-2"), ("需要谨慎", "tier-1"), ("暂不值得", "tier-0"), ("复核未通过", "failed")]
-    counts = {label: 0 for label, _ in buckets}
+    buckets = ("值得继续研究", "需要谨慎", "暂不值得", "复核未通过")
+    counts = {label: 0 for label in buckets}
+    by_code = {}
     for c in companies:
-        key = c["verdict"] if c["passed"] and c["verdict"] in counts else "复核未通过"
-        counts[key] = counts.get(key, 0) + 1
+        key = c["verdict"] if c["passed"] and c["verdict"] in VERDICTS else "复核未通过"
+        by_code[c["code"]] = key
+        counts[key] += 1
     total = len(companies)
-    active = [(label, cls, counts[label]) for label, cls in buckets if counts[label] > 0]
+    active = [(label, counts[label]) for label in buckets if counts[label] > 0]
     items, cursor = [], 0.0
-    for i, (label, cls, count) in enumerate(active):
+    for i, (label, count) in enumerate(active):
         pct = round(count / total * 100, 1) if total else 0.0
         w = round(100.0 - cursor if i == len(active) - 1 else count / total * 100, 2)
-        items.append({"label": label, "cls": cls, "count": count, "pct": pct,
-                      "x": round(cursor, 2), "w": max(w, 0.5)})
+        items.append({"label": label, "count": count, "pct": pct,
+                      "x": round(cursor, 2), "w": max(w, 0.0)})
         cursor += w
-    return {"items": items, "total": total}
+    return {"items": items, "total": total, "buckets": by_code}

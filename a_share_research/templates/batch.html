@@ -206,7 +206,7 @@
       <div class="cand-spark" data-chart>
         <div class="cand-spark-meta">
           <span class="small muted">扣非净利（{{ sp.span }}，亿）</span>
-          <span class="readout small">{{ sp.base }} → <strong>{{ sp.latest }}</strong>{% if sp.roe_text %} · 扣非ROE {{ sp.roe_text }}{% endif %}</span>
+          <span class="readout small">{{ sp.base }} → {{ sp.latest }}{% if sp.roe_text %} · 扣非ROE {{ sp.roe_text }}{% endif %}</span>
         </div>
         {{ spark_cols(sp.spark) }}
       </div>
@@ -256,9 +256,9 @@
   </ul>
   {% endif %}
   <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名（缺口不代表质量差）。</p>
-  {% if batch.universe.markets %}<p class="muted small">粗筛后板块覆盖：{% for m, n in batch.universe.markets.items() %}{{ m }} {{ n }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
   {% if market_strip is defined and market_strip %}
   <div class="market-strip" data-chart>
+    <p class="small muted">粗筛后板块覆盖（共 {{ market_strip.total }} 家）：{% for s in market_strip.segments %}<span class="seg-key"><i class="seg-dot {{ s.cls }}"></i>{{ s.label }} {{ s.count }}（{{ s.pct }}%）</span>{% if not loop.last %}、{% endif %}{% endfor %}</p>
     <svg width="100%" height="10" class="strip-bar" role="img" aria-label="粗筛后板块占比">
       {% for s in market_strip.segments %}
       <g class="slot" tabindex="0" data-tip="{{ s.tip }}">
@@ -267,9 +267,9 @@
       </g>
       {% endfor %}
     </svg>
-    <p class="readout small muted">粗筛池共 {{ market_strip.total }} 家：{% for s in market_strip.segments %}<span class="seg-key"><i class="seg-dot {{ s.cls }}"></i>{{ s.label }} {{ s.pct }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    <p class="readout small muted">悬停或点按分段查看各板块家数与占比</p>
   </div>
-  {% endif %}
+  {% elif batch.universe.markets %}<p class="muted small">粗筛后板块覆盖：{% for m, n in batch.universe.markets.items() %}{{ m }} {{ n }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
   {% set gaps = batch.universe.rows | selectattr("status", "equalto", "gap") | list %}
   {% if gaps %}
   <details>

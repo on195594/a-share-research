@@ -92,9 +92,9 @@
   {% if companies %}
   {% if verdict_summary is defined and verdict_summary %}
   <div class="verdict-overview">
-    <svg width="100%" height="8" class="strip-bar" role="img" aria-label="主动研究过的公司最新判断分布">
+    <svg width="100%" height="8" class="strip-bar single-hue" role="img" aria-label="主动研究过的公司最新判断分布">
       {% for item in verdict_summary["items"] %}
-      <rect x="{{ item.x }}%" y="0" width="{{ item.w }}%" height="8" class="seg {{ item.cls }}">
+      <rect x="{{ item.x }}%" y="0" width="{{ item.w }}%" height="8" class="seg">
         <title>{{ item.label }}：{{ item.count }} 家（{{ item.pct }}%）</title>
       </rect>
       {% endfor %}
@@ -102,14 +102,15 @@
     <div class="filter-pills" role="toolbar" aria-label="按最新研究判断筛选公司">
       <button type="button" class="pill active" data-verdict-filter="all" aria-pressed="true">全部 <span class="num">{{ verdict_summary.total }}</span></button>
       {% for item in verdict_summary["items"] %}
-      <button type="button" class="pill" data-verdict-filter="{{ item.label }}" aria-pressed="false"><i class="seg-dot {{ item.cls }}"></i>{{ item.label }} <span class="num">{{ item.count }}</span></button>
+      <button type="button" class="pill" data-verdict-filter="{{ item.label }}" aria-pressed="false">{{ item.label }} <span class="num">{{ item.count }}</span></button>
       {% endfor %}
     </div>
+    <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
   </div>
   {% endif %}
   <ul class="list companies">
   {% for c in companies %}
-    <li data-verdict="{{ c.verdict if c.passed else '复核未通过' }}">
+    <li data-verdict="{{ verdict_summary.buckets[c.code] if verdict_summary is defined and verdict_summary else (c.verdict if c.passed else '复核未通过') }}">
       <div class="company-row">
         <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
         {% if c.passed %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% else %}<span class="company-verdict flag">复核未通过</span>{% endif %}

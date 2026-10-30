@@ -324,26 +324,36 @@ def test_waterfall_cash_bridge_and_paired_balance_structure_on_real_series_and_t
     series = build("000858")
     fin = financial_table(frames(CAPTURES["000858"]), {})
     figures = charts.financial_charts({"series": series}, fin)
+    assert not any("近12月滚动" in f["title"] for f in figures)
     bridge = figure(figures, "盈利与现金流转化")
     assert bridge["kind"] == "waterfall"
     wf = bridge["chart"]
     assert [s["label"] for s in wf["rows"]] == [
-        "归母净利润", "扣非归母净利润", "经营活动现金流净额", "购建长期资产现金", "减购建后现金净额"
+        "归母净利润", "扣非归母净利润", "经营活动现金流净额", "购建长期资产支付的现金", "经营现金流减购建长期资产现金"
     ]
     assert wf["rows"][0]["role"] == "profit" and wf["rows"][3]["role"] == "step" and wf["rows"][4]["role"] == "fcf"
     assert len(wf["connectors"]) == 2
     html = str(ENV.get_template("_charts.html").module.figure(bridge))
     assert "chart waterfall" in html and 'class="connector"' in html
-    # Mutation check: a missing step in waterfall draws no bar and suppresses adjacent connectors.
+    # Mutation check: a missing step or missing FCF in waterfall draws no capex bridge bar and suppresses connectors.
     gapped = copy.deepcopy(series)
     latest_ann = gapped["annual"]["periods"][-1]
     next(r for r in gapped["annual"]["rows"] if r["id"] == "capex")["values"][latest_ann].update(display=None, value=None)
     wf_gapped = figure(charts.financial_charts({"series": gapped}, fin), "盈利与现金流转化")["chart"]
     assert wf_gapped["rows"][3]["missing"] and wf_gapped["rows"][3]["w"] == 0.0
     assert wf_gapped["connectors"] == []
-    # Paired balance structure on series and legacy table fallback.
+    no_fcf = copy.deepcopy(series)
+    next(r for r in no_fcf["annual"]["rows"] if r["id"] == "fcf")["values"][latest_ann].update(display=None, value=None)
+    wf_no_fcf = figure(charts.financial_charts({"series": no_fcf}, fin), "盈利与现金流转化")["chart"]
+    assert wf_no_fcf["rows"][3]["missing"] and wf_no_fcf["connectors"] == []
+    # Paired balance structure on series and legacy table fallback; omitted when year-earlier period is absent.
     struct = figure(figures, "资金与营运结构")
     assert struct["kind"] == "paired" and len(struct["chart"]["rows"]) >= 3
+    no_prior = copy.deepcopy(series)
+    latest_bal = no_prior["balance"]["periods"][-1]
+    prior_bal = f"{int(latest_bal[:4]) - 1}{latest_bal[4:]}"
+    no_prior["balance"]["periods"] = [p for p in no_prior["balance"]["periods"] if p != prior_bal]
+    assert not any(f["title"].startswith("资金与营运结构") for f in charts.financial_charts({"series": no_prior}, []))
     legacy_body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
     legacy_fin = [r for r in legacy_body["table"] if r["id"].startswith("T.")]
     legacy_figs = charts.financial_charts(legacy_body, legacy_fin)
@@ -351,12 +361,14 @@ def test_waterfall_cash_bridge_and_paired_balance_structure_on_real_series_and_t
     assert figure(legacy_figs, "资金与营运结构")["source"] == "财务数据表"
 
 
-def test_vitals_falls_back_to_financial_table_when_series_is_absent():
-    body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
+def test_vitals_falls_back_to_financial_table_and_stock_template_labels_source():
+    rec = next(r for r in RECORDS if r["report"]["id"] == 37)
+    body = rec["report"]["body"]
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     assert charts.vitals(body) is None
     panel = charts.vitals(body, fin)
     assert panel["flow_heading"] == "历年" and panel["source"] == "财务数据表"
+    assert panel["flow_period"] == "26年上半年" and panel["span_title"] == "历年 3 期与最新期"
     saved_rev = next(r for r in fin if r["id"] == "T.revenue")["values"]
     rev = vital(panel, "营业总收入")
     latest = max(saved_rev)
@@ -367,14 +379,22 @@ def test_vitals_falls_back_to_financial_table_when_series_is_absent():
     next(r for r in mutated if r["id"] == "T.revenue")["values"].pop(years[0])
     rev_after = vital(charts.vitals(body, mutated), "营业总收入")
     assert rev_after["spark"]["bars"][0]["missing"] and "h" not in rev_after["spark"]["bars"][0]
+    # Stock page template must report the vitals source ("财务数据表") rather than hardcoding "经营序列".
+    report_meta = {**rec["report"], "replay_of": None, "question": body.get("question"),
+                   "parent_report_id": None, "feedback_text": None, "prior_report_id": None}
+    stock_html = ENV.get_template("stock.html").render(
+        reports=[report_meta], code=rec["report"]["code"], vitals=panel, vitals_report=report_meta,
+        comparison={"old": None, "reason": "未记录明确关联", "diff": None, "excluded": []},
+        price=None, csrf="t", request_id="r", track=None,
+    )
+    assert "保存的财务数据表" in stock_html and "保存的经营序列" not in stock_html
 
 
-def test_batch_overview_sparks_market_strip_and_verdict_summary():
+def test_batch_overview_sparks_market_strip_and_verdict_summary_on_captured_data():
     matrix = json.loads((ROOT / "tests/data/batch-candidate-matrix.json").read_text())
     labels = json.loads((ROOT / "tests/data/batch-factor-labels.json").read_text())
-    rows_with_ret = [{**r, "return_60d": -0.35 if r.get("drawdown") else 0.12} for r in matrix["rows"]]
-    batch = {"q20": rows_with_ret, "l5": {"codes": matrix["l5"]},
-             "universe": {"markets": {"主板": 3100, "创业板": 1350, "科创板": 580}}}
+    batch = {"q20": matrix["rows"], "l5": {"codes": matrix["l5"]},
+             "universe": {"markets": matrix["markets"]}}
     overview = charts.batch_overview(batch)
     assert overview and len(overview["momentum"]["rows"]) == len(matrix["rows"])
     assert any(r["emphasis"] for r in overview["industries"]["rows"])
@@ -383,13 +403,29 @@ def test_batch_overview_sparks_market_strip_and_verdict_summary():
     for code, sp in sparks.items():
         assert len(sp["spark"]["bars"]) == 4 and sp["spark"]["bars"][-1]["last"]
     strip = charts.market_strip(batch)
-    assert strip["total"] == 5030 and abs(sum(s["w"] for s in strip["segments"]) - 100.0) < 0.05
-    summary = charts.verdict_summary([
-        {"verdict": "值得继续研究", "passed": 1},
-        {"verdict": "需要谨慎", "passed": 1},
-        {"verdict": "值得继续研究", "passed": 0},
-    ])
-    assert summary["total"] == 3
-    assert [(i["label"], i["count"]) for i in summary["items"]] == [
-        ("值得继续研究", 1), ("需要谨慎", 1), ("复核未通过", 1)
-    ]
+    assert strip["total"] == sum(matrix["markets"].values())
+    assert abs(sum(s["w"] for s in strip["segments"]) - 100.0) < 0.05
+    # Verify batch.html keeps the board color legend outside .readout so hovering never erases it.
+    batch_tpl = (ROOT / "a_share_research/templates/batch.html").read_text()
+    start = batch_tpl.index("{% if market_strip is defined and market_strip %}")
+    end = batch_tpl.index("{% set gaps =", start)
+    strip_html = ENV.from_string(batch_tpl[start:end]).render(
+        market_strip=strip, batch={"universe": {"markets": matrix["markets"]}}
+    )
+    readout_part = strip_html.split('<p class="readout')[1].split("</p>")[0]
+    assert "seg-dot" in strip_html and "seg-dot" not in readout_part
+    # Verdict summary on real captured reports from RECORDS, using sqlite3.Row as web.latest_reports() does.
+    import sqlite3
+    mem = sqlite3.connect(":memory:")
+    mem.row_factory = sqlite3.Row
+    mem.execute("CREATE TABLE t (code TEXT, name TEXT, id INT, verdict TEXT, passed INT, coverage TEXT, created_at TEXT, from_batch INT, checkpoint INT)")
+    for r in RECORDS[:5]:
+        rep = r["report"]
+        mem.execute("INSERT INTO t VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)",
+                    (rep["code"], rep["name"], rep["id"], rep["verdict"], rep["passed"], rep["period"], rep["created_at"]))
+    companies = mem.execute("SELECT * FROM t").fetchall()
+    summary = charts.verdict_summary(companies)
+    assert summary["total"] == len(companies)
+    assert all(summary["buckets"][c["code"]] in ("值得继续研究", "需要谨慎", "暂不值得", "复核未通过") for c in companies)
+    js = (ROOT / "a_share_research/static/app.js").read_text()
+    assert ":scope > .items details.source, :scope > details.more details.source" in js

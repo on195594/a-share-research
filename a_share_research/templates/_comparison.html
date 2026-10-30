@@ -21,24 +21,22 @@
   {% if comparison.diff %}
   {% set diff = comparison.diff %}
   {% set moved = diff.valuation | rejectattr('unchanged') | list %}
-  <details {% if moved or diff.revised or diff.disclosed %}open{% endif %}>
+  <details {% if moved or diff.revised %}open{% endif %}>
     <summary>程序核对的指标变化{% if moved or diff.revised %} · {{ (moved | length) + (diff.revised | length) }} 项变动{% endif %}</summary>
-    <p class="hint">仅比较同指标、同单位、同期间的已记录值；不同期间的累计值不相减，缺失值不按零处理。</p>
+    <p class="hint">仅比较同指标、同单位、同期间的已记录值；不同期间的累计值不相减，缺失值不按零处理。{% if diff.revised %}不据此推断修订原因。{% endif %}{% if moved %}估值快照变化，不是收益。{% endif %}</p>
     {% if moved or diff.revised %}
     <dl class="diff-grid">
       {% for r in diff.revised %}
-      <div><dt>{{ r.label }} <small>{{ r.period }} · 修订</small></dt><dd class="num"><span class="muted">{{ r.before }} →</span> <strong>{{ r.after }}</strong> <small>{{ r.unit }}</small></dd></div>
+      <div class="diff-cell"><dt>{{ r.label }} <small>{{ r.period }} · 同口径记录值变化</small></dt><dd class="num"><span class="muted">{{ r.before }} →</span> <strong>{{ r.after }}</strong> <small>{{ r.unit }}</small></dd></div>
       {% endfor %}
       {% for v in moved %}
-      <div><dt>{{ v.label }} <small>{{ v.before[0] }} → {{ v.after[0] }}</small></dt><dd class="num"><span class="muted">{{ v.before[1] }} →</span> <strong>{{ v.after[1] }}</strong> <small>{{ v.unit }}</small></dd></div>
+      <div class="diff-cell"><dt>{{ v.label }} <small>{{ v.before[0] }} → {{ v.after[0] }} · 估值快照</small></dt><dd class="num"><span class="muted">{{ v.before[1] }} →</span> <strong>{{ v.after[1] }}</strong> <small>{{ v.unit }}</small></dd></div>
       {% endfor %}
     </dl>
     {% endif %}
     <ul>
       <li>新增财务数据覆盖期：{{ diff.disclosed | join('、') if diff.disclosed else '无' }}（不代表已完整阅读新披露原文）。</li>
       {% if diff.backfilled %}<li>补齐比较期：{{ diff.backfilled | join('、') }}（不是新披露）。</li>{% endif %}
-      {% for r in diff.revised %}<li>同口径记录值变化：{{ r.label }} {{ r.period }}，{{ r.before }} → {{ r.after }} {{ r.unit }}（不据此推断修订原因）。</li>{% endfor %}
-      {% for v in moved %}<li>{{ v.label }}：{{ v.before[1] }}（{{ v.before[0] }}）→ {{ v.after[1] }}（{{ v.after[0] }}）{{ v.unit }}，估值快照变化，不是收益。</li>{% endfor %}
       {% if diff.uncollected %}<li>上次未采集：{{ diff.uncollected | join('、') }}。</li>{% endif %}
       {% if comparison.missing %}<li>本次未记录部分旧指标或期间：{{ comparison.missing | join('、') }}，不能认定没有变化。</li>{% endif %}
       {% if not (diff.disclosed or diff.backfilled or diff.revised or diff.uncollected or moved) %}<li>可比的已记录指标未发现变化；缺失字段不在此判断内。</li>{% endif %}

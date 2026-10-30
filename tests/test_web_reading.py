@@ -196,3 +196,22 @@ def test_candidate_matrix_shades_percentiles_and_links_flags_to_details():
     assert flagged and all(f'href="#cand-{r["code"]}">60日跌超30%' in html for r in flagged)
     assert html.count('class="matrix-flag"') == len(flagged)
     assert 'id="cand-{{ r.code }}"' in template
+
+
+def test_stock_vitals_source_uses_vitals_source_and_home_filter_live_region():
+    from a_share_research import charts
+    records = json.loads((ROOT / 'tests/data/continuation-records.json').read_text())['records']
+    body = next(r['report']['body'] for r in records if r['report']['id'] == 37)
+    fin = [r for r in body['table'] if r['id'].startswith('T.')]
+    vt = charts.vitals(body, fin)
+    assert vt and vt['source'] == '财务数据表'
+    stock_tpl = (TEMPLATES / 'stock.html').read_text()
+    start = stock_tpl.index('{% if vitals %}')
+    end = stock_tpl.index('{% endif %}', start) + len('{% endif %}')
+    html = ENV.from_string('{% from "_charts.html" import vitals as vitals_panel %}' + stock_tpl[start:end]).render(
+        vitals=vt, vitals_report={'id': 37, 'created_at': '2026-10-14', 'period': '2026-06-30'}
+    )
+    assert '保存的财务数据表' in html
+    home_tpl = (TEMPLATES / 'home.html').read_text()
+    assert 'data-verdict="{{ verdict_summary.buckets[c.code]' in home_tpl
+    assert 'role="status" aria-live="polite" data-filter-status' in home_tpl

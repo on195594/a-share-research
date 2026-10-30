@@ -1,5 +1,5 @@
 {
- "source": "Production batch 1 q20/q5/l5, read-only capture of the 2026-10-30 database snapshot; values unchanged, fields limited to the candidate matrix.",
+ "source": "Production batch 1 q20/q5/l5/markets, read-only capture of the 2026-10-30 database snapshot; values unchanged, fields limited to the candidate matrix and batch overview.",
  "q5": [
   "002648.SZ",
   "002847.SZ",
@@ -32,7 +32,9 @@
    "drawdown": false,
    "report_id": 15,
    "verdict": "值得继续研究",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "基础化工",
+   "return_60d": -0.005193767479025335
   },
   {
    "code": "002847.SZ",
@@ -51,7 +53,9 @@
    "drawdown": false,
    "report_id": 16,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "食品饮料",
+   "return_60d": -0.16603214890016926
   },
   {
    "code": "600961.SH",
@@ -70,7 +74,9 @@
    "drawdown": false,
    "report_id": 17,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "有色金属",
+   "return_60d": -0.1906761864762705
   },
   {
    "code": "300750.SZ",
@@ -89,7 +95,9 @@
    "drawdown": true,
    "report_id": 18,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "电力设备",
+   "return_60d": -0.38219816686524255
   },
   {
    "code": "601600.SH",
@@ -108,7 +116,9 @@
    "drawdown": false,
    "report_id": 19,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "有色金属",
+   "return_60d": -0.07355933068082976
   },
   {
    "code": "605499.SH",
@@ -127,7 +137,9 @@
    "drawdown": false,
    "report_id": 20,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "食品饮料",
+   "return_60d": -0.16313752690750338
   },
   {
    "code": "603699.SH",
@@ -146,7 +158,9 @@
    "drawdown": false,
    "report_id": 21,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "机械设备",
+   "return_60d": -0.16551125715357973
   },
   {
    "code": "601918.SH",
@@ -165,7 +179,9 @@
    "drawdown": false,
    "report_id": 22,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "煤炭",
+   "return_60d": -0.048809802882390896
   },
   {
    "code": "600346.SH",
@@ -184,7 +200,9 @@
    "drawdown": false,
    "report_id": 23,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "石油石化",
+   "return_60d": -0.06979542719614917
   },
   {
    "code": "600862.SH",
@@ -203,7 +221,9 @@
    "drawdown": false,
    "report_id": 24,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "国防军工",
+   "return_60d": -0.028184281842818404
   },
   {
    "code": "000651.SZ",
@@ -222,7 +242,9 @@
    "drawdown": false,
    "report_id": 25,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "家用电器",
+   "return_60d": -0.03595627353052333
   },
   {
    "code": "300475.SZ",
@@ -241,7 +263,9 @@
    "drawdown": false,
    "report_id": 26,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "电子",
+   "return_60d": -0.29652803337013867
   },
   {
    "code": "002468.SZ",
@@ -260,7 +284,9 @@
    "drawdown": false,
    "report_id": null,
    "verdict": null,
-   "research_status": "failed"
+   "research_status": "failed",
+   "industry": "交通运输",
+   "return_60d": 0.01760821716801164
   },
   {
    "code": "002170.SZ",
@@ -279,7 +305,9 @@
    "drawdown": false,
    "report_id": 27,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "基础化工",
+   "return_60d": -0.07417637398405297
   },
   {
    "code": "600989.SH",
@@ -298,7 +326,9 @@
    "drawdown": false,
    "report_id": 28,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "基础化工",
+   "return_60d": -0.10665810926436103
   },
   {
    "code": "688208.SH",
@@ -317,7 +347,9 @@
    "drawdown": false,
    "report_id": 29,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "计算机",
+   "return_60d": -0.08654607021005467
   },
   {
    "code": "600066.SH",
@@ -336,7 +368,9 @@
    "drawdown": false,
    "report_id": 30,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "汽车",
+   "return_60d": -0.12896208825357358
   },
   {
    "code": "300274.SZ",
@@ -355,7 +389,9 @@
    "drawdown": true,
    "report_id": 31,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "电力设备",
+   "return_60d": -0.3825487666590416
   },
   {
    "code": "000921.SZ",
@@ -374,7 +410,9 @@
    "drawdown": false,
    "report_id": 32,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "家用电器",
+   "return_60d": -0.051438181853683096
   },
   {
    "code": "603501.SH",
@@ -393,7 +431,15 @@
    "drawdown": false,
    "report_id": 33,
    "verdict": "需要谨慎",
-   "research_status": "done"
+   "research_status": "done",
+   "industry": "电子",
+   "return_60d": -0.14959652389819977
   }
- ]
+ ],
+ "markets": {
+  "主板": 906,
+  "创业板": 250,
+  "科创板": 189,
+  "北交所": 2
+ }
 }
