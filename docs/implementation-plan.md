@@ -122,22 +122,25 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `08e7e89`** 于 2026-10-30 20:56（北京时间）完成 web、worker 切换：在 `8ce24bc` 基础上，数字核对把问题自设的阈值（“是否高于150亿元”“增速<15%”）与报告编号（“报告37”）当作问题条款跳过；问题中给出的事实数字和其他数字仍须有出处（互变测试）。起因是报告 45（任务 62）仅因复述问题里的 37 和 150 被判“数字找不到”。从已推送提交的干净归档构建。无数据库迁移或生产配置、凭据、依赖变更；worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `635dd78`** 于 2026-10-31 00:25（北京时间）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `08e7e89` 包含：
+
+- **投资卡片与整站配色**（`invest-cards` 合入）：首页按最新判断分组的公司卡片（结论、4 个保存值、首要反证外露，其余反证与检查点折叠），公司页完整卡片（判断刻度、财务概览含上年同期、全部反证与检查点），筛选为锚点链接（无 JS 可用），财务体征默认折叠；纸-墨-靛配色。规范见 DESIGN.md / PRODUCT.md。agy(Gemini 4 Argon High) 独立审查 3C/5I/4M，除 C1（SQLite 3.46 空 `IN ()` 实测可执行，误报）外均已修复，原文 `~/.local/share/a-share-research-evaluations/review-cards-20261031/`。
+- **复核边界**：`1284d9f` 阈值豁免与遗漏解决目标绑定（发布批准见 `1bf8e5e`）；`b3d3710` 阈值前缀补“大于/小于/不大于/不小于”（附 8 例参数化测试）。
+
+无数据库迁移或生产配置、凭据、依赖变更；worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:08e7e89` | `bcf783ca7e7bd19faf41fcbfb78280c54b75a5bba37ee5284a428956bb14fc7b` |
-| `a-share-research-worker:08e7e89` | `da44fc5479949371637400545ab1f330592b71add4320435829a08de90f3ba5a` |
+| `a-share-research-web:635dd78` | `f9f147d596aa8ba5307060ad0911e1f21528d7f4f28610d16898fc68308b2102` |
+| `a-share-research-worker:635dd78` | `cc41e3e89f2734fac1f7e7fdc027228734324f4094eec41df63902f76a240250` |
 
-**复核契约真实评估**（gpt-6.1-terra，独立 `DATA_DIR`，不触生产库）：`7a4af86` 非金融 7/10（基线 10-27 为 9/10），神华、美的、万华 3 例均为 `review_format`，且 6/10 首次复核被拒、重问救回 3 例。调用记录显示是机械校验误伤：`gaps[i]` 不是合法位置、以……连接的不连续逐字摘录无法匹配、报错不指明哪个位置/引文导致重问重犯。`8ce24bc` 修复后同一评估集 **10/10**，银行按范围外拒绝并显示原因，0 次复核格式拒绝；抽读东方电缆、比亚迪、万华的复核问题（累计数解释单季、漏披露回款下降、减值总额当跌价损失、漏产能过剩风险）均实质成立且经修正关闭，美的报告引文与计算链完整。旧响应离线重核：138 条复核引文的拒绝数 18→12，余下均为只给页码或确实不符的引文。证据：`~/.local/share/a-share-research-evaluations/review-contract-7a4af86-20261030-180505/`、`review-contract-8ce24bc-20261030-183109/`。
+**验证**：同源码测试 408 通过、7 环境跳过（沿用 `5b7b0fc` 结果，合并未引入其他改动）。README 固定发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检（gpt-6.1-sol 就绪）通过。生产经公网入口用 Chromium 验收：390px 首页筛选（JS 隐藏其他组；无 JS 跳到分组锚点）、卡片展开、公司页、复核未通过公司页、报告页均无横溢、无页面错误，1280px 两列卡片正常；验收会话已退出。未验证 iOS Safari；真实模型调用为 0。
 
-**验证**：测试 382 通过、7 环境跳过；新增 2 个测试，在修复前代码上失败。以生产库只读重放：任务 62 终稿的机械核对由 2 项（数字 37、150）降为 0 项，原有复核问题不受影响；正常案例任务 63–65 终稿仍为 0 项。README 固定发布工具仅执行一次，全部检查通过。只改服务端核对，无页面改动，未做浏览器验收；真实模型调用为 0。
+**证据**：`~/.local/share/a-share-research-evaluations/deploy-635dd78-20261031-002513/`。备份：`~/a-share-research-data/backup-pre-635dd78-20261031-002514.db`。
 
-**证据**：`~/.local/share/a-share-research-evaluations/deploy-08e7e89-20261030-205639/`。备份：`~/a-share-research-data/backup-pre-08e7e89-20261030-205640.db`。
+**直接回退**：`a-share-research-web:rollback-635dd78` 与 `a-share-research-worker:rollback-635dd78` 即原运行的 `08e7e89`（`bcf783ca…c7b`、`da44fc54…ba5a`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；无数据库迁移，回退只换应用。
 
-**直接回退**：`a-share-research-web:rollback-08e7e89` 与 `a-share-research-worker:rollback-08e7e89` 即原运行的 `8ce24bc`（SHA 见上一版记录：`a239f01b…bdd`、`8715efe7…dd5`）；更早的 `7a4af86` 见 `rollback-8ce24bc`。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；无数据库迁移，回退只换应用。
-
-**历史限制**：`7a4af86` 的发布记录（证据 `deploy-7a4af86-20261030-180235/`、备份 `backup-pre-7a4af86-20261030-180237.db`、回退到 `8a856b6`）见 `git show 15023f2:docs/implementation-plan.md`。`8a856b6` 的发布记录（证据 `deploy-8a856b6-20261030-171910/`、备份 `backup-pre-8a856b6-20261030-171911.db`、回退到 `1c510da`）见 `git show 7a4af86:docs/implementation-plan.md`。`1c510da` 的发布记录（证据 `deploy-1c510da-20261030-1558/`、备份 `backup-pre-1c510da-20261030-155829.db`、回退到 `350a877`）见 `git show 8a856b6:docs/implementation-plan.md`。`350a877` 的发布记录（证据 `deploy-350a877-20261030-1521/`、备份 `backup-pre-350a877-20261030-152045.db`、回退到 `604f619`）见 `git show e2a20fc:docs/implementation-plan.md`。`604f619` 的发布记录（证据 `deploy-604f619-20261030-143845/`、备份 `backup-pre-604f619-20261030-143847.db`、回退到 `251b9ff`）见 `git show 350a877:docs/implementation-plan.md`。`251b9ff` 的发布记录（证据 `deploy-251b9ff-20261030-142353/`、备份 `backup-pre-251b9ff-20261030-142355.db`、回退到 `0e54ad7`）见 `git show 604f619:docs/implementation-plan.md`。`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
+**历史限制**：`08e7e89` 的发布记录（数字核对跳过问题阈值与报告编号；复核契约评估 `8ce24bc` 10/10；证据 `deploy-08e7e89-20261030-205639/`、备份 `backup-pre-08e7e89-20261030-205640.db`、回退到 `8ce24bc`）见 `git show 1bf8e5e:docs/implementation-plan.md`。`7a4af86` 的发布记录（证据 `deploy-7a4af86-20261030-180235/`、备份 `backup-pre-7a4af86-20261030-180237.db`、回退到 `8a856b6`）见 `git show 15023f2:docs/implementation-plan.md`。`8a856b6` 的发布记录（证据 `deploy-8a856b6-20261030-171910/`、备份 `backup-pre-8a856b6-20261030-171911.db`、回退到 `1c510da`）见 `git show 7a4af86:docs/implementation-plan.md`。`1c510da` 的发布记录（证据 `deploy-1c510da-20261030-1558/`、备份 `backup-pre-1c510da-20261030-155829.db`、回退到 `350a877`）见 `git show 8a856b6:docs/implementation-plan.md`。`350a877` 的发布记录（证据 `deploy-350a877-20261030-1521/`、备份 `backup-pre-350a877-20261030-152045.db`、回退到 `604f619`）见 `git show e2a20fc:docs/implementation-plan.md`。`604f619` 的发布记录（证据 `deploy-604f619-20261030-143845/`、备份 `backup-pre-604f619-20261030-143847.db`、回退到 `251b9ff`）见 `git show 350a877:docs/implementation-plan.md`。`251b9ff` 的发布记录（证据 `deploy-251b9ff-20261030-142353/`、备份 `backup-pre-251b9ff-20261030-142355.db`、回退到 `0e54ad7`）见 `git show 604f619:docs/implementation-plan.md`。`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
 
 ## 三项工程待办收尾（2026-10-30）
 
