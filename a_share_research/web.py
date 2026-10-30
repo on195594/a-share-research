@@ -546,8 +546,7 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
     reports = reading.stock_reports(conn, code)
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
-    latest = reading.latest_reports(conn, codes=[code])
-    head = next((r for r in reports if latest and r['id'] == latest[0]['id']), reports[0])
+    head = next((r for r in reports if not r['replay_of']), reports[0])
     selected = next((r for r in reports if r['id'] == report), None) if report is not None else head
     if selected is None:
         return not_found(request, session, "这份报告不属于当前公司。")
@@ -567,8 +566,7 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
                 latest = (r, v)
                 break
     latest = latest or (None, None)
-    previous = reading.latest_reports(conn, codes=[code], passed=True) if not head["passed"] else []
-    before = previous[0] if previous else None
+    before = next((r for r in reports if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
     card = reading.card(head, parsed[0][1], before) | {
         "coverage": head["coverage"],
         "created_at": head["created_at"]}

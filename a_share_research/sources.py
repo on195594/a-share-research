@@ -19,7 +19,7 @@ from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
 from a_stock_lib.providers.tushare_valuation import TushareValuationProvider
 
 from a_share_research.db import DATA, SHANGHAI
-from a_share_research.companies import CNINFO, SESSION, SourceError, stock_list, company, FINANCIAL_NAME, PERIODIC, due_report
+from a_share_research.companies import CNINFO, SESSION, SourceError, company
 
 log = logging.getLogger(__name__)
 KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "一季度报告": "03-31", "三季度报告": "09-30"}

@@ -152,7 +152,8 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
 
 def _migrate_v3(conn: sqlite3.Connection) -> None:
     for event, suffix in (("INSERT", "ai"), ("UPDATE OF identity", "au")):
-        conn.execute(f"CREATE TRIGGER runs_replay_of_{suffix} AFTER {event} ON runs BEGIN"
+        condition = " WHEN NEW.identity IS NOT NULL" if event == "INSERT" else ""
+        conn.execute(f"CREATE TRIGGER runs_replay_of_{suffix} AFTER {event} ON runs{condition} BEGIN"
                      " UPDATE runs SET replay_of = json_extract(NEW.identity, '$.replay_of')"
                      " WHERE id = NEW.id; END")
     for event, suffix in (("INSERT", "ai"), ("UPDATE OF body, period", "au")):

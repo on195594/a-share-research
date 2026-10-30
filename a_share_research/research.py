@@ -14,8 +14,7 @@ import pandas as pd
 from a_share_research import db, model, sources, evidence
 from a_share_research.sources import Document
 from a_share_research.service import MAX_CALLS
-from a_share_research.reading import since_prior
-from a_share_research.evidence import material_hash, NUMBER
+from a_share_research.evidence import material_hash
 from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 

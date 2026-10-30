@@ -106,7 +106,8 @@ def _operand(side: dict, rows: dict, material) -> dict:
         return {"ref": clean["ref"], "period": period, "label": row["label"],
                 "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
     if {"page", "quote", "value", "unit"} <= set(clean) and not clean.get("ref"):
-        from a_share_research.research import NUMBER, _quote_found
+        from a_share_research.evidence import NUMBER
+        from a_share_research.research import _quote_found
         if material is None or not _quote_found(side, material):
             raise ValueError("计算输入的原文引文在已读取页面中找不到")
         raw = str(side["value"]).replace(",", "").replace("−", "-").strip()

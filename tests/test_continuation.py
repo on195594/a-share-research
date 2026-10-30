@@ -12,7 +12,8 @@ from markupsafe import escape
 
 import a_share_research
 from a_share_research import db, screening, reading
-from a_share_research.research import _prior_report, _research_context, _verified_facts, prior_question, since_prior
+from a_share_research.research import _prior_report, _research_context, _verified_facts, prior_question
+from a_share_research.reading import since_prior
 from support.reports import report
 from support.continuation import BODY, RECORDS, load
 from support.templates import render

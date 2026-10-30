@@ -124,7 +124,9 @@ def test_identity_updates_and_material_writes_keep_replay_in_step(tmp_path):
 def test_save_report_writes_coverage_with_the_backfill_expression(tmp_path, report_id):
     conn = db.connect(tmp_path / "app.db")
     report = next(record["report"] for record in RECORDS if record["report"]["id"] == report_id)
+    changes = conn.total_changes
     run = db.create_run(conn, report["code"])
+    assert conn.total_changes - changes == 1  # No derived UPDATE for a queued run without identity.
     db.save_report(conn, run, report["code"], report["name"], report["period"], report["passed"],
                    report["verdict"], report["body"])
     assert_derived(conn)
