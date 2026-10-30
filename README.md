@@ -174,7 +174,7 @@ git archive "$release_code" | docker build --target web -t "a-share-research-web
 git archive "$release_code" | docker build --target worker -t "a-share-research-worker:$release_code" -
 ```
 
-获得当次生产切换授权后，调用仓库内的发布工具；不再从历史证据目录复制脚本，也不重新编写临时 SQL：
+按 [AGENTS.md 例行发布授权](AGENTS.md#授权)调用仓库内的发布工具；不再从历史证据目录复制脚本，也不重新编写临时 SQL：
 
 ```bash
 uv run python -m a_share_research.deploy "$release_code" \
