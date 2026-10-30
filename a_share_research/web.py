@@ -26,6 +26,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
 from a_share_research import charts, db, screening, sources, service, reading, progress
+from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -88,6 +89,8 @@ templates = Jinja2Templates(directory=HERE / "templates")
 ASSET_VERSION = hashlib.sha256(b"".join((HERE / "static" / name).read_bytes() for name in ("app.css", "app.js"))).hexdigest()[:12]
 templates.env.globals["asset_version"] = ASSET_VERSION
 templates.env.globals["funnel_chart"] = charts.funnel
+templates.env.globals["citation_link"] = citation_link
+templates.env.globals["report_source_view"] = report_source_view
 conn = db.connect()
 
 
@@ -380,6 +383,8 @@ def run_page(request: Request, run_id: int):
         " ((u.request_id LIKE 'batch-%') < me.batch OR ((u.request_id LIKE 'batch-%') = me.batch AND u.id < ?))))",
         (run_id, run_id, run_id)).fetchone()[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
+                  diagnostics=service.run_view(conn, run_id=run_id)["diagnostics"]
+                  if run["kind"] == "research" and run["status"] == "failed" else None,
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   request_id=uuid.uuid4().hex)
 
@@ -411,7 +416,7 @@ def report_page(request: Request, report_id: int):
     row = conn.execute(f"SELECT r.*, {db.COVERAGE} AS coverage FROM reports r WHERE id = ?", (report_id,)).fetchone()
     if row is None:
         return not_found(request, session)
-    run = conn.execute("SELECT kind, status, request, identity FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
+    run = conn.execute("SELECT kind, status, request, identity, material FROM runs WHERE id = ?", (row["run_id"],)).fetchone()
     if not service.ready(run["status"], row["passed"]):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
@@ -428,6 +433,7 @@ def report_page(request: Request, report_id: int):
     rows = {r["id"]: r for r in body["table"]}
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence,
+                  source_view=report_source_view(body, (json.loads(run["material"] or "{}") or {}).get("data")),
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
                   figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],

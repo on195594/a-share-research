@@ -122,7 +122,7 @@ def _operand(side: dict, rows: dict, material) -> dict:
         unit = str(side["unit"]).strip()
         if not unit:
             raise ValueError("计算输入须注明单位")
-        doc = {"pages": material.pages} if source == "D0" else material.extra.get("sources", {}).get(source, {})
+        doc = material.source_registry().get(source, {})
         pages = doc.get("pages", {})
         page_text = "\n".join(pages.get(p) or pages.get(str(p), "") for p in (page - 1, page, page + 1))
         quote_text = str(side["quote"])
@@ -332,6 +332,13 @@ def _fetches(traces: list[dict]) -> int:
     return sum(t["tool"] != "calculate" for t in traces)
 
 
+def record_stop(material, reason):
+    stops = material.extra.setdefault("stop_reasons", [])
+    entry = {"stage": "explore", "category": "acquisition_stop", "reason": reason}
+    if entry not in stops:
+        stops.append(entry)
+
+
 def explore(runner, material, *, budget_seconds: float = 900):
     from a_share_research.research import RULES, output_schema, _parse, compose
     toolkit = ResearchTools(material, runner.conn)
@@ -352,8 +359,7 @@ def explore(runner, material, *, budget_seconds: float = 900):
 {output_schema(material)}
 # 起始材料
 {material.prompt_block()}
-# 定期披露目录
-{json.dumps(material.extra['catalog'], ensure_ascii=False)}"""
+"""
     messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
     deadline = time.monotonic() + budget_seconds
     traces = material.extra.setdefault("tools", [])
@@ -361,6 +367,8 @@ def explore(runner, material, *, budget_seconds: float = 900):
     stale = 0
     for _ in range(12):
         if time.monotonic() >= deadline or _fetches(traces) >= FETCH_LIMIT or stale >= 2:
+            record_stop(material, "time_limit" if time.monotonic() >= deadline else
+                        "fetch_limit" if _fetches(traces) >= FETCH_LIMIT else "repeated_requests")
             material.extra["gaps"].append("探索已到停止条件，回答仅依据已取得证据；未完成的取证仍未知。")
             break
         payload = json.dumps({"messages": messages, "tools": TOOLS}, ensure_ascii=False)
@@ -381,6 +389,8 @@ def explore(runner, material, *, budget_seconds: float = 900):
                 # calculate is local exact arithmetic over evidence already in hand; only fetches spend the budget.
                 if ((call["name"] != "calculate" and _fetches(traces) >= FETCH_LIMIT)
                         or len(traces) >= CALL_LIMIT or time.monotonic() >= deadline):
+                    record_stop(material, "time_limit" if time.monotonic() >= deadline else
+                                "tool_limit" if len(traces) >= CALL_LIMIT else "fetch_limit")
                     raise ValueError("本次探索预算已用尽，请据已有材料回答并说明缺口")
                 if call.get("argumentsError"):
                     raise ValueError(call["argumentsError"])
@@ -400,5 +410,6 @@ def explore(runner, material, *, budget_seconds: float = 900):
         db.save_material(runner.conn, runner.run_id, material.snapshot())
         stale = 0 if any_new else stale + 1
     else:
+        record_stop(material, "round_limit")
         material.extra["gaps"].append("探索达到十二轮上限，未完成的取证仍未知。")
     return compose(runner, material)

@@ -70,13 +70,14 @@ def test_material_prompt_preserves_captured_base_disclosure_identity(include_sup
                         {"sources": supplements} if include_supplements else {})
     before = material.snapshot()
     prompt = material.prompt_block()
-    marker = "## 基础披露来源（source=D0；未写 source 的原文引文也对应 D0）\n"
-    identity = json.loads(prompt.split(marker, 1)[1].split("\n", 1)[0])
-    assert identity == {"document": body["document"], "read_pages": []}
+    identity = material.source_registry()["D0"]
+    assert identity["document"] == body["document"] and identity["read_pages"] == []
+    assert json.dumps(body["document"], ensure_ascii=False) in prompt
     assert doc.url and doc.sha256 and doc.announced
     if include_supplements:
-        saved = json.loads(prompt.split("# 补充资料（source 标识用于 cites）\n", 1)[1].split("\n", 1)[0])
-        assert saved == supplements  # D0 does not overwrite the independent D1/D6 identities.
+        for key, value in supplements.items():
+            assert material.source_registry()[key]["document"] == value["document"]
+            assert json.dumps(value["document"], ensure_ascii=False) in prompt
     assert material.snapshot() == before
     restored = Material.from_snapshot(json.loads(json.dumps(before)))
     assert restored.prompt_block() == prompt and restored.snapshot()["sha256"] == before["sha256"]
@@ -85,13 +86,12 @@ def test_material_prompt_preserves_captured_base_disclosure_identity(include_sup
 def test_material_prompt_keeps_unknown_url_and_actual_read_pages():
     # Normal Moutai excerpt fixture has no captured URL; exposing metadata must not invent one.
     prompt = MATERIAL.prompt_block()
-    marker = "## 基础披露来源（source=D0；未写 source 的原文引文也对应 D0）\n"
-    identity = json.loads(prompt.split(marker, 1)[1].split("\n", 1)[0])
+    identity = MATERIAL.source_registry()["D0"]
     assert identity["document"] == MATERIAL.doc.info()
     assert identity["document"]["url"] == ""
     assert identity["read_pages"] == sorted(MATERIAL.pages)
     for page, text in MATERIAL.pages.items():
-        assert f'<page n="{page}">\n{text}\n</page>' in prompt
+        assert json.dumps(text, ensure_ascii=False) in prompt
     assert check(report(), MATERIAL) == []
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from support.templates import ENV, TEMPLATES
+from a_share_research.evidence import report_source_view
 from markupsafe import escape
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +32,8 @@ def test_report_scope_distinguishes_unrecorded_pages_and_keeps_source_links(sour
     template = (TEMPLATES / 'report.html').read_text()
     start = template.index('  <details class="about" id="research-scope"')
     end = template.index('  </details>', start) + len('  </details>')
-    html = ENV.from_string(template[start:end]).render(body=body)
+    view = report_source_view(body)
+    html = ENV.from_string(template[start:end]).render(body=body, source_view=view, documents=view["sources"])
     label = '基础原文' if source_kind == 'base' else '补充原文'
     paragraph = next(p.split('</p>', 1)[0] for p in html.split('<p>') if p.startswith(label + '：'))
     assert f'href="{escape(source["document"]["url"])}"' in paragraph

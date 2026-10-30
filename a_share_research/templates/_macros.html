@@ -43,7 +43,10 @@
       </li>{% endif %}
     {% else %}
       {% set source = sources.get(c.source or 'D0') %}
-      <li><span class="tag">{{ source.document.title ~ ' · ' if source else '' }}第 {{ c.page }} 页</span><q>{{ c.quote }}</q></li>
+      {% set link = citation_link(c, sources) %}
+      <li><span class="tag">{{ source.document.title ~ ' · ' if source else '' }}{{ '匹配第 ' ~ (link.pages | join('、')) ~ ' 页' if link.pages else '引文标注第 ' ~ c.page ~ ' 页' }}</span><q>{{ c.quote }}</q>
+        {% if link.url %}<a href="{{ link.url }}" rel="noreferrer noopener">{{ '打开原文匹配页' if link.pages else '打开原文 PDF（匹配页未核定）' }}</a>{% else %}<span class="muted">未记录可用原文链接</span>{% endif %}
+      </li>
     {% endif %}
   {% endfor %}
   </ul>

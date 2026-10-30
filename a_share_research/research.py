@@ -12,8 +12,9 @@ from typing import Self
 
 import pandas as pd
 
-from a_share_research import db, model, sources
+from a_share_research import db, model, sources, evidence
 from a_share_research.sources import Document
+from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,10 @@ class ResearchError(Exception):
     pass
 
 
+class ModelStageError(Exception):
+    """Public exception deliberately excludes provider payloads and credentials."""
+
+
 @dataclass
 class Material:
     code: str
@@ -95,29 +100,28 @@ class Material:
             table=data["table"], market_date=data["market_date"], extra=data.get("extra", {}),
         )
 
+    def source_registry(self) -> dict:
+        return evidence.source_registry(self.doc.info(), self.pages, self.raw_pages,
+                                        self.extra.get("sources"), self.extra.get("catalog"))
+
     def prompt_block(self) -> str:
         rows = [
             f"[{r['id']}] {r['label']}（{r['unit']}）：" + ("；".join(f"{p} {v}" for p, v in r["values"].items()) or "缺失")
             for r in self.table
         ]
-        pages = "\n".join(f'<page n="{n}">\n{text}\n</page>' for n, text in self.pages.items())
         block = (
             f"公司：{self.name}（{self.code}）\n\n"
             f"## 财务与行情表（程序从 TuShare 生成；行情为 {self.market_date} 收盘）\n" + "\n".join(rows)
-            + "\n\n## 基础披露来源（source=D0；未写 source 的原文引文也对应 D0）\n"
-            + json.dumps({"document": self.doc.info(), "read_pages": sorted(self.pages)}, ensure_ascii=False)
-            + f"\n\n## {self.doc.title}·管理层讨论与分析（原文，按页）\n{pages}"
+            + "\n\n# 统一原文证据（默认 source=D0；read 为已读，listed 仅目录，不可引证；URL 由来源映射交付，无需正文手抄）\n"
+            + json.dumps(evidence.projection(self.source_registry(), catalog=True), ensure_ascii=False)
         )
         if self.extra:
             pending = {k: self.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}
             if self.extra.get("prior"):
                 pending["prior"] = self.extra["prior"]
             block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(pending, ensure_ascii=False)
-            block += "\n\n# 补充资料（source 标识用于 cites）\n" + json.dumps(
-                {k: {"document": v["document"], "pages": v["pages"]}
-                 for k, v in self.extra.get("sources", {}).items()}, ensure_ascii=False)
-            block += "\n\n# 程序计算依据\n" + json.dumps(
-                [r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False)
+        block += "\n\n# 程序计算依据\n" + json.dumps(
+            [r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False)
         return block
 
 
@@ -461,21 +465,16 @@ def _candidates(cites: list[dict], material: Material) -> list[float]:
 
 
 def _quote_found(cite: dict, material: Material) -> bool:
-    quote = SQUASH.sub("", str(cite.get("quote", "")))
-    page = cite.get("page")
-    if len(quote) < 8 or not isinstance(page, int):
-        return False
-    source = cite.get("source", "D0")
-    doc = {"pages": material.pages, "raw_pages": material.raw_pages} if source == "D0" else material.extra.get("sources", {}).get(source, {})
-    return any(
-        quote in SQUASH.sub("", "".join(pages.get(p) or pages.get(str(p), "") for p in (page - 1, page, page + 1)))
-        for pages in (doc.get("pages", {}), doc.get("raw_pages", {}))
-    )
+    return bool(evidence.quote_match(cite, material.source_registry()))
 
 
 def check(report: dict, material: Material) -> list[dict]:
     """Structural, citation and number checks; returns problems as {where, problem}."""
     problems = []
+    try:
+        registry = material.source_registry()
+    except evidence.EvidenceError as exc:
+        return [{"where": "sources", "problem": str(exc), "type": "source_input"}]
     if not isinstance(report.get("gaps", []), list) or not all(isinstance(g, str) for g in report.get("gaps", [])):
         problems.append({"where": "gaps", "problem": "gaps 必须是字符串数组"})
     if report.get("verdict") not in VERDICTS:
@@ -485,7 +484,6 @@ def check(report: dict, material: Material) -> list[dict]:
         problems.append({"where": "summary", "problem": "summary 必须以结论词开头"})
     if REF_IN_TEXT.search(summary):
         problems.append({"where": "summary", "problem": "summary 中不要写出处编号"})
-    rows = {r["id"]: r["values"] for r in material.table}
     all_cites = []
     sections = [*SECTIONS]
     if material.extra.get("question") or report.get("answer"):
@@ -512,17 +510,10 @@ def check(report: dict, material: Material) -> list[dict]:
                 problems.append({"where": where, "problem": "text 中不要写出处编号"})
             if not cites:
                 problems.append({"where": where, "problem": "没有出处"})
-            for cite in cites:
-                if "ref" in cite:
-                    if cite["ref"] not in rows:
-                        problems.append({"where": where, "problem": f"表中没有 {cite['ref']}"})
-                    elif cite.get("period") and cite["period"] not in rows[cite["ref"]]:
-                        row_obj = next((r for r in material.table if r["id"] == cite["ref"]), {})
-                        calc_periods = {i.get("period") for i in (row_obj.get("calculation") or {}).get("inputs", [])}
-                        if not (cite["ref"].startswith("C.") and cite["period"] in calc_periods):
-                            problems.append({"where": where, "problem": "所引数据不含指定期间"})
-                elif not _quote_found(cite, material):
-                    problems.append({"where": where, "problem": f"第 {cite.get('page')} 页找不到引文：{str(cite.get('quote', ''))[:60]}"})
+            errors = evidence.citation_errors(cites, registry, material.table)
+            problems += [{"where": where, "problem": error, "type": "citation_calculation"} for error in errors]
+            if errors:
+                continue
             candidates = _candidates(cites, material)
             for value, decimals in _numbers(_without_codes(str(item.get("text", "")), material)):
                 if not _supported(value, decimals, candidates):
@@ -599,8 +590,10 @@ class Runner:
     def __init__(self, conn, run_id: int):
         self.conn, self.run_id, self.calls = conn, run_id, 0
         self.deadline = time.monotonic() + 1800
+        self.stage = "gather"
 
     def call(self, step: str, prompt: str, *, messages=None, tools=None):
+        self.stage = step
         if self.calls >= MAX_CALLS:
             raise ResearchError("模型调用次数超过上限")
         timeout = int(min(600, self.deadline - time.monotonic()))
@@ -611,9 +604,9 @@ class Runner:
         try:
             result = model.complete(prompt, timeout=timeout, max_tokens=16000, messages=messages, tools=tools)
         except Exception as exc:
-            db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: {exc}",
+            db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: 模型阶段未完成（未保存供应商异常原文）",
                         identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None))
-            raise
+            raise ModelStageError("模型阶段未完成") from exc
         db.log_call(self.conn, self.run_id, step, prompt,
                     response=json.dumps(result.message, ensure_ascii=False) if messages is not None else result.text,
                     usage=result.usage, seconds=result.seconds, identity=result.identity)
@@ -629,7 +622,7 @@ def compose(runner: Runner, material: Material) -> dict | None:
     return _parse(runner.ask("compose", prompt))
 
 
-def review(runner: Runner, material: Material, report: dict) -> list[dict]:
+def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedger) -> list[dict]:
     prompt = f"""你是独立复核员。检查下面这份研究报告是否忠实于资料。
 
 逐条检查：
@@ -641,14 +634,18 @@ def review(runner: Runner, material: Material, report: dict) -> list[dict]:
 原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
 通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
 
-输出且只输出一个 JSON 对象：{{"issues": [{{"where": "risks[0] / business[1] / checkpoints[0] / summary / missing", "problem": "具体问题"}}]}}，没有问题时 issues 为空数组。
+{PROTOCOL}
+
+# 当前复核绑定与必须逐项决定的旧问题/风险
+{json.dumps(ledger.request(report, material.snapshot()["sha256"]), ensure_ascii=False)}
 
 # 待复核的报告
 {json.dumps(report, ensure_ascii=False, indent=1)}
 
 # 资料
 {material.prompt_block()}"""
-    return _review_issues(runner.ask("review", prompt))
+    return ledger.accept(_parse(runner.ask("review", prompt)), report, material.source_registry(),
+                         material.table, material.snapshot()["sha256"])
 
 
 def _review_issues(text: str) -> list[dict]:
@@ -667,6 +664,7 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
 补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
 以下是内部质量检查，不是用户对另一份报告提出的纠错；正文只完成原研究任务。
+下方未解决问题 ID 仅用于复核追踪，你不能自行把它们标为解决。可据证反驳错误批评；独立复核员将核对新版去向及理由。
 
 {RULES}
 
@@ -846,15 +844,28 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             report = compose(runner, material)
             material_sha256 = identity["material_sha256"]
         problems: list[dict] = []
-        # At most two repairs, so a repair spent on mechanical slips still leaves one for review findings.
+        ledger = ReviewLedger()
+        # Acquisition has ended. Repair/review keep their existing, separate run-level guard.
         for attempt in range(3):
-            reviewed = False  # A repair is a new report; prior review cannot endorse it.
-            problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON"}]
+            reviewed = False  # A changed draft never inherits an earlier independent endorsement.
+            runner.stage = "check"
+            problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON",
+                                                                 "type": "generation_format"}]
+            if any(p.get("type") == "source_input" for p in problems):
+                problems += ledger.pending()
+                break  # Source identity conflicts cannot be repaired by rewriting prose.
             if not problems:
-                problems = review(runner, material, report)
-                reviewed = not any(p["where"] == "review" for p in problems)
+                try:
+                    problems = review(runner, material, report, ledger)
+                    reviewed = True
+                except ReviewFormatError as exc:
+                    problems = ledger.pending() + [{"where": "review", "problem": str(exc), "type": "review_format"}]
+                    break  # A malformed reviewer cannot be fixed by asking the writer again.
+            else:
+                problems += ledger.pending()
             if not problems or attempt == 2:
                 break
+            ledger.protect_risks(report)
             report = repair(runner, material, report, problems)
         period = max([material.doc.period] + [p for r in material.table if r["id"].startswith("T.") for p in r["values"]])
         body = {
@@ -862,6 +873,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "document": material.doc.info(),
             "pages": sorted(material.pages), "table": material.table, "market_date": material.market_date,
             "calls": runner.calls,
+            "review_audit": ledger.snapshot(),
+            "stop_reasons": material.extra.get("stop_reasons", []),
             "question": material.extra.get("question", ""), "parent_report_id": request.get("parent_report_id"),
             "sources": {k: {"document": v["document"], "pages": sorted(map(int, v["pages"]))}
                         for k, v in material.extra.get("sources", {}).items()},
@@ -878,6 +891,11 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             body["prior"] = {"report_id": prior["report_id"], "period": prior["period"],
                              "question_added": material.extra.get("question") == prior_question(prior)}
         if problems:
+            body["failure"] = {"stage": "review" if reviewed or any(p.get("type") == "review_format" for p in problems) else "check",
+                               "category": "review_format" if any(p.get("type") == "review_format" for p in problems)
+                               else "source_input" if any(p.get("type") == "source_input" for p in problems)
+                               else "generation_format" if any(p.get("type") == "generation_format" for p in problems)
+                               else "substantive_review" if reviewed else "citation_calculation"}
             body |= {"facts": _verified_facts(report, problems, reviewed=reviewed),
                      "facts_reviewed": reviewed, "problems": problems}
             publish(conn, run_id, material, period, False, None, body)
@@ -890,10 +908,22 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             body["answer"] = report.get("answer", [])
             publish(conn, run_id, material, period, True, report["verdict"], body)
     except Exception as exc:
-        if not isinstance(exc, ScopeError | ResearchError | sources.SourceError):
+        if not isinstance(exc, ScopeError | ResearchError | ModelStageError | sources.SourceError | evidence.EvidenceError):
             log.exception("run %s failed", run_id)
-        db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=str(exc) or type(exc).__name__)
+        category = ("source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or runner.stage == "gather"
+                    else "run_limit" if isinstance(exc, ResearchError)
+                    else "model_error" if isinstance(exc, ModelStageError) else "pipeline_error")
+        # Model/transport exceptions can contain internal details; callers receive stage/category, not prompts or credentials.
+        failure = {"stage": runner.stage, "category": category,
+                   "message": "来源输入未能完成，请核对已保存资料。" if category == "source_input"
+                   else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
+        db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=failure["message"])
+        identity["failure"] = failure
+        if "ledger" in locals():
+            identity["review_audit"] = ledger.snapshot()
+        db.update_run(conn, run_id, identity=json.dumps(identity, ensure_ascii=False))
         if "material" in locals():
+            # Diagnostics belong to run metadata, not the evidence hashed by the reviewer.
             save_material(material, with_company=False)
 
 

@@ -1,8 +1,10 @@
 {% extends "base.html" %}
-{% from "_macros.html" import items, research_form, price_block, snapshot_date_notice, financial_period, followup_link, feedback_retry_form %}
+{% from "_macros.html" import items, cites, research_form, price_block, snapshot_date_notice, financial_period, followup_link, feedback_retry_form %}
 {% from "_charts.html" import figure, verdict_scale, vitals as vitals_panel %}
 {% block title %}{{ report.name }} · 研究报告{% endblock %}
 {% block main %}
+{% set source_view = source_view if source_view is defined else report_source_view(body) %}
+{% set documents = source_view.sources %}
 <article class="report">
   <header class="stub">
     <h1>{{ report.name }}</h1>
@@ -21,6 +23,7 @@
       {% else %}
       <p class="notice caution" role="status">研究未通过完整核查，不展示结论。以下资料仅供核对，不应视为已获独立复核认可的事实。</p>
       {% endif %}
+      {% if body.failure %}<p class="small">停止阶段：{{ {'check': '原文与计算检查', 'review': '独立复核'}.get(body.failure.stage, '研究处理') }}；{{ {'review_format': '复核响应无效，未接受解决声明', 'substantive_review': '实质问题仍未解决', 'citation_calculation': '引用、数字或报告结构检查未通过', 'source_input': '来源身份存在冲突', 'generation_format': '成文响应格式无效'}.get(body.failure.category, '流程未能完成') }}。<a href="?scope=1#research-scope">查看具体问题与已存原文</a>；不会自动重跑。</p>{% endif %}
       {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
     {% endif %}
     {# A failed review with nothing retained has no evidence to count; the notice above says so. #}
@@ -68,7 +71,6 @@
     </ul>
   </nav>
 
-  {% set documents = dict(body.sources or {}, D0=dict(document=body.document or {})) %}
   <section id="risks" class="risks" tabindex="-1">
     <h2>主要风险与反证</h2>
     {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", focus) }}
@@ -165,13 +167,15 @@
 
   <details class="about" id="research-scope" tabindex="-1" {% if request and request.query_params.get('scope') == '1' %}open{% endif %}>
     <summary>研究范围与原文</summary>
-    <p>基础原文：{% if body.document and body.document.url %}<a href="{{ body.document.url }}" rel="noreferrer noopener">{{ body.document.title }}（PDF，巨潮资讯）</a>，公告日 {{ body.document.announced or '未记录' }}，{% if body.pages %}已读取页码：{{ body.pages | join('、') }}{% else %}未记录已读页码{% endif %}。{% else %}未记录原文链接。{% endif %}</p>
-    {% for source in (body.sources or {}).values() %}<p>补充原文：<a href="{{ source.document.url }}" rel="noreferrer noopener">{{ source.document.title }}</a>（{{ source.document.announced }} 披露），{% if source.pages %}已读取页码：{{ source.pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
+    {% if source_view.error %}<p class="notice caution">{{ source_view.error }}</p>{% endif %}
+    {% for key, source in documents.items() %}<p>{{ '基础原文' if key == 'D0' else '补充原文' }}：{% if source.href %}<a href="{{ source.href }}" rel="noreferrer noopener">{{ source.document.title or key }}</a>{% else %}{{ source.document.title or key }}（未记录原文链接）{% endif %}（公告日 {{ source.document.announced or '未记录' }}），{% if source.state == 'listed' %}仅目录记录，不是已读证据{% elif source.read_pages %}已读取页码：{{ source.read_pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
     {% if body.document %}<p class="muted small">抓取于 {{ body.document.retrieved_at or '未记录' }} · SHA-256 {{ body.document.sha256[:16] if body.document.sha256 else '未记录' }} · 模型调用 {{ body.calls }} 次</p>{% endif %}
     {% if body.problems %}
     <p>复核意见：</p>
-    <ul>{% for p in body.problems %}<li>{{ p.problem }}</li>{% endfor %}</ul>
+    <p class="muted small">以下为核查意见，不是新的投资结论；旧记录未保存解决状态时不推断已解决。</p>
+    <ul>{% for p in body.problems %}<li>{{ p.problem }}{% if p.id %}<small> · {{ p.id }} · {{ '仍未解决' if p.status == 'unresolved' else '状态未记录' }}</small>{% endif %}{% if p.importance %}<p>与本次判断的关系：{{ p.importance }}</p>{% endif %}{% if p.evidence %}{{ cites(dict(cites=p.evidence), rows, documents) }}{% endif %}</li>{% endfor %}</ul>
     {% endif %}
+    {% if body.stop_reasons %}<p>取证停止记录（不等于复核失败原因）：{% for stop in body.stop_reasons %}{{ {'time_limit': '探索时限', 'fetch_limit': '取证次数上限', 'tool_limit': '工具次数上限', 'round_limit': '探索轮数上限', 'repeated_requests': '重复请求未增加资料'}.get(stop.reason, '已记录停止条件') }}{{ '；' if not loop.last else '。' }}{% endfor %}未完成的取证仍未知。</p>{% endif %}
     <p>覆盖上述已读取的披露及财务数据，不代表全部公告、新闻或账户事实。</p>
     {% for search in body.announcement_searches or [] %}<p>公告检索：{{ search.code }}，{{ search.since }} 至 {{ search.until }}，{{ '关键词「' ~ search.query ~ '」' if search.query else '全部标题' }}。{% if search.truncated %}结果未列全，仍需缩小范围。{% endif %}</p>{% endfor %}
     <p><a href="?evidence=1#evidence">展开证据日期与本报告记录的缺口</a></p>

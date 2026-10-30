@@ -5,6 +5,8 @@ import re
 import sqlite3
 
 from a_share_research import db
+from a_share_research.evidence import report_source_view, projection
+from a_share_research.reviewing import legacy_issue_view
 
 VERSION = "research-v1"
 
@@ -122,8 +124,9 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
     evidence = {"sources": extra.get("sources", {}), "table": body.get("table", []),
                 "market_date": body.get("market_date"), "material_sha256": body.get("material_sha256"),
                 "methods_used": extra.get("methods_used", [])}
-    evidence["sources"] = {"D0": {"document": data.get("doc", body.get("document")),
-                                     "pages": data.get("pages", {})}, **evidence["sources"]}
+    source_view = report_source_view(body, data)
+    evidence["sources"] = projection(source_view["sources"], catalog=True, raw=True)
+    evidence["source_error"] = source_view["error"]
     result = {"version": VERSION, "id": row["id"], "run_id": row["run_id"], "code": row["code"],
             "name": row["name"], "created_at": row["created_at"], "status": row["status"],
             "passed": bool(row["passed"]), "error": row["error"],
@@ -140,6 +143,8 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
                          "missing": body.get("gaps", extra.get("gaps", [])),
                          "announcement_searches": extra.get("announcement_searches", []),
                          "limits": "覆盖已读取的披露和财务数据；公告检索范围单独列出，不代表全部公告、新闻或账户事实。历史结果不自动刷新。"}}
+    result["diagnostics"] = diagnostics(row["status"], body, gaps=extra.get("gaps"),
+                                        announcement_searches=extra.get("announcement_searches"))
     if not compact:
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
@@ -148,8 +153,9 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
                          if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],
+                          "source_error": evidence["source_error"],
                           "sources": {key: {"document": source["document"],
-                                              "pages_available": list(source.get("pages", {}))}
+                                              "pages_available": source["read_pages"], "state": source["state"]}
                                       for key, source in evidence["sources"].items()}}
     result.pop("identity")
     result.pop("model_calls")
@@ -173,7 +179,8 @@ def run_budget(conn, run_id: int | None = None) -> dict:
 
 def diagnostics(status: str, body: dict, *, gaps: list | None = None,
                 announcement_searches: list | None = None, report_available: bool = True) -> dict:
-    problems = body.get("problems", [])
+    problems = body.get("problems", [i for i in (body.get("review_audit") or {}).get("issues", [])
+                                     if i.get("status") == "unresolved"])
     missing = body.get("gaps", gaps or [])
     gaps_basis = "report" if "gaps" in body else "material_snapshot" if gaps is not None else "unavailable"
     next_step = "历史报告不自动刷新；追问先核查是否有新披露。"
@@ -183,7 +190,9 @@ def diagnostics(status: str, body: dict, *, gaps: list | None = None,
         next_step = ("先查看 error、具体核查问题与已取证材料，缩小到一个关键缺口；继续研究须另行确认，不自动重跑。"
                      if report_available else "尚未形成报告；先查看 error 与 diagnostics.gaps，缩小到一个关键缺口；继续研究须另行确认，不自动重跑。")
     return {"status": "passed" if status == "done" else "review_failed" if status == "failed" and problems else status,
-            "problems": problems, "gaps": missing, "gaps_basis": gaps_basis, "next_step": next_step,
+            "problems": problems, "issue_states": legacy_issue_view(problems),
+            "failure": body.get("failure"), "review_audit": body.get("review_audit"),
+            "stop_reasons": body.get("stop_reasons", []), "gaps": missing, "gaps_basis": gaps_basis, "next_step": next_step,
             "announcement_searches": body.get("announcement_searches", announcement_searches or []),
             "limits": "缺口与预算提示不是失败根因判定；不据此推断未披露或清除投资门禁。"}
 
@@ -227,14 +236,18 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
         raise RequestError("请求编号须为 1–128 字")
     field, value = ("request_id", request_id) if request_id is not None else ("id", run_id)
     row = conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
-                       " u.material, r.id AS report_id, r.body AS report_body FROM runs u LEFT JOIN reports r ON r.run_id = u.id"
+                       " u.material, u.identity, r.id AS report_id, r.body AS report_body FROM runs u LEFT JOIN reports r ON r.run_id = u.id"
                        f" WHERE u.{field} = ? AND u.kind = 'research'", (value,)).fetchone()
     if row is None:
         raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
     body = json.loads(row["report_body"]) if row["report_body"] else {}
     material = (json.loads(row["material"]) or {}) if row["material"] else {}
     extra = material.get("data", {}).get("extra", {})
-    public = {key: row[key] for key in row.keys() if key not in {"report_body", "material"}}
+    metadata = json.loads(row["identity"] or "{}") or {}
+    for key in ("failure", "review_audit", "stop_reasons"):
+        if key not in body and key in metadata | extra:
+            body[key] = (extra | metadata)[key]
+    public = {key: row[key] for key in row.keys() if key not in {"report_body", "material", "identity"}}
     return {"version": VERSION, **public,
             "budget": run_budget(conn, row["id"]),
             "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),
