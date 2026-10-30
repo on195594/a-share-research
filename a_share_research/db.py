@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -150,7 +150,20 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX runs_by_replay_of ON runs(replay_of)")
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2)
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    for event, suffix in (("INSERT", "ai"), ("UPDATE OF identity", "au")):
+        conn.execute(f"CREATE TRIGGER runs_replay_of_{suffix} AFTER {event} ON runs BEGIN"
+                     " UPDATE runs SET replay_of = json_extract(NEW.identity, '$.replay_of')"
+                     " WHERE id = NEW.id; END")
+    for event, suffix in (("INSERT", "ai"), ("UPDATE OF body, period", "au")):
+        conn.execute(f"CREATE TRIGGER reports_coverage_{suffix} AFTER {event} ON reports BEGIN"
+                     f" UPDATE reports SET coverage = (SELECT {COVERAGE} FROM reports r WHERE r.id = NEW.id)"
+                     " WHERE id = NEW.id; END")
+    conn.execute("UPDATE runs SET replay_of = json_extract(identity, '$.replay_of')")
+    conn.execute(f"UPDATE reports AS r SET coverage = {COVERAGE}")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3)
 
 
 def now() -> str:
@@ -164,8 +177,6 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
-        if conn.execute("PRAGMA user_version").fetchone()[0] > len(MIGRATIONS):
-            raise ValueError("Database schema is newer than this application supports")
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(SCHEMA)
@@ -211,11 +222,7 @@ def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = Non
 
 def update_run(conn: sqlite3.Connection, run_id: int, **fields) -> None:
     sets = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values())
-    if "identity" in fields:
-        sets += ", replay_of = json_extract(?, '$.replay_of')"
-        values.append(fields["identity"])
-    conn.execute(f"UPDATE runs SET {sets} WHERE id = ?", (*values, run_id))
+    conn.execute(f"UPDATE runs SET {sets} WHERE id = ?", (*fields.values(), run_id))
 
 
 def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=None,
@@ -232,7 +239,6 @@ def save_material(conn, run_id: int, snapshot: dict) -> None:
     """Store a material snapshot and keep the run identity's hash of it in step."""
     conn.execute(
         "UPDATE runs SET material = ?, identity = json_set(coalesce(identity, '{}'), '$.material_sha256', ?)"
-        ", replay_of = json_extract(identity, '$.replay_of')"
         " WHERE id = ?",
         (json.dumps(snapshot, ensure_ascii=False), snapshot["sha256"], run_id),
     )
@@ -241,13 +247,11 @@ def save_material(conn, run_id: int, snapshot: dict) -> None:
 def save_report(conn, run_id: int, code: str, name: str, period: str, passed: bool,
                 verdict: str | None, body: dict) -> None:
     text = json.dumps(body, ensure_ascii=False)
-    with transaction(conn) if not conn.in_transaction else nullcontext():
-        cur = conn.execute(
-            "INSERT INTO reports (run_id, code, name, period, passed, verdict, body, created_at, body_sha256)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (run_id, code, name, period, int(passed), verdict, text, now(), hashlib.sha256(text.encode()).hexdigest()),
-        )
-        conn.execute(f"UPDATE reports AS r SET coverage = {COVERAGE} WHERE id = ?", (cur.lastrowid,))
+    conn.execute(
+        "INSERT INTO reports (run_id, code, name, period, passed, verdict, body, created_at, body_sha256)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, code, name, period, int(passed), verdict, text, now(), hashlib.sha256(text.encode()).hexdigest()),
+    )
 
 
 def update_batch(conn: sqlite3.Connection, batch_id: int, **fields) -> None:

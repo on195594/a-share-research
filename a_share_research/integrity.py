@@ -85,15 +85,9 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
             problems.append(f"报告 {report['id']}：正文不是 JSON 对象")
         elif body.get("material_sha256") is not None and materials.get(report["run_id"]) != body["material_sha256"]:
             problems.append(f"报告 {report['id']}：引用的材料快照与任务 {report['run_id']} 记录不符")
-        if covered and body is not None:
-            try:
-                mismatch = conn.execute(f"SELECT coverage IS NOT {db.COVERAGE} FROM reports r WHERE id = ?",
-                                        (report["id"],)).fetchone()[0]
-            except sqlite3.OperationalError as exc:
-                problems.append(f"报告 {report['id']}：coverage 无法重算（{exc}）")
-            else:
-                if mismatch:
-                    problems.append(f"报告 {report['id']}：coverage 与正文重算不一致")
+    if covered:
+        for report in conn.execute(f"SELECT id FROM reports r WHERE coverage IS NOT {db.COVERAGE} ORDER BY id"):
+            problems.append(f"报告 {report['id']}：coverage 与正文重算不一致")
     for price in conn.execute("SELECT id, body FROM prices ORDER BY id"):
         if _object(price["body"]) is None:
             problems.append(f"价格参考 {price['id']}：正文不是 JSON 对象")

@@ -40,7 +40,7 @@ def legacy_database(path, columns="present"):
 
 
 def assert_derived(conn):
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
     assert conn.execute("SELECT count(*) FROM runs WHERE replay_of IS NOT json_extract(identity, '$.replay_of')").fetchone()[0] == 0
     assert conn.execute(f"SELECT count(*) FROM reports r WHERE coverage IS NOT {db.COVERAGE}").fetchone()[0] == 0
 
@@ -142,4 +142,47 @@ def test_save_report_rolls_back_insert_if_coverage_update_fails(tmp_path):
         db.save_report(conn, run, report["code"], report["name"], report["period"], report["passed"],
                        report["verdict"], report["body"])
     assert conn.execute("SELECT count(*) FROM reports").fetchone()[0] == 0
+    conn.close()
+
+
+def test_v3_repairs_writes_missed_during_v2_rollback(tmp_path):
+    path = tmp_path / "app.db"
+    legacy_database(path)
+    conn = sqlite3.connect(path, isolation_level=None)
+    db._migrate_v2(conn)
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute("UPDATE runs SET replay_of = NULL")
+    conn.execute("UPDATE reports SET coverage = NULL")
+    conn.close()
+    conn = db.connect(path)
+    assert_derived(conn)
+    conn.close()
+
+
+def test_future_additive_version_remains_usable(tmp_path):
+    path = tmp_path / "app.db"
+    conn = db.connect(path)
+    conn.execute("PRAGMA user_version = 4")
+    conn.close()
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.total_changes == 0
+    conn.close()
+
+
+def test_legacy_sql_inserts_and_updates_maintain_derived_columns(tmp_path):
+    conn = db.connect(tmp_path / "app.db")
+    load(conn)
+    assert_derived(conn)
+    report = RECORDS[0]["report"]
+    replay = next(r["run"] for r in RECORDS if r["report"]["id"] == 143)
+    conn.execute("UPDATE runs SET identity = ? WHERE id = ?",
+                 (json.dumps(replay["identity"]), RECORDS[0]["run"]["id"]))
+    conn.execute("UPDATE reports SET body = ?, period = ? WHERE id = 143",
+                 (json.dumps(report["body"]), report["period"]))
+    assert_derived(conn)
+    conn.execute("UPDATE reports SET period = ? WHERE id = 143", (report["body"]["period"],))
+    assert_derived(conn)
+    conn.execute("UPDATE runs SET identity = NULL WHERE id = ?", (replay["id"],))
+    assert_derived(conn)
     conn.close()

@@ -197,3 +197,19 @@ def test_derived_column_mismatch_is_reported_read_only(tmp_path, column):
     before = (tmp_path / "app.db").read_bytes()
     assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == [expected]
     assert (tmp_path / "app.db").read_bytes() == before
+
+
+def test_coverage_check_reports_all_mismatches_in_one_query(tmp_path):
+    from support.continuation import load
+
+    conn = db.connect(tmp_path / "app.db")
+    load(conn)
+    conn.execute("UPDATE reports SET coverage = NULL")
+    statements = []
+    conn.set_trace_callback(statements.append)
+    problems, _ = integrity._check_rows(conn)
+    assert [p for p in problems if "coverage" in p] == [
+        f"报告 {r['report']['id']}：coverage 与正文重算不一致"
+        for r in sorted(RECORDS, key=lambda r: r['report']['id'])]
+    assert len([s for s in statements if "json_each" in s]) == 1
+    conn.close()
