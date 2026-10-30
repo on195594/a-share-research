@@ -6,7 +6,7 @@ import sqlite3
 
 from a_share_research import db
 from a_share_research.evidence import report_source_view, projection
-from a_share_research.reviewing import legacy_issue_view
+from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view
 
 VERSION = "research-v1"
 
@@ -118,6 +118,8 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
     if not ready(row["status"], row["passed"]):
         raise RequestError("报告尚未就绪或状态不一致", 409)
     body = json.loads(row["body"])
+    if "review_audit" in body:
+        body["review_audit"] = audit_view(body["review_audit"])
     material = json.loads(row["material"] or "null")
     data = material["data"] if material else {}
     extra = data.get("extra", {})
@@ -181,6 +183,7 @@ def diagnostics(status: str, body: dict, *, gaps: list | None = None,
                 announcement_searches: list | None = None, report_available: bool = True) -> dict:
     problems = body.get("problems", [i for i in (body.get("review_audit") or {}).get("issues", [])
                                      if i.get("status") == "unresolved"])
+    problems = [issue_view(i) for i in problems if isinstance(i, dict)]
     missing = body.get("gaps", gaps or [])
     gaps_basis = "report" if "gaps" in body else "material_snapshot" if gaps is not None else "unavailable"
     next_step = "历史报告不自动刷新；追问先核查是否有新披露。"
@@ -191,7 +194,7 @@ def diagnostics(status: str, body: dict, *, gaps: list | None = None,
                      if report_available else "尚未形成报告；先查看 error 与 diagnostics.gaps，缩小到一个关键缺口；继续研究须另行确认，不自动重跑。")
     return {"status": "passed" if status == "done" else "review_failed" if status == "failed" and problems else status,
             "problems": problems, "issue_states": legacy_issue_view(problems),
-            "failure": body.get("failure"), "review_audit": body.get("review_audit"),
+            "failure": body.get("failure"), "review_audit": audit_view(body.get("review_audit")),
             "stop_reasons": body.get("stop_reasons", []), "gaps": missing, "gaps_basis": gaps_basis, "next_step": next_step,
             "announcement_searches": body.get("announcement_searches", announcement_searches or []),
             "limits": "缺口与预算提示不是失败根因判定；不据此推断未披露或清除投资门禁。"}

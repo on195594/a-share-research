@@ -7,12 +7,13 @@ import pytest
 
 from a_share_research.evidence import (EvidenceError, source_registry, projection, quote_match,
                                       citation_link, citation_errors, report_source_view)
-from a_share_research.research import Material, check, _parse
-from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest, legacy_issue_view
+from a_share_research.research import Material, check, _parse, _verified_facts
+from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest, legacy_issue_view, PROTOCOL
 from a_share_research.research_tools import record_stop
 from a_share_research import service, db
 from support.reports import MATERIAL, SALES, CASH, report
 from support.templates import ENV
+from support.continuation import load
 
 DATA = Path(__file__).parent / "data"
 RECORDS = json.loads((DATA / "continuation-records.json").read_text())["records"]
@@ -277,6 +278,76 @@ def test_report_and_material_source_id_conflict_is_visible_not_silently_overridd
     assert view["error"] and view["sources"] == {}
 
 
+def test_carried_issue_cannot_endorse_reordered_disputed_claim_as_fact():
+    ledger = ReviewLedger()
+    original = REVIEW["report"]
+    finding = issue() | {"where": "risks[2]"}
+    accept(ledger, payload(ledger, original, issues=[finding]), original)
+    initial_facts = _verified_facts(original, ledger.pending(), reviewed=True)
+    assert original["risks"][2] not in initial_facts["risks"]
+    changed = deepcopy(original)
+    changed["risks"].reverse()
+    pending = accept(ledger, payload(ledger, changed, resolutions=[{
+        "id": ledger.pending()[0]["id"], "status": "unresolved", "reason": finding["problem"]}]), changed)
+    assert pending[0]["where"] == "risks[2]"  # Origin is retained for audit, not used as the new location.
+    assert _verified_facts(changed, pending, reviewed=True) == {}
+
+
+@pytest.mark.parametrize("snapshot_sources", [{}, {"D1": {"document": {}, "pages": {}}}])
+def test_partial_material_retains_report_manifest_without_inventing_page_text(snapshot_sources):
+    material = {"doc": {}, "extra": {"sources": snapshot_sources}}
+    before = deepcopy((BODY, material))
+    view = report_source_view(BODY, material)
+    assert not view["error"]
+    assert set(view["sources"]) == {"D0", *BODY["sources"]}
+    for source_id in BODY["sources"]:
+        original = BODY["sources"][source_id]
+        saved = view["sources"][source_id]
+        assert saved["document"] == original["document"]
+        assert saved["read_pages"] == original["pages"]
+        assert saved["pages"] == {} and saved["raw_pages"] == {}
+    cite = REVIEW["report"]["risks"][0]["cites"][-1]
+    link = citation_link(cite, view["sources"])
+    assert link["url"] == BODY["sources"]["D1"]["document"]["url"] and not link["pages"]
+    html = ENV.get_template("_macros.html").module.cites({"cites": [cite]}, {}, view["sources"])
+    assert "匹配页未核定" in html
+    assert (BODY, material) == before
+
+
+def test_manifest_merge_still_rejects_source_identity_and_page_conflicts():
+    material = {"doc": BODY["document"], "extra": {"sources": {"D1": {
+        "document": BODY["document"], "pages": {}}}}}
+    assert report_source_view(BODY, material)["error"]
+    body = deepcopy(BODY)
+    body["sources"]["D1"]["pages"] = {23: REVIEW["report"]["risks"][0]["cites"][-1]["quote"]}
+    material["extra"]["sources"]["D1"] = {"document": body["sources"]["D1"]["document"],
+                                             "pages": {23: MATERIAL.pages[9]}}
+    assert report_source_view(body, material)["error"]
+
+
+def test_unknown_reviewer_fields_never_enter_stored_or_public_audit():
+    ledger = ReviewLedger()
+    original = REVIEW["report"]
+    finding = issue() | {"prompt": PROTOCOL, "debug": {"internal_prompt": PROTOCOL}}
+    finding["evidence"] = [finding["evidence"][0] | {"prompt": PROTOCOL}]
+    accept(ledger, payload(ledger, original, issues=[finding], prompt=PROTOCOL))
+    assert PROTOCOL not in json.dumps(ledger.snapshot(), ensure_ascii=False)
+    resolution = {"id": ledger.pending()[0]["id"], "status": "dismissed", "reason": issue()["problem"],
+                  "evidence": issue()["evidence"], "prompt": PROTOCOL}
+    accept(ledger, payload(ledger, original, resolutions=[resolution], prompt=PROTOCOL))
+    snapshot = ledger.snapshot()
+    assert PROTOCOL not in json.dumps(snapshot, ensure_ascii=False)
+    # Independent public boundary also filters a previously saved/untrusted payload without rewriting it.
+    legacy = deepcopy(snapshot)
+    legacy["prompt"] = PROTOCOL
+    legacy["rounds"][0]["prompt"] = PROTOCOL
+    legacy["issues"][0]["resolution"]["debug"] = PROTOCOL
+    public = service.diagnostics("done", {"review_audit": legacy})
+    assert PROTOCOL not in json.dumps(public, ensure_ascii=False)
+    assert legacy["prompt"] == PROTOCOL
+    assert public["review_audit"]["issues"][0]["status"] == "dismissed"
+
+
 def test_stop_is_deduplicated_separate_from_review_failure():
     material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
     record_stop(material, "fetch_limit")
@@ -284,3 +355,22 @@ def test_stop_is_deduplicated_separate_from_review_failure():
     assert len(material.extra["stop_reasons"]) == 1
     assert "failure" not in material.extra
     assert _parse("") is None and _parse("not JSON") is None
+
+
+def test_full_api_keeps_report_sources_when_old_material_has_no_supplements(tmp_path):
+    conn = db.connect(tmp_path / "sources.db")
+    load(conn)
+    row = conn.execute("SELECT run_id, body FROM reports WHERE id=37").fetchone()
+    body = json.loads(row["body"])
+    # Metadata-presence boundary over the actual capture, not a complete replay snapshot.
+    db.update_run(conn, row["run_id"], material=json.dumps({"data": {"extra": {"sources": {}}}}))
+    changes = conn.total_changes
+    view = service.report_view(conn, 37)
+    for source_id, saved in body["sources"].items():
+        source = view["evidence"]["sources"][source_id]
+        assert source["document"] == saved["document"]
+        assert source["read_pages"] == saved["pages"] and source["pages"] == {}
+    assert view["evidence"]["source_error"] is None
+    assert conn.execute("SELECT body FROM reports WHERE id=37").fetchone()[0] == row["body"]
+    assert conn.total_changes == changes
+    conn.close()

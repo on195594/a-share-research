@@ -14,7 +14,7 @@ import pandas as pd
 
 from a_share_research import db, model, sources, evidence
 from a_share_research.sources import Document
-from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL
+from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 
 log = logging.getLogger(__name__)
 
@@ -686,6 +686,10 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool = False) -> dict:
     """Retain unflagged claims only after semantic review of this exact report completed."""
     if not report or not reviewed or any(p["where"] == "review" for p in problems):
+        return {}
+    # A carried issue retains its original target. Reordering/replacing a draft can move that
+    # disputed claim; without a new position mapping no subset is safe to endorse.
+    if any(p.get("id") and p.get("draft_sha256") != digest(report) for p in problems):
         return {}
     flagged = set()
     for problem in problems:

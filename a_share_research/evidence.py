@@ -93,11 +93,27 @@ def report_sources(body, material=None):
     registry = source_registry(data.get("doc", body.get("document")), data.get("pages", body.get("pages")),
                                data.get("raw_pages"), extra.get("sources", body.get("sources")), extra.get("catalog"))
     saved = source_registry(body.get("document"), body.get("pages"), sources=body.get("sources"))
-    for key in saved.keys() & registry.keys():
+    for key, fallback in saved.items():
+        if key not in registry:
+            registry[key] = fallback
+            continue
+        current_source = registry[key]
         for field in IDENTITY:
-            old, current = saved[key]["document"][field], registry[key]["document"][field]
+            old, current = fallback["document"][field], current_source["document"][field]
             if old and current and old != current:
                 raise EvidenceError(f"来源 {key} 的 {field} 在报告与材料间冲突")
+            if not current:
+                current_source["document"][field] = old
+        for field in ("pages", "raw_pages"):
+            for page, text in fallback[field].items():
+                if page in current_source[field] and text != current_source[field][page]:
+                    raise EvidenceError(f"来源 {key} 的同页原文在报告与材料间冲突")
+                current_source[field][page] = text
+        # A legacy list records read coverage, not page text. Never turn it into quote evidence.
+        current_source["read_pages"] = sorted(set(current_source["read_pages"] + fallback["read_pages"]))
+        if current_source["read_pages"]:
+            current_source["state"] = "read"
+        current_source["href"] = safe_url(current_source["document"]["url"])
     return registry
 
 

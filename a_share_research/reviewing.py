@@ -20,6 +20,71 @@ def _text(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def _strings(value, fields):
+    return {k: value[k] for k in fields if isinstance(value.get(k), str)} if isinstance(value, dict) else {}
+
+
+def _cites_view(cites):
+    result = []
+    for cite in cites if isinstance(cites, list) else []:
+        clean = _strings(cite, ("ref", "period", "source", "quote", "source_code", "source_period"))
+        if isinstance(cite, dict) and type(cite.get("page")) is int:
+            clean["page"] = cite["page"]
+        if clean:
+            result.append(clean)
+    return result
+
+
+def _decision_view(value):
+    clean = _strings(value, ("id", "status", "reason"))
+    if not isinstance(value, dict):
+        return clean
+    if isinstance(value.get("targets"), list):
+        clean["targets"] = [v for v in value["targets"] if isinstance(v, str)]
+    if "evidence" in value:
+        clean["evidence"] = _cites_view(value["evidence"])
+    return clean
+
+
+def issue_view(value):
+    clean = _strings(value, ("id", "type", "where", "problem", "importance", "status", "draft_sha256",
+                             "material_sha256", "reviewed_draft_sha256"))
+    if not isinstance(value, dict):
+        return clean
+    if "evidence" in value:
+        clean["evidence"] = _cites_view(value["evidence"])
+    if "resolution" in value:
+        clean["resolution"] = _decision_view(value["resolution"])
+    return clean
+
+
+def _round_view(value):
+    clean = _strings(value, ("draft_sha256", "material_sha256"))
+    if not isinstance(value, dict):
+        return clean
+    if type(value.get("version")) is int:
+        clean["version"] = value["version"]
+    for key, project in (("issues", issue_view), ("resolutions", _decision_view), ("risk_resolutions", _decision_view)):
+        clean[key] = [project(v) for v in value.get(key, []) if isinstance(v, dict)] if isinstance(value.get(key), list) else []
+    return clean
+
+
+def audit_view(value):
+    """Public/storage allowlist, including nested objects; never forward an arbitrary model payload."""
+    if not isinstance(value, dict):
+        return None
+    clean = {"version": value.get("version") if type(value.get("version")) is int else None,
+             "issues": [issue_view(i) for i in value.get("issues", []) if isinstance(i, dict)]
+                       if isinstance(value.get("issues"), list) else [],
+             "rounds": [_round_view(r) for r in value.get("rounds", []) if isinstance(r, dict)]
+                       if isinstance(value.get("rounds"), list) else []}
+    risks = value.get("protected_risks")
+    clean["protected_risks"] = {key: _strings(risk, ("text",)) | {"cites": _cites_view(risk.get("cites"))}
+                                for key, risk in (risks if isinstance(risks, dict) else {}).items()
+                                if isinstance(key, str) and re.fullmatch(r"risk-[0-9a-f]{20}", key) and isinstance(risk, dict)}
+    return clean
+
+
 def target_exists(target, report):
     if target in ("summary", "verdict", "gaps"):
         return target in report
@@ -88,7 +153,7 @@ class ReviewLedger:
                 raise ReviewFormatError("复核问题状态或理由无效")
             if status != "unresolved":
                 proof(resolution, targets=status == "resolved")
-            updated[resolution["id"]] |= {"status": status, "resolution": deepcopy(resolution),
+            updated[resolution["id"]] |= {"status": status, "resolution": _decision_view(resolution),
                                            "reviewed_draft_sha256": draft}
 
         changes = self.risk_changes(report)
@@ -109,25 +174,27 @@ class ReviewLedger:
             if (not isinstance(cites, list) or citation_errors(cites, registry, table)
                     or issue["type"] != "question" and not cites):
                 raise ReviewFormatError("实质复核问题必须指向有效的已存证据")
-            key = digest(issue)
+            clean_issue = issue_view(issue)
+            key = digest(clean_issue)
             if key in seen:
                 raise ReviewFormatError("新增复核问题重复")
             seen.add(key)
             issue_id = f"issue-{len(self.rounds) + 1}-{draft[:12]}-{index + 1}"
-            updated[issue_id] = deepcopy(issue) | {"id": issue_id, "status": "unresolved",
+            updated[issue_id] = clean_issue | {"id": issue_id, "status": "unresolved",
                                                   "draft_sha256": draft, "material_sha256": material_sha256}
         self.issues = updated
-        self.rounds.append(deepcopy(payload))
+        self.rounds.append(_round_view(payload))
         return self.pending()
 
     def snapshot(self):
-        return {"version": 1, "issues": deepcopy(list(self.issues.values())),
-                "protected_risks": deepcopy(self.risks), "rounds": deepcopy(self.rounds)}
+        return audit_view({"version": 1, "issues": list(self.issues.values()),
+                           "protected_risks": self.risks, "rounds": self.rounds})
 
 
 def legacy_issue_view(issues):
     """An old opinion has no reliable resolution state; do not backfill one."""
-    return [deepcopy(i) | {"status": i.get("status", "not_recorded")} for i in issues if isinstance(i, dict)]
+    return [issue_view(i) | {"status": i["status"] if isinstance(i.get("status"), str) else "not_recorded"}
+            for i in issues if isinstance(i, dict)]
 
 
 PROTOCOL = """输出一个 JSON 对象，version=1，逐字返回下方 draft_sha256 和 material_sha256。
