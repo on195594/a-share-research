@@ -85,7 +85,7 @@ def test_card_renders_standalone_with_report_dates_and_unicode_minus():
     summary_html = str(CARD.summary_card(card))
     full_html = str(CARD.full_card(card))
     assert '研究于' in summary_html
-    assert '财务体检' in full_html
+    assert '财务概览' in full_html and '累计 · 括号内为上年同期' in full_html
 
     # Test signed values with unicode minus sign − and ascii minus -
     mock_metric_ascii = {'label': '测试A', 'unit': '%', 'value': '-5.20', 'signed': True, 'unavailable': False, 'prior': '-3.10'}

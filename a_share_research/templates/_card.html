@@ -75,13 +75,13 @@
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
   {% if c.dims %}
   <section class="card-section" aria-labelledby="checkup-{{ c.code }}">
-    <h2 class="card-label" id="checkup-{{ c.code }}">财务体检{% if c.period %} <span class="muted">{{ c.period }} · 括号内为上年同期</span>{% endif %}</h2>
+    <h2 class="card-label" id="checkup-{{ c.code }}">财务概览{% if c.period %} <span class="muted">{{ c.period }}累计 · 括号内为上年同期</span>{% endif %}</h2>
     <table class="checkup">
       <tbody>
       {% for d in c.dims %}
         <tr><th scope="row">{{ d.label }}</th>
           <td><div class="checkup-cells">{% for m in d.metrics %}
-            <div><span class="checkup-label">{{ m.label }}</span><span class="checkup-value num">{{ value(m) }}</span>{% if m.prior is not none %}<span class="checkup-prior num">({{ '+' if m.signed and not m.prior.startswith(('-', '−', '+')) }}{{ m.prior }})</span>{% endif %}</div>
+            <div><span class="checkup-label">{{ m.label }}</span><span class="checkup-value num">{{ value(m) }}</span>{% if m.prior is not none %}<span class="checkup-prior num">({{ '+' if m.signed and not m.prior.startswith(('-', '−', '+')) }}{{ m.prior }}{{ m.unit }})</span>{% endif %}</div>
           {% endfor %}</div></td></tr>
       {% endfor %}
       </tbody>

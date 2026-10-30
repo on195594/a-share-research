@@ -578,7 +578,7 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .checkup th { width: 44px; font-size: 13px; font-weight: 650; color: var(--muted); padding-top: 12px; }
 .checkup-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
 .checkup-cells > div { display: flex; flex-direction: column; min-width: 0; }
-.checkup-label { font-size: 12px; color: var(--muted); }
+.checkup-label { font-size: 12px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
 .checkup-value { font-size: 16px; font-weight: 650; overflow-wrap: normal; }
 /* A long figure keeps its digits together and lets the unit drop to the next line. */
 .checkup-value small { display: inline-block; white-space: nowrap; }
