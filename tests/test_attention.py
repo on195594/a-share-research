@@ -5,7 +5,8 @@ import json
 import pytest
 
 from a_share_research import db, reading
-from test_continuation import BODY, load, render, RECORDS
+from support.continuation import BODY, load, RECORDS
+from support.templates import render
 
 
 @pytest.fixture

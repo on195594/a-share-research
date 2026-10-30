@@ -13,7 +13,7 @@ from a_share_research import db, service
 from a_share_research.research import Material, check, financial_table, _research_context, _verified_facts, _review_issues
 from a_share_research.research_tools import calculate
 from a_share_research.sources import Document
-from test_check import MATERIAL, report
+from support.reports import MATERIAL, report
 from test_financial_table import DATA
 
 

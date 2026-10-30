@@ -9,7 +9,8 @@ from starlette.requests import Request
 import a_share_research
 from a_share_research import db, reading, service
 from a_share_research.login_token import mint
-from test_continuation import load, RECORDS, render
+from support.continuation import load, RECORDS
+from support.templates import render
 
 
 @pytest.fixture

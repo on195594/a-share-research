@@ -13,7 +13,7 @@ import pytest
 
 from a_share_research import db, integrity, price, sources
 from a_share_research.research import _material_hash, publish
-from test_check import MATERIAL
+from support.reports import MATERIAL
 from test_price import DATA as PRICES
 
 PDF = Path(__file__).parent / "data" / "601138-buyback-announcement.pdf"

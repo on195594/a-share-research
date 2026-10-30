@@ -6,12 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from support.templates import ENV, TEMPLATES
 from markupsafe import escape
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATES = ROOT / 'a_share_research/templates'
-ENV = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape())
 MACROS = ENV.get_template('_macros.html').module
 
 
@@ -154,7 +152,7 @@ def test_relationship_and_feedback_only_use_explicit_fields():
 
 def test_long_question_is_discoverable_without_losing_text():
     # Reuse a real captured disclosure excerpt, without making a research call.
-    from test_check import MATERIAL
+    from support.reports import MATERIAL
     text = '\n'.join(MATERIAL.pages.values())
     assert len(text) > 100
     html = str(MACROS.research_context(text, None, None))

@@ -18,7 +18,7 @@
 |---|---|
 | `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
-| `tests/`、`tests/data/` | 确定性与状态边界测试、真实采集样本；样本随代码保留 |
+| `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
 | `docs/` | 方案、项目契约、路线图、实施与部署状态；`PRODUCT.md` / `DESIGN.md` 是界面设计入口 |
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
 | `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
@@ -33,8 +33,9 @@
 uv run --env-file .env python -m a_share_research.research 600519 --question '最新财报改变了什么？'
 uv run --env-file .env python -m a_share_research.worker            # 后台 worker：执行网页提交的研究与价格参考
 uv run --env-file .env.web.dev uvicorn a_share_research.web:app --port 8610  # 网页（本机开发）
-uv run pytest -q tests
 ```
+
+验证按影响范围选择测试文件（见[测试说明](tests/README.md)）；需要完整离线回归时用 `uv run pytest -q tests`。不以离线测试代替真实研究或浏览器验收。
 
 `.env.web`（本机开发可用 `.env.web.dev`）只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 

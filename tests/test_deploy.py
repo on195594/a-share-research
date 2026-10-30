@@ -3,7 +3,7 @@
 import pytest
 
 from a_share_research import db, deploy
-from test_continuation import load
+from support.continuation import load
 
 
 def test_idle_guard_and_fingerprints_on_captured_records(tmp_path):

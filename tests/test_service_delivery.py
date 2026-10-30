@@ -6,8 +6,8 @@ import pytest
 
 from a_share_research import db, reading, service
 from a_share_research.research import MAX_CALLS
-from test_check import MATERIAL
-from test_continuation import load
+from support.reports import MATERIAL
+from support.continuation import load
 
 RECORDS = json.loads((Path(__file__).parent / "data/continuation-records.json").read_text())["records"]
 SUCCESS = next(item["report"] for item in RECORDS if item["report"]["id"] == 143)

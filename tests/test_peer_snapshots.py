@@ -7,7 +7,8 @@ import json
 import pytest
 
 from a_share_research import reading
-from test_continuation import BODY, render
+from support.continuation import BODY
+from support.templates import render
 from test_feedback_retry import web, browser_request
 
 

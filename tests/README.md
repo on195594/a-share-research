@@ -1,0 +1,33 @@
+# 测试目录
+
+## 组织
+
+- `test_*.py`：按业务能力保存回归断言，不按某次交付或版本另建重复测试。
+- `data/`：真实采集的 JSON/PDF 样本，属于回归输入，不是临时文件。采集来源与口径见样本内元数据及使用它的测试。
+- `support/reports.py`：茅台年报摘录、财务数字和引文检查用报告构造器。
+- `support/continuation.py`：真实生产/K2 报告记录及 SQLite 装载器。
+- `support/templates.py`：统一开启自动转义的 Jinja 环境与报告渲染入口。
+
+通用支撑不再从 `test_check.py`、`test_continuation.py` 导入；其他领域专用采集数据/fixture 暂留原测试模块，不为整理目录搬动业务代码。报告构造器只用于检查边界，不能充当真实模型验收结果。不要修改公共样本对象；需要改变输入时复制后再处理。
+
+## 验证范围
+
+从仓库根目录运行 `uv run pytest -q tests/test_相关能力.py`。选择受影响的真实案例及正常案例；同一版本已通过的结果复用，不因提交或部署再跑一轮。
+
+常见入口：
+
+| 能力 | 测试 |
+|---|---|
+| 公告标题与报告日期 | `test_announcements.py`、`test_report_dates.py` |
+| 精确计算、研究预算与工具 | `test_research_tools.py` |
+| 申万行业同业发现 | `test_industry_peers.py` |
+| 财务序列与同行快照 | `test_financial_series.py`、`test_peer_snapshots.py` |
+| 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py` |
+| 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
+| API、任务交付与部署 | `test_service_http.py`、`test_service_delivery.py`、`test_deploy.py` |
+
+完整离线回归：`uv run pytest -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。
+
+## 清理边界
+
+可删除可再生的 `__pycache__/`、`.pytest_cache/` 等缓存；不删除 `data/` 下的真实样本，不把仓库根目录运行数据 `../data/`、`.env*` 或历史评估证据当作测试垃圾。相似测试若覆盖不同数据来源、缺失状态或回归故障，应保留，不按行数或文件数裁剪。

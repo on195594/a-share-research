@@ -8,29 +8,16 @@ import json
 import sys
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import escape
 
 import a_share_research
 from a_share_research import db, screening, reading
 from a_share_research.research import _prior_report, _research_context, _verified_facts, prior_question, since_prior
-from test_check import report
+from support.reports import report
+from support.continuation import BODY, RECORDS, load
+from support.templates import render
 
 ROOT = Path(__file__).resolve().parents[1]
-RECORDS = json.loads((ROOT / "tests/data/continuation-records.json").read_text())["records"]
-BODY = {r["report"]["id"]: r["report"]["body"] for r in RECORDS}
-
-
-def load(conn) -> None:
-    for record in RECORDS:
-        run, rep = record["run"], record["report"]
-        conn.execute("INSERT INTO runs(id,request_id,kind,code,status,created_at,identity,request) VALUES (?,?,?,?,?,?,?,?)",
-                     (run["id"], run["request_id"], run["kind"], rep["code"], run["status"], rep["created_at"],
-                      json.dumps(run["identity"]) if run["identity"] else None, json.dumps(run["request"], ensure_ascii=False)))
-        conn.execute("INSERT INTO reports(id,run_id,code,name,period,passed,verdict,body,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                     (rep["id"], run["id"], rep["code"], rep["name"], rep["period"], rep["passed"], rep["verdict"],
-                      json.dumps(rep["body"], ensure_ascii=False), rep["created_at"]))
-
 
 def test_prior_report_skips_real_feedback_and_replays_and_carries_only_the_agenda(tmp_path):
     conn = db.connect(tmp_path / "app.db")
@@ -83,13 +70,6 @@ def test_home_lists_own_research_and_counts_batch_only_companies(tmp_path, monke
     finally:
         web.conn.close()
 
-
-def render(name: str, **context) -> str:
-    env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
-    env.globals["asset_version"] = "test"
-    if name == 'report.html':
-        context['evidence'] = reading.evidence_context(context['body'], context['report'].get('period'))
-    return env.get_template(name).render(csrf="", steps={}, request_id="r", **context)
 
 
 def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):

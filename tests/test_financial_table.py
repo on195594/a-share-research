@@ -8,7 +8,7 @@ import pytest
 
 from a_share_research import sources
 from a_share_research.research import Material, financial_table
-from test_check import MATERIAL
+from support.reports import MATERIAL
 
 DATA = json.loads((Path(__file__).parent / "data" / "600519-financials.json").read_text())
 

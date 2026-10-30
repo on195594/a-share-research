@@ -3,13 +3,13 @@ import json
 from pathlib import Path
 
 import pytest
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from support.templates import ENV
 
 from a_share_research import db, reading
-from test_continuation import load
+from support.continuation import load
 
-ROOT = Path(__file__).parents[1]
-ENV = Environment(loader=FileSystemLoader(ROOT / 'a_share_research/templates'), autoescape=select_autoescape())
+ROOT = Path(__file__).resolve().parents[1]
+
 
 
 @pytest.fixture

@@ -172,7 +172,7 @@ def test_windfall_flag_needs_both_a_profit_jump_and_a_low_multiple():
 def test_comparison_keeps_real_calculations_and_marks_legacy_gaps(tmp_path):
     from a_share_research import db
     from a_share_research.research_tools import calculate
-    from test_check import MATERIAL, report
+    from support.reports import MATERIAL, report
 
     conn = db.connect(tmp_path / 'app.db')
     calculation = calculate(MATERIAL.table, '经营现金流差额', 'difference',

@@ -11,7 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from a_share_research.research import Material, financial_series, financial_table, since_prior
 from a_share_research.research_tools import calculate
-from test_check import MATERIAL
+from support.reports import MATERIAL
 
 ROOT = Path(__file__).resolve().parents[1]
 CAPTURES = json.loads((ROOT / "tests/data/financial-series-captures.json").read_text())["companies"]

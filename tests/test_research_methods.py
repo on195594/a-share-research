@@ -6,7 +6,7 @@ from pathlib import Path
 from a_share_research import db, service
 from a_share_research.research import check, _research_context
 from a_share_research.research_tools import research_methods
-from test_check import MATERIAL, report
+from support.reports import MATERIAL, report
 
 CAPTURED = json.loads((Path(__file__).parent / "data/research-methods.json").read_text())["reports"]
 
