@@ -88,7 +88,7 @@ def audit_view(value):
 def target_exists(target, report):
     if target in ("summary", "verdict", "gaps"):
         return target in report
-    match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|methods)\[(\d+)\]", target or "")
+    match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|methods|gaps)\[(\d+)\]", target or "")
     return bool(match and int(match[2]) < len(report.get(match[1], [])))
 
 
@@ -140,8 +140,10 @@ class ReviewLedger:
             # An empty list records that the flagged item itself was deleted from the new draft.
             if targets and (not isinstance(listed, list) or not (listed or removable)
                             or not all(isinstance(t, str) and target_exists(t, report) for t in listed)):
-                raise ReviewFormatError(label + "复核决定缺少新版条目去向（targets 须为新报告中存在的位置"
-                                        + ("；原条目已删除时为 []" if removable else "") + "）")
+                invalid = [t for t in listed if not (isinstance(t, str) and target_exists(t, report))] \
+                    if isinstance(listed, list) else listed
+                raise ReviewFormatError(label + f"复核决定缺少新版条目去向：{invalid or '[]'} 不是新报告中存在的位置"
+                                        + "（如 risks[0]、gaps[1]、summary" + ("；原条目已删除时为 []" if removable else "") + "）")
 
         def decisions(items, expected):
             if any(not isinstance(i, dict) or not isinstance(i.get("id"), str) for i in items):
@@ -207,13 +209,14 @@ def legacy_issue_view(issues):
 PROTOCOL = """输出一个 JSON 对象，version=1，逐字返回下方 draft_sha256 和 material_sha256。
 issues: 新发现的实质问题数组，每项 {type: omission/claim/question, where: 条目位置或 missing,
 problem: 具体问题, importance: 为什么会影响本次问题或结论, evidence: 已存出处数组}；
-where 是单个位置，如 risks[0]、business[1]、summary、verdict，或 missing。
+where 是单个位置，如 risks[0]、business[1]、gaps[0]、summary、verdict，或 missing。
 omission/claim 必须给支持批评的已读原文/表格/程序计算出处，不能只凭经验列风险清单；question 可无出处。
 resolutions: 对下方每个 unresolved_issues 的 ID 恰好一项 {id, status: resolved/unresolved/dismissed,
 reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；
 dismissed 表示原批评不成立，必须用证据说明理由；unresolved 保留阻断并说明仍缺什么。不能因修复者声称完成或本轮未再提起就关闭。
 risk_resolutions: 对下方每个 changed_risks 的 ID 恰好一项 {id, status: retained/merged/dismissed,
 reason, targets, evidence}；可有依据地改写、合并或反驳原风险，多项可指向同一新版条目，不按条数或措辞机械否决。
+evidence 每项格式同报告 cites：原文 {source, page: 整数, quote: 逐字摘录，不连续处用……分隔}，表格 {ref, period}。
 没有问题和没有待处理项时三个数组都为 []；不得省略数组、未知 ID 或只返回空对象。
 正式链接由统一来源映射提供：合法已读引文无需正文重复 URL；URL 未记录时指出来源缺口。
 目录 listed 只有可发现身份，不能作为已读事实。仍须严查事实/遗漏/含义；不同公司与期间可以合法引用，逐项核对论断口径。

@@ -124,13 +124,37 @@ def projection(registry, *, catalog=False, raw=False):
             for key, source in registry.items() if catalog or source["state"] != "listed"}
 
 
+ELISION = re.compile(r"…+|\.{3,}")
+MIN_QUOTE, MIN_SEGMENT = 8, 4
+
+
+def _find(window, quote):
+    """(start, end) of the verbatim quote, else of its elided segments found in order."""
+    whole = re.sub(r"\s+", "", quote)
+    start = window.find(whole)
+    if start >= 0:
+        return start, start + len(whole)
+    # Excerpts joined with an ellipsis are ordinary citation. Each segment must be real text, in
+    # order; short segments are refused so a number or a word can't be picked from elsewhere.
+    segments = [s for s in (re.sub(r"\s+", "", part) for part in ELISION.split(quote)) if s]
+    if len(segments) < 2 or any(len(s) < MIN_SEGMENT for s in segments):
+        return None
+    first = position = window.find(segments[0])
+    for segment in segments:
+        position = window.find(segment, position)
+        if position < 0:
+            return None
+        position += len(segment)
+    return first, position
+
+
 def quote_match(cite, registry):
     """Return actual matching pages, including a genuine page-spanning match; never guess a PDF anchor."""
-    quote = re.sub(r"\s+", "", str(cite.get("quote", "")))
+    quote = str(cite.get("quote", ""))
     page = cite.get("page")
     source_id = cite.get("source", "D0")
     source = registry.get(source_id) if isinstance(source_id, str) else None
-    if len(quote) < 8 or type(page) is not int or page < 1 or not source:
+    if len(ELISION.sub("", re.sub(r"\s+", "", quote))) < MIN_QUOTE or type(page) is not int or page < 1 or not source:
         return None
     for field in ("pages", "raw_pages"):
         parts, spans, offset = [], [], 0
@@ -140,12 +164,23 @@ def quote_match(cite, registry):
             if text:
                 spans.append((n, offset, offset + len(text)))
             offset += len(text)
-        start = "".join(parts).find(quote)
-        if start >= 0:
-            matched = [n for n, lo, hi in spans if lo < start + len(quote) and hi > start]
+        if found := _find("".join(parts), quote):
+            start, end = found
+            matched = [n for n, lo, hi in spans if lo < end and hi > start]
             if matched == list(range(matched[0], matched[-1] + 1)):
                 return matched
     return None
+
+
+def _quote_error(cite, source):
+    """Say which part of an unmatched quote citation to fix, as tool errors do."""
+    source_id, page, quote = cite.get("source", "D0"), cite.get("page"), cite.get("quote")
+    if not source or source["state"] == "listed":
+        return f"来源 {source_id} 未读取（仅目录或不存在），不能引证；请引用已读来源"
+    if type(page) is not int or page < 1 or not isinstance(quote, str) or len(re.sub(r"\s+", "", quote)) < MIN_QUOTE:
+        return f"{source_id} 原文出处须含整数 page 和至少 {MIN_QUOTE} 字的 quote 原文摘录"
+    return (f"{source_id} 第 {page} 页及相邻页找不到引文「{quote[:30]}」；请逐字摘录已读原文，"
+            f"不连续处用……分隔且每段至少 {MIN_SEGMENT} 字，不要拼接表格单元或改写")
 
 
 def citation_errors(cites, registry, table):
@@ -168,7 +203,7 @@ def citation_errors(cites, registry, table):
             source_id = cite.get("source", "D0")
             source = registry.get(source_id) if isinstance(source_id, str) else None
             if not source or not quote_match(cite, registry):
-                errors.append("引文未匹配已读取原文")
+                errors.append(_quote_error(cite, source))
                 continue
             # These optional fields describe document identity, not the period/subject of every claim.
             for field in ("code", "period"):

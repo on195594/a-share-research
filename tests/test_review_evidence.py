@@ -1,6 +1,7 @@
 """Protocol boundary mutations over real captured reports; no semantic/model verdict is simulated."""
 from copy import deepcopy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -454,3 +455,45 @@ def test_provider_text_wrapped_in_source_error_stays_out_of_the_run(tmp_path, mo
     row = conn.execute("SELECT error FROM runs WHERE id=?", (run,)).fetchone()
     assert row["error"] == "来源输入未能完成，请核对已保存资料。" and "upstream" not in row["error"]
     conn.close()
+
+
+def elided_page():
+    # Two real, separated excerpts of one captured Moutai page; no text is invented.
+    page, text = next(iter(MATERIAL.pages.items()))
+    squashed = re.sub(r"\s+", "", text)
+    third = len(squashed) // 3
+    return page, squashed[:third], squashed[-third:]
+
+
+def test_elided_excerpts_match_in_order_and_fabricated_joins_do_not():
+    registry = MATERIAL.source_registry()
+    page, head, tail = elided_page()
+    cite = {"page": page, "quote": head + "……" + tail}
+    assert quote_match(cite, registry) == [page]
+    assert citation_errors([cite], registry, MATERIAL.table) == []
+    assert quote_match(cite | {"quote": head + "..." + tail}, registry) == [page]
+    # Mutations: wrong order, a fragment absent from the page, a fragment too short to locate.
+    for quote in (tail + "……" + head, head + "……营业收入增长百分之九十", head + "……" + tail[:3]):
+        assert quote_match(cite | {"quote": quote}, registry) is None
+        assert "找不到引文" in citation_errors([cite | {"quote": quote}], registry, MATERIAL.table)[0]
+    # Elision never bridges an unread page.
+    registry["D0"]["pages"] = {page - 1: head, page + 1: tail}
+    registry["D0"]["raw_pages"] = {}
+    assert quote_match(cite, registry) is None
+
+
+def test_unmatched_citation_errors_say_what_to_fix():
+    registry = MATERIAL.source_registry()
+    errors = citation_errors([{"page": "5", "quote": SALES["quote"]}, {"source": "D9", "page": 1, "quote": SALES["quote"]}],
+                             registry, MATERIAL.table)
+    assert "整数 page" in errors[0] and "D9 未读取" in errors[1]
+
+
+def test_gap_positions_are_valid_targets_and_invalid_ones_are_named():
+    ledger = pending_ledger()
+    draft = REVIEW["report"] | {"gaps": ["尚未取得三季报附注"]}
+    decision = {"id": ledger.pending()[0]["id"], "status": "resolved", "reason": issue()["problem"],
+                "targets": ["gaps[0]"], "evidence": issue()["evidence"]}
+    with pytest.raises(ReviewFormatError, match=r"gaps\[3\]"):
+        accept(ledger, payload(ledger, draft, resolutions=[decision | {"targets": ["risks[0]", "gaps[3]"]}]), draft)
+    assert accept(ledger, payload(ledger, draft, resolutions=[decision]), draft) == []
