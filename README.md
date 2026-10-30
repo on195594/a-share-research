@@ -166,6 +166,8 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 
 ## 部署
 
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列，v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引。迁移须另获授权并备份；回退旧镜像可保留新增结构，旧应用仍读写原字段，但其后写入不维护派生列，重新启用派生列读取前须核对并补齐这些写入。
+
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。

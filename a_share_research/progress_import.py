@@ -46,13 +46,14 @@ def import_exports(database: Path, files: list[Path]):
                 identity = dict(value.get('identity') or {})
                 identity['progress_capture'] = {'source': f"/api/reports/{value['id']}", 'export_sha256': sha,
                                                 'evidence': value['evidence'], 'basis': 'authorized_api_export_not_original_run_snapshot'}
-                conn.execute('INSERT INTO runs(id,kind,code,name,status,created_at,request,identity) VALUES (?,\'research\',?,?,\'done\',?,?,?)',
+                conn.execute('INSERT INTO runs(id,kind,code,name,status,created_at,request,identity,replay_of) VALUES (?,\'research\',?,?,\'done\',?,?,?,?)',
                              (value['run_id'], value['code'], value['name'], value['created_at'],
                               progress.encode({'question': value.get('question') or body.get('question'), 'parent_report_id': parent}),
-                              progress.encode(identity)))
+                              progress.encode(identity), identity.get('replay_of')))
                 conn.execute('INSERT INTO reports(id,run_id,code,name,period,passed,verdict,body,created_at,body_sha256) VALUES (?,?,?,?,?,1,?,?,?,?)',
                              (value['id'], value['run_id'], value['code'], value['name'], body['period'], body.get('verdict'),
                               body_text, value['created_at'], hashlib.sha256(body_text.encode()).hexdigest()))
+                conn.execute(f'UPDATE reports AS r SET coverage = {db.COVERAGE} WHERE id = ?', (value['id'],))
     finally:
         conn.close()
 

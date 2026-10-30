@@ -14,6 +14,7 @@ import pytest
 from a_share_research import db, integrity, price, sources
 from a_share_research.research import _material_hash, publish
 from support.reports import MATERIAL
+from support.continuation import RECORDS
 from test_price import DATA as PRICES
 
 PDF = Path(__file__).parent / "data" / "601138-buyback-announcement.pdf"
@@ -174,3 +175,25 @@ def test_wrongly_typed_json_is_listed_and_the_check_carries_on(tmp_path):
     assert problems == [f"任务 {run_id}：运行身份无法解析", "报告 1：正文与写入时的哈希不符",
                         "报告 1：正文不是 JSON 对象"]
     assert counts["reports"] == 2 and counts["pdfs"] == 1
+
+
+@pytest.mark.parametrize("column", ["replay_of", "coverage"])
+def test_derived_column_mismatch_is_reported_read_only(tmp_path, column):
+    conn = db.connect(tmp_path / "app.db")
+    record = next(record for record in RECORDS if record["report"]["id"] == 143)
+    report = record["report"]
+    run = db.create_run(conn, report["code"])
+    db.update_run(conn, run, identity=json.dumps(record["run"]["identity"]))
+    db.save_report(conn, run, report["code"], report["name"], report["period"], report["passed"],
+                   report["verdict"], report["body"])
+    assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == []
+    if column == "replay_of":
+        conn.execute("UPDATE runs SET replay_of = NULL WHERE id = ?", (run,))
+        expected = f"任务 {run}：replay_of 与运行身份 JSON 不一致"
+    else:
+        conn.execute("UPDATE reports SET coverage = NULL")
+        expected = "报告 1：coverage 与正文重算不一致"
+    conn.close()
+    before = (tmp_path / "app.db").read_bytes()
+    assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == [expected]
+    assert (tmp_path / "app.db").read_bytes() == before
