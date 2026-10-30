@@ -1,23 +1,24 @@
 :root {
-  --bg: #E6EFF0;
-  --surface: #F6FAFA;
-  --band: #DBE8EB;
-  --ink: #203536;
-  --muted: #486168;
-  --accent: #006975;
-  --accent-strong: #00565F;
-  --accent-ink: #F6FAFA;
-  --line: #BCCDCF;
-  --caution: #805500;
-  --caution-bg: #FFF1D6;
-  --caution-ink: #5C3D00;
-  --placeholder: #5E7479;
+  --bg: #F5F4F0;
+  --surface: #FFFFFF;
+  --band: #EDEBE5;
+  --ink: #1D232B;
+  --muted: #5A616B;
+  --accent: #2B48B0;
+  --accent-strong: #1F3690;
+  --accent-ink: #FFFFFF;
+  --line: #DCD9D1;
+  --control: #9A968D;
+  --caution: #8A5300;
+  --caution-bg: #FBF1DE;
+  --caution-ink: #5E3A00;
+  --placeholder: #707780;
   /* charts: validated pair (OKLCH chroma >= 0.10, CVD ΔE >= 12 on surface); text never wears them */
-  --chart-1: #008F93;
-  --chart-1-dim: #9FC7C9;
-  --chart-2: #7B86E8;
-  --chart-grid: #CBDADC;
-  --chart-band: #CFE3E4;
+  --chart-1: #3A5BC7;
+  --chart-1-dim: #B9C5EE;
+  --chart-2: #C8742A;
+  --chart-grid: #E3E0D8;
+  --chart-band: #E4E9F8;
   --column: 760px;
   --radius: 6px;
   --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
@@ -42,8 +43,8 @@ body {
 .shell { display: flex; align-items: center; justify-content: space-between; min-height: 56px; }
 .brand { color: var(--ink); font-weight: 700; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
 
-h1 { font-size: 28px; line-height: 1.3; margin: 16px 0 4px; text-wrap: balance; }
-h2 { font-size: 20px; line-height: 1.4; margin: 32px 0 12px; }
+h1 { font-size: 26px; line-height: 1.3; letter-spacing: -0.01em; margin: 20px 0 4px; text-wrap: balance; }
+h2 { font-size: 19px; line-height: 1.4; letter-spacing: -0.005em; margin: 36px 0 12px; }
 p { margin: 0 0 8px; }
 p, li, dd { text-wrap: pretty; }
 a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
@@ -103,7 +104,7 @@ form.inline { display: inline; margin: 0; }
   min-width: 0;
   min-height: 48px;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--ink);
@@ -157,17 +158,19 @@ form.inline { display: inline; margin: 0; }
 .stub { background: var(--surface); margin: 8px -20px 0; padding: 8px 20px 18px; }
 .meta { color: var(--muted); font-size: 14px; }
 .conclusion { font-size: 18px; font-weight: 600; line-height: 1.6; margin: 16px 0; }
-.snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 108px), 1fr)); gap: 8px 10px; margin: 16px 0 4px; }
-.snapshot div { margin: 0; background: var(--bg); padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--line); }
+.snapshot { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 100px), 1fr)); margin: 16px 0 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+/* Hairlines between cells, drawn outward so the clipped outer edge stays the border. */
+.snapshot div { margin: 0; padding: 8px 12px; box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line); }
 .snapshot dt { color: var(--muted); font-size: 13px; }
-.snapshot dd { margin: 0; font-size: 18px; font-weight: 600; white-space: nowrap; }
+.snapshot dd { margin: 0; font-size: 17px; font-weight: 650; white-space: nowrap; letter-spacing: -0.01em; }
 .snapshot small, th small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 2px; }
 .perforation { border: 0; border-top: 2px dashed var(--line); margin: 0 -20px 8px; }
 .items { list-style: none; padding: 0; margin: 0; }
 .items > li { padding: 12px 0; border-top: 1px solid var(--line); }
 .items > li > p { margin: 0; }
 .risks h2 { color: var(--caution); }
-.risks .items > li { background: var(--caution-bg); border-top: 0; margin-bottom: 8px; padding: 12px 16px; border-radius: var(--radius); }
+.risks .items > li { border-top: 0; border-left: 3px solid var(--caution); margin-bottom: 16px; padding: 2px 0 2px 14px; }
 
 details { margin-top: 6px; }
 /* display:flex drops the native marker, so draw a chevron that turns when open */
@@ -422,11 +425,11 @@ details.block[open] { padding-bottom: 12px; }
 .matrix .rank { display: inline-block; width: 1.7em; color: var(--muted); font-weight: 400; font-size: 12px; }
 .matrix tr.picked th { box-shadow: inset 3px 0 0 var(--accent); padding-left: 6px; }
 .matrix td { border-radius: 2px; text-align: center; }
-.matrix td.h0, .heat-key .h0 { background: #EEF5F5; color: var(--ink); }
-.matrix td.h1, .heat-key .h1 { background: #D3E7E8; color: var(--ink); }
-.matrix td.h2, .heat-key .h2 { background: #A9D1D3; color: var(--ink); }
-.matrix td.h3, .heat-key .h3 { background: #5FAEB1; color: var(--ink); }
-.matrix td.h4, .heat-key .h4 { background: #007A7E; color: var(--accent-ink); font-weight: 600; }
+.matrix td.h0, .heat-key .h0 { background: #F0F2FB; color: var(--ink); }
+.matrix td.h1, .heat-key .h1 { background: #DCE2F7; color: var(--ink); }
+.matrix td.h2, .heat-key .h2 { background: #B9C5EE; color: var(--ink); }
+.matrix td.h3, .heat-key .h3 { background: #8A9EE2; color: var(--ink); }
+.matrix td.h4, .heat-key .h4 { background: #2F49A8; color: var(--accent-ink); font-weight: 600; }
 .heat-key { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; white-space: nowrap; }
 .heat-key i { width: 14px; height: 10px; border-radius: 2px; margin-left: 6px; }
 .heat-key i.h0 { outline: 1px solid var(--chart-grid); }
@@ -511,67 +514,76 @@ details.block[open] { padding-bottom: 12px; }
 .pill .num { color: var(--muted); font-size: 12px; font-weight: 400; }
 
 /* ---------- investment cards ---------- */
-/* One company per card, shaped like the report stub: verdict above, a perforation, then the
-   counter-evidence and saved figures. Flat: a hairline border, no shadow. */
-.card-tools { align-items: center; margin: 0 0 12px; }
-.card-tools .view { margin-left: auto; }
-.cards { display: grid; gap: 16px; }
-.card { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
-.card[hidden] { display: none; }
-.card-stub { padding: 14px 16px 12px; }
-.card-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
-.card-title h3 { margin: 0; font-size: 18px; line-height: 1.4; }
-.card-title h1 { margin: 0; }
-.card-title .company-verdict { margin-left: auto; }
-.card-thesis { font-size: 16px; font-weight: 600; line-height: 1.6; margin: 10px 0 6px; }
-.card.full .card-thesis { font-size: 18px; margin-top: 12px; }
-.card-dates { margin: 0; }
-.card-body { position: relative; border-top: 2px dashed var(--line); padding: 12px 16px 4px; }
-/* Ticket notches at both ends of the perforation. */
-.card-body::before, .card-body::after {
-  content: ""; position: absolute; top: -9px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--bg); border: 1px solid var(--line);
-}
-.card-body::before { left: -9px; clip-path: inset(0 0 0 50%); }
-.card-body::after { right: -9px; clip-path: inset(0 50% 0 0); }
-.card-label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 4px; }
-.card-more { font-weight: 400; white-space: nowrap; }
-.card-risk { background: var(--caution-bg); color: var(--caution-ink); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
-.card-risk .card-label { color: var(--caution-ink); }
-.card-risk a { color: var(--caution-ink); }
-.card-risk p, .card-check p { margin: 0; overflow-wrap: anywhere; }
-.card-check { margin-bottom: 12px; }
-.card-list { margin: 0; padding-left: 20px; }
-.card-list li { margin-bottom: 8px; overflow-wrap: anywhere; }
+/* One company per card on a white surface: identity and verdict, the thesis, saved figures,
+   then the lists. Hierarchy comes from type size, weight and spacing; colour only marks the
+   counter-evidence rule and links. Flat: a hairline border, no shadow. */
+.companies { margin-top: 8px; }
+.card-group { margin: 24px 0 0; }
+.group-title { display: flex; align-items: baseline; gap: 8px; font-size: 15px; font-weight: 650; color: var(--muted);
+  margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.group-title .num { font-size: 13px; font-weight: 400; }
+.cards { display: grid; gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 0; }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
+.card-name { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 700; }
+.card-name a { color: var(--ink); text-decoration: none; }
+.card-name a:hover { color: var(--accent-strong); text-decoration: underline; }
+.card-name .code { font-weight: 400; margin-left: 4px; white-space: nowrap; }
+.card.full .card-name { font-size: 26px; letter-spacing: -0.01em; }
+.card.full .card-name .code { font-size: 15px; }
+.badge-verdict { flex: none; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; white-space: nowrap;
+  background: var(--band); border-radius: 999px; padding: 3px 10px 3px 8px; margin-top: 1px; }
+.badge-verdict.flag { background: var(--caution-bg); color: var(--caution-ink); }
+.card-meta { display: flex; flex-wrap: wrap; gap: 0 12px; font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+.card-stale { font-size: 13px; color: var(--caution); margin: 4px 0 0; }
+.card-thesis { font-size: 16px; line-height: 1.7; font-weight: 500; margin: 12px 0 0; }
+.card.full .verdict { margin-top: 16px; }
+.card.full .card-thesis { font-size: 17px; margin-top: 14px; }
+.card-failed { color: var(--caution); font-weight: 600; margin: 12px 0 0; }
+.card-note { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 8px 0 0; }
+/* Key figures: label over value, hairline dividers between cells, no boxes. */
+.card-keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 14px 0 0; padding: 10px 0;
+  border-block: 1px solid var(--line); }
+.card-keys div { min-width: 0; padding: 0 8px; border-left: 1px solid var(--line); }
+.card-keys div:first-child { padding-left: 0; border-left: 0; }
+.card-keys dt { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-keys dd { margin: 2px 0 0; font-size: 17px; font-weight: 650; white-space: nowrap; letter-spacing: -0.01em; }
+.card-keys small, .checkup small { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 1px; }
+/* Lists: counter-evidence carries a caution rule on its left; checkpoints a neutral one. */
+.card-label { font-size: 13px; font-weight: 650; color: var(--ink); margin: 16px 0 8px; }
+.card-label .muted { font-weight: 400; margin-left: 6px; }
+.card-label.risk { color: var(--caution); }
+.card-list { list-style: none; margin: 0; padding: 0; counter-reset: item; }
+.card-list li { position: relative; counter-increment: item; padding: 0 0 0 30px; margin: 0 0 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.card-list li::before { content: counter(item); position: absolute; left: 0; top: 2px; width: 20px; height: 20px; border-radius: 50%;
+  font-size: 12px; line-height: 20px; text-align: center; background: var(--band); color: var(--muted); font-weight: 600; }
+.card-list.risk li::before { background: var(--caution-bg); color: var(--caution-ink); }
 a.plain { color: inherit; text-decoration: none; }
-a.plain:hover { text-decoration: underline; }
-.card-pulse { margin: 0 0 10px; }
-.card-pulse figcaption { margin-bottom: 2px; }
-.card-pulse .readout { color: var(--muted); }
-.card-pulse table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.card-pulse th, .card-pulse td { padding: 3px 0; border: 0; font-size: 13px; }
-.card-pulse th { font-weight: 400; text-align: left; width: 32%; }
-.card-pulse .spark-cell { width: 28%; padding: 0 8px; }
-.card-pulse td.num { text-align: right; width: 18%; }
-.card-pulse td.num:last-child { width: 22%; color: var(--muted); font-size: 12px; }
-.card-pulse td.strong { font-weight: 700; font-size: 14px; }
-.card-market { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0 0 2px; }
-.card-market div { background: var(--bg); border-radius: var(--radius); padding: 4px 8px; min-width: 0; }
-.card-market dt { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.card-market dd { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; }
-.card-market small { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 1px; }
-.card-body > p.small { margin: 0 0 8px; }
-.card-foot { display: flex; gap: 4px 20px; border-top: 1px solid var(--line); padding: 4px 16px; font-size: 14px; }
-.card-foot a { min-height: 40px; display: inline-flex; align-items: center; }
-/* Compact view keeps the stub and the links; the full card is one tap away. */
-.cards.compact { gap: 8px; }
-.cards.compact .card-body { display: none; }
-.cards.compact .card-thesis { font-size: 15px; font-weight: 400; margin: 6px 0 4px; }
-.card.full { margin: 8px 0 20px; }
-.card.full .card-body { padding-bottom: 8px; }
-@media (max-width: 380px) { .card-market { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+a.plain:hover { text-decoration: underline; text-decoration-color: var(--control); }
+.card-fold { margin: 12px 0 0; border-top: 1px solid var(--line); }
+.card-keys + .card-note + .card-fold { border-top: 0; }
+.card-fold > summary { font-size: 14px; color: var(--accent); min-height: 44px; display: flex; align-items: center; }
+.card-fold[open] > summary { margin-bottom: 0; }
+.card-foot { display: flex; gap: 4px 20px; margin: 4px -16px 0; padding: 0 16px; border-top: 1px solid var(--line); font-size: 14px; }
+.card-foot a { min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; font-weight: 500; }
+.card-foot a:hover { text-decoration: underline; }
+/* Full card: a check-up table, one dimension per row, metrics flowing in a row. */
+.card.full { padding-bottom: 8px; margin: 12px 0 20px; }
+.card-section { margin: 0; }
+.card-section h2.card-label { margin-top: 22px; }
+.checkup { width: 100%; border-collapse: collapse; }
+.checkup th, .checkup td { border: 0; border-top: 1px solid var(--line); padding: 10px 0; vertical-align: top; text-align: left; }
+.checkup tr:last-child th, .checkup tr:last-child td { border-bottom: 1px solid var(--line); }
+.checkup th { width: 44px; font-size: 13px; font-weight: 650; color: var(--muted); padding-top: 12px; }
+.checkup-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
+.checkup-cells > div { display: flex; flex-direction: column; min-width: 0; }
+.checkup-label { font-size: 12px; color: var(--muted); }
+.checkup-value { font-size: 16px; font-weight: 650; white-space: nowrap; }
+.checkup-prior { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.card-actions { margin-top: 0; }
+.active-runs h3 { margin-top: 8px; }
 @media (min-width: 1100px) {
-  /* Two columns of cards on wide screens, wider than the reading column. */
-  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start;
-    width: min(1120px, calc(100vw - 40px)); margin-left: calc(50% - min(560px, 50vw - 20px)); }
+  /* Cards spread to two columns on wide screens, beyond the reading column. */
+  .wide { width: min(1120px, calc(100vw - 40px)); margin-left: calc(50% - min(560px, 50vw - 20px)); }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }

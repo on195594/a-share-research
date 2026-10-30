@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form, price_block, research_context %}
 {% from "_charts.html" import verdict_track, verdict_pips, vitals as vitals_panel %}
-{% from "_card.html" import invest_card %}
+{% from "_card.html" import full_card %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
 <section class="narrow">
-  {{ invest_card(card, due, full=true) }}
+  {{ full_card(card, due) }}
   <div class="actions card-actions">
     <a class="btn" href="/reports/{{ card.id }}">阅读完整报告</a>
     <a href="/reports/{{ card.id }}#more">追问或请求核查</a>

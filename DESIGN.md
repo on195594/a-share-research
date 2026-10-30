@@ -1,32 +1,33 @@
 ---
 name: a-share-research · 窗口索引
-description: 冷矿蓝、精确日期与成对解释反证的只读核查界面
+description: 暖白纸面、深靛蓝强调、精确日期与成对解释反证的只读核查界面
 colors:
-  background: "#E6EFF0"
-  surface: "#F6FAFA"
-  band: "#DBE8EB"
-  ink: "#203536"
-  muted: "#486168"
-  accent: "#006975"
-  accent-strong: "#00565F"
-  line: "#BCCDCF"
-  caution: "#805500"
-  caution-bg: "#FFF1D6"
-  caution-ink: "#5C3D00"
-  placeholder: "#5E7479"
-  chart-1: "#008F93"
-  chart-1-dim: "#9FC7C9"
-  chart-2: "#7B86E8"
-  chart-grid: "#CBDADC"
-  chart-band: "#CFE3E4"
+  background: "#F5F4F0"
+  surface: "#FFFFFF"
+  band: "#EDEBE5"
+  ink: "#1D232B"
+  muted: "#5A616B"
+  accent: "#2B48B0"
+  accent-strong: "#1F3690"
+  line: "#DCD9D1"
+  control: "#9A968D"
+  caution: "#8A5300"
+  caution-bg: "#FBF1DE"
+  caution-ink: "#5E3A00"
+  placeholder: "#707780"
+  chart-1: "#3A5BC7"
+  chart-1-dim: "#B9C5EE"
+  chart-2: "#C8742A"
+  chart-grid: "#E3E0D8"
+  chart-band: "#E4E9F8"
 typography:
   headline:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
-    fontSize: 28px
+    fontSize: 26px
     fontWeight: 700
   title:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
-    fontSize: 20px
+    fontSize: 19px
     fontWeight: 700
   section:
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif'
@@ -73,17 +74,17 @@ components:
 
 # Design System: 窗口索引
 
-沿用 a-stock-tracker 已确认的“窗口索引”视觉方向（冷矿蓝色域、深墨文字、固定颜色角色、精确日期），按新项目的页面精简。token 实现在 `a_share_research/static/app.css` 的 `:root`。
+2026-10-30 起由冷矿蓝改为“纸面 + 墨 + 靛蓝”：暖白纸面底、纯白内容面、近黑墨色正文、深靛蓝唯一强调色，琥珀只留给反证与警示；保留固定颜色角色与精确日期。靛蓝与铜色避开 A 股红涨绿跌的含义。token 实现在 `a_share_research/static/app.css` 的 `:root`。
 
 ## Colors
 
-accent 用于主要动作与链接，accent-strong 是其悬停态；background 是冷矿蓝全页底；surface 是报告头与出处的局部浅底；band 标明来源与日期。ink 承担正文与标题，muted 只用于代码、日期等辅助信息；line 分隔条目。caution 配 caution-bg 表达反证、失败与缺口，始终附文字标签；琥珀横带内文字用 caution-ink。placeholder 只用于输入框占位文字。禁止用红绿暗示涨跌或买卖；结论不用颜色区分好坏。文字对实际背景至少 4.5:1。
+accent 用于主要动作、链接与判断刻度的当前档，accent-strong 是其悬停态；background 是暖白纸面全页底；surface 是纯白内容面（报告头、投资卡片、估值格）；band 是中性浅底（胶囊、徽标、未选中刻度、编号圆点）；control 是输入框边线。ink 承担正文与标题，muted 只用于代码、日期等辅助信息；line 分隔条目。caution 配 caution-bg 表达反证、失败与缺口，始终附文字标签；琥珀横带内文字用 caution-ink。placeholder 只用于输入框占位文字。禁止用红绿暗示涨跌或买卖；结论不用颜色区分好坏。文字对实际背景至少 4.5:1。
 
-图表另有一组只给图形用的色：chart-1（图表青，单系列与主系列）、chart-2（蓝紫，双系列的第二项），两者经 dataviz 校验脚本验证（OKLCH 彩度 ≥ 0.10，色盲模拟 ΔE ≥ 12，正常视觉 ΔE ≥ 17）；chart-1-dim 是同色淡阶，用于“突出一项、其余退后”；chart-grid 为网格细线，chart-band 为价位区间底。图中文字一律用 ink/muted，不穿系列色；正负值用同一颜色，靠零线方向和带符号的数值区分，不用红绿。
+图表另有一组只给图形用的色：chart-1（靛蓝，单系列与主系列）、chart-2（铜色，双系列的第二项），两者在白色与纸面底上经 dataviz 校验脚本验证（OKLCH 彩度 ≥ 0.10，对比度 ≥ 3:1，色盲模拟 ΔE 28.2，正常视觉 ΔE 32.5）；因子分位热力为靛蓝五档单色阶 #F0F2FB / #DCE2F7 / #B9C5EE / #8A9EE2 / #2F49A8（前四档墨色字、末档白字，均 ≥ 6:1）；chart-1-dim 是同色淡阶，用于“突出一项、其余退后”；chart-grid 为网格细线，chart-band 为价位区间底。图中文字一律用 ink/muted，不穿系列色；正负值用同一颜色，靠零线方向和带符号的数值区分，不用红绿。
 
 ## Typography
 
-系统中文字体栈，不加载网页字体；数字用等宽数字（tabular-nums）。正文 16px、行高 1.6；辅助 14px；页面标题 28px；二级标题 20px；结论与公司名 18px。公司名与代码分开；标题和反证完整换行，不截断。
+系统中文字体栈，不加载网页字体；数字用等宽数字（tabular-nums）。正文 16px、行高 1.6（卡片结论与清单 1.65–1.7）；辅助 14px，注释 12–13px；页面标题 26px、二级标题 19px，均略收字距；结论与卡片公司名 18px。层级靠字号、字重（400 / 500 / 650 / 700）与留白区分，不靠色块。关键数字 16–17px、650 字重，单位缩小为 11px 辅助色紧随其后。公司名与代码分开；标题和反证完整换行，不截断。
 
 ## Layout
 
@@ -91,13 +92,16 @@ accent 用于主要动作与链接，accent-strong 是其悬停态；background 
 
 ## Elevation & Shapes
 
-平面色域，无阴影；按钮、输入框与投资卡片 6px 圆角；报告头与正文之间、投资卡片的票根与卡身之间用 2px line 色虚线（打孔线）分隔，卡片打孔线两端有半圆票口。
+平面，无阴影；按钮与输入框 6px 圆角，投资卡片与估值格 10px 圆角，徽标与胶囊全圆角；报告头与正文之间用 2px line 色虚线（打孔线）分隔，只此一处。成组的数字（估值快照、卡片关键数字）用发丝线分格，不给每格单独加底色或边框。反证用左侧 3px 琥珀竖线标出，不整块铺底色。
 
 ## Components
 
 `.notice`（色域横带，`.caution` 为琥珀）、`.btn`（主要动作，至少 48px 高）、`.link`（文字动作）、条目列表、`<details>`（出处；`summary` 前有细线折角，展开时转向下，悬停加下划线；摘要右侧以 `.cite-meta` 标明“原文 N · 计算 N · 表值 N”证据构成，含多条出处的章节标题旁提供 `.cite-toggle` 一键展开/收起本节出处）。报告头下方与批次页的 `.toc` 为吸顶章节跳转栏（只列实际存在的章节，附条目计数 `.num`，随滚动高亮当前章节）；正文先给完整的“主要风险与反证”，再给可能很长的问题回答/核查。日期及其前缀（“研究于”“资料至”“基准日”）用 `.date` 不断行。候选初筛先给 `.matrix` 因子分位矩阵与候选行业分布、初筛前 60 日表现横条图，逐家明细折进“逐家因子、口径与研究结论”（待选择时默认展开）：编号列表 `.candidates`，公司名与代码同行，`.badge` 文字徽标（accent 底为“选定”，band 底为“机械前五”），下方四格 `.factors` 因子与近 4 年扣非净利迷你柱 `.cand-spark`；勾选框 24px、标签至少 44px 高；`.funnel` 为左右对齐的计数行（漏斗数据存在时改用横条图，粗筛板块分布用 `.strip-bar` 等比分段条）。首页“主动研究过的公司”上方提供最新判断等比分布条 `.strip-bar` 与按判断档位过滤的 `.pill` 胶囊。程序数据对照将修订或变动指标提炼为 `.diff-grid` 对照小格。页脚只有一次免责说明。
 
-**投资卡片**（`_card.html`，数据由 `reading.card` 从已存报告读出，不取数、不重算）：surface 底、1px line 边、无阴影。票根为公司名与代码、判断（列表中 `.pips` 加文字，公司档案用三档 `.verdict`）、一句话结论（去掉与刻度重复的判断前缀）、资料至/研究于日期与过期提示；打孔线下的卡身依次为琥珀底的首要反证、下期检查点、近 8 期营业总收入与扣非归母净利润迷你柱（可悬停/点按读数）、研究时收盘的估值四格（收盘价、市盈率、市净率、股息率，明示收盘日与“不是实时行情”）。文字一律完整显示不截断：首页卡只列第一条反证与检查点并给“共 N 条”链接，公司档案顶部的完整卡列出全部反证与检查点、每条链接到报告原条目。复核未通过的卡不显示判断、结论和卡身，只写明未通过并给出上次通过报告的判断与日期。首页卡片手机一列，≥1100px 两列（突破阅读列至 1120px）；脚本可用时提供排序（最新 / 判断 / 资料最旧）和“紧凑”切换（只留票根，选择记在本浏览器），与判断筛选胶囊共用一组卡片。
+**投资卡片**（`_card.html`，数据由 `reading.card` 从已存报告读出，不取数、不重算、不打分）：白底、1px line 边、10px 圆角、无阴影。信息分四层，自上而下：①身份与判断——公司名、代码、判断徽标（`.pips` + 文字，同色，位置表达档位）、研究于/资料至与过期提示；②一句话结论（去掉与徽标重复的判断前缀，500 字重）；③保存的数字；④风险与反证、下期检查点。两种形态：
+- 首页摘要卡 `summary_card`：③为关键数字四格（营收同比、扣非同比、市盈率、股息率，发丝线分格），下方一行注明增速所属累计期与估值收盘日；④折进一个 `<details>`（“N 条风险与反证 · M 个检查点”），展开后全文显示，不截断；卡脚为“阅读报告 / 公司档案”。首页按判断分组（值得继续研究 → 需要谨慎 → 暂不值得 → 复核未通过），组内最近研究在前；判断筛选胶囊按组显隐。手机一列，≥1100px 整个公司区加宽到 1120px、两列。
+- 公司档案完整卡 `full_card`：判断用三档 `.verdict`；③为“财务体检”表，按成长（营收、扣非同比）/ 盈利（毛利率、加权 ROE）/ 现金（经营现金流、归母净利润）/ 健康（资产负债率、货币资金、四项债务）/ 估值（市盈率、市净率、股息率）五维分行，每格为最新报告期保存值，括号内为上年同期保存值，不打分、不推导变化，不用颜色表示好坏；④全部展开，编号圆点清单（反证圆点用 caution-bg），每条链接到报告原条目。
+复核未通过的卡不显示判断、结论、数字与清单，只写明未通过，并给出上次通过报告的判断与日期。
 
 **判断与证据计量**：`.verdict` 为三档判断刻度（暂不值得 / 需要谨慎 / 值得继续研究），三档同色，只有当前档填 accent，位置表达顺序、文字标出档位；列表里用 `.pips` 三格小刻度配文字判断。报告头 `.ledger` 是一行计量：风险与反证、检查点、原文引文段数、程序计算项、记录的缺口，各数字可跳到对应位置。
 

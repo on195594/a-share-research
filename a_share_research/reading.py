@@ -324,9 +324,17 @@ def comparison(conn, report) -> dict:
     return result | {'diff': diff, 'excluded': excluded, 'missing': missing}
 
 
-# The valuation strip on a card: saved closing-day values, never refreshed.
-CARD_MARKET = (('M.close', '收盘价'), ('M.pe_ttm', '市盈率'), ('M.pb', '市净率'), ('M.dv_ttm', '股息率'))
-CARD_PULSE = ('营业总收入', '扣非归母净利润')
+# Card check-up: saved financial-table rows grouped by what they tell a reader. No scores, no
+# derived numbers: each metric is the saved latest value beside the saved value a year earlier.
+CARD_DIMENSIONS = (
+    ('成长', (('T.revenue_yoy', '营收同比'), ('T.core_profit_yoy', '扣非同比'))),
+    ('盈利', (('T.gross_margin', '毛利率'), ('T.roe', '加权ROE'))),
+    ('现金', (('T.op_cash', '经营现金流'), ('T.net_profit', '归母净利润'))),
+    ('健康', (('T.debt_ratio', '资产负债率'), ('T.cash', '货币资金'), ('T.interest_debt', '四项债务'))),
+)
+# Saved closing-day valuation, never refreshed.
+CARD_MARKET = (('M.pe_ttm', '市盈率'), ('M.pb', '市净率'), ('M.dv_ttm', '股息率'))
+CARD_KEYS = ('T.revenue_yoy', 'T.core_profit_yoy', 'M.pe_ttm', 'M.dv_ttm')
 CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
 
 
@@ -347,17 +355,28 @@ def card(report, body: dict, last_passed=None) -> dict:
         return [i['text'] for i in body.get(key) or [] if isinstance(i, dict) and i.get('text')] if passed else []
 
     table = {r['id']: r for r in body.get('table') or [] if isinstance(r, dict) and isinstance(r.get('id'), str)}
+    periods = {p for k, r in table.items() if k.startswith('T.') for p in r.get('values') or {}}
+    latest = max(periods) if periods else None
+    prior = latest and f"{int(latest[:4]) - 1}{latest[4:]}"
     day = body.get('market_date')
-    market = []
-    for key, label in CARD_MARKET if passed and day else ():
-        value = ((table.get(key) or {}).get('values') or {}).get(day)
-        if value is not None:
-            market.append({'label': label, 'value': value, 'unit': table[key].get('unit') or ''})
-    vitals = (charts.vitals(body, [r for k, r in table.items() if k.startswith('T.')]) or {}) if passed else {}
-    pulse = [r for r in vitals.get('flows') or [] if r['label'] in CARD_PULSE and r['present']]
+    metrics = {}
+    for key, label in [m for _, group in CARD_DIMENSIONS for m in group] + list(CARD_MARKET):
+        row = table.get(key)
+        at, before = (day, None) if key.startswith('M.') else (latest, prior)
+        if not (passed and row and at):
+            continue
+        values = row.get('values') or {}
+        metrics[key] = {'label': label, 'unit': row.get('unit') or '', 'value': values.get(at), 'signed': key.endswith('_yoy'),
+                        'unavailable': at in (row.get('unavailable') or {}),
+                        'prior': values.get(before) if before else None}
+    dims = [{'label': label, 'metrics': [metrics[k] for k, _ in group if k in metrics]}
+            for label, group in CARD_DIMENSIONS]
+    dims.append({'label': '估值', 'metrics': [metrics[k] for k, _ in CARD_MARKET if k in metrics]})
+    dims = [d for d in dims if any(m['value'] is not None or m['unavailable'] for m in d['metrics'])]
     bucket = verdict or '复核未通过'  # the same buckets as the home verdict strip
     return {'id': report['id'], 'code': report['code'], 'name': report['name'], 'passed': passed,
             'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
-            'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'market': market, 'market_date': day,
-            'pulse': pulse, 'pulse_period': vitals.get('flow_period'), 'pulse_heading': vitals.get('flow_heading'),
-            'last_passed': dict(last_passed) if last_passed else None}
+            'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
+            'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
+            'period': latest and f"{latest[2:4]}年{charts.CUMULATIVE.get(latest[5:], latest[5:])}",
+            'market_date': day, 'last_passed': dict(last_passed) if last_passed else None}

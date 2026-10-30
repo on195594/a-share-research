@@ -22,8 +22,20 @@ def test_card_carries_saved_verdict_risks_checkpoints_and_closing_values():
     assert card['risks'] == [r['text'] for r in body['risks']]
     assert card['checkpoints'] == [c['text'] for c in body['checkpoints']]
     table = {r['id']: r for r in body['table']}
-    assert [m['value'] for m in card['market']] == [
-        table[k]['values'][body['market_date']] for k, _ in reading.CARD_MARKET if k in table]
+    latest = max(p for k, r in table.items() if k.startswith('T.') for p in r['values'])
+    prior = f"{int(latest[:4]) - 1}{latest[4:]}"
+    # Every check-up value is the saved string for its period; the prior column is the year-earlier saved string.
+    labels = dict(m for _, group in reading.CARD_DIMENSIONS for m in group) | dict(reading.CARD_MARKET)
+    by_label = {v: k for k, v in labels.items()}
+    for dim in card['dims']:
+        for m in dim['metrics']:
+            row = table[by_label[m['label']]]
+            if dim['label'] == '估值':
+                assert m['value'] == row['values'][body['market_date']] and m['prior'] is None
+            else:
+                assert m['value'] == row['values'].get(latest) and m['prior'] == row['values'].get(prior)
+    assert [d['label'] for d in card['dims']][-1] == '估值'
+    assert [m['label'] for m in card['figures']] == ['营收同比', '扣非同比', '市盈率', '股息率'][:len(card['figures'])]
     assert card['market_date'] == '2026-10-26'
 
 
@@ -33,22 +45,23 @@ def test_failed_card_shows_no_judgement_only_the_dated_last_pass():
     card = reading.card(report, report['body'], last)
     assert card['verdict'] is None and card['bucket'] == '复核未通过'
     assert card['summary'] == '' and card['risks'] == [] and card['checkpoints'] == []
-    assert card['market'] == [] and card['pulse'] == []
-    html = str(CARD.invest_card(card | {'coverage': '2026-06-30', 'created_at': report['created_at']}))
+    assert card['dims'] == [] and card['figures'] == []
+    html = str(CARD.summary_card(card | {'coverage': '2026-06-30', 'created_at': report['created_at']}))
     assert '最新一次研究复核未通过' in html and '2026-10-26 的报告' in html
     assert report['body']['summary'][5:20] not in html
-    assert 'card-body' not in html
+    assert 'card-keys' not in html and 'card-fold' not in html
 
 
 def test_card_text_is_never_truncated():
     report = RECORDS[39]
     card = reading.card(report, report['body']) | {'coverage': '2026-06-30', 'created_at': report['created_at']}
-    compact = str(CARD.invest_card(card, ('2026-09-30', '2026 年三季报')))
-    full = str(CARD.invest_card(card, full=True))
+    compact = str(CARD.summary_card(card, ('2026-09-30', '2026 年三季报')))
+    full = str(CARD.full_card(card))
     escaped = lambda t: str(ENV.from_string('{{ t }}').render(t=t))  # noqa: E731
-    assert escaped(card['risks'][0]) in compact and escaped(card['checkpoints'][0]) in compact
-    assert f"共 {len(card['risks'])} 条" in compact
-    assert all(escaped(t) in full for t in card['risks'] + card['checkpoints'])
+    # The summary card folds the lists but keeps every item whole; the full card shows them open.
+    for html in (compact, full):
+        assert all(escaped(t) in html for t in card['risks'] + card['checkpoints'])
+    assert f"{len(card['risks'])} 条风险与反证" in compact and '<details class="card-fold">' in compact
     # The coverage predates the due report, so the card says so without claiming an announcement.
     assert '资料未覆盖 2026 年三季报' in compact
 
