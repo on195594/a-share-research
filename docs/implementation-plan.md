@@ -92,20 +92,20 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `251b9ff`** 于 2026-10-30 14:23（北京时间）完成 web、worker 切换：阅读层继续图表化——有经营序列的报告在“财务与走势”首位给“财务体征”小倍数表（近 8 个单季流量迷你柱、近 8 个期末时点迷你线，最新保存值与同比，悬停/点按逐期读数），取代单独的单季利润图；新增毛利率、加权 ROE、资产负债率与上年同期的哑铃对比；公司档案沿用最新带序列报告的体征；批次页以 20×4 因子分位热力矩阵领起，逐家明细折叠；首页公司一行一家、判断右置；报告头去掉重复的“研究判断：”并收紧估值快照。所有者要求本次不受规则文档束缚、开放设计，但图表仍只重画保存值，不新算财务数字。只改阅读层，无数据库、配置、依赖或成文/复核契约变化；例行发布按 AGENTS.md 常设授权执行，worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `604f619`** 于 2026-10-30 14:38（北京时间）完成 web、worker 切换：修复 Codex 对 `251b9ff`（财务体征、同期哑铃、候选分位矩阵）的独立审查结论（原文 `review-251b9ff-20261030/`，accept with changes，2 重要 3 次要全修，并采纳 3 条可读性建议）——无期间的序列组略去而非 500；孤立期末值画点；只要有可读值就显示面板；单季与期末拆为两张带表头的表，期末右列为一年前同一期末的保存值；首页恢复完整生成日期；有体征的报告默认只开同比与同期对比两图；体征口径说明固定、读数独立一行；矩阵行内标出行业样本少、60 日跌超 30%、利润跳升且低 PE 并链到明细。只改阅读层，无数据库、配置、依赖或成文/复核契约变化；例行发布按 AGENTS.md 常设授权执行，worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:251b9ff` | `415577f85cf5d4773026ce369eecdb57ebbc2bcbc8b85e633d32a0aa6ea55a34` |
-| `a-share-research-worker:251b9ff` | `435b6beab95a4c4bf8c0fcb29f308af480465788fac8a4966501cd6eb1ec1e6a` |
+| `a-share-research-web:604f619` | `21c11f3fb14e8b8d832be4b6f90a19fdd23b7857452eb22ad894b8903c383d0b` |
+| `a-share-research-worker:604f619` | `dff99a6cb212de55f668fa4fd1270ff6323302010b71821b992aa9a923b6a603` |
 
-**验证**：全集 304 项通过（`test_charts.py` 12 项，新增体征与哑铃 4 项，输入为真实捕获的五粮液、卫星化学经营序列与报告 37；近零迷你柱越过零线的问题由新测试在修复前捕获）。本机开发实例（生产库快照）390px 遍历报告 1–44、首页、批次列表与批次 1、三家公司档案及研究库：均为 200/404/409 预期状态，无横向溢出、无脚本错误；1280px 查看报告 44。生产私有会话 390px 复核首页、报告 44/37、批次 1、万华化学档案均 200、无横溢与脚本错误，体征/哑铃/矩阵按预期出现，随后退出撤销会话。
+**验证**：全集 308 项通过（新增空期间、孤点、一年前列、候选矩阵 4 项；矩阵输入为批次 1 候选的只读采集 `tests/data/batch-candidate-matrix.json`；孤点绘制与空期间两项经互变确认被钉住）。本机开发实例（生产库快照）390px 遍历报告 1–44、首页、批次、三家公司档案与研究库，无异常状态、横溢或脚本错误；点按读数时体征表位置不变，矩阵标记链接展开明细。生产私有会话 390px 复核首页、报告 44/37、批次 1、万华化学档案均 200、无横溢与脚本错误，随后退出撤销会话。
 
-**证据**：`deploy-251b9ff-20261030-142353/`。备份：`~/a-share-research-data/backup-pre-251b9ff-20261030-142355.db`。
+**证据**：`deploy-604f619-20261030-143845/`。备份：`~/a-share-research-data/backup-pre-604f619-20261030-143847.db`。
 
-**直接回退**：`a-share-research-web:rollback-251b9ff` 与 `a-share-research-worker:rollback-251b9ff` 来自原运行的 `0e54ad7`（SHA 分别为 `456b25959089305e9ed4b790f83b07caf4a40d9d5157873b3cd9d291f50198b0` 和 `f904ef18a7455da4b1a54005f062cec5c5a3e5dc053cd33ddf932bc48988d5da`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；本次无数据变化，回退只换应用。
+**直接回退**：`a-share-research-web:rollback-604f619` 与 `a-share-research-worker:rollback-604f619` 来自原运行的 `251b9ff`（SHA 分别为 `415577f85cf5d4773026ce369eecdb57ebbc2bcbc8b85e633d32a0aa6ea55a34` 和 `435b6beab95a4c4bf8c0fcb29f308af480465788fac8a4966501cd6eb1ec1e6a`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；本次无数据变化，回退只换应用。
 
-**历史限制**：`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
+**历史限制**：`251b9ff` 的发布记录（证据 `deploy-251b9ff-20261030-142353/`、备份 `backup-pre-251b9ff-20261030-142355.db`、回退到 `0e54ad7`）见 `git show 604f619:docs/implementation-plan.md`。`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
 
 ## 尚待完成与未采用项
 
