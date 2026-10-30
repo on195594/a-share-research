@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
-{% from "_charts.html" import bars, verdict_pips %}
+{% from "_charts.html" import bars, data_list, verdict_pips %}
 {% macro review_items(rows) %}
 <ul class="list">
 {% for r in rows %}
@@ -63,8 +63,9 @@
   <p><a href="/batches/{{ batch.id }}">{{ b.month(batch) }}</a> <span class="muted">· {{ b.batch_status[batch.status] }}</span></p>
   {% if performance %}
   <figure class="figure" data-chart>
-    <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite">入场至今，扣往返费用；单个批次只是一次观察</span></figcaption>
+    <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite"><span class="date">{{ b.day(performance.entry) }}</span> 开盘入场至 <span class="date">{{ b.day(performance.date) }}</span> 收盘，扣往返费用；单个批次只是一次观察</span></figcaption>
     {{ bars(performance.groups, "本批次各组合累计模拟收益", emphasis=true) }}
+    {{ data_list(performance.groups) }}
   </figure>
   {% endif %}
   {% else %}

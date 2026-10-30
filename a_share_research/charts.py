@@ -1,7 +1,9 @@
 """Chart geometry for server-rendered SVG; pure functions over saved report and batch data.
 
-Charts only redraw values already saved in a report, batch or price reference. Labels reuse the
-saved display strings; the geometry (scales and ticks) is the only thing computed here. The page
+Charts redraw values already saved in a report, batch or price reference, and labels reuse the
+saved display strings; besides geometry (scales and ticks), the one value computed here is each
+selected company's own batch return, through the same screening.group_return as the portfolios.
+Every chart also returns its readouts as `data`, the HTML equivalent listed under it. The page
 CSP forbids inline styles, so templates draw with SVG attributes: x in percent of the figure
 width (the chart follows the column on any screen) and y in pixels (text keeps its size).
 """
@@ -86,6 +88,7 @@ def columns(groups: list[dict], series: list[str]) -> dict | None:
                     "slot_w": round(slot, 3), "bars": bars, "tip": group["tip"],
                     "outline": group.get("outline", False), "last": index == len(groups) - 1})
     return {"groups": out, "series": series, "zero": zero, "height": HEIGHT, "gutter": GUTTER,
+            "data": [g["tip"] for g in groups],
             "ticks": [{"y": y(t), "text": tick_text(t)} for t in ticks], "label_y": TOP + PLOT + 17}
 
 
@@ -105,11 +108,9 @@ def lines(periods: list[str], labels: list[str], series: list[dict]) -> dict | N
     for k, s in enumerate(series):
         points = [(xs[i], y(number(t))) if number(t) is not None else None for i, t in enumerate(s["texts"])]
         segments = [{"x1": a[0], "y1": a[1], "x2": b[0], "y2": b[1]} for a, b in zip(points, points[1:]) if a and b]
-        last = next((i for i in range(len(points) - 1, -1, -1) if points[i]), None)
+        # The legend reads every series at the same, latest period; an older value is not carried forward.
         out.append({"series": k, "label": s["label"], "segments": segments,
-                    "dots": [{"x": p[0], "y": p[1]} for p in points if p],
-                    "latest": s["texts"][last] if last is not None else None,
-                    "latest_period": periods[last] if last is not None else None})
+                    "dots": [{"x": p[0], "y": p[1]} for p in points if p], "latest": s["texts"][-1]})
     # Label the latest period, then walk back keeping labels at least 14% apart.
     axis = []
     for i in range(len(periods) - 1, -1, -1):
@@ -119,7 +120,7 @@ def lines(periods: list[str], labels: list[str], series: list[dict]) -> dict | N
              "tip": f"{periods[i]}：" + "；".join(f"{s['label']} {s['texts'][i] or '—'}" for s in series)}
             for i in range(len(periods))]
     return {"series": out, "ticks": [{"y": y(t), "text": tick_text(t)} for t in ticks], "axis": axis,
-            "tips": tips, "height": HEIGHT, "gutter": GUTTER, "label_y": TOP + PLOT + 17}
+            "tips": tips, "data": [t["tip"] for t in tips], "latest_period": periods[-1], "height": HEIGHT, "gutter": GUTTER, "label_y": TOP + PLOT + 17}
 
 
 def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | None:
@@ -136,7 +137,8 @@ def bars(rows: list[dict], start: float = 34.0, end: float = 84.0) -> dict | Non
         x = at(r["value"]) if r["value"] is not None else zero
         out.append({**r, "y": i * 32, "x": round(min(x, zero), 3), "w": round(abs(x - zero), 3),
                     "missing": r["value"] is None})
-    return {"rows": out, "zero": round(zero, 3), "height": len(rows) * 32, "start": start}
+    return {"rows": out, "zero": round(zero, 3), "height": len(rows) * 32, "start": start,
+            "data": [r["tip"] for r in rows]}
 
 
 def _period_label(period: str, kind: str) -> str:
@@ -267,10 +269,11 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
             texts = [[r["values"].get(p) for p in periods] for r in (cash, debt)]
             source = "财务数据表"
         chart = lines(periods, [_period_label(p, "balance") for p in periods],
-                      [{"label": "货币资金", "texts": texts[0]}, {"label": "四项有息债务", "texts": texts[1]}])
-        return chart and {"kind": "lines", "title": "货币资金与有息债务", "chart": chart, "source": source,
-                          "headline": f"期末时点值，亿元，截至 {chart['series'][0]['latest_period'] or periods[-1]}",
-                          "note": "四项有息债务为短期借款、一年内到期的非流动负债、长期借款与应付债券合计；时点值不代表期间流量。"}
+                      [{"label": "货币资金", "texts": texts[0]}, {"label": "四项债务合计", "texts": texts[1]}])
+        return chart and {"kind": "lines", "title": "货币资金与四项债务合计", "chart": chart, "source": source,
+                          "headline": f"期末时点值，亿元；图例为 {periods[-1]} 的值",
+                          "note": "四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券，不代表全部有息负债；"
+                                  "时点值不代表期间流量，某期缺失时图例留空，不沿用更早的值。"}
 
     for figure in (
         latest_growth(),
@@ -353,7 +356,8 @@ def verdict_track(reports: list) -> dict | None:
     for i, r in enumerate(points):
         out.append({"id": r["id"], "x": round(30 + slot * (i + 0.5), 3), "y": 16 + 30 * (2 - VERDICTS.index(r["verdict"])),
                     "verdict": r["verdict"], "date": r["created_at"][5:10].replace("-", "/"),
-                    "tip": f"{r['created_at'][:16].replace('T', ' ')} · {r['verdict']} · 资料至 {r['period']}"})
+                    "tip": f"{r['created_at'][:16].replace('T', ' ')} · {r['verdict']} · 资料至 {r['period']}"
+                           + (f" · 问题：{_brief(r['question'])}" if r["question"] else " · 未记录具体问题")})
     segments = [{"x1": a["x"], "y1": a["y"], "x2": b["x"], "y2": b["y"]} for a, b in zip(out, out[1:])]
     stride = math.ceil(len(out) / 6)
     days = [p["date"] for p in out]
@@ -366,8 +370,15 @@ def verdict_track(reports: list) -> dict | None:
             "height": 16 + 60 + 34}
 
 
+def _brief(text: str, limit: int = 40) -> str:
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
 def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None:
-    """Cumulative portfolio returns and each selected company's own net return since entry."""
+    """Cumulative portfolio returns and each selected company's own net return since entry.
+
+    A company's return is computed here, on request, with screening.group_return over the saved
+    entry and latest mark as a one-seat group, so it carries the same cost as the portfolios."""
     if not results:
         return None
     labels = [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")] + list(batch["rule"]["benchmarks"].items())
@@ -385,7 +396,7 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
         members.append({"label": names.get(code, code), "value": value * 100 if filled else None,
                         "text": f"{value * 100:+.2f}%" if filled else "未成交",
                         "tip": f"{names.get(code, code)}：{f'{value * 100:+.2f}%' if filled else '未成交，按现金计'}"})
-    return {"groups": bars(rows), "members": bars(members)}
+    return {"groups": bars(rows), "members": bars(members), "entry": batch["entry"]["date"], "date": results["date"]}
 
 
 def funnel(batch: dict, labels: list[tuple[str, str]]) -> dict | None:

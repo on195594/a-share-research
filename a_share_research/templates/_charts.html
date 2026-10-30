@@ -32,7 +32,7 @@
   {% for a in c.axis %}<text class="axis" x="{{ a.x }}%" y="{{ c.label_y }}" text-anchor="{{ a.anchor }}">{{ a.text }}</text>{% endfor %}
   {% for t in c.tips %}<g class="slot" data-tip="{{ t.tip }}"><rect class="hit" x="{{ t.x }}%" y="0" width="{{ t.w }}%" height="{{ c.height }}"/><title>{{ t.tip }}</title></g>{% endfor %}
 </svg>
-<ul class="legend">{% for s in c.series %}<li><span class="key line-key s{{ s.series }}" aria-hidden="true"></span>{{ s.label }} <span class="num">{{ s.latest or '—' }}</span></li>{% endfor %}</ul>
+<ul class="legend">{% for s in c.series %}<li><span class="key line-key s{{ s.series }}" aria-hidden="true"></span>{{ s.label }} <span class="num">{{ s.latest or '—' }}</span>{% if not s.latest %}<span class="muted">（该期缺失）</span>{% endif %}</li>{% endfor %}</ul>
 {% endmacro %}
 
 {# Horizontal bars from a shared zero; `emphasis` dims every row not marked as the subject. #}
@@ -51,6 +51,11 @@
 </svg>
 {% endmacro %}
 
+{# The HTML equivalent of a chart: every plotted value, in the same words as its readout. #}
+{% macro data_list(c) %}
+{% if c and c.data %}<details class="figure-data"><summary>本图数值</summary><ul>{% for d in c.data %}<li>{{ d }}</li>{% endfor %}</ul></details>{% endif %}
+{% endmacro %}
+
 {% macro figure(f) %}
 <figure class="figure{{ ' tall' if f.kind != 'bars' }}" data-chart>
   <figcaption><strong>{{ f.title }}</strong><span class="readout" aria-live="polite">{{ f.headline }}</span></figcaption>
@@ -58,6 +63,7 @@
   {% elif f.kind == 'lines' %}{{ lines(f.chart, f.title) }}
   {% else %}{{ bars(f.chart, f.title) }}{% endif %}
   <p class="figure-note">{{ f.note }}来源：{{ f.source }}。</p>
+  {{ data_list(f.chart) }}
 </figure>
 {% endmacro %}
 
@@ -96,7 +102,7 @@
 
 {% macro verdict_track(t) %}
 <figure class="figure track" data-chart>
-  <figcaption><strong>判断轨迹</strong><span class="readout" aria-live="polite">已通过复核的 {{ t.points | length }} 份报告，按生成时间排列</span></figcaption>
+  <figcaption><strong>判断轨迹</strong><span class="readout" aria-live="polite">已通过复核的 {{ t.points | length }} 份报告，按生成时间排列；各次研究问题与范围可能不同，判断只针对当次范围，不代表公司基本面转折</span></figcaption>
   <svg class="chart" width="100%" height="{{ t.height }}" role="img" aria-label="各次研究判断的变化，逐条记录见下方研究记录">
     {% for r in t.rows %}<line class="grid" x1="30%" x2="100%" y1="{{ r.y }}" y2="{{ r.y }}"/><text class="tick" x="0" y="{{ r.y }}" dy="4">{{ r.label }}</text>{% endfor %}
     {% for s in t.segments %}<line class="line s0" x1="{{ s.x1 }}%" y1="{{ s.y1 }}" x2="{{ s.x2 }}%" y2="{{ s.y2 }}"/>{% endfor %}

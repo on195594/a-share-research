@@ -336,3 +336,8 @@ details.block[open] { padding-bottom: 12px; }
 .meter { display: block; margin: 3px 0 2px; }
 .meter .track { fill: var(--chart-grid); }
 .meter .fill { fill: var(--chart-1); }
+.figure-data { margin-top: 0; }
+.figure-data > summary { min-height: 36px; font-size: 13px; }
+.figure-data ul { list-style: none; padding: 8px 12px; margin: 0 0 4px; background: var(--surface); border-radius: var(--radius); font-size: 13px; color: var(--ink); }
+.figure-data li { padding: 2px 0; overflow-wrap: anywhere; }
+.more-figures > .figures { margin-top: 4px; }

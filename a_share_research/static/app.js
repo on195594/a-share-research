@@ -40,10 +40,12 @@ function readout(figure, slot) {
   if (slot) slot.classList.add("active");
   out.textContent = slot ? slot.dataset.tip : out.dataset.rest;
 }
-document.addEventListener("pointerover", (event) => {
-  const slot = event.target.closest?.("[data-chart] [data-tip]");
-  if (slot) readout(slot.closest("[data-chart]"), slot);
-});
+for (const type of ["pointerover", "focusin"]) {
+  document.addEventListener(type, (event) => {
+    const slot = event.target.closest?.("[data-chart] [data-tip]");
+    if (slot) readout(slot.closest("[data-chart]"), slot);
+  });
+}
 document.addEventListener("pointerout", (event) => {
   const figure = event.target.closest?.("[data-chart]");
   // Touch keeps the last tapped reading; a mouse leaving the figure restores the summary.
@@ -52,7 +54,12 @@ document.addEventListener("pointerout", (event) => {
 
 // A link to a claim or data block inside a folded <details> opens every fold around it.
 function reveal() {
-  const id = decodeURIComponent(location.hash.slice(1));
+  let id;
+  try {
+    id = decodeURIComponent(location.hash.slice(1));
+  } catch {
+    return; // A malformed fragment names nothing; leave the rest of the page enhancements running.
+  }
   const target = id && document.getElementById(id);
   if (!target) return;
   for (let el = target; el; el = el.parentElement?.closest("details")) {

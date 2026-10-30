@@ -25,11 +25,11 @@
     {% endif %}
     {# A failed review with nothing retained has no evidence to count; the notice above says so. #}
     {% if ledger and (report.passed or ledger.risks or ledger.quotes or ledger.calculations) %}
-    <ul class="ledger" aria-label="本报告的证据构成">
+    <ul class="ledger" aria-label="正文条目引用的证据计数，不是可靠性评分">
       <li><a href="#risks"><b>{{ ledger.risks }}</b> 条风险与反证</a></li>
       {% if ledger.checkpoints %}<li><a href="#checkpoints"><b>{{ ledger.checkpoints }}</b> 个检查点</a></li>{% endif %}
-      <li><b>{{ ledger.quotes }}</b> 段原文引文</li>
-      <li><b>{{ ledger.calculations }}</b> 项程序计算</li>
+      <li><b>{{ ledger.quotes }}</b> 段引用原文</li>
+      <li><b>{{ ledger.calculations }}</b> 项引用的程序计算</li>
       <li><a href="?evidence=1#evidence"><b>{{ ledger.gaps }}</b> 项记录的缺口</a></li>
     </ul>
     {% endif %}
@@ -99,8 +99,14 @@
   <section id="financial" tabindex="-1">
     <h2>财务与走势</h2>
     {% if figures %}
-    <div class="figures">{% for f in figures %}{{ figure(f) }}{% endfor %}</div>
-    <p class="hint">图中数值均来自本报告保存的财务数据，桌面悬停、手机点按可读出每一期；完整数值见下方数据表。</p>
+    <div class="figures">{% for f in figures[:4] %}{{ figure(f) }}{% endfor %}</div>
+    {% if figures | length > 4 %}
+    <details class="block more-figures">
+      <summary>更多走势 · {{ figures[4:] | map(attribute='title') | join('、') }}</summary>
+      <div class="figures">{% for f in figures[4:] %}{{ figure(f) }}{% endfor %}</div>
+    </details>
+    {% endif %}
+    <p class="hint">图中数值均来自本报告保存的财务数据；桌面悬停、手机点按可读出每一期，每张图下的“本图数值”列出全部数值。</p>
     {% endif %}
     <h3>财务要点</h3>
     {{ items(content.financial or [], rows, "可列出的财务事实", documents, "financial", focus, limit=4) }}

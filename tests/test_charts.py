@@ -6,6 +6,7 @@ missing or unreconciled value draws no mark rather than a zero.
 import copy
 import json
 import re
+from datetime import date
 from pathlib import Path
 
 from support.templates import ENV
@@ -80,15 +81,25 @@ def test_reports_without_series_fall_back_to_the_saved_financial_table():
     assert not any(f["title"].startswith("单季") for f in figures)
 
 
-def test_line_positions_follow_calendar_gaps_between_annual_and_quarter_ends():
-    periods = ["2021-12-31", "2022-12-31", "2025-03-31", "2025-06-30"]
-    full = charts.lines(periods, periods, [{"label": "货币资金", "texts": ["1", "2", "3", "4"]}])
-    xs = [d["x"] for d in full["series"][0]["dots"]]
-    # One year between the first two ends, one quarter (91 days) between the last two.
-    assert abs((xs[1] - xs[0]) / (xs[3] - xs[2]) - 365 / 91) < 0.01
-    # A missing middle value breaks the line instead of bridging it.
-    gapped = charts.lines(periods, periods, [{"label": "货币资金", "texts": ["1", "2", None, "4"]}])
-    assert len(gapped["series"][0]["segments"]) == 1 and gapped["series"][0]["latest"] == "4"
+def test_line_positions_follow_calendar_and_legend_never_carries_an_older_value():
+    # 卫星化学: 四项债务合计 has a complete input only at its first period end, cash at every one.
+    figures = charts.financial_charts({"series": build("002648")}, [])
+    balance = figure(figures, "货币资金与四项债务合计")
+    periods = build("002648")["balance"]["periods"]
+    chart = balance["chart"]
+    cash, debt = chart["series"]
+    xs = [d["x"] for d in cash["dots"]]
+    days = [date.fromisoformat(p).toordinal() for p in periods]
+    for i in range(1, len(periods) - 1):
+        assert abs((xs[i] - xs[i - 1]) / (xs[i + 1] - xs[i]) - (days[i] - days[i - 1]) / (days[i + 1] - days[i])) < 0.01
+    assert debt["segments"] == [] and len(debt["dots"]) == 1
+    assert debt["latest"] is None and cash["latest"] == "142.15" and chart["latest_period"] == periods[-1]
+    assert periods[-1] in balance["headline"] and "有息" not in balance["title"] + debt["label"]
+    html = str(ENV.get_template("_charts.html").module.figure(balance))
+    assert "164.15" not in html.split('<ul class="legend">')[1].split("</ul>")[0]
+    assert "（该期缺失）" in html
+    # The data list is the HTML equivalent: every period with both series, as in the readout.
+    assert html.count("<li>" + periods[0]) == 1 and "四项债务合计 164.15" in html
 
 
 # Every price reference saved in production by 2026-10-30 (prices rows 1–8), including 比亚迪
@@ -150,17 +161,26 @@ def test_member_returns_reuse_group_return_and_portfolio_matches():
         assert row["text"] == f"{expected * 100:+.2f}%"
     assert performance["groups"]["rows"][0]["text"] == f"{results['values']['L5'] * 100:+.2f}%"
     assert performance["groups"]["rows"][0]["emphasis"]
+    assert (performance["entry"], performance["date"]) == (prices["entry"]["date"], prices["mark"]["date"])
 
 
-def test_verdict_track_skips_unreviewed_and_replayed_reports():
-    rows = [{"id": 4, "passed": 1, "verdict": "值得继续研究", "replay_of": None, "created_at": "2026-10-27T14:22:00", "period": "2026-09-30"},
-            {"id": 3, "passed": 1, "verdict": "需要谨慎", "replay_of": 2, "created_at": "2026-10-26T17:20:00", "period": "2026-09-30"},
-            {"id": 2, "passed": 0, "verdict": None, "replay_of": None, "created_at": "2026-10-26T17:15:00", "period": "2026-09-30"},
-            {"id": 1, "passed": 1, "verdict": "暂不值得", "replay_of": None, "created_at": "2026-10-26T17:09:00", "period": "2026-06-30"}]
+def test_verdict_track_uses_reviewed_original_reports_with_their_questions():
+    rows = []
+    for record in RECORDS:
+        report, run = record["report"], record["run"]
+        if report["code"] != "600519.SH":
+            continue
+        rows.append({**{k: report[k] for k in ("id", "passed", "verdict", "created_at", "period")},
+                     "replay_of": (run["identity"] or {}).get("replay_of"),
+                     "question": (run["request"] or {}).get("question") or report["body"].get("question")})
+    rows.sort(key=lambda r: r["id"], reverse=True)  # the company page lists newest first
     track = charts.verdict_track(rows)
-    assert [p["id"] for p in track["points"]] == [1, 4]
-    assert track["points"][0]["y"] > track["points"][1]["y"]  # 值得继续研究 sits on the top row
-    assert charts.verdict_track(rows[:3]) is None
+    expected = [r for r in reversed(rows) if r["passed"] and not r["replay_of"]]
+    assert expected and len(expected) < len(rows)  # the captured set includes replays
+    assert [p["id"] for p in track["points"]] == [r["id"] for r in expected]
+    for point, row in zip(track["points"], expected):
+        assert point["y"] == 16 + 30 * (2 - charts.VERDICTS.index(row["verdict"]))
+        assert ("问题：" + row["question"][:40]) in point["tip"] if row["question"] else "未记录具体问题" in point["tip"]
 
 
 def test_ledger_counts_distinct_quotes_and_calculations_actually_cited():
@@ -170,6 +190,10 @@ def test_ledger_counts_distinct_quotes_and_calculations_actually_cited():
     quotes = {(c.get("source") or "D0", c.get("page"), c["quote"]) for key in ("answer", "risks", "business", "financial", "checkpoints", "methods")
               for item in body.get(key) or [] for c in item.get("cites") or [] if not c.get("ref") and c.get("quote")}
     assert ledger["quotes"] == len(quotes) > 0
+    cited = {c["ref"] for key in ("answer", "risks", "business", "financial", "checkpoints", "methods")
+             for item in body.get(key) or [] for c in item.get("cites") or [] if c.get("ref")}
+    assert ledger["calculations"] == len({ref for ref in cited if rows[ref].get("calculation")}) == 3
+    assert len(cited) > 3  # plain table rows are cited too and are not counted as calculations
     assert ledger["risks"] == len(body["risks"]) and ledger["gaps"] == len(dict.fromkeys(body.get("gaps") or []))
     doubled = copy.deepcopy(body)
     doubled["risks"].append(copy.deepcopy(doubled["risks"][0]))

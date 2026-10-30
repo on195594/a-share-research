@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_batch.html" as b with context %}
-{% from "_charts.html" import bars %}
+{% from "_charts.html" import bars, data_list %}
 {% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
 {% set refresh = 15 if busy else none %}
 {# updated_at moves with every batch write; research statuses come from the runs table #}
@@ -54,10 +54,12 @@
     <figure class="figure" data-chart>
       <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite">选定组合与对照组、全收益基准同期比较</span></figcaption>
       {{ bars(performance.groups, "各组合累计模拟收益", emphasis=true) }}
+      {{ data_list(performance.groups) }}
     </figure>
     <figure class="figure" data-chart>
       <figcaption><strong>选定公司各自表现</strong><span class="readout" aria-live="polite">单家等额持有，同样扣往返费用</span></figcaption>
       {{ bars(performance.members, "选定公司各自累计收益") }}
+      {{ data_list(performance.members) }}
     </figure>
   </div>
   {% endif %}
@@ -191,6 +193,7 @@
   <figure class="figure" data-chart>
     <figcaption><strong>筛选漏斗</strong><span class="readout" aria-live="polite">每一步之后仍留在范围内的公司数</span></figcaption>
     {{ bars(chart, "全市场初筛各步剩余公司数") }}
+    {{ data_list(chart) }}
   </figure>
   {% else %}
   <ul class="funnel">
