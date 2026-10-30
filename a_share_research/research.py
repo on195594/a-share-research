@@ -448,7 +448,7 @@ def _without_codes(text: str, material: Material) -> str:
 
 REPORT_ID = re.compile(r"(?:报告|report)\s*#?\s*\d+", re.I)
 QUESTION_THRESHOLD = re.compile(
-    r"(?:阈值|门槛|低于|高于|不低于|不高于|超过|跌破|突破|[<>≤≥]=?)\s*"
+    r"(?:阈值|门槛|低于|高于|不低于|不高于|小于|大于|不小于|不大于|超过|跌破|突破|[<>≤≥]=?)\s*"
     r"(?P<value>[-−+]?\d[\d,]*(?:\.\d+)?)(?![\d.,])\s*"
     r"(?P<unit>(?:万亿|亿|万)?元|个百分点|[%％]|倍|天|(?!\s*[\w%％]))")
 

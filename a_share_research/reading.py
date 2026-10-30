@@ -322,3 +322,68 @@ def comparison(conn, report) -> dict:
     missing = sorted({r['label'] for r in old_table if r['id'] not in new_map or
                       set(r['values']) - set(new_map[r['id']]['values'])})
     return result | {'diff': diff, 'excluded': excluded, 'missing': missing}
+
+
+# Card check-up: saved financial-table rows grouped by what they tell a reader. No scores, no
+# derived numbers: each metric is the saved latest value beside the saved value a year earlier.
+CARD_DIMENSIONS = (
+    ('成长', (('T.revenue', '营业总收入'), ('T.revenue_yoy', '营收同比'), ('T.core_profit_yoy', '扣非同比'))),
+    ('盈利', (('T.core_profit', '扣非净利润'), ('T.gross_margin', '毛利率'), ('T.roe', '加权ROE'))),
+    ('现金', (('T.net_profit', '归母净利润'), ('T.op_cash', '经营现金流'), ('T.fcf', '经营现金流减购建长期资产'))),
+    ('健康', (('T.debt_ratio', '资产负债率'), ('T.cash', '货币资金'), ('T.interest_debt', '四项债务'))),
+)
+# Saved closing-day valuation, never refreshed.
+CARD_MARKET = (('M.pe_ttm', '市盈率'), ('M.pb', '市净率'), ('M.dv_ttm', '股息率'))
+CARD_KEYS = ('T.revenue_yoy', 'T.core_profit_yoy', 'M.pe_ttm', 'M.dv_ttm')
+CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
+
+
+def card(report, body: dict, last_passed=None) -> dict:
+    """One company's investment card, read from its latest saved report; nothing is fetched or recomputed.
+
+    A report that failed review shows no verdict, summary, risks, checkpoints or figures. The last
+    passed report, when the caller supplies one, is named with its own date rather than standing in.
+    """
+    report = dict(report)  # sqlite3.Row has no .get
+    passed = bool(report['passed'])
+    verdict = report['verdict'] if passed and report['verdict'] in charts.VERDICTS else None
+    summary = (body.get('summary') or '').strip() if passed else ''
+    # Summaries often open with the verdict the card already shows on its scale.
+    if verdict and summary[len(verdict):len(verdict) + 1] in ('：', ':', '，') and summary.startswith(verdict):
+        summary = summary[len(verdict) + 1:].lstrip()
+
+    def texts(key):
+        return [i['text'] for i in body.get(key) or []
+                if isinstance(i, dict) and isinstance(i.get('text'), str) and i['text'].strip()] if passed else []
+
+    table = {r['id']: r for r in body.get('table') or [] if isinstance(r, dict) and isinstance(r.get('id'), str)}
+    periods = {p for k, r in table.items() if k.startswith('T.') for p in r.get('values') or {}}
+    latest = max(periods) if periods else None
+    prior = (f"{int(latest[:4]) - 1}{latest[4:]}"
+             if latest and len(latest) >= 4 and latest[:4].isdigit() else None)
+    day = body.get('market_date')
+    metrics = {}
+    for key, label in [m for _, group in CARD_DIMENSIONS for m in group] + list(CARD_MARKET):
+        row = table.get(key)
+        at, before = (day, None) if key.startswith('M.') else (latest, prior)
+        if not (passed and row and at):
+            continue
+        values = row.get('values') or {}
+        metrics[key] = {'label': label, 'unit': row.get('unit') or '', 'value': values.get(at), 'signed': key.endswith('_yoy'),
+                        'unavailable': at in (row.get('unavailable') or {}),
+                        'prior': values.get(before) if before else None}
+    dims = [{'label': label, 'metrics': [metrics[k] for k, _ in group if k in metrics]}
+            for label, group in CARD_DIMENSIONS]
+    dims.append({'label': '估值', 'metrics': [metrics[k] for k, _ in CARD_MARKET if k in metrics]})
+    dims = [d for d in dims if any(m['value'] is not None or m['unavailable'] for m in d['metrics'])]
+    bucket = verdict or '复核未通过'  # the same buckets as the home verdict strip
+    created_at = report.get('created_at') or ''
+    coverage = report.get('coverage') or (latest or report.get('period'))
+    period_label = (f"{latest[2:4]}年{charts.CUMULATIVE.get(latest[5:], latest[5:])}"
+                    if latest and len(latest) >= 7 and latest[:4].isdigit() else (latest or None))
+    return {'id': report['id'], 'code': report['code'], 'name': report['name'], 'passed': passed,
+            'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
+            'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
+            'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
+            'period': period_label, 'created_at': created_at, 'coverage': coverage,
+            'market_date': day, 'last_passed': dict(last_passed) if last_passed else None}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
 {% from "_charts.html" import bars, data_list, verdict_pips %}
+{% from "_card.html" import summary_card %}
 {% macro review_items(rows) %}
 <ul class="list">
 {% for r in rows %}
@@ -13,29 +14,21 @@
 {% endmacro %}
 {% block main %}
 <h1>研究首页</h1>
-<section aria-labelledby="attention">
-  <h2 id="attention" tabindex="-1">待处理事项</h2>
-  <p class="hint">仅列原报告存在且就绪、尚未通过复核的已提交核查；完成不等于已读，也不表示投资判断正确。</p>
-  {% if pending %}
-    {{ review_items(pending[:3]) }}
-    {% if pending|length > 3 %}<details><summary>展开本页其余 {{ pending|length - 3 }} 项核查</summary>{{ review_items(pending[3:]) }}</details>{% endif %}
-    {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
-  {% else %}<p>没有符合上述范围的待核查记录。</p>{% endif %}
-  <details><summary>新证据与检查点的提醒范围</summary><p>尚未接入持续的新公告监测，检查点也未记录可自动判定的到期日期。当前不能确认这两类事项，不代表没有新证据或风险。关联记录缺失的核查无法纳入本清单，可从公司档案核对历史任务。</p></details>
-  <p><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
-</section>
-<details class="start" {% if not pending or error or choices or recent or q %}open{% endif %}>
-  <summary>开始新的研究</summary>
+<section class="start" aria-labelledby="start-title">
+  <h2 class="visually-hidden" id="start-title">开始新的研究</h2>
   <form method="post" action="/research" class="search">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request_id" value="{{ request_id }}">
-    <label for="q">代码或简称</label>
+    <label for="q">研究一家公司</label>
     <div class="row">
-      <input id="q" name="q" value="{{ q or '' }}" placeholder="600519 或 茅台" autocomplete="off" enterkeyhint="go" required>
+      <input id="q" name="q" value="{{ q or '' }}" placeholder="代码或简称，如 600519 或 茅台" autocomplete="off" enterkeyhint="go" required>
       <button class="btn" type="submit">开始研究</button>
     </div>
-    <label for="question">想弄清什么？<span class="muted">（选填）</span></label>
-    <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：最新财报改变了什么，利润与现金流是否一致？">{{ question or '' }}</textarea>
+    <details class="question"{% if question %} open{% endif %}>
+      <summary>补充想弄清的问题（选填）</summary>
+      <label for="question" class="visually-hidden">想弄清什么？</label>
+      <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：最新财报改变了什么，利润与现金流是否一致？">{{ question or '' }}</textarea>
+    </details>
     <p class="hint">按问题补读定期报告、核对财务与计算，通常需要几分钟。银行、保险、券商暂不支持。</p>
   </form>
 
@@ -54,7 +47,59 @@
     </div>
   </div>
   {% endif %}
-</details>
+</section>
+
+<section aria-labelledby="attention">
+  <h2 id="attention" tabindex="-1">待处理事项</h2>
+{% if active %}
+<div class="active-runs">
+  <h3>进行中</h3>
+  <ul class="list">
+  {% for r in active %}
+    <li><a href="/runs/{{ r.id }}">{{ r.name or r.code }}</a>
+      <span class="muted">{{ steps.get(r.step, "排队中") if r.status == "running" else "排队中" }}</span></li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+  {% if pending %}
+    {{ review_items(pending[:3]) }}
+    {% if pending|length > 3 %}<details><summary>展开本页其余 {{ pending|length - 3 }} 项核查</summary>{{ review_items(pending[3:]) }}</details>{% endif %}
+    {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
+  {% else %}<p>没有符合上述范围的待核查记录。</p>{% endif %}
+  <details><summary>提醒范围</summary><p>仅列原报告存在且就绪、尚未通过复核的已提交核查；完成不等于已读，也不表示投资判断正确。</p><p>尚未接入持续的新公告监测，检查点也未记录可自动判定的到期日期。当前不能确认这两类事项，不代表没有新证据或风险。关联记录缺失的核查无法纳入本清单，可从公司档案核对历史任务。</p></details>
+</section>
+
+<section aria-labelledby="companies">
+  <h2 id="companies" tabindex="-1">主动研究过的公司 · {{ companies|length }} 家</h2>
+  <p class="small"><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
+  {% if companies %}<p class="hint">按最新一份报告的判断分组，组内最近研究的在前；未通过复核的不展示判断。卡上数字均为研究时保存的值：营收与扣非为最新报告期累计同比，市盈率、股息率为 TTM、按研究当日收盘，不是实时行情。检查点尚不能自动判定是否到期。</p>{% endif %}
+  {% if companies %}
+  {% if verdict_summary is defined and verdict_summary %}
+  <nav class="filter-pills" aria-label="按最新研究判断查看">
+    <a class="pill active" href="#companies" data-verdict-filter="all" aria-current="true">全部 <span class="num">{{ verdict_summary.total }}</span></a>
+    {% for item in verdict_summary["items"] %}
+    <a class="pill" href="#group-{{ item.label }}" data-verdict-filter="{{ item.label }}">{{ item.label }} <span class="num">{{ item.count }}</span></a>
+    {% endfor %}
+  </nav>
+  <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
+  {% endif %}
+  <div class="companies wide">
+  {% for label in ["值得继续研究", "需要谨慎", "暂不值得", "复核未通过"] %}
+  {% set group = companies | selectattr("bucket", "equalto", label) | list %}
+  {% if group %}
+  <section class="card-group" data-verdict="{{ label }}" aria-labelledby="group-{{ label }}">
+    <h3 class="group-title" id="group-{{ label }}" tabindex="-1">{{ label }} <span class="num">{{ group | length }}</span></h3>
+    <div class="cards">{% for c in group %}{{ summary_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>
+  </section>
+  {% endif %}
+  {% endfor %}
+  </div>
+  {% elif not batch_only %}
+  <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
+  {% endif %}
+  {% if batch_only %}<p class="muted">另有 {{ batch_only }} 家只在初筛中深挖过，见<a href="/batches">各批次</a>。</p>{% endif %}
+</section>
 
 <section>
   <h2>候选初筛</h2>
@@ -72,57 +117,5 @@
   <p class="muted">每月从全市场筛出 20 家候选、深挖后选 5 家做模拟跟踪。</p>
   {% endif %}
   <p><a href="/batches">{{ "全部批次" if batch else "开始初筛" }}</a></p>
-</section>
-
-{% if active %}
-<section>
-  <h2>进行中</h2>
-  <ul class="list">
-  {% for r in active %}
-    <li><a href="/runs/{{ r.id }}">{{ r.name or r.code }}</a>
-      <span class="muted">{{ steps.get(r.step, "排队中") if r.status == "running" else "排队中" }}</span></li>
-  {% endfor %}
-  </ul>
-</section>
-{% endif %}
-
-<section aria-labelledby="companies">
-  <h2 id="companies">主动研究过的公司 · {{ companies|length }} 家</h2>
-  {% if companies %}<p class="hint">右侧为最新一份报告的研究判断；未通过复核的不展示判断。检查点尚不能自动判定是否到期。</p>{% endif %}
-  {% if companies %}
-  {% if verdict_summary is defined and verdict_summary %}
-  <div class="verdict-overview">
-    <svg width="100%" height="8" class="strip-bar single-hue" role="img" aria-label="主动研究过的公司最新判断分布">
-      {% for item in verdict_summary["items"] %}
-      <rect x="{{ item.x }}%" y="0" width="{{ item.w }}%" height="8" class="seg">
-        <title>{{ item.label }}：{{ item.count }} 家（{{ item.pct }}%）</title>
-      </rect>
-      {% endfor %}
-    </svg>
-    <div class="filter-pills" role="toolbar" aria-label="按最新研究判断筛选公司">
-      <button type="button" class="pill active" data-verdict-filter="all" aria-pressed="true">全部 <span class="num">{{ verdict_summary.total }}</span></button>
-      {% for item in verdict_summary["items"] %}
-      <button type="button" class="pill" data-verdict-filter="{{ item.label }}" aria-pressed="false">{{ item.label }} <span class="num">{{ item.count }}</span></button>
-      {% endfor %}
-    </div>
-    <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
-  </div>
-  {% endif %}
-  <ul class="list companies">
-  {% for c in companies %}
-    <li data-verdict="{{ verdict_summary.buckets[c.code] if verdict_summary is defined and verdict_summary else (c.verdict if c.passed else '复核未通过') }}">
-      <div class="company-row">
-        <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
-        {% if c.passed %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% else %}<span class="company-verdict flag">复核未通过</span>{% endif %}
-      </div>
-      <p class="small muted"><span class="date">覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 <time datetime="{{ c.created_at[:10] }}">{{ c.created_at[:10] }}</time></span>{% if c.from_batch %} · 来自初筛{% endif %}{% if c.checkpoint %} · <a href="/reports/{{ c.id }}#checkpoints">检查点</a>{% endif %}</p>
-      {% if c.coverage and c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
-    </li>
-  {% endfor %}
-  </ul>
-  {% elif not batch_only %}
-  <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
-  {% endif %}
-  {% if batch_only %}<p class="muted">另有 {{ batch_only }} 家只在初筛中深挖过，见<a href="/batches">各批次</a>。</p>{% endif %}
 </section>
 {% endblock %}

@@ -301,8 +301,21 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
                                            {r["code"]: r["name"] for r in loaded["q20"] or []})
     companies, batch_only = latest_reports()
     pending, pending_more = reading.pending_reviews(conn)
+    if companies:
+        bodies = {r["id"]: json.loads(r["body"]) for r in conn.execute(
+            f"SELECT id, body FROM reports WHERE id IN ({','.join('?' * len(companies))})", [c["id"] for c in companies])}
+        passed_before = {}
+        for r in conn.execute(
+                "SELECT r.id, r.code, r.verdict, r.created_at FROM reports r JOIN runs u ON u.id = r.run_id"
+                " WHERE r.passed = 1 AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC"):
+            passed_before.setdefault(r["code"], r)
+        cards = [reading.card(c, bodies[c["id"]], None if c["passed"] else passed_before.get(c["code"]))
+                 | {"from_batch": c["from_batch"]}
+                 for c in companies]
+    else:
+        cards = []
     listed = {r['id'] for r in pending}
-    return render(request, "home.html", session, status, companies=companies, batch_only=batch_only,
+    return render(request, "home.html", session, status, companies=cards, batch_only=batch_only,
                   verdict_summary=charts.verdict_summary(companies),
                   pending=pending, pending_more=pending_more,
                   due=sources.due_report(datetime.now(db.SHANGHAI).date()),
@@ -615,7 +628,13 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
                 latest = (r, v)
                 break
     latest = latest or (None, None)
-    return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
+    head = ordered[0]
+    before = next((r for r in ordered if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
+    card = reading.card(head, parsed[0][1], before) | {
+        "coverage": conn.execute(f"SELECT {db.COVERAGE} FROM reports r WHERE id = ?", (head["id"],)).fetchone()[0],
+        "created_at": head["created_at"]}
+    return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex, card=card,
+                  due=sources.due_report(datetime.now(db.SHANGHAI).date()),
                   vitals=latest[1], vitals_report=latest[0],
                   price=latest_price(code), comparison=reading.comparison(conn, selected),
                   selected=selected, track=charts.verdict_track(reports), progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
