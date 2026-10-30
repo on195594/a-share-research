@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Self
@@ -684,8 +685,117 @@ def _review_issues(text: str) -> list[dict]:
     return verdict["issues"]
 
 
-def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict]) -> dict | None:
-    prompt = f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请修正后输出完整的新报告。
+REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods")
+PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告，不用 Markdown 代码围栏。格式示例（内容占位，须换成实际证据）：
+{"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "T.inventory", "period": "2025-12-31"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "T.op_cash"}]}}], "summary": "需要谨慎：按实际证据修正摘要"}
+ops 必须是数组，无需修改条目时用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
+add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods；不能整段替换。value 使用下方报告结构中的完整条目对象。
+verdict、summary、gaps 可在补丁顶层选择性替换，类型沿用报告结构；未提到的字段与条目由程序逐字保留。
+可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
+程序将 rebuttals 放入合并稿的 repair_rebuttals，供独立复核员作为待核查数据阅读；它不是解决声明，不接受 status/resolutions/risk_resolutions，也不能关闭问题或豁免旧风险去向复核。
+"""
+
+
+class RepairFormatError(ValueError):
+    pass
+
+
+def merge_repair_patch(report: dict, patch: dict, problems: list[dict]) -> dict:
+    """Apply an atomic patch against original positions without mutating either input."""
+    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "rebuttals"}:
+        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、rebuttals；不要输出完整报告")
+    if not isinstance(patch.get("ops"), list):
+        raise RepairFormatError("补丁 ops 必须是数组；无需改动条目时用 []")
+    replacements, additions = {}, {}
+    for i, op in enumerate(patch["ops"]):
+        label = f"ops[{i}]："
+        if not isinstance(op, dict) or op.get("op") not in ("replace", "delete", "add"):
+            raise RepairFormatError(label + "op 必须是 replace/delete/add")
+        kind, where = op["op"], op.get("where")
+        keys = {"op", "where"} if kind == "delete" else {"op", "where", "value"}
+        if set(op) != keys:
+            raise RepairFormatError(label + f"{kind} 只接受字段 {sorted(keys)}")
+        match = re.fullmatch(r"([a-z]+)\[(0|[1-9]\d*)\]", where) if isinstance(where, str) else None
+        section = where if kind == "add" else match[1] if match else None
+        if not isinstance(section, str) or section not in REPAIR_SECTIONS:
+            raise RepairFormatError(label + f"章节或位置不存在：{where}；replace/delete 用章节[序号]，add 用章节名；章节仅 {', '.join(REPAIR_SECTIONS)}")
+        items = report.get(section, [])
+        if not isinstance(items, list):
+            raise RepairFormatError(label + f"原报告 {section} 不是条目数组，不能按序号操作")
+        if kind != "delete":
+            item = op["value"]
+            if (not isinstance(item, dict) or set(item) != {"text", "cites"}
+                    or not isinstance(item["text"], str) or not isinstance(item["cites"], list)
+                    or not all(isinstance(cite, dict) for cite in item["cites"])):
+                raise RepairFormatError(label + "value 必须是完整条目 {text: 字符串, cites: 出处对象数组}")
+        if kind == "add":
+            additions.setdefault(section, []).append(op["value"])
+            continue
+        index = int(match[2])
+        if index >= len(items):
+            raise RepairFormatError(label + f"{where} 越界；原报告 {section} 共 {len(items)} 条，序号从 0 开始；新增用 add")
+        target = (section, index)
+        if target in replacements:
+            raise RepairFormatError(label + f"{where} 重复操作（包括既删又改）；同一原条目只允许一次 replace 或 delete")
+        replacements[target] = op.get("value")
+    for key in ("verdict", "summary", "gaps"):
+        if key in patch and not (isinstance(patch[key], list) and all(isinstance(g, str) for g in patch[key])
+                                 if key == "gaps" else isinstance(patch[key], str)):
+            raise RepairFormatError(f"{key} 必须是" + ("字符串数组" if key == "gaps" else "字符串"))
+    if "rebuttals" in patch:
+        pending_ids = {p["id"] for p in problems if p.get("id")}
+        seen = set()
+        if not isinstance(patch["rebuttals"], list):
+            raise RepairFormatError("rebuttals 必须是数组")
+        for i, note in enumerate(patch["rebuttals"]):
+            if (not isinstance(note, dict) or set(note) != {"id", "reason", "evidence"}
+                    or not isinstance(note["id"], str) or note["id"] not in pending_ids or note["id"] in seen
+                    or not isinstance(note["reason"], str) or not note["reason"].strip()
+                    or not isinstance(note["evidence"], list) or not note["evidence"]
+                    or not all(isinstance(cite, dict) for cite in note["evidence"])):
+                raise RepairFormatError(f"rebuttals[{i}] 须含唯一的未解决问题 id、非空 reason、非空出处对象数组 evidence；不能自行指定解决状态")
+            seen.add(note["id"])
+    merged = deepcopy(report)
+    for section in {s for s, _ in replacements} | additions.keys():
+        merged[section] = [deepcopy(replacements.get((section, i), item))
+                           for i, item in enumerate(report.get(section, []))
+                           if (section, i) not in replacements or replacements[section, i] is not None]
+        merged[section].extend(deepcopy(additions.get(section, [])))
+    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps") if k in patch})
+    if "rebuttals" in patch:
+        merged["repair_rebuttals"] = deepcopy(patch["rebuttals"])
+    return merged
+
+
+def repair_result(report: dict | None, response: str, problems: list[dict]) -> dict | None:
+    if report is None:
+        return _parse(response)
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise RepairFormatError(f"补丁 JSON 字段 {key} 重复；每个对象字段只允许一次")
+            result[key] = value
+        return result
+
+    try:
+        patch = json.loads(response, object_pairs_hook=unique_object)
+    except json.JSONDecodeError as exc:
+        raise RepairFormatError("补丁输出不是合法 JSON；请只输出含 ops 数组的 JSON 对象") from exc
+    return merge_repair_patch(report, patch, problems)
+
+
+def repair_prompt(material: Material, report: dict | None, problems: list[dict]) -> str:
+    if report is None:
+        output = "请修正后输出完整的新报告。\n" + output_schema(material)
+        original = "（上一次输出不是合法 JSON）"
+    else:
+        output = "合并后的报告须符合以下结构（仅说明字段，本轮不要输出完整报告）：\n" + output_schema(material) + "\n\n" + PATCH_SCHEMA
+        indexed = {key: {f"{key}[{i}]": item for i, item in enumerate(value)}
+                   if key in REPAIR_SECTIONS and isinstance(value, list) else value for key, value in report.items()}
+        original = json.dumps(indexed, ensure_ascii=False, indent=1)
+    return f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请按本轮输出格式修正。
 可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
 补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
 以下是内部质量检查，不是用户对另一份报告提出的纠错；正文只完成原研究任务。
@@ -693,17 +803,20 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 
 {RULES}
 
-{output_schema(material)}
+{output}
 
 # 问题
 {json.dumps(problems, ensure_ascii=False, indent=1)}
 
 # 原报告
-{json.dumps(report, ensure_ascii=False, indent=1) if report else "（上一次输出不是合法 JSON）"}
+{original}
 
 # 资料
 {material.prompt_block()}"""
-    return _parse(runner.ask("repair", prompt))
+
+
+def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict]) -> dict | None:
+    return repair_result(report, runner.ask("repair", repair_prompt(material, report, problems)), problems)
 
 
 # ---------- run ----------
@@ -874,12 +987,14 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             material_sha256 = identity["material_sha256"]
         problems: list[dict] = []
         ledger = ReviewLedger()
+        repair_problems = []
         # Acquisition has ended. Repair/review keep their existing, separate run-level guard.
         for attempt in range(3):
             reviewed = False  # A changed draft never inherits an earlier independent endorsement.
             runner.stage = "check"
             problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON",
                                                                  "type": "generation_format"}]
+            problems += repair_problems
             if any(p.get("type") == "source_input" for p in problems):
                 problems += ledger.pending()
                 break  # Source identity conflicts cannot be repaired by rewriting prose.
@@ -895,7 +1010,12 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             if not problems or attempt == 2:
                 break
             ledger.protect_risks(report)
-            report = repair(runner, material, report, problems)
+            repair_problems = []
+            try:
+                report = repair(runner, material, report, problems)
+            except RepairFormatError as exc:
+                # Keep the original draft and feed the rejected patch back through the existing loop.
+                repair_problems = [{"where": "repair", "problem": str(exc), "type": "generation_format"}]
         period = max([material.doc.period] + [p for r in material.table if r["id"].startswith("T.") for p in r["values"]])
         body = {
             "code": material.code, "name": material.name, "period": period,
