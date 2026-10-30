@@ -571,14 +571,16 @@ a.plain:hover { text-decoration: underline; text-decoration-color: var(--control
 .card.full { padding-bottom: 8px; margin: 12px 0 20px; }
 .card-section { margin: 0; }
 .card-section h2.card-label { margin-top: 22px; }
-.checkup { width: 100%; border-collapse: collapse; }
+.checkup { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .checkup th, .checkup td { border: 0; border-top: 1px solid var(--line); padding: 10px 0; vertical-align: top; text-align: left; }
 .checkup tr:last-child th, .checkup tr:last-child td { border-bottom: 1px solid var(--line); }
 .checkup th { width: 44px; font-size: 13px; font-weight: 650; color: var(--muted); padding-top: 12px; }
 .checkup-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
 .checkup-cells > div { display: flex; flex-direction: column; min-width: 0; }
 .checkup-label { font-size: 12px; color: var(--muted); }
-.checkup-value { font-size: 16px; font-weight: 650; white-space: nowrap; }
+.checkup-value { font-size: 16px; font-weight: 650; overflow-wrap: normal; }
+/* A long figure keeps its digits together and lets the unit drop to the next line. */
+.checkup-value small { display: inline-block; white-space: nowrap; }
 .checkup-prior { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .card-actions { margin-top: 0; }
 .active-runs h3 { margin-top: 8px; }
