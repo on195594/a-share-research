@@ -452,8 +452,8 @@ def _candidates(cites: list[dict], material: Material) -> list[float]:
     for cite in cites:
         if "ref" in cite and cite["ref"] in rows:
             row = rows[cite["ref"]]
-            for field in ("values", "exact_values"):
-                cited = row.get(field, {})
+            for fld in ("values", "exact_values"):
+                cited = row.get(fld, {})
                 values += [float(v) for p, v in cited.items()
                            if not cite.get("period") or cite["period"] == p or row["id"].startswith("C.")]
             calc = row.get("calculation") or {}
@@ -520,8 +520,8 @@ def check(report: dict, material: Material) -> list[dict]:
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
     candidates = _candidates(all_cites, material) + [float(v) for r in material.table
-                                                   for field in ("values", "exact_values")
-                                                   for v in r.get(field, {}).values()]
+                                                   for fld in ("values", "exact_values")
+                                                   for v in r.get(fld, {}).values()]
     for value, decimals in _numbers(_without_codes(summary, material)):
         if not _supported(value, decimals, candidates):
             problems.append({"where": "summary", "problem": f"数字 {value:g} 在报告出处与表中找不到"})

@@ -18,14 +18,18 @@
 
 | 能力 | 测试 |
 |---|---|
-| 公告标题与报告日期 | `test_announcements.py`、`test_report_dates.py` |
-| 精确计算、研究预算与工具 | `test_research_tools.py` |
-| 申万行业同业发现 | `test_industry_peers.py` |
-| 财务序列与同行快照 | `test_financial_series.py`、`test_peer_snapshots.py` |
-| 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py` |
+| 公告标题与报告日期 | `test_announcements.py`、`test_report_dates.py`、`test_mdna_pages.py` |
+| 申万行业与同业快照 | `test_industry_peers.py`、`test_peer_snapshots.py` |
+| 财务序列与报表核验 | `test_financial_series.py`、`test_financial_table.py` |
+| 价格参考与技术纪律 | `test_price.py` |
+| 图表与可视化几何 | `test_charts.py` |
+| 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_home_staleness.py` |
+| 精确计算与研究工具 | `test_research_tools.py` |
+| 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py` |
+| 历史回测与离线实验 | `test_backtest.py`、`test_backtest_experiment.py` |
 | 公司研究进展 | `test_progress.py`：真实捕获的引用、重复公告反例、幂等、HTTP 与隔离导入；人工绑定的结构互变样本不代表真实模型验收 |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
-| API、任务交付与部署 | `test_service_http.py`、`test_service_delivery.py`、`test_deploy.py` |
+| API、会话与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py` |
 
 完整离线回归：`uv run pytest -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。
 

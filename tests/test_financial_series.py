@@ -1,5 +1,7 @@
 """Exact financial history checked against captured TuShare single-quarter statements."""
 
+import copy
+import functools
 import json
 import re
 from decimal import Decimal
@@ -21,9 +23,14 @@ def frames(captured):
     return {key: pd.DataFrame(rows) for key, rows in captured["financials"].items()}
 
 
-def build(code="000858"):
+@functools.lru_cache(maxsize=None)
+def _build_cached(code="000858"):
     captured = CAPTURES[code]
     return financial_series(frames(captured), captured["code"], captured["retrieved_at"])
+
+
+def build(code="000858"):
+    return copy.deepcopy(_build_cached(code))
 
 
 def cell(series, kind, key, period):

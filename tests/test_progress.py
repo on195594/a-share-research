@@ -3,15 +3,11 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import re
-import socket
 import subprocess
 import sys
-import time
 
 import pytest
-import requests
 
 from a_share_research import db, progress, service
 from support.continuation import BODY, load
@@ -243,55 +239,48 @@ def test_progress_template_preserves_six_questions_and_full_sources(captured):
     assert '同一期研究' in html
 
 
-def test_http_read_refresh_and_duplicate_queue_never_call_models(captured, tmp_path):
+def test_http_read_refresh_and_duplicate_queue_never_call_models(captured, tmp_path, monkeypatch):
+    import importlib
     from a_share_research import api_keys
+    import a_share_research
+    from starlette.testclient import TestClient
+
     token = api_keys.create(captured, 'temporary-progress-test')
-    listener = socket.socket(); listener.bind(('127.0.0.1', 0)); listener.listen()
-    url = f'http://127.0.0.1:{listener.getsockname()[1]}'
-    env = {**os.environ, 'DATA_DIR': str(tmp_path), 'PUBLIC_BASE_URL': url,
-           'DEV_LOGIN': '1', 'SESSION_SECRET': 'temporary-progress-http-only-secret'}
-    with (tmp_path / 'web.log').open('w') as logfile:
-        process = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'a_share_research.web:app', '--fd', str(listener.fileno())],
-                                   pass_fds=(listener.fileno(),), env=env, cwd=Path(__file__).resolve().parents[1],
-                                   stdout=logfile, stderr=logfile)
-        listener.close()
-        client = requests.Session(); client.trust_env = False
-        try:
-            for _ in range(100):
-                assert process.poll() is None
-                try:
-                    if client.get(url + '/login', timeout=1).status_code == 200:
-                        break
-                except requests.ConnectionError:
-                    pass
-                time.sleep(.05)
-            else:
-                pytest.fail('local web did not start')
-            route = url + '/api/reports/39/progress'
-            assert client.get(route).status_code == 401
-            client.headers['Authorization'] = f'Bearer {token}'
-            for _ in range(2):
-                result = client.get(route)
-                assert result.status_code == 200 and result.json()['status'] == 'missing'
-            first = client.post(route)
-            assert first.status_code == 202 and first.json()['status'] == 'queued'
-            assert client.post(route).json()['progress_id'] == first.json()['progress_id']
-            assert client.post(url + '/api/reports/37/progress').status_code == 409
-            # Ordinary developer login; no production session or provider credentials.
-            login = client.get(url + '/login').text
-            assert '本机开发登录' in login
-            assert client.post(url + '/auth/dev', headers={'Origin': url}).status_code == 200
-            page = client.get(url + '/stock/603606.SH?report=39')
-            assert page.status_code == 200 and '等待整理' in page.text
-            assert client.get(url + '/stock/603606.SH?report=8').status_code == 404
-            csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
-            assert client.post(url + '/reports/39/progress', data={'csrf': csrf}, headers={'Origin': url}).status_code == 200
-            target = client.get(url + '/reports/37?claim=business:2#claim-business-2')
-            assert 'id="claim-business-2"' in target.text
-            fragment = target.text.split('id="claim-business-2"')[1].split('</li>')[0]
-            assert '<details class="source" open>' in fragment
-            assert captured.execute('SELECT count(*) FROM research_progress').fetchone()[0] == 1
-            assert captured.execute('SELECT count(*) FROM progress_calls').fetchone()[0] == 0
-            assert captured.execute('SELECT count(*) FROM calls').fetchone()[0] == 0
-        finally:
-            process.terminate(); process.wait(timeout=10); client.close()
+    base_url = 'http://127.0.0.1:8627'
+    monkeypatch.setattr(db, 'DATA', tmp_path)
+    monkeypatch.setenv('DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('PUBLIC_BASE_URL', base_url)
+    monkeypatch.setenv('DEV_LOGIN', '1')
+    monkeypatch.setenv('SESSION_SECRET', 'temporary-progress-http-only-secret')
+    monkeypatch.setattr(a_share_research, 'web', None, raising=False)
+    monkeypatch.delitem(sys.modules, 'a_share_research.web', raising=False)
+    web_module = importlib.import_module('a_share_research.web')
+
+    client = TestClient(web_module.app, base_url=base_url)
+    route = '/api/reports/39/progress'
+    assert client.get(route).status_code == 401
+    client.headers['Authorization'] = f'Bearer {token}'
+    for _ in range(2):
+        result = client.get(route)
+        assert result.status_code == 200 and result.json()['status'] == 'missing'
+    first = client.post(route)
+    assert first.status_code == 202 and first.json()['status'] == 'queued'
+    assert client.post(route).json()['progress_id'] == first.json()['progress_id']
+    assert client.post('/api/reports/37/progress').status_code == 409
+    # Ordinary developer login; no production session or provider credentials.
+    login = client.get('/login').text
+    assert '本机开发登录' in login
+    assert client.post('/auth/dev', headers={'Origin': base_url}).status_code == 200
+    page = client.get('/stock/603606.SH?report=39')
+    assert page.status_code == 200 and '等待整理' in page.text
+    assert client.get('/stock/603606.SH?report=8').status_code == 404
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
+    assert client.post('/reports/39/progress', data={'csrf': csrf}, headers={'Origin': base_url}).status_code == 200
+    target = client.get('/reports/37?claim=business:2#claim-business-2')
+    assert 'id="claim-business-2"' in target.text
+    fragment = target.text.split('id="claim-business-2"')[1].split('</li>')[0]
+    assert '<details class="source" open>' in fragment
+    assert captured.execute('SELECT count(*) FROM research_progress').fetchone()[0] == 1
+    assert captured.execute('SELECT count(*) FROM progress_calls').fetchone()[0] == 0
+    assert captured.execute('SELECT count(*) FROM calls').fetchone()[0] == 0
+    web_module.conn.close()

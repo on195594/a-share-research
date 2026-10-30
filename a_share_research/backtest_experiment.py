@@ -184,6 +184,12 @@ def summarize(batches: list[dict]) -> dict:
     return out
 
 
+def check_paths_separate(source: Path, out: Path) -> None:
+    s, o = source.resolve(), out.resolve()
+    if s == o or s in o.parents or o in s.parents:
+        raise ValueError("output must be separate from the frozen source")
+
+
 def implementation_hashes() -> dict[str, str]:
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in
             (Path(__file__), Path(bt.__file__), Path(sc.__file__), Path(screening_factors.__file__))}
@@ -199,9 +205,10 @@ def main():
     parser.add_argument("--limit", type=int, help="first N source batches for a smoke check")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    source, output_root = args.source.resolve(), args.out.resolve()
-    if source == output_root or source in output_root.parents or output_root in source.parents:
-        parser.error("output must be separate from the frozen source")
+    try:
+        check_paths_separate(args.source, args.out)
+    except ValueError as e:
+        parser.error(str(e))
     bt.CACHE = args.source / "cache"
     calendar = json.loads(args.calendar.read_text())
     days = calendar["days"]
