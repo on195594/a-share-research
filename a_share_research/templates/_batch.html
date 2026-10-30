@@ -4,3 +4,5 @@
 {% macro month(batch) %}{{ batch.created_at[:7].replace("-", " 年 ") }} 月批次{% endmacro %}
 {% macro day(d) %}{{ d[:4] }}-{{ d[4:6] }}-{{ d[6:] }}{% endmacro %}
 {% macro pct(v) %}{% if v is none %}—{% else %}{{ "%+.2f" | format(v * 100) }}%{% endif %}{% endmacro %}
+{# Percentile 0–1 as a thin meter; the number beside it stays the readable value. #}
+{% macro meter(v) %}<svg class="meter" width="100%" height="4" aria-hidden="true"><rect class="track" x="0" y="0" width="100%" height="4" rx="2"/><rect class="fill" x="0" y="0" width="{{ (v * 100) | round(1) }}%" height="4" rx="2"/></svg>{% endmacro %}

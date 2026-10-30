@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form, price_block, research_context %}
+{% from "_charts.html" import verdict_track, verdict_pips %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
 <section class="narrow">
@@ -8,6 +9,7 @@
   {% if progress is defined %}{% include "_progress.html" %}{% endif %}
   <details><summary>查看程序数据对照</summary>{% include "_comparison.html" %}</details>
   <h2>研究记录</h2>
+  {% if track %}{{ verdict_track(track) }}{% endif %}
   <ul class="list">
   {% for r in reports %}
     <li>
@@ -15,7 +17,7 @@
       {% if r.parent_report_id or r.prior_report_id %}<a href="?report={{ r.id }}#research-progress">查看这次研究进展</a>{% endif %}
       {{ research_context(r.question, r.parent_report_id, r.feedback_text, r.prior_report_id) }}
       {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
-      <p>{% if r.passed %}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
+      <p>{% if r.passed %}{{ verdict_pips(r.verdict) }}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
         <span class="muted">· <span class="date">资料至 {{ r.period }}</span></span></p>
     </li>
   {% endfor %}

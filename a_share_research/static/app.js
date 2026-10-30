@@ -30,6 +30,39 @@ window.addEventListener("pageshow", (event) => {
   }, 0);
 });
 
+// Chart readouts: hovering or tapping a period writes its exact values into the figure caption.
+// Every value is also in the folded data table, so this only saves a trip there.
+function readout(figure, slot) {
+  const out = figure.querySelector(".readout");
+  if (!out) return;
+  out.dataset.rest ??= out.textContent;
+  figure.querySelectorAll(".slot.active").forEach((el) => el.classList.remove("active"));
+  if (slot) slot.classList.add("active");
+  out.textContent = slot ? slot.dataset.tip : out.dataset.rest;
+}
+document.addEventListener("pointerover", (event) => {
+  const slot = event.target.closest?.("[data-chart] [data-tip]");
+  if (slot) readout(slot.closest("[data-chart]"), slot);
+});
+document.addEventListener("pointerout", (event) => {
+  const figure = event.target.closest?.("[data-chart]");
+  // Touch keeps the last tapped reading; a mouse leaving the figure restores the summary.
+  if (figure && event.pointerType === "mouse" && !figure.contains(event.relatedTarget)) readout(figure, null);
+});
+
+// A link to a claim or data block inside a folded <details> opens every fold around it.
+function reveal() {
+  const id = decodeURIComponent(location.hash.slice(1));
+  const target = id && document.getElementById(id);
+  if (!target) return;
+  for (let el = target; el; el = el.parentElement?.closest("details")) {
+    if (el.tagName === "DETAILS") el.open = true;
+  }
+  target.scrollIntoView();
+}
+window.addEventListener("hashchange", reveal);
+if (location.hash) reveal();
+
 // Elapsed timers count locally between server updates.
 function tick() {
   for (const el of document.querySelectorAll("[data-elapsed]")) {

@@ -1,5 +1,3 @@
-<section aria-labelledby="comparison">
-  <h2 id="comparison" tabindex="-1">前后变化对照</h2>
   {% if comparison.old %}
   <p><a href="/reports/{{ comparison.old.id }}">原报告 {{ comparison.old.created_at[:16].replace('T', ' ') }}</a> → <a href="/reports/{{ comparison.new.id }}">本次报告 {{ comparison.new.created_at[:16].replace('T', ' ') }}</a></p>
   <p class="hint">只对照明确关联的报告；问题范围可能不同，结论措辞变化不等于公司整体判断反转，也不解释变化原因。</p>
@@ -39,4 +37,3 @@
   {% endif %}
   {% if comparison.excluded %}<p class="muted">口径不一致或字段不完整，未比较：{{ comparison.excluded | join('、') }}。</p>{% endif %}
   <p class="hint">旧风险是否缓解或关闭，只以报告中带出处的核查记录为准；此对照不推断风险已解决。</p>
-</section>

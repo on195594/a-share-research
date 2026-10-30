@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
+{% from "_charts.html" import bars, verdict_pips %}
 {% macro review_items(rows) %}
 <ul class="list">
 {% for r in rows %}
@@ -60,6 +61,12 @@
   {% import "_batch.html" as b with context %}
   {% if batch %}
   <p><a href="/batches/{{ batch.id }}">{{ b.month(batch) }}</a> <span class="muted">· {{ b.batch_status[batch.status] }}</span></p>
+  {% if performance %}
+  <figure class="figure" data-chart>
+    <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite">入场至今，扣往返费用；单个批次只是一次观察</span></figcaption>
+    {{ bars(performance.groups, "本批次各组合累计模拟收益", emphasis=true) }}
+  </figure>
+  {% endif %}
   {% else %}
   <p class="muted">每月从全市场筛出 20 家候选、深挖后选 5 家做模拟跟踪。</p>
   {% endif %}
@@ -78,15 +85,14 @@
 </section>
 {% endif %}
 
-<section>
-  <details>
-  <summary>主动研究过的公司 · {{ companies|length }} 家</summary>
+<section aria-labelledby="companies">
+  <h2 id="companies">主动研究过的公司 · {{ companies|length }} 家</h2>
   {% if companies %}
   <ul class="list companies">
   {% for c in companies %}
     <li>
       <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
-      <p>{% if c.passed %}研究判断：{{ c.verdict }}{% else %}<span class="flag">流程：复核未通过，不展示研究判断</span>{% endif %}
+      <p>{% if c.passed %}{{ verdict_pips(c.verdict) }}研究判断：{{ c.verdict }}{% else %}<span class="flag">流程：复核未通过，不展示研究判断</span>{% endif %}
         <span class="muted">· <span class="date">财务覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 {{ c.created_at[:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}</span></p>
       {% if c.checkpoint %}<p class="small"><a href="/reports/{{ c.id }}#checkpoints">查看检查点</a>（尚不能自动判定到期）</p>{% endif %}
       {% if c.coverage and c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
@@ -97,6 +103,5 @@
   <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
   {% endif %}
   {% if batch_only %}<p class="muted">另有 {{ batch_only }} 家只在初筛中深挖过，见<a href="/batches">各批次</a>。</p>{% endif %}
-  </details>
 </section>
 {% endblock %}

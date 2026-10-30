@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, screening, sources, service, reading, progress
+from a_share_research import charts, db, screening, sources, service, reading, progress
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -87,6 +87,7 @@ templates = Jinja2Templates(directory=HERE / "templates")
 # Busts browser caches of the stylesheet and script on each deploy that changes them.
 ASSET_VERSION = hashlib.sha256(b"".join((HERE / "static" / name).read_bytes() for name in ("app.css", "app.js"))).hexdigest()[:12]
 templates.env.globals["asset_version"] = ASSET_VERSION
+templates.env.globals["funnel_chart"] = charts.funnel
 conn = db.connect()
 
 
@@ -289,14 +290,20 @@ def active_runs() -> list:
 
 
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
-    batch = conn.execute("SELECT id, status, created_at FROM batches ORDER BY id DESC LIMIT 1").fetchone()
+    batch = conn.execute("SELECT * FROM batches ORDER BY id DESC LIMIT 1").fetchone()
+    performance = None
+    if batch and batch["status"] == "tracking":
+        loaded = screening.load(batch)
+        performance = charts.batch_returns(loaded, screening.returns(loaded),
+                                           {r["code"]: r["name"] for r in loaded["q20"] or []})
     companies, batch_only = latest_reports()
     pending, pending_more = reading.pending_reviews(conn)
     listed = {r['id'] for r in pending}
     return render(request, "home.html", session, status, companies=companies, batch_only=batch_only,
                   pending=pending, pending_more=pending_more,
                   due=sources.due_report(datetime.now(db.SHANGHAI).date()),
-                  active=[r for r in active_runs() if r['id'] not in listed], batch=batch, **context)
+                  active=[r for r in active_runs() if r['id'] not in listed], batch=batch,
+                  performance=performance, **context)
 
 
 @app.get("/")
@@ -416,15 +423,19 @@ def report_page(request: Request, report_id: int):
                           "checkpoints": "下期检查点"}[section]
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
-    return render(request, "report.html", session, report=row, body=body,
-                  evidence=reading.evidence_context(body, row['coverage']),
+    evidence = reading.evidence_context(body, row['coverage'])
+    rows = {r["id"]: r for r in body["table"]}
+    fin = [r for r in body["table"] if r["id"].startswith("T.")]
+    return render(request, "report.html", session, report=row, body=body, evidence=evidence,
+                  ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
+                  figures=charts.financial_charts(body, fin),
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
                   replay_of=body.get("replay_of") or json.loads(run["identity"] or "{}").get("replay_of"),
-                  rows={r["id"]: r for r in body["table"]}, request_id=uuid.uuid4().hex,
+                  rows=rows, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
-                  fin=[r for r in body["table"] if r["id"].startswith("T.")], price=latest_price(row["code"]),
+                  fin=fin, price=latest_price(row["code"]),
                   followups=conn.execute(
                       "SELECT u.id, u.status, COALESCE(NULLIF(json_extract(u.request, '$.question'), ''),"
                       " json_extract(f.body, '$.question')) AS question,"
@@ -587,7 +598,7 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
         draft = advancement['body']['items'][progress_item]['next_step']['text']
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
                   price=latest_price(code), comparison=reading.comparison(conn, selected),
-                  selected=selected, progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
+                  selected=selected, track=charts.verdict_track(reports), progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
 
 
 @app.post('/reports/{report_id}/progress')
@@ -624,6 +635,7 @@ def latest_price(code: str) -> dict | None:
     body = json.loads(row["body"])
     # Levels are only shown while valid; afterwards the reference is history, not an action line.
     body["expired"] = datetime.now(db.SHANGHAI).date().isoformat() > body["expires"]
+    body["ladder"] = charts.price_ladder(body["levels"])
     return body
 
 
@@ -681,9 +693,10 @@ def batch_page(request: Request, batch_id: int):
     if batch["status"] == "researching":
         batch["q20"] = screening.research_state(conn, batch["q20"])[1]
     draft = ((batch["selection"] or {}).get("draft") or {})
+    results, names = screening.returns(batch), {r["code"]: r["name"] for r in batch["q20"] or []}
     return render(request, "batch.html", session, batch=batch, draft=draft,
                   draft_codes=[p["code"] for p in draft.get("picks", [])],
-                  results=screening.returns(batch), names={r["code"]: r["name"] for r in batch["q20"] or []},
+                  results=results, names=names, performance=charts.batch_returns(batch, results, names),
                   frozen_by=screening.FROZEN_BY)
 
 

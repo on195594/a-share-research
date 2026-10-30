@@ -63,8 +63,8 @@ def test_financial_table_keeps_comparable_periods_after_preceding_periods_expand
     from a_share_research.research import financial_table
     from test_financial_series import CAPTURES, frames
     template = (TEMPLATES / 'report.html').read_text()
-    start = template.index('  <section id="data">')
-    end = template.index('  </section>', start) + len('  </section>')
+    start = template.index('    <details class="block" id="data"')
+    end = template.index('    </details>', start) + len('    </details>')
     table = ENV.from_string('{% from "_macros.html" import financial_period %}' + template[start:end])
     captured = CAPTURES['000858']
     for cutoff, expected in [

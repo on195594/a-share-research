@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_batch.html" as b with context %}
+{% from "_charts.html" import bars %}
 {% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
 {% set refresh = 15 if busy else none %}
 {# updated_at moves with every batch write; research statuses come from the runs table #}
@@ -48,6 +49,20 @@
 <section>
   <h2 id="returns" tabindex="-1">模拟收益</h2>
   <p class="muted small"><span class="date">{{ b.day(batch.entry.date) }}</span> 开盘入场 → <span class="date">{{ b.day(results.date) }}</span> 收盘；等权、复权、扣 {{ "%.1f" | format(batch.rule.cost * 1000) }}‰ 往返费用，买不进的席位按现金计。</p>
+  {% if performance %}
+  <div class="figures">
+    <figure class="figure" data-chart>
+      <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite">选定组合与对照组、全收益基准同期比较</span></figcaption>
+      {{ bars(performance.groups, "各组合累计模拟收益", emphasis=true) }}
+    </figure>
+    <figure class="figure" data-chart>
+      <figcaption><strong>选定公司各自表现</strong><span class="readout" aria-live="polite">单家等额持有，同样扣往返费用</span></figcaption>
+      {{ bars(performance.members, "选定公司各自累计收益") }}
+    </figure>
+  </div>
+  {% endif %}
+  <details class="block">
+  <summary>收益数据表{% if batch.marks.horizons %} · 含各评价期限{% endif %}</summary>
   <div class="table-wrap" tabindex="0" role="region" aria-label="模拟收益">
   <table>
     <thead><tr><th scope="col">组合</th><th scope="col" class="num">累计</th>
@@ -60,6 +75,7 @@
     </tbody>
   </table>
   </div>
+  </details>
   {% set unfilled = batch.entry.prices.items() | rejectattr("1.filled") | list %}
   {% if unfilled %}<p class="small">未成交：{% for code, p in unfilled %}{{ names.get(code, code) }}（{{ p.reason }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
   <p class="hint">单个批次只是一次观察；6 个月为主评价期限。</p>
@@ -129,14 +145,14 @@
       {% set profits = r.get("profit_dedt") or [] %}
       {% set has_history = years | length == 4 and profits | length == 4 %}
       <dl class="factors">
-        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.roe_pct) }}</dd>
+        <div><dt>扣非ROE</dt><dd class="num">{{ "%.1f" | format(r.roe) }}%</dd><dd class="pct">{{ b.meter(r.roe_pct) }}分位 {{ "%.2f" | format(r.roe_pct) }}</dd>
           {% if has_history %}<dd class="pct">{{ years[1] }}–{{ years[-1] }}</dd>{% endif %}</div>
-        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.cash_pct) }}</dd>
+        <div><dt>现金含量</dt><dd class="num">{{ "%.2f" | format(r.cash) }}</dd><dd class="pct">{{ b.meter(r.cash_pct) }}分位 {{ "%.2f" | format(r.cash_pct) }}</dd>
           {% if has_history %}<dd class="pct">{{ years[1] }}–{{ years[-1] }}</dd>{% endif %}</div>
-        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd><dd class="pct">分位 {{ "%.2f" | format(r.growth_pct) }}</dd>
+        <div><dt>扣非增速</dt><dd class="num">{{ "%+.1f" | format(r.growth * 100) }}%</dd><dd class="pct">{{ b.meter(r.growth_pct) }}分位 {{ "%.2f" | format(r.growth_pct) }}</dd>
           {% if has_history %}<dd class="pct">{{ years[0] }}→{{ years[-1] }}</dd>
           {% if profits[0] is number %}<dd class="pct">基数 {{ "%.2f" | format(profits[0] / 100000000) }} 亿</dd>{% endif %}{% endif %}</div>
-        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">分位 {{ "%.2f" | format(r.pe_pct) }}</dd>
+        <div><dt>市盈率</dt><dd class="num">{{ "%.1f" | format(r.pe) }}</dd><dd class="pct">{{ b.meter(r.pe_pct) }}分位 {{ "%.2f" | format(r.pe_pct) }}</dd>
           {% if batch.as_of %}<dd class="pct">初筛日 <span class="date">{{ b.day(batch.as_of) }}</span></dd>{% endif %}</div>
       </dl>
       {% if r.return_60d is defined %}<p class="small">近 60 个交易日 {{ b.pct(r.return_60d) }}{% if r.drawdown %} · <span class="flag">跌幅超过 30%，冻结前核对原因</span>{% endif %}</p>{% endif %}
@@ -170,9 +186,17 @@
   {% set labels = [("listed", "上市 A 股"), ("after_financial", "排除金融类"), ("after_st", "排除 ST"), ("after_suspended", "排除当日停牌"),
                    ("after_listed_years", "上市满 3 年"), ("after_market_cap", "总市值 ≥ 100 亿"), ("after_liquidity", "20 日均成交 ≥ 1 亿"),
                    ("after_industry_mapping", "有申万一级行业"), ("factor_ok", "财务与审计合格、参与排名")] %}
+  {% set chart = funnel_chart(batch, labels) %}
+  {% if chart %}
+  <figure class="figure" data-chart>
+    <figcaption><strong>筛选漏斗</strong><span class="readout" aria-live="polite">每一步之后仍留在范围内的公司数</span></figcaption>
+    {{ bars(chart, "全市场初筛各步剩余公司数") }}
+  </figure>
+  {% else %}
   <ul class="funnel">
   {% for key, label in labels %}<li><span>{{ label }}</span><span class="num">{{ f[key] }}</span></li>{% endfor %}
   </ul>
+  {% endif %}
   <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名（缺口不代表质量差）。</p>
   {% if batch.universe.markets %}<p class="muted small">粗筛后板块覆盖：{% for m, n in batch.universe.markets.items() %}{{ m }} {{ n }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
   {% set gaps = batch.universe.rows | selectattr("status", "equalto", "gap") | list %}

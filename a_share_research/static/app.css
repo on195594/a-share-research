@@ -12,6 +12,12 @@
   --caution-bg: #FFF1D6;
   --caution-ink: #5C3D00;
   --placeholder: #5E7479;
+  /* charts: validated pair (OKLCH chroma >= 0.10, CVD ΔE >= 12 on surface); text never wears them */
+  --chart-1: #008F93;
+  --chart-1-dim: #9FC7C9;
+  --chart-2: #7B86E8;
+  --chart-grid: #CBDADC;
+  --chart-band: #CFE3E4;
   --column: 760px;
   --radius: 6px;
   --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
@@ -246,3 +252,87 @@ th small { display: block; margin-left: 0; }
 .progress-step h3 { font-size: 16px; margin-block-end: 8px; }
 .progress-step blockquote { margin-inline: 0; padding-inline-start: 16px; border-inline-start: 2px solid var(--line); }
 [id^="claim-"] { scroll-margin-block-start: 20px; }
+
+/* ---------- verdict, ledger ---------- */
+/* Three tiers in one colour: the filled step is the verdict, its position the order. */
+.verdict { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; margin: 16px 0 0; font-size: 13px; }
+.verdict span { padding: 6px 4px; text-align: center; background: var(--band); color: var(--muted); line-height: 1.3; }
+.verdict span:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.verdict span:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.verdict span.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.verdict + .conclusion { margin-top: 12px; }
+.pips { display: inline-flex; gap: 2px; vertical-align: 1px; margin-right: 6px; }
+.pips i { width: 10px; height: 6px; border-radius: 1px; background: var(--line); }
+.pips i.on { background: var(--accent); }
+
+.ledger { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 10px 0; margin: 12px 0 0;
+  border-block: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.ledger li { display: inline-flex; align-items: center; min-height: 32px; }
+.ledger b { color: var(--ink); font-size: 16px; font-weight: 700; margin-right: 3px; }
+.ledger a { color: var(--muted); text-decoration: none; min-height: 32px; display: inline-flex; align-items: center; }
+.ledger a:hover { color: var(--accent-strong); text-decoration: underline; }
+
+.question { font-weight: 600; }
+h3 { font-size: 16px; line-height: 1.4; margin: 24px 0 8px; }
+details.more > summary { margin-top: 4px; }
+
+/* Folded data blocks inside a section: one hairline row each. */
+details.block { border-top: 1px solid var(--line); margin-top: 0; }
+details.block:last-child { border-bottom: 1px solid var(--line); }
+details.block > summary { width: 100%; font-size: 15px; }
+details.block[open] { padding-bottom: 12px; }
+#financial > .items + details.block, #financial > ul + details.block { margin-top: 20px; }
+
+/* ---------- charts ---------- */
+.figures { display: grid; grid-template-columns: 1fr; gap: 8px 28px; margin: 4px 0 4px; }
+@media (min-width: 640px) { .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.figure { margin: 0; padding: 12px 0 4px; border-top: 1px solid var(--line); min-width: 0; }
+.figure figcaption { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.figure figcaption strong { font-size: 15px; line-height: 1.4; }
+.readout { color: var(--muted); font-size: 13px; line-height: 1.45; min-height: 1.45em; font-variant-numeric: tabular-nums; }
+/* Long per-period readouts can wrap to two lines; reserve them so the plot does not jump. */
+.figure.tall .readout { min-height: 2.9em; }
+.figure-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 4px 0 0; }
+.chart { display: block; overflow: visible; font-family: var(--font); }
+.chart text { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .value, .chart .label { font-size: 12px; fill: var(--ink); }
+.chart .strong { font-weight: 700; }
+.chart .grid { stroke: var(--chart-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .grid.zero { stroke: var(--muted); }
+.chart .bar.s0 { fill: var(--chart-1); }
+.chart .bar.s1 { fill: var(--chart-2); }
+.chart .bar.dim { fill: var(--chart-1-dim); }
+.chart .bar.outline { fill: var(--surface); stroke-width: 1.5; }
+.chart .bar.outline.s0 { stroke: var(--chart-1); }
+.chart .bar.outline.s1 { stroke: var(--chart-2); }
+.chart .line { stroke-width: 2; stroke-linecap: round; }
+.chart .line.s0 { stroke: var(--chart-1); }
+.chart .line.s1 { stroke: var(--chart-2); }
+.chart .dot { stroke: var(--bg); stroke-width: 2; }
+.chart .dot.s0 { fill: var(--chart-1); }
+.chart .dot.s1 { fill: var(--chart-2); }
+.chart .hit { fill: transparent; }
+.chart .slot { cursor: default; }
+.chart .slot.active .hit, .chart .slot:hover .hit { fill: var(--ink); fill-opacity: 0.05; }
+.chart a.slot { cursor: pointer; }
+.chart .band { fill: var(--chart-band); }
+.chart .leader, .chart .tickmark { stroke: var(--muted); stroke-width: 1; }
+.chart .tickmark { stroke: var(--ink); stroke-width: 2; }
+.chart .ladder-label { font-size: 12px; fill: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 16px; list-style: none; padding: 0; margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.legend .num { color: var(--ink); font-weight: 600; }
+.key { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.key.s0 { background: var(--chart-1); }
+.key.s1 { background: var(--chart-2); }
+.key.line-key { height: 2px; width: 14px; border-radius: 1px; }
+.ladder, .track { border-top: 0; padding-top: 4px; }
+@media (forced-colors: active) {
+  .chart .bar, .chart .dot, .key { fill: CanvasText; background: CanvasText; }
+  .chart .line { stroke: CanvasText; }
+  .verdict span.on { outline: 2px solid CanvasText; }
+}
+@media print { .chart .hit { display: none; } }
+.meter { display: block; margin: 3px 0 2px; }
+.meter .track { fill: var(--chart-grid); }
+.meter .fill { fill: var(--chart-1); }

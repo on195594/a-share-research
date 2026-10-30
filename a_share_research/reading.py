@@ -229,6 +229,21 @@ def evidence_context(body: dict, coverage: str | None) -> dict:
             'gaps': list(dict.fromkeys(body.get('gaps') or []))}
 
 
+def evidence_ledger(content: dict, rows: dict, evidence: dict) -> dict:
+    """Counts of what a report shows: its items, distinct quoted passages and program calculations."""
+    quotes, calculations = set(), set()
+    for key in ('answer', 'risks', 'business', 'financial', 'checkpoints', 'methods'):
+        for item in content.get(key) or []:
+            for cite in item.get('cites') or [] if isinstance(item, dict) else []:
+                if cite.get('ref'):
+                    if (rows.get(cite['ref']) or {}).get('calculation'):
+                        calculations.add(cite['ref'])
+                elif cite.get('quote'):
+                    quotes.add((cite.get('source') or 'D0', cite.get('page'), cite['quote']))
+    return {'risks': len(content.get('risks') or []), 'checkpoints': len(content.get('checkpoints') or []),
+            'quotes': len(quotes), 'calculations': len(calculations), 'gaps': len(evidence.get('gaps') or [])}
+
+
 def search_reports(conn, query: str, page: int = 1, *, page_size: int = PAGE_SIZE) -> tuple[list, bool]:
     # Match literal text, including %, _ and quotes. Keep bodies out of the result;
     # SQLite derives coverage for only the selected page, as on the K1 home page.

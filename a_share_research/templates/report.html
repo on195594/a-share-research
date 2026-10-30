@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import items, research_form, price_block, snapshot_date_notice, financial_period, followup_link, feedback_retry_form %}
+{% from "_charts.html" import figure, verdict_scale %}
 {% block title %}{{ report.name }} · 研究报告{% endblock %}
 {% block main %}
 <article class="report">
@@ -9,8 +10,9 @@
     <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，不是公告日期）</p>
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
-      <p class="small">研究流程：已完成并通过复核。以下判断针对本次研究范围，不是买卖建议。</p>
+      {{ verdict_scale(body.verdict) }}
       <p class="conclusion" id="claim-summary-0" tabindex="-1">研究判断：{{ body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
+      <p class="small muted">研究流程：已完成并通过复核。以下判断针对本次研究范围，不是买卖建议。</p>
     {% else %}
       {% if body.facts_reviewed and body.facts and body.facts.values() | select | list %}
       <p class="notice caution" role="status">独立复核没有通过，不展示结论。仅保留本次原文与数字检查通过、且独立复核未指出问题的条目；不代表报告结论可靠。</p>
@@ -20,6 +22,23 @@
       <p class="notice caution" role="status">研究未通过完整核查，不展示结论。以下资料仅供核对，不应视为已获独立复核认可的事实。</p>
       {% endif %}
       {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
+    {% endif %}
+    {# A failed review with nothing retained has no evidence to count; the notice above says so. #}
+    {% if ledger and (report.passed or ledger.risks or ledger.quotes or ledger.calculations) %}
+    <ul class="ledger" aria-label="本报告的证据构成">
+      <li><a href="#risks"><b>{{ ledger.risks }}</b> 条风险与反证</a></li>
+      {% if ledger.checkpoints %}<li><a href="#checkpoints"><b>{{ ledger.checkpoints }}</b> 个检查点</a></li>{% endif %}
+      <li><b>{{ ledger.quotes }}</b> 段原文引文</li>
+      <li><b>{{ ledger.calculations }}</b> 项程序计算</li>
+      <li><a href="?evidence=1#evidence"><b>{{ ledger.gaps }}</b> 项记录的缺口</a></li>
+    </ul>
+    {% endif %}
+    {% if market %}
+    <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
+      {% for r in market %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}
+    </dl>
+    <p class="muted small">行情为 {{ body.market_date }} 收盘。</p>
+    {% if report.passed %}{{ snapshot_date_notice(body.market_date, price) }}{% endif %}
     {% endif %}
     <p class="small">研究问题：{% if body.question %}{{ body.question | truncate(90, true, '…') }} <a href="#answer">完整问题与回答</a>{% else %}未记录具体问题。{% endif %}</p>
     <details id="evidence" tabindex="-1" {% if request and (request.query_params.get('evidence') == '1' or request.query_params.get('claim', '').startswith('gaps:')) %}open{% endif %}>
@@ -32,27 +51,18 @@
       {% if evidence and evidence.gaps %}<ul>{% for gap in evidence.gaps %}<li id="claim-gaps-{{ loop.index0 }}" tabindex="-1">{{ gap }}</li>{% endfor %}</ul>{% else %}<p>未记录明确的证据缺口，不代表资料充分或没有风险。</p>{% endif %}
       <a href="?scope=1#research-scope">展开完整研究范围与原文</a>
     </details>
-    {% if market %}
-    <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
-      {% for r in market %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}
-    </dl>
-    <p class="muted small">行情为 {{ body.market_date }} 收盘。</p>
-    {% if report.passed %}{{ snapshot_date_notice(body.market_date, price) }}{% endif %}
-    {% endif %}
   </header>
   <hr class="perforation">
   {% set content = body if report.passed else body.facts %}
   {% set answer_title = '核查' if feedback else ('与上次研究对照' if body.prior and body.prior.question_added else '你的问题') %}
+  {% set focus = request.query_params.get("claim", "") if request else "" %}
   <nav aria-label="报告章节">
     <ul class="toc">
       <li><a href="#risks">风险与反证</a></li>
       {% if body.question or content.answer %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
       {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点</a></li>{% endif %}
       <li><a href="#business">业务</a></li>
-      <li><a href="#financial">财务</a></li>
-      <li><a href="#data">财务数据</a></li>
-      <li><a href="#comparison">前后变化对照</a></li>
-      <li><a href="#series">经营序列</a></li>
+      <li><a href="#financial">财务与走势</a></li>
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
     </ul>
@@ -61,37 +71,42 @@
   {% set documents = dict(body.sources or {}, D0=dict(document=body.document or {})) %}
   <section id="risks" class="risks" tabindex="-1">
     <h2>主要风险与反证</h2>
-    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", request.query_params.get("claim", "") if request else "") }}
+    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", focus) }}
     {% else %}<p class="muted">本报告未记录可列出的风险，不代表没有风险。</p>{% endif %}
   </section>
   {% if body.question or content.answer %}
   <section id="answer" tabindex="-1">
     <h2>{{ answer_title }}</h2>
     {% if feedback %}<p>核查原报告的{{ feedback_label }}</p>{% endif %}
-    <p>{{ feedback.text if feedback else (body.question or '未记录专门问题，以下为已保存的回答。') }}</p>
+    <p class="question">{{ feedback.text if feedback else (body.question or '未记录专门问题，以下为已保存的回答。') }}</p>
     {% if body.parent_report_id %}<p><a href="/reports/{{ body.parent_report_id }}">查看原报告</a></p>{% endif %}
     {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。</p>{% endif %}
-    {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", request.query_params.get("claim", "") if request else "") }}
+    {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", focus, limit=4) }}
   </section>
   {% endif %}
   {% if content.checkpoints %}
   <section id="checkpoints" tabindex="-1">
     <h2>下期检查点</h2>
     <p class="muted">下一期披露时应观察的事项；出处只证明基期事实，不是预测。</p>
-    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", request.query_params.get("claim", "") if request else "") }}
+    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus) }}
   </section>
   {% endif %}
   <section id="business">
     <h2>业务</h2>
-    {{ items(content.business or [], rows, "可列出的业务事实", documents, "business", request.query_params.get("claim", "") if request else "") }}
-  </section>
-  <section id="financial">
-    <h2>财务</h2>
-    {{ items(content.financial or [], rows, "可列出的财务事实", documents, "financial", request.query_params.get("claim", "") if request else "") }}
+    {{ items(content.business or [], rows, "可列出的业务事实", documents, "business", focus, limit=4) }}
   </section>
 
-  <section id="data">
-    <h2>财务数据</h2>
+  <section id="financial" tabindex="-1">
+    <h2>财务与走势</h2>
+    {% if figures %}
+    <div class="figures">{% for f in figures %}{{ figure(f) }}{% endfor %}</div>
+    <p class="hint">图中数值均来自本报告保存的财务数据，桌面悬停、手机点按可读出每一期；完整数值见下方数据表。</p>
+    {% endif %}
+    <h3>财务要点</h3>
+    {{ items(content.financial or [], rows, "可列出的财务事实", documents, "financial", focus, limit=4) }}
+
+    <details class="block" id="data" tabindex="-1">
+    <summary>财务数据表 · 最新期、上年同期与最近两个年度</summary>
     {% set selected = namespace(available=[], annual=[]) %}
     {% for r in fin %}{% set selected.available = selected.available + (r["values"].keys() | list) + (r.get('unavailable', {}).keys() | list) %}{% endfor %}
     {% set available = selected.available | unique | sort %}
@@ -110,14 +125,23 @@
     </table>
     </div>
     <p class="muted small">来源：TuShare 合并报表与财务指标，显示最新期、上年同期及最近两个年度，重复期间只列一次。收入、利润和现金流为年初至报告期末累计值，并非单季值；资产负债为期末时点值，比率按指标口径。更正版本待核对的数值暂不展示；完整期间和缺口见出处。</p>
+    </details>
+    <details class="block" id="series" tabindex="-1">
+      <summary>经营序列明细{% if body.series %} · 年度、单季、TTM 与期末{% else %} · 未记录{% endif %}</summary>
+      {% include "_series.html" %}
+    </details>
     {% include "_peers.html" %}
+    <details class="block" id="comparison" tabindex="-1">
+      <summary>前后变化对照{% if not comparison.old %} · 无明确关联的原报告{% endif %}</summary>
+      {% include "_comparison.html" %}
+    </details>
   </section>
 
   {% if report.passed and body.methods %}
   <section>
     <h2>本次可复用的方法</h2>
     <p class="muted">来自本次核查，使用时仍须核对适用条件；可以通过下方请求核查提出反证。</p>
-    {{ items(body.methods, rows, "研究方法", documents, "methods", request.query_params.get("claim", "") if request else "") }}
+    {{ items(body.methods, rows, "研究方法", documents, "methods", focus) }}
   </section>
   {% endif %}
   {% if body.methods_used %}
@@ -143,9 +167,6 @@
     {% for search in body.announcement_searches or [] %}<p>公告检索：{{ search.code }}，{{ search.since }} 至 {{ search.until }}，{{ '关键词「' ~ search.query ~ '」' if search.query else '全部标题' }}。{% if search.truncated %}结果未列全，仍需缩小范围。{% endif %}</p>{% endfor %}
     <p><a href="?evidence=1#evidence">展开证据日期与本报告记录的缺口</a></p>
   </details>
-
-  {% include "_comparison.html" %}
-  {% include "_series.html" %}
 
   <section id="more">
     <h2>继续研究</h2>

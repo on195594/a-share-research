@@ -1,0 +1,113 @@
+{# Server-rendered SVG charts. Geometry comes from charts.py: x in percent, y in pixels.
+   Every value drawn here is also in the folded table next to it; app.js only updates the readout. #}
+
+{% macro ticks(c) %}
+{% for t in c.ticks %}<line class="grid{{ ' zero' if t.text == '0' }}" x1="{{ c.gutter }}%" x2="100%" y1="{{ t.y }}" y2="{{ t.y }}"/><text class="tick" x="{{ c.gutter - 1.5 }}%" y="{{ t.y }}" dy="4" text-anchor="end">{{ t.text }}</text>{% endfor %}
+{% endmacro %}
+
+{% macro columns(c, title) %}
+<svg class="chart" width="100%" height="{{ c.height }}" role="img" aria-label="{{ title }}，数值见下方数据表">
+  {{ ticks(c) }}
+  {% for g in c.groups %}
+  <g class="slot{{ ' latest' if g.last }}" data-tip="{{ g.tip }}">
+    <rect class="hit" x="{{ g.slot_x }}%" y="0" width="{{ g.slot_w }}%" height="{{ c.height }}"/>
+    {% for b in g.bars if not b.missing %}<rect class="bar s{{ b.series }}{{ ' outline' if g.outline }}" x="{{ b.x }}%" y="{{ b.y }}" width="{{ b.w }}%" height="{{ b.h }}" rx="2"/>{% endfor %}
+    {% if g.last and c.series | length == 1 and not g.bars[0].missing %}<text class="value" x="{{ g.x }}%" y="{{ g.bars[0].label_y }}" text-anchor="middle">{{ g.bars[0].text }}</text>{% endif %}
+    {% for b in g.bars if b.missing %}<text class="gap" x="{{ b.x + b.w / 2 }}%" y="{{ c.zero - 4 }}" text-anchor="middle">—</text>{% endfor %}
+    <text class="axis" x="{{ g.x }}%" y="{{ c.label_y }}" text-anchor="middle">{{ g.label }}</text>
+    <title>{{ g.tip }}</title>
+  </g>
+  {% endfor %}
+</svg>
+{% if c.series | length > 1 %}<ul class="legend">{% for s in c.series %}<li><span class="key s{{ loop.index0 }}" aria-hidden="true"></span>{{ s }}</li>{% endfor %}</ul>{% endif %}
+{% endmacro %}
+
+{% macro lines(c, title) %}
+<svg class="chart" width="100%" height="{{ c.height }}" role="img" aria-label="{{ title }}，数值见下方数据表">
+  {{ ticks(c) }}
+  {% for s in c.series %}
+    {% for seg in s.segments %}<line class="line s{{ s.series }}" x1="{{ seg.x1 }}%" y1="{{ seg.y1 }}" x2="{{ seg.x2 }}%" y2="{{ seg.y2 }}"/>{% endfor %}
+    {% for d in s.dots %}<circle class="dot s{{ s.series }}{{ ' end' if loop.last }}" cx="{{ d.x }}%" cy="{{ d.y }}" r="{{ 4 if loop.last else 2.5 }}"/>{% endfor %}
+  {% endfor %}
+  {% for a in c.axis %}<text class="axis" x="{{ a.x }}%" y="{{ c.label_y }}" text-anchor="{{ a.anchor }}">{{ a.text }}</text>{% endfor %}
+  {% for t in c.tips %}<g class="slot" data-tip="{{ t.tip }}"><rect class="hit" x="{{ t.x }}%" y="0" width="{{ t.w }}%" height="{{ c.height }}"/><title>{{ t.tip }}</title></g>{% endfor %}
+</svg>
+<ul class="legend">{% for s in c.series %}<li><span class="key line-key s{{ s.series }}" aria-hidden="true"></span>{{ s.label }} <span class="num">{{ s.latest or '—' }}</span></li>{% endfor %}</ul>
+{% endmacro %}
+
+{# Horizontal bars from a shared zero; `emphasis` dims every row not marked as the subject. #}
+{% macro bars(c, title, emphasis=false) %}
+<svg class="chart bars" width="100%" height="{{ c.height }}" role="img" aria-label="{{ title }}">
+  <line class="grid zero" x1="{{ c.zero }}%" x2="{{ c.zero }}%" y1="0" y2="{{ c.height }}"/>
+  {% for r in c.rows %}
+  <g class="slot" data-tip="{{ r.tip }}">
+    <rect class="hit" x="0" y="{{ r.y }}" width="100%" height="32"/>
+    <text class="label{{ ' strong' if r.emphasis }}" x="0" y="{{ r.y + 20 }}">{{ r.label }}</text>
+    {% if not r.missing %}<rect class="bar s0{{ ' dim' if emphasis and not r.emphasis }}" x="{{ r.x }}%" y="{{ r.y + 9 }}" width="{{ r.w }}%" height="14" rx="2"/>{% endif %}
+    <text class="value{{ ' strong' if r.emphasis }}" x="100%" y="{{ r.y + 20 }}" text-anchor="end">{{ r.text }}</text>
+    <title>{{ r.tip }}</title>
+  </g>
+  {% endfor %}
+</svg>
+{% endmacro %}
+
+{% macro figure(f) %}
+<figure class="figure{{ ' tall' if f.kind != 'bars' }}" data-chart>
+  <figcaption><strong>{{ f.title }}</strong><span class="readout" aria-live="polite">{{ f.headline }}</span></figcaption>
+  {% if f.kind == 'columns' %}{{ columns(f.chart, f.title) }}
+  {% elif f.kind == 'lines' %}{{ lines(f.chart, f.title) }}
+  {% else %}{{ bars(f.chart, f.title) }}{% endif %}
+  <p class="figure-note">{{ f.note }}来源：{{ f.source }}。</p>
+</figure>
+{% endmacro %}
+
+{# Three-step research verdict. One colour for every step: position, not hue, carries the tier. #}
+{% macro verdict_scale(verdict) %}
+{% set tiers = ["暂不值得", "需要谨慎", "值得继续研究"] %}
+{% if verdict in tiers %}
+<p class="verdict" role="img" aria-label="研究判断：{{ verdict }}（三档依次为暂不值得、需要谨慎、值得继续研究）">
+  {% for t in tiers %}<span class="{{ 'on' if t == verdict }}">{{ t }}</span>{% endfor %}
+</p>
+{% endif %}
+{% endmacro %}
+
+{% macro verdict_pips(verdict) %}
+{% set tiers = ["暂不值得", "需要谨慎", "值得继续研究"] %}
+{% if verdict in tiers %}<span class="pips" aria-hidden="true">{% for t in tiers %}<i class="{{ 'on' if t == verdict }}"></i>{% endfor %}</span>{% endif %}
+{% endmacro %}
+
+{% macro price_ladder(l) %}
+<figure class="figure ladder" data-chart>
+  <figcaption><strong>价位刻度</strong><span class="readout" aria-live="polite">阴影为失效线到观察线的区间</span></figcaption>
+  <svg class="chart" width="100%" height="{{ l.height }}" role="img" aria-label="失效线、均线、收盘与观察线的相对位置，数值见下方">
+    <rect class="band" x="{{ l.band.x }}%" y="{{ l.axis - 5 }}" width="{{ l.band.w }}%" height="10" rx="2"/>
+    <line class="grid" x1="2%" x2="98%" y1="{{ l.axis }}" y2="{{ l.axis }}"/>
+    {% for i in l.marks %}
+    <g class="slot mark-{{ i.key }}" data-tip="{{ i.label }} 元">
+      <line class="leader" x1="{{ i.x }}%" x2="{{ i.x }}%" y1="{{ l.axis }}" y2="{{ i.y + 4 if i.side == 'above' else i.y - 13 }}"/>
+      {% if i.key == 'close' %}<circle class="dot s0 end" cx="{{ i.x }}%" cy="{{ l.axis }}" r="5"/>{% else %}<line class="tickmark" x1="{{ i.x }}%" x2="{{ i.x }}%" y1="{{ l.axis - 7 }}" y2="{{ l.axis + 7 }}"/>{% endif %}
+      <text class="ladder-label{{ ' strong' if i.key == 'close' }}" x="{{ i.x }}%" y="{{ i.y }}" text-anchor="{{ i.anchor }}">{{ i.label }}</text>
+      <title>{{ i.label }} 元</title>
+    </g>
+    {% endfor %}
+  </svg>
+</figure>
+{% endmacro %}
+
+{% macro verdict_track(t) %}
+<figure class="figure track" data-chart>
+  <figcaption><strong>判断轨迹</strong><span class="readout" aria-live="polite">已通过复核的 {{ t.points | length }} 份报告，按生成时间排列</span></figcaption>
+  <svg class="chart" width="100%" height="{{ t.height }}" role="img" aria-label="各次研究判断的变化，逐条记录见下方研究记录">
+    {% for r in t.rows %}<line class="grid" x1="30%" x2="100%" y1="{{ r.y }}" y2="{{ r.y }}"/><text class="tick" x="0" y="{{ r.y }}" dy="4">{{ r.label }}</text>{% endfor %}
+    {% for s in t.segments %}<line class="line s0" x1="{{ s.x1 }}%" y1="{{ s.y1 }}" x2="{{ s.x2 }}%" y2="{{ s.y2 }}"/>{% endfor %}
+    {% for p in t.points %}
+    <a href="/reports/{{ p.id }}" class="slot" data-tip="{{ p.tip }}">
+      <circle class="dot s0{{ ' end' if loop.last }}" cx="{{ p.x }}%" cy="{{ p.y }}" r="{{ 5 if loop.last else 4 }}"/>
+      <circle class="hit" cx="{{ p.x }}%" cy="{{ p.y }}" r="14"/>
+      {% if p.show_date %}<text class="axis" x="{{ p.x }}%" y="{{ t.height - 8 }}" text-anchor="middle">{{ p.date }}</text>{% endif %}
+      <title>{{ p.tip }}</title>
+    </a>
+    {% endfor %}
+  </svg>
+</figure>
+{% endmacro %}
