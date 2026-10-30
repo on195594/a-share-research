@@ -428,7 +428,7 @@ def report_page(request: Request, report_id: int):
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence,
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
-                  figures=charts.financial_charts(body, fin),
+                  figures=charts.financial_charts(body, fin), vitals=charts.vitals(body),
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
@@ -596,7 +596,10 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
     draft = None
     if advancement['status'] == 'passed' and progress_item is not None and 0 <= progress_item < len(advancement['body']['items']):
         draft = advancement['body']['items'][progress_item]['next_step']['text']
+    # The newest report with an operating series lends its vitals to the company page.
+    latest = next(((r, v) for r in reports if (v := charts.vitals(json.loads(r["body"])))), (None, None))
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
+                  vitals=latest[1], vitals_report=latest[0],
                   price=latest_price(code), comparison=reading.comparison(conn, selected),
                   selected=selected, track=charts.verdict_track(reports), progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
 

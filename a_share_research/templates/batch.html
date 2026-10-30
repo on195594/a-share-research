@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_batch.html" as b with context %}
-{% from "_charts.html" import bars, data_list %}
+{% from "_charts.html" import bars, data_list, verdict_pips %}
 {% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
 {% set refresh = 15 if busy else none %}
 {# updated_at moves with every batch write; research statuses come from the runs table #}
@@ -126,9 +126,33 @@
 <section>
   <h2 id="candidates" tabindex="-1">候选 {{ batch.q20 | length }} 家</h2>
   <p class="muted small">行业内分位加权：扣非 ROE、现金含量、扣非利润增速各 20%，低市盈率 40%。分位只是排序，不代表预期收益。</p>
-  <p class="muted small">因子口径：扣非 ROE 为近 3 个年报扣非 ROE 的平均值；现金含量为这 3 年经营现金流合计 ÷ 合并净利润合计；扣非增速为扣非净利润的 3 年复合增速；市盈率为初筛日的 PE（TTM，归母口径）。</p>
+  <p class="muted small" id="factor-basis">因子口径：扣非 ROE 为近 3 个年报扣非 ROE 的平均值；现金含量为这 3 年经营现金流合计 ÷ 合并净利润合计；扣非增速为扣非净利润的 3 年复合增速；市盈率为初筛日的 PE（TTM，归母口径）。</p>
+  {% set heat = namespace(cells=[("roe", "roe_pct", "扣非ROE"), ("cash", "cash_pct", "现金含量"), ("growth", "growth_pct", "扣非增速"), ("pe", "pe_pct", "市盈率")]) %}
+  <div class="table-wrap matrix-wrap" tabindex="0" role="region" aria-label="候选因子分位矩阵">
+  <table class="matrix">
+    <caption>格内为因子原值，底色为行业内分位（市盈率越低分位越高）：
+      <span class="heat-key"><i class="h0"></i>&lt;0.6<i class="h1"></i>0.6<i class="h2"></i>0.75<i class="h3"></i>0.85<i class="h4"></i>≥0.95</span></caption>
+    <thead><tr><th scope="col">公司 · 总分</th>{% for _, _, label in heat.cells %}<th scope="col" class="num">{{ label }}</th>{% endfor %}<th scope="col"><span class="visually-hidden">研究判断</span></th></tr></thead>
+    <tbody>
+    {% for r in batch.q20 %}
+      <tr class="{{ 'picked' if r.code in l5 }}">
+        <th scope="row"><span class="rank">{{ loop.index }}</span>{% if r.report_id %}<a href="/reports/{{ r.report_id }}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}
+          <small>{{ "%.2f" | format(r.score) }}{% if r.code in l5 %} · <b>选定</b>{% endif %}{% if r.code in q5 %} · 前五{% endif %}</small></th>
+        {% for key, pct, label in heat.cells %}
+        {% set v = r[key] %}
+        {% set q = r[pct] %}<td class="num h{{ 4 if q >= 0.95 else 3 if q >= 0.85 else 2 if q >= 0.75 else 1 if q >= 0.6 else 0 }}" title="{{ label }}分位 {{ '%.2f' | format(r[pct]) }}">{% if key == "roe" %}{{ "%.1f" | format(v) }}%{% elif key == "cash" %}{{ "%.2f" | format(v) }}{% elif key == "growth" %}{{ "%+.0f" | format(v * 100) }}%{% else %}{{ "%.1f" | format(v) }}{% endif %}</td>
+        {% endfor %}
+        <td class="verdict-cell">{% if r.verdict %}{{ verdict_pips(r.verdict) }}<span class="visually-hidden">{{ r.verdict }}</span>{% elif r.research_status in ("queued", "running") %}<span class="muted">…</span>{% else %}<span class="flag" title="未通过复核或研究失败">×</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="legend-row small muted"><span class="pips" aria-hidden="true"><i></i><i></i><i class="on"></i></span>三格依次为暂不值得、需要谨慎、值得继续研究；× 为未通过复核或研究失败。</p>
   {% if batch.status == "proposed" %}<form method="post" action="/batches/{{ batch.id }}/freeze" class="freeze">
   <input type="hidden" name="csrf" value="{{ csrf }}">{% endif %}
+  <details class="block" id="candidate-details" {% if batch.status == "proposed" %}open{% endif %}>
+  <summary>逐家因子、口径与研究结论</summary>
   <ol class="candidates">
   {% for r in batch.q20 %}
     <li>
@@ -169,6 +193,7 @@
     </li>
   {% endfor %}
   </ol>
+  </details>
   {% if batch.status == "proposed" %}
     <div class="search">
       <label for="note">说明<span class="muted">（选填，例如排除已持有的股票）</span></label>

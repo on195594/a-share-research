@@ -88,14 +88,16 @@
 
 <section aria-labelledby="companies">
   <h2 id="companies">主动研究过的公司 · {{ companies|length }} 家</h2>
+  {% if companies %}<p class="hint">右侧为最新一份报告的研究判断；未通过复核的不展示判断。检查点尚不能自动判定是否到期。</p>{% endif %}
   {% if companies %}
   <ul class="list companies">
   {% for c in companies %}
     <li>
-      <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
-      <p>{% if c.passed %}{{ verdict_pips(c.verdict) }}研究判断：{{ c.verdict }}{% else %}<span class="flag">流程：复核未通过，不展示研究判断</span>{% endif %}
-        <span class="muted">· <span class="date">财务覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 {{ c.created_at[:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}</span></p>
-      {% if c.checkpoint %}<p class="small"><a href="/reports/{{ c.id }}#checkpoints">查看检查点</a>（尚不能自动判定到期）</p>{% endif %}
+      <div class="company-row">
+        <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
+        {% if c.passed %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% else %}<span class="company-verdict flag">复核未通过</span>{% endif %}
+      </div>
+      <p class="small muted"><span class="date">覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 {{ c.created_at[5:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}{% if c.checkpoint %} · <a href="/reports/{{ c.id }}#checkpoints">检查点</a>{% endif %}</p>
       {% if c.coverage and c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
     </li>
   {% endfor %}

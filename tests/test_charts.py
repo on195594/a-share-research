@@ -49,6 +49,10 @@ def test_series_figures_reuse_saved_display_values_and_mark_ttm_apart():
     assert all(b["y"] + b["h"] <= zero + 0.02 for b in drawn(revenue["chart"]))
 
 
+def vital(panel, label):
+    return next(r for r in panel["flows"] + panel["stocks"] if r["label"] == label)
+
+
 def test_missing_and_unreconciled_cells_draw_nothing_and_say_why():
     series = build("000858")
     quarterly = series["quarterly"]
@@ -57,13 +61,66 @@ def test_missing_and_unreconciled_cells_draw_nothing_and_say_why():
     reconciled = copy.deepcopy(series)
     cell = next(r for r in reconciled["quarterly"]["rows"] if r["id"] == "net_profit")["values"][target]
     cell.update(display=None, value=None, unreconciled={target: "2026-01-01"})
-    before = figure(charts.financial_charts({"series": series}, []), "单季归母净利润")["chart"]
-    after = figure(charts.financial_charts({"series": reconciled}, []), "单季归母净利润")["chart"]
-    index = quarterly["periods"].index(target)
-    assert not before["groups"][index]["bars"][0]["missing"]
-    assert before["groups"][index]["bars"][0]["text"] == row["values"][target]["display"]
-    assert after["groups"][index]["bars"][0]["missing"] and after["groups"][index]["bars"][0]["h"] == 0
-    assert after["groups"][index]["tip"].endswith("更正版本待核对")
+    before = vital(charts.vitals({"series": series}), "归母净利润")
+    after = vital(charts.vitals({"series": reconciled}), "归母净利润")
+    index = quarterly["periods"][-8:].index(target)
+    assert not before["spark"]["bars"][index]["missing"] and "h" in before["spark"]["bars"][index]
+    assert before["spark"]["bars"][index]["tip"].startswith(f"{charts._period_label(target, 'quarterly')} 归母净利润："
+                                                            f"{row['values'][target]['display']} 亿元")
+    assert after["spark"]["bars"][index]["missing"] and "h" not in after["spark"]["bars"][index]
+    assert after["spark"]["bars"][index]["tip"].endswith("更正版本待核对")
+    html = str(ENV.get_template("_charts.html").module.vitals(charts.vitals({"series": reconciled})))
+    assert html.count(after["spark"]["bars"][index]["tip"]) == 3  # data-tip, <title> and the data list
+
+
+def test_vitals_reuse_saved_latest_values_and_sit_on_zero():
+    series = build("000858")
+    panel = charts.vitals({"series": series})
+    periods = series["quarterly"]["periods"][-8:]
+    for key, label in charts.FLOWS:
+        saved = next(r for r in series["quarterly"]["rows"] if r["id"] == key)["values"]
+        r = vital(panel, label)
+        assert r["latest"] == saved[periods[-1]].get("display")
+        assert r["yoy"] == (saved[periods[-1]].get("yoy") or {}).get("value")
+        assert len(r["data"]) == len(periods)
+        spark = r["spark"]
+        for bar, p in zip(spark["bars"], periods):
+            value = charts.number(saved[p].get("display"))
+            assert bar["missing"] is (value is None)
+            if value is not None:  # positive bars end on the zero line, negative ones start there
+                assert abs((bar["y"] if value < 0 else bar["y"] + bar["h"]) - spark["zero"]) < 0.02
+        assert spark["bars"][-1]["last"] and not any(b["last"] for b in spark["bars"][:-1])
+    assert panel["flow_period"] == charts._period_label(periods[-1], "quarterly")
+
+
+def test_vitals_keep_a_balance_row_with_too_few_values():
+    # 卫星化学: 四项债务合计 has a complete input only at its first period end, before the last eight.
+    series = build("002648")
+    debt = vital(charts.vitals({"series": series}), "四项债务合计")
+    assert debt["spark"] is None and debt["latest"] is None
+    assert len(debt["data"]) == 8 and all(t.endswith("缺失") for t in debt["data"])
+    cash = vital(charts.vitals({"series": series}), "货币资金")
+    assert cash["latest"] == "142.15" and cash["spark"]["dots"][-1]["last"]
+    html = str(ENV.get_template("_charts.html").module.vitals(charts.vitals({"series": series})))
+    assert "不足两期" in html
+
+
+def test_dumbbell_compares_saved_ratios_with_the_same_period_a_year_earlier():
+    body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
+    fin = [r for r in body["table"] if r["id"].startswith("T.")]
+    chart = charts.dumbbell(fin)
+    latest = max(p for r in fin for p in r["values"])
+    prior = f"{int(latest[:4]) - 1}{latest[4:]}"
+    assert (chart["latest"], chart["prior"]) == (latest, prior)
+    table = {r["id"]: r["values"] for r in fin}
+    for (key, label), row in zip([k for k in charts.RATIOS if k[0] in table], chart["rows"]):
+        assert (row["label"], row["after"], row["before"]) == (label, table[key][latest], table[key].get(prior))
+        assert row["x_after"] < row["x_before"] if float(row["after"]) < float(row["before"]) else row["x_after"] >= row["x_before"]
+    # Without the year-earlier value only the latest dot is drawn and the readout says so.
+    alone = copy.deepcopy(fin)
+    next(r for r in alone if r["id"] == "T.gross_margin")["values"].pop(prior)
+    row = charts.dumbbell(alone)["rows"][0]
+    assert row["x_before"] is None and f"{prior} 缺失" in row["tip"]
 
 
 def test_reports_without_series_fall_back_to_the_saved_financial_table():

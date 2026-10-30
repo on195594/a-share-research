@@ -237,23 +237,6 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
                           "headline": f"{latest} 累计，较上年同期", "chart": chart, "source": "财务数据表",
                           "note": "年初至报告期末累计口径，来自财务数据表的同比指标；不是单季增速。"}
 
-    def quarterly(key, label):
-        group = series.get("quarterly") or {}
-        r = row("quarterly", key)
-        if not r or not group.get("periods"):
-            return None
-        groups = []
-        for p in group["periods"]:
-            cell = r["values"].get(p) or {}
-            groups.append({"label": _period_label(p, "quarterly"), "points": [{"text": cell.get("display")}],
-                           "tip": _cell_tip(label, _period_label(p, "quarterly"), cell, "亿元")})
-        chart = columns(groups, [label])
-        last = r["values"].get(group["periods"][-1]) or {}
-        return chart and {"kind": "columns", "title": f"单季{label}", "chart": chart, "source": "经营序列",
-                          "headline": _headline(label, _period_label(group["periods"][-1], "quarterly"),
-                                                last.get("display"), (last.get("yoy") or {}).get("value"), "亿元"),
-                          "note": "单季由同年相邻累计期相减，一季度直接取值；同比为与上年同季比较。"}
-
     def balance():
         group = series.get("balance") or {}
         cash, debt = row("balance", "cash"), row("balance", "interest_debt")
@@ -275,12 +258,19 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
                           "note": "四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券，不代表全部有息负债；"
                                   "时点值不代表期间流量，某期缺失时图例留空，不沿用更早的值。"}
 
+    def ratios():
+        chart = dumbbell(fin)
+        return chart and {"kind": "dumbbell", "title": "毛利率、ROE 与负债率 · 同期对比", "chart": chart,
+                          "headline": f"{chart['latest']} 对比上年同期 {chart['prior']}", "source": "财务数据表",
+                          "note": "毛利率与加权 ROE 为年初至报告期末累计口径，ROE 不年化，只与上年同期比较；"
+                                  "资产负债率为期末时点值。"}
+
     for figure in (
         latest_growth(),
+        ratios(),
         annual_columns(["revenue"], ["营业总收入"], "营业总收入 · 年度", ""),
         annual_columns(["net_profit", "op_cash"], ["归母净利润", "经营活动现金流净额"], "利润与经营现金流 · 年度",
                        "两者口径不同：经营现金流为合并口径，归母净利润只含母公司股东部分。"),
-        quarterly("net_profit", "归母净利润"),
         annual_columns(["fcf"], ["经营现金流减购建长期资产现金"], "经营现金流减购建长期资产现金 · 年度",
                        "不等于可分配现金。"),
         balance(),
@@ -288,6 +278,142 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
         if figure:
             figures.append(figure)
     return figures
+
+
+# Sparklines in the vitals panel: a short row height, each scaled to its own values.
+SPARK = 30
+FLOWS = (("revenue", "营业总收入"), ("net_profit", "归母净利润"), ("core_profit", "扣非归母净利润"),
+         ("op_cash", "经营活动现金流净额"), ("fcf", "经营现金流减购建长期资产现金"))
+STOCKS = (("cash", "货币资金"), ("interest_debt", "四项债务合计"), ("receivables", "应收票据及应收账款"),
+          ("inventory", "存货"), ("contract_liab", "合同负债"), ("goodwill", "商誉"))
+
+
+def spark_columns(values: list[float | None]) -> dict | None:
+    """Evenly spaced mini columns from a shared zero; the last one is the latest period."""
+    present = [v for v in values if v is not None]
+    if not present:
+        return None
+    lo, hi = min(present + [0.0]), max(present + [0.0])
+    span = (hi - lo) or 1.0
+    y = lambda v: round(2 + (hi - v) / span * (SPARK - 4), 2)  # noqa: E731
+    zero, slot = y(0.0), 100.0 / len(values)
+    width = slot * 0.6
+    out = []
+    for i, v in enumerate(values):
+        cell = {"slot_x": round(slot * i, 3), "slot_w": round(slot, 3), "missing": v is None,
+                "x": round(slot * i + (slot - width) / 2, 3), "w": round(width, 3), "last": i == len(values) - 1}
+        if v is not None:
+            # A value near zero still gets 1px, grown from the zero line in its own direction.
+            h = max(round(abs(zero - y(v)), 2), 1.0)
+            cell.update(y=zero if v < 0 else round(zero - h, 2), h=h)
+        out.append(cell)
+    return {"bars": out, "zero": zero, "height": SPARK, "negative": lo < 0}
+
+
+def spark_line(periods: list[str], values: list[float | None]) -> dict | None:
+    """A min–max scaled line over calendar time; gaps break the line instead of bridging it."""
+    present = [v for v in values if v is not None]
+    if len(present) < 2:
+        return None
+    lo, hi = min(present), max(present)
+    span = (hi - lo) or 1.0
+    days = [date.fromisoformat(p).toordinal() for p in periods]
+    first, width = days[0], (days[-1] - days[0]) or 1
+    xs = [round(4 + (d - first) / width * 92, 3) for d in days]
+    points = [(xs[i], round(4 + (hi - v) / span * (SPARK - 8), 2)) if v is not None else None
+              for i, v in enumerate(values)]
+    bounds = [0.0] + [round((a + b) / 2, 3) for a, b in zip(xs, xs[1:])] + [100.0]
+    return {"segments": [{"x1": a[0], "y1": a[1], "x2": b[0], "y2": b[1]} for a, b in zip(points, points[1:]) if a and b],
+            "dots": [{"x": p[0], "y": p[1], "last": i == len(points) - 1} for i, p in enumerate(points) if p],
+            "slots": [{"x": bounds[i], "w": round(bounds[i + 1] - bounds[i], 3)} for i in range(len(periods))],
+            "height": SPARK}
+
+
+def vitals(body: dict) -> dict | None:
+    """Small multiples over the saved operating series: single-quarter flows as mini columns and
+    period-end balances as lines, each with its latest saved value. Needs the operating series."""
+    series = body.get("series") or {}
+
+    def rows(kind, keys):
+        group = series.get(kind) or {}
+        indexed = {r.get("id"): r for r in group.get("rows", [])}
+        return group.get("periods") or [], [(indexed[k], label) for k, label in keys if k in indexed]
+
+    periods, flows = rows("quarterly", FLOWS)
+    periods = periods[-8:]
+    flow_rows = []
+    for r, label in flows:
+        cells = [r["values"].get(p) or {} for p in periods]
+        tips = [_cell_tip(label, _period_label(p, "quarterly"), c, "亿元") for p, c in zip(periods, cells)]
+        spark = spark_columns([number(c.get("display")) for c in cells])
+        for bar, tip in zip(spark["bars"] if spark else [], tips):
+            bar["tip"] = tip
+        last = cells[-1] if cells else {}
+        flow_rows.append({"label": label, "spark": spark, "latest": last.get("display"),
+                          "unreconciled": bool(last.get("unreconciled")),
+                          "yoy": (last.get("yoy") or {}).get("value"), "data": tips})
+
+    balance, stocks = rows("balance", STOCKS)
+    balance = balance[-8:]
+    stock_rows = []
+    for r, label in stocks:
+        cells = [r["values"].get(p) or {} for p in balance]
+        # A row with too few values keeps its place, so a gap reads as a gap rather than vanishing.
+        spark = spark_line(balance, [number(c.get("display")) for c in cells])
+        tips = [_cell_tip(label, p, c, "亿元") for p, c in zip(balance, cells)]
+        for slot, tip in zip(spark["slots"] if spark else [], tips):
+            slot["tip"] = tip
+        last = cells[-1]
+        stock_rows.append({"label": label, "spark": spark, "latest": last.get("display"),
+                           "unreconciled": bool(last.get("unreconciled")), "data": tips})
+
+    if not any(r["spark"] for r in flow_rows + stock_rows):
+        return None
+    return {"flows": flow_rows, "stocks": stock_rows,
+            "flow_period": periods and _period_label(periods[-1], "quarterly"),
+            "flow_span": periods and f"{_period_label(periods[0], 'quarterly')}–{_period_label(periods[-1], 'quarterly')}",
+            "stock_period": balance and _period_label(balance[-1], "balance"),
+            "stock_span": balance and f"{_period_label(balance[0], 'balance')}–{_period_label(balance[-1], 'balance')}",
+            "data": [d for r in flow_rows + stock_rows for d in r["data"]]}
+
+
+# Same-period comparison rows: (table id, label, cumulative over the year so far).
+RATIOS = (("T.gross_margin", "毛利率"), ("T.roe", "加权ROE"), ("T.debt_ratio", "资产负债率"))
+
+
+def dumbbell(fin: list[dict], start: float = 30.0, end: float = 72.0) -> dict | None:
+    """Latest period against the same period a year earlier, on one percent axis."""
+    table = {r["id"]: r for r in fin}
+    present = [table[k] for k, _ in RATIOS if k in table]
+    latest = max((p for r in present for p in r["values"]), default=None)
+    if not latest:
+        return None
+    prior = f"{int(latest[:4]) - 1}{latest[4:]}"
+    rows = []
+    for key, label in RATIOS:
+        if key not in table:
+            continue
+        before, after = (table[key]["values"].get(p) for p in (prior, latest))
+        if number(after) is None:
+            continue
+        rows.append({"label": label, "before": before, "after": after,
+                     "tip": f"{label}：{prior} {before + '%' if number(before) is not None else '缺失'} → "
+                            f"{latest} {after}%"})
+    if not rows:
+        return None
+    values = [number(v) for r in rows for v in (r["before"], r["after"]) if number(v) is not None]
+    ticks = nice_ticks(min(values), max(values), 4)
+    lo, hi = ticks[0], ticks[-1]
+    at = lambda v: round(start + (v - lo) / (hi - lo) * (end - start), 3)  # noqa: E731
+    for i, r in enumerate(rows):
+        b, a = number(r["before"]), number(r["after"])
+        r.update(y=i * 34, x_after=at(a), x_before=at(b) if b is not None else None)
+        if b is not None:
+            r.update(seg_x=min(r["x_before"], r["x_after"]), seg_w=round(abs(r["x_after"] - r["x_before"]), 3))
+    height = len(rows) * 34
+    return {"rows": rows, "latest": latest, "prior": prior, "track": (at(lo), at(hi)), "height": height + 18,
+            "ticks": [{"x": at(t), "text": tick_text(t)} for t in ticks], "axis_y": height + 12,
+            "data": [r["tip"] for r in rows]}
 
 
 def price_ladder(levels: dict) -> dict:

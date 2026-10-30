@@ -51,6 +51,77 @@
 </svg>
 {% endmacro %}
 
+{# Latest period (filled) against the same period a year earlier (hollow) on one percent axis. #}
+{% macro dumbbell(c, title) %}
+<svg class="chart dumbbell" width="100%" height="{{ c.height }}" role="img" aria-label="{{ title }}，数值见下方">
+  {% for t in c.ticks %}<line class="grid faint" x1="{{ t.x }}%" x2="{{ t.x }}%" y1="0" y2="{{ c.axis_y - 10 }}"/><text class="tick" x="{{ t.x }}%" y="{{ c.axis_y }}" dy="4" text-anchor="middle">{{ t.text }}</text>{% endfor %}
+  {% for r in c.rows %}
+  <g class="slot" data-tip="{{ r.tip }}">
+    <rect class="hit" x="0" y="{{ r.y }}" width="100%" height="34"/>
+    <text class="label" x="0" y="{{ r.y + 21 }}">{{ r.label }}</text>
+    <line class="track" x1="{{ c.track[0] }}%" x2="{{ c.track[1] }}%" y1="{{ r.y + 17 }}" y2="{{ r.y + 17 }}"/>
+    {% if r.x_before is not none %}<rect class="span" x="{{ r.seg_x }}%" y="{{ r.y + 15 }}" width="{{ r.seg_w }}%" height="4" rx="2"/>{% endif %}
+    <circle class="dot s0" cx="{{ r.x_after }}%" cy="{{ r.y + 17 }}" r="4.5"/>
+    {% if r.x_before is not none %}<circle class="before" cx="{{ r.x_before }}%" cy="{{ r.y + 17 }}" r="7"/>{% endif %}
+    <text class="value" x="100%" y="{{ r.y + 21 }}" text-anchor="end"><tspan class="muted-fill">{{ r.before or '—' }} →</tspan> <tspan class="strong">{{ r.after }}%</tspan></text>
+    <title>{{ r.tip }}</title>
+  </g>
+  {% endfor %}
+</svg>
+<ul class="legend"><li><span class="key ring" aria-hidden="true"></span>上年同期 {{ c.prior }}</li><li><span class="key dotkey s0" aria-hidden="true"></span>最新期 {{ c.latest }}</li></ul>
+{% endmacro %}
+
+{# Small multiples: one row per metric, a sparkline, the latest saved value and its YoY. #}
+{% macro spark_cols(s) %}
+<svg class="spark" width="100%" height="{{ s.height }}" aria-hidden="true">
+  {% if s.negative %}<line class="grid zero" x1="0" x2="100%" y1="{{ s.zero }}" y2="{{ s.zero }}"/>{% endif %}
+  {% for b in s.bars %}
+  <g class="slot{{ ' latest' if b.last }}" data-tip="{{ b.tip }}">
+    <rect class="hit" x="{{ b.slot_x }}%" y="0" width="{{ b.slot_w }}%" height="{{ s.height }}"/>
+    {% if not b.missing %}<rect class="bar {{ 's0' if b.last else 'dim' }}" x="{{ b.x }}%" y="{{ b.y }}" width="{{ b.w }}%" height="{{ b.h }}" rx="1"/>{% endif %}
+    <title>{{ b.tip }}</title>
+  </g>
+  {% endfor %}
+</svg>
+{% endmacro %}
+
+{% macro spark_line(s) %}
+<svg class="spark" width="100%" height="{{ s.height }}" aria-hidden="true">
+  {% for seg in s.segments %}<line class="line s0" x1="{{ seg.x1 }}%" y1="{{ seg.y1 }}" x2="{{ seg.x2 }}%" y2="{{ seg.y2 }}"/>{% endfor %}
+  {% for d in s.dots %}{% if d.last %}<circle class="dot s0 end" cx="{{ d.x }}%" cy="{{ d.y }}" r="3.5"/>{% endif %}{% endfor %}
+  {% for t in s.slots %}<g class="slot" data-tip="{{ t.tip }}"><rect class="hit" x="{{ t.x }}%" y="0" width="{{ t.w }}%" height="{{ s.height }}"/><title>{{ t.tip }}</title></g>{% endfor %}
+</svg>
+{% endmacro %}
+
+{% macro vitals(v, title="财务体征") %}
+<figure class="figure vitals" data-chart>
+  <figcaption><strong>{{ title }}</strong><span class="readout" aria-live="polite">亿元{% if v.flows %}；单季 {{ v.flow_span }}{% endif %}{% if v.stocks %}，期末 {{ v.stock_span }}{% endif %}。每行按自身数值缩放，只看走势；悬停或点按读出每一期</span></figcaption>
+  <table class="vitals-table">
+    {% if v.flows %}
+    <thead><tr><th scope="col">单季</th><th scope="col"><span class="visually-hidden">走势</span></th><th scope="col" class="num">{{ v.flow_period }}</th><th scope="col" class="num">同比</th></tr></thead>
+    <tbody>
+    {% for r in v.flows %}
+      <tr><th scope="row">{{ r.label }}</th><td class="spark-cell">{% if r.spark %}{{ spark_cols(r.spark) }}{% else %}<span class="muted">缺失</span>{% endif %}</td>
+        <td class="num strong">{{ r.latest or ('待核对' if r.unreconciled else '—') }}</td>
+        <td class="num">{{ r.yoy ~ '%' if r.yoy else '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+    {% endif %}
+    {% if v.stocks %}
+    <tbody class="group">
+      <tr class="subhead"><th scope="col">期末</th><td></td><td class="num">{{ v.stock_period }}</td><td></td></tr>
+    {% for r in v.stocks %}
+      <tr><th scope="row">{{ r.label }}</th><td class="spark-cell">{% if r.spark %}{{ spark_line(r.spark) }}{% else %}<span class="muted">不足两期</span>{% endif %}</td>
+        <td class="num strong">{{ r.latest or ('待核对' if r.unreconciled else '—') }}</td><td></td></tr>
+    {% endfor %}
+    </tbody>
+    {% endif %}
+  </table>
+  <p class="figure-note">单季由同年相邻累计期相减，一季度直接取值；最深一根为最新季。期末为时点值，不相减推导单季。四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券。来源：经营序列。</p>
+  {{ data_list(v) }}
+</figure>
+{% endmacro %}
+
 {# The HTML equivalent of a chart: every plotted value, in the same words as its readout. #}
 {% macro data_list(c) %}
 {% if c and c.data %}<details class="figure-data"><summary>本图数值</summary><ul>{% for d in c.data %}<li>{{ d }}</li>{% endfor %}</ul></details>{% endif %}
@@ -61,6 +132,7 @@
   <figcaption><strong>{{ f.title }}</strong><span class="readout" aria-live="polite">{{ f.headline }}</span></figcaption>
   {% if f.kind == 'columns' %}{{ columns(f.chart, f.title) }}
   {% elif f.kind == 'lines' %}{{ lines(f.chart, f.title) }}
+  {% elif f.kind == 'dumbbell' %}{{ dumbbell(f.chart, f.title) }}
   {% else %}{{ bars(f.chart, f.title) }}{% endif %}
   <p class="figure-note">{{ f.note }}来源：{{ f.source }}。</p>
   {{ data_list(f.chart) }}

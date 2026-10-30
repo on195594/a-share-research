@@ -157,7 +157,7 @@ form.inline { display: inline; margin: 0; }
 .stub { background: var(--surface); margin: 8px -20px 0; padding: 4px 20px 16px; }
 .meta { color: var(--muted); font-size: 14px; }
 .conclusion { font-size: 18px; font-weight: 600; line-height: 1.6; margin: 16px 0; }
-.snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 12px; margin: 16px 0 4px; }
+.snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)); gap: 8px 12px; margin: 16px 0 4px; }
 .snapshot div { margin: 0; }
 .snapshot dt { color: var(--muted); font-size: 13px; }
 .snapshot dd { margin: 0; font-size: 18px; font-weight: 600; white-space: nowrap; }
@@ -341,3 +341,80 @@ details.block[open] { padding-bottom: 12px; }
 .figure-data ul { list-style: none; padding: 8px 12px; margin: 0 0 4px; background: var(--surface); border-radius: var(--radius); font-size: 13px; color: var(--ink); }
 .figure-data li { padding: 2px 0; overflow-wrap: anywhere; }
 .more-figures > .figures { margin-top: 4px; }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---------- vitals: small multiples, one metric per row ---------- */
+.vitals { border-top: 0; padding-top: 0; margin-bottom: 8px; }
+.vitals-table { table-layout: fixed; font-size: 13px; }
+.vitals-table th, .vitals-table td { padding: 4px 4px; border-bottom: 1px solid var(--chart-grid); vertical-align: middle; white-space: normal; }
+.vitals-table thead th, .vitals-table .subhead > * { color: var(--muted); font-size: 12px; font-weight: 400; border-bottom-color: var(--line); padding-top: 10px; }
+.vitals-table thead th:first-child, .vitals-table .subhead th { text-align: left; }
+.vitals-table tbody th { font-weight: 400; line-height: 1.35; min-width: 0; }
+.vitals-table th:nth-child(1) { width: 31%; }
+.vitals-table th:nth-child(2), .vitals-table td.spark-cell { width: 33%; }
+.vitals-table td.num, .vitals-table th.num { width: 19%; }
+.vitals-table td:last-child, .vitals-table th:last-child { width: 17%; padding-right: 0; font-size: 12px; }
+.vitals-table td.strong { font-weight: 700; font-size: 14px; }
+.vitals-table .spark-cell { padding: 2px 6px; }
+.spark { display: block; overflow: visible; }
+.spark .bar.s0 { fill: var(--chart-1); }
+.spark .bar.dim { fill: var(--chart-1-dim); }
+.spark .line { stroke-width: 1.5; stroke-linecap: round; }
+.spark .line.s0 { stroke: var(--chart-1); }
+.spark .dot { stroke: var(--bg); stroke-width: 1.5; }
+.spark .dot.s0 { fill: var(--chart-1); }
+.spark .grid.zero { stroke: var(--muted); stroke-width: 1; shape-rendering: crispEdges; }
+.spark .hit { fill: transparent; }
+.spark .slot.active .hit, .spark .slot:hover .hit { fill: var(--ink); fill-opacity: 0.06; }
+.spark .slot.active .bar.dim, .spark .slot:hover .bar.dim { fill: var(--chart-1); }
+@media (min-width: 640px) {
+  .vitals-table th:nth-child(1) { width: 30%; }
+  .vitals-table th:nth-child(2), .vitals-table td.spark-cell { width: 46%; }
+  .vitals-table td.num, .vitals-table th.num { width: 12%; }
+  .vitals-table td:last-child, .vitals-table th:last-child { width: 12%; }
+}
+
+/* ---------- dumbbell: same period, a year apart ---------- */
+.chart .span { fill: var(--chart-1-dim); }
+.chart .before { fill: none; stroke: var(--chart-1); stroke-width: 1.5; }
+.chart .track { stroke: var(--chart-grid); stroke-width: 1; }
+.chart .grid.faint { stroke-dasharray: 2 3; }
+.chart .muted-fill { fill: var(--muted); font-weight: 400; }
+.key.ring { border: 1.5px solid var(--chart-1); background: transparent; border-radius: 50%; }
+.key.dotkey { border-radius: 50%; }
+
+/* ---------- candidate matrix: factor percentiles as a five-step single-hue heat ---------- */
+.matrix-wrap { margin: 12px 0 4px; }
+.matrix { font-size: 13px; border-collapse: separate; border-spacing: 2px; table-layout: fixed; }
+.matrix caption { caption-side: top; text-align: left; color: var(--muted); font-size: 12px; padding-bottom: 6px; }
+.matrix th, .matrix td { border: 0; padding: 6px 4px; white-space: nowrap; }
+.matrix thead th { font-size: 12px; padding: 2px 4px; }
+.matrix thead th:first-child { width: 30%; }
+.matrix thead th:last-child { width: 12%; }
+.matrix tbody th { font-weight: 600; white-space: normal; line-height: 1.3; padding-left: 0; overflow-wrap: anywhere; }
+.matrix tbody th a { color: var(--ink); text-decoration: none; }
+.matrix tbody th a:hover { color: var(--accent-strong); text-decoration: underline; }
+.matrix tbody th small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; margin: 1px 0 0 1.7em; }
+.matrix tbody th small b { color: var(--accent); font-weight: 700; }
+.matrix .rank { display: inline-block; width: 1.7em; color: var(--muted); font-weight: 400; font-size: 12px; }
+.matrix tr.picked th { box-shadow: inset 3px 0 0 var(--accent); padding-left: 6px; }
+.matrix td { border-radius: 2px; text-align: center; }
+.matrix td.h0, .heat-key .h0 { background: #EEF5F5; color: var(--ink); }
+.matrix td.h1, .heat-key .h1 { background: #D3E7E8; color: var(--ink); }
+.matrix td.h2, .heat-key .h2 { background: #A9D1D3; color: var(--ink); }
+.matrix td.h3, .heat-key .h3 { background: #5FAEB1; color: var(--ink); }
+.matrix td.h4, .heat-key .h4 { background: #007A7E; color: var(--accent-ink); font-weight: 600; }
+.heat-key { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; white-space: nowrap; }
+.heat-key i { width: 14px; height: 10px; border-radius: 2px; margin-left: 6px; }
+.heat-key i.h0 { outline: 1px solid var(--chart-grid); }
+.matrix .verdict-cell { text-align: center; padding: 0; }
+.matrix .verdict-cell .pips { margin: 0; }
+.legend-row { display: flex; align-items: center; gap: 4px; margin: 0 0 12px; }
+@media (max-width: 480px) { .matrix td { padding: 6px 1px; font-size: 12px; } }
+@media (forced-colors: active) { .matrix td { border: 1px solid CanvasText; } }
+
+/* home: one line per company, verdict on the right */
+.company-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.company-verdict { font-size: 14px; white-space: nowrap; }
+.companies p.small { margin-top: 0; }
