@@ -97,7 +97,7 @@
         <a class="company" href="/stock/{{ c.code }}"><strong>{{ c.name }}</strong> <span class="code">{{ c.code }}</span></a>
         {% if c.passed %}<span class="company-verdict">{{ verdict_pips(c.verdict) }}{{ c.verdict }}</span>{% else %}<span class="company-verdict flag">复核未通过</span>{% endif %}
       </div>
-      <p class="small muted"><span class="date">覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 {{ c.created_at[5:10] }}</span>{% if c.from_batch %} · 来自初筛{% endif %}{% if c.checkpoint %} · <a href="/reports/{{ c.id }}#checkpoints">检查点</a>{% endif %}</p>
+      <p class="small muted"><span class="date">覆盖至 {{ c.coverage or '未记录' }}</span> · <span class="date">生成于 <time datetime="{{ c.created_at[:10] }}">{{ c.created_at[:10] }}</time></span>{% if c.from_batch %} · 来自初筛{% endif %}{% if c.checkpoint %} · <a href="/reports/{{ c.id }}#checkpoints">检查点</a>{% endif %}</p>
       {% if c.coverage and c.coverage < due[0] %}<p class="flag">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
     </li>
   {% endfor %}

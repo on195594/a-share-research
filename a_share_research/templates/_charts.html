@@ -88,17 +88,19 @@
 {% macro spark_line(s) %}
 <svg class="spark" width="100%" height="{{ s.height }}" aria-hidden="true">
   {% for seg in s.segments %}<line class="line s0" x1="{{ seg.x1 }}%" y1="{{ seg.y1 }}" x2="{{ seg.x2 }}%" y2="{{ seg.y2 }}"/>{% endfor %}
-  {% for d in s.dots %}{% if d.last %}<circle class="dot s0 end" cx="{{ d.x }}%" cy="{{ d.y }}" r="3.5"/>{% endif %}{% endfor %}
+  {% for d in s.dots if d.last or d.isolated %}<circle class="dot s0{{ ' end' if d.last }}" cx="{{ d.x }}%" cy="{{ d.y }}" r="{{ 3.5 if d.last else 2.5 }}"/>{% endfor %}
   {% for t in s.slots %}<g class="slot" data-tip="{{ t.tip }}"><rect class="hit" x="{{ t.x }}%" y="0" width="{{ t.w }}%" height="{{ s.height }}"/><title>{{ t.tip }}</title></g>{% endfor %}
 </svg>
 {% endmacro %}
 
 {% macro vitals(v, title="财务体征") %}
 <figure class="figure vitals" data-chart>
-  <figcaption><strong>{{ title }}</strong><span class="readout" aria-live="polite">亿元{% if v.flows %}；单季 {{ v.flow_span }}{% endif %}{% if v.stocks %}，期末 {{ v.stock_span }}{% endif %}。每行按自身数值缩放，只看走势；悬停或点按读出每一期</span></figcaption>
+  <figcaption><strong>{{ title }}</strong>
+    <span class="caption-note">亿元{% if v.flows %}；单季 {{ v.flow_span }}{% endif %}{% if v.stocks %}，期末 {{ v.stock_span }}{% endif %}。每行按自身数值缩放，只看走势，不比较行间高度。</span>
+    <span class="readout" aria-live="polite">悬停或点按走势读出每一期</span></figcaption>
+  {% if v.flows %}
   <table class="vitals-table">
-    {% if v.flows %}
-    <thead><tr><th scope="col">单季</th><th scope="col"><span class="visually-hidden">走势</span></th><th scope="col" class="num">{{ v.flow_period }}</th><th scope="col" class="num">同比</th></tr></thead>
+    <thead><tr><th scope="col">单季</th><th scope="col"><span class="visually-hidden">近 8 季走势</span></th><th scope="col" class="num">{{ v.flow_period }}</th><th scope="col" class="num">同比</th></tr></thead>
     <tbody>
     {% for r in v.flows %}
       <tr><th scope="row">{{ r.label }}</th><td class="spark-cell">{% if r.spark %}{{ spark_cols(r.spark) }}{% else %}<span class="muted">缺失</span>{% endif %}</td>
@@ -106,18 +108,21 @@
         <td class="num">{{ r.yoy ~ '%' if r.yoy else '—' }}</td></tr>
     {% endfor %}
     </tbody>
-    {% endif %}
-    {% if v.stocks %}
-    <tbody class="group">
-      <tr class="subhead"><th scope="col">期末</th><td></td><td class="num">{{ v.stock_period }}</td><td></td></tr>
+  </table>
+  {% endif %}
+  {% if v.stocks %}
+  <table class="vitals-table">
+    <thead><tr><th scope="col">期末</th><th scope="col"><span class="visually-hidden">近 8 个期末走势</span></th><th scope="col" class="num">{{ v.stock_period }}</th><th scope="col" class="num">{{ v.year_ago or '一年前' }}</th></tr></thead>
+    <tbody>
     {% for r in v.stocks %}
       <tr><th scope="row">{{ r.label }}</th><td class="spark-cell">{% if r.spark %}{{ spark_line(r.spark) }}{% else %}<span class="muted">不足两期</span>{% endif %}</td>
-        <td class="num strong">{{ r.latest or ('待核对' if r.unreconciled else '—') }}</td><td></td></tr>
+        <td class="num strong">{{ r.latest or ('待核对' if r.unreconciled else '—') }}</td>
+        <td class="num">{{ r.year_ago or '—' }}</td></tr>
     {% endfor %}
     </tbody>
-    {% endif %}
   </table>
-  <p class="figure-note">单季由同年相邻累计期相减，一季度直接取值；最深一根为最新季。期末为时点值，不相减推导单季。四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券。来源：经营序列。</p>
+  {% endif %}
+  <p class="figure-note">单季由同年相邻累计期相减，一季度直接取值；最深一根为最新季，同比为与上年同季比较。期末为时点值，右列为一年前同一期末的保存值，不相减推导变化。四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券。来源：经营序列。</p>
   {{ data_list(v) }}
 </figure>
 {% endmacro %}

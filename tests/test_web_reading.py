@@ -3,6 +3,7 @@
 Condition-only cases exercise template branches, not invented research results.
 """
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -176,3 +177,22 @@ def test_context_queries_execute_against_current_schema_without_writing_research
                 checked += 1
     assert checked == 2
     conn.close()
+
+
+def test_candidate_matrix_shades_percentiles_and_links_flags_to_details():
+    captured = json.loads((ROOT / 'tests/data/batch-candidate-matrix.json').read_text())
+    template = (TEMPLATES / 'batch.html').read_text()
+    start = template.index('{% set heat =')
+    end = template.index('<p class="legend-row', start)
+    matrix = ENV.from_string('{% from "_charts.html" import verdict_pips %}' + template[start:end])
+    html = matrix.render(batch={'q20': captured['rows']}, l5=captured['l5'], q5=captured['q5'])
+    # Levels in row order, compared with the unrounded captured percentiles.
+    levels = [int(level) for level in re.findall(r'<td class="num h(\d)" title=', html)]
+    expected = [r[key] for r in captured['rows'] for key in ('roe_pct', 'cash_pct', 'growth_pct', 'pe_pct')]
+    assert levels == [4 if q >= 0.95 else 3 if q >= 0.85 else 2 if q >= 0.75 else 1 if q >= 0.6 else 0 for q in expected]
+    assert len(set(levels)) == 5  # the captured batch spans every step
+    assert html.count('class="picked"') == len(captured['l5'])
+    flagged = [r for r in captured['rows'] if r.get('drawdown')]
+    assert flagged and all(f'href="#cand-{r["code"]}">60日跌超30%' in html for r in flagged)
+    assert html.count('class="matrix-flag"') == len(flagged)
+    assert 'id="cand-{{ r.code }}"' in template

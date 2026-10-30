@@ -105,6 +105,55 @@ def test_vitals_keep_a_balance_row_with_too_few_values():
     assert "不足两期" in html
 
 
+def test_vitals_skip_groups_without_periods_and_keep_single_readings():
+    series = build("000858")
+    empty = copy.deepcopy(series)
+    empty["balance"]["periods"] = []  # the generator keeps metric rows even with no period ends
+    panel = charts.vitals({"series": empty})
+    assert panel["stocks"] == [] and len(panel["flows"]) == len(charts.FLOWS)
+    # No quarters, and each balance row keeps only its latest value: no trend, but still a reading.
+    single = copy.deepcopy(series)
+    single["quarterly"]["periods"] = []
+    last = single["balance"]["periods"][-1]
+    for row in single["balance"]["rows"]:
+        for period, cell in row["values"].items():
+            if period != last:
+                cell.update(display=None, value=None)
+    panel = charts.vitals({"series": single})
+    assert panel["flows"] == [] and all(r["spark"] is None for r in panel["stocks"])
+    saved = {r["id"]: r["values"][last]["display"] for r in series["balance"]["rows"]}
+    assert vital(panel, "货币资金")["latest"] == saved["cash"]
+    html = str(ENV.get_template("_charts.html").module.vitals(panel))
+    assert "不足两期" in html and saved["cash"] in html and "<th scope=\"col\">单季</th>" not in html
+
+
+def test_balance_values_without_neighbours_are_drawn_as_dots():
+    series = build("000858")
+    periods = series["balance"]["periods"][-8:]
+    gapped = copy.deepcopy(series)
+    cash = next(r for r in gapped["balance"]["rows"] if r["id"] == "cash")["values"]
+    for period in periods[1::2]:  # keep every other period end, the latest among the blanks
+        cash[period].update(display=None, value=None)
+    spark = vital(charts.vitals({"series": gapped}), "货币资金")["spark"]
+    assert spark["segments"] == [] and len(spark["dots"]) == 4 and all(d["isolated"] for d in spark["dots"])
+    html = str(ENV.get_template("_charts.html").module.spark_line(spark))
+    assert html.count("<circle") == 4
+    full = vital(charts.vitals({"series": series}), "货币资金")["spark"]
+    assert str(ENV.get_template("_charts.html").module.spark_line(full)).count("<circle") == 1
+
+
+def test_balance_year_ago_column_reuses_the_saved_period_end():
+    series = build("000858")
+    periods = series["balance"]["periods"]
+    year_ago = f"{int(periods[-1][:4]) - 1}{periods[-1][4:]}"
+    panel = charts.vitals({"series": series})
+    assert year_ago in periods and panel["year_ago"] == charts._period_label(year_ago, "balance")
+    for key, label in charts.STOCKS:
+        row = next((r for r in series["balance"]["rows"] if r["id"] == key), None)
+        if row:
+            assert vital(panel, label)["year_ago"] == (row["values"].get(year_ago) or {}).get("display")
+
+
 def test_dumbbell_compares_saved_ratios_with_the_same_period_a_year_earlier():
     body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
     fin = [r for r in body["table"] if r["id"].startswith("T.")]

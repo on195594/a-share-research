@@ -348,8 +348,12 @@ details.block[open] { padding-bottom: 12px; }
 .vitals { border-top: 0; padding-top: 0; margin-bottom: 8px; }
 .vitals-table { table-layout: fixed; font-size: 13px; }
 .vitals-table th, .vitals-table td { padding: 4px 4px; border-bottom: 1px solid var(--chart-grid); vertical-align: middle; white-space: normal; }
-.vitals-table thead th, .vitals-table .subhead > * { color: var(--muted); font-size: 12px; font-weight: 400; border-bottom-color: var(--line); padding-top: 10px; }
-.vitals-table thead th:first-child, .vitals-table .subhead th { text-align: left; }
+.vitals-table thead th { color: var(--muted); font-size: 12px; font-weight: 400; border-bottom-color: var(--line); padding-top: 10px; }
+.vitals-table thead th:first-child { text-align: left; }
+.vitals-table + .vitals-table { margin-top: 4px; }
+.caption-note { color: var(--muted); font-size: 13px; line-height: 1.45; }
+/* The readout keeps one line of its own so the fixed note above never gets replaced. */
+.vitals .readout { color: var(--ink); min-height: 2.9em; }
 .vitals-table tbody th { font-weight: 400; line-height: 1.35; min-width: 0; }
 .vitals-table th:nth-child(1) { width: 31%; }
 .vitals-table th:nth-child(2), .vitals-table td.spark-cell { width: 33%; }
@@ -397,6 +401,8 @@ details.block[open] { padding-bottom: 12px; }
 .matrix tbody th a:hover { color: var(--accent-strong); text-decoration: underline; }
 .matrix tbody th small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; margin: 1px 0 0 1.7em; }
 .matrix tbody th small b { color: var(--accent); font-weight: 700; }
+.matrix .matrix-flag { display: block; margin: 1px 0 0 1.7em; font-size: 11px; font-weight: 600; color: var(--caution); text-decoration: none; }
+.matrix .matrix-flag:hover { text-decoration: underline; }
 .matrix .rank { display: inline-block; width: 1.7em; color: var(--muted); font-weight: 400; font-size: 12px; }
 .matrix tr.picked th { box-shadow: inset 3px 0 0 var(--accent); padding-left: 6px; }
 .matrix td { border-radius: 2px; text-align: center; }

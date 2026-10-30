@@ -137,7 +137,9 @@
     {% for r in batch.q20 %}
       <tr class="{{ 'picked' if r.code in l5 }}">
         <th scope="row"><span class="rank">{{ loop.index }}</span>{% if r.report_id %}<a href="/reports/{{ r.report_id }}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}
-          <small>{{ "%.2f" | format(r.score) }}{% if r.code in l5 %} · <b>选定</b>{% endif %}{% if r.code in q5 %} · 前五{% endif %}</small></th>
+          <small>{{ "%.2f" | format(r.score) }}{% if r.code in l5 %} · <b>选定</b>{% endif %}{% if r.code in q5 %} · 前五{% endif %}</small>
+          {% set notes = (["行业样本少"] if r.small_group else []) + (["60日跌超30%"] if r.drawdown else []) + (["利润跳升且低PE"] if r.windfall else []) %}
+          {% if notes %}<a class="matrix-flag" href="#cand-{{ r.code }}">{{ notes | join(" · ") }}</a>{% endif %}</th>
         {% for key, pct, label in heat.cells %}
         {% set v = r[key] %}
         {% set q = r[pct] %}<td class="num h{{ 4 if q >= 0.95 else 3 if q >= 0.85 else 2 if q >= 0.75 else 1 if q >= 0.6 else 0 }}" title="{{ label }}分位 {{ '%.2f' | format(r[pct]) }}">{% if key == "roe" %}{{ "%.1f" | format(v) }}%{% elif key == "cash" %}{{ "%.2f" | format(v) }}{% elif key == "growth" %}{{ "%+.0f" | format(v * 100) }}%{% else %}{{ "%.1f" | format(v) }}{% endif %}</td>
@@ -155,7 +157,7 @@
   <summary>逐家因子、口径与研究结论</summary>
   <ol class="candidates">
   {% for r in batch.q20 %}
-    <li>
+    <li id="cand-{{ r.code }}" tabindex="-1">
       <div class="candidate-head">
         {% if batch.status == "proposed" %}
         <input type="checkbox" name="codes" value="{{ r.code }}" id="c{{ loop.index }}"

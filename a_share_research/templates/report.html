@@ -100,11 +100,13 @@
     <h2>财务与走势</h2>
     {% if vitals %}{{ vitals_panel(vitals, "财务体征 · 近 8 期") }}{% endif %}
     {% if figures %}
-    <div class="figures">{% for f in figures[:4] %}{{ figure(f) }}{% endfor %}</div>
-    {% if figures | length > 4 %}
+    {# With the vitals panel up front, only the same-period comparisons stay open; longer history folds. #}
+    {% set shown = 2 if vitals else 4 %}
+    <div class="figures">{% for f in figures[:shown] %}{{ figure(f) }}{% endfor %}</div>
+    {% if figures | length > shown %}
     <details class="block more-figures">
-      <summary>更多走势 · {{ figures[4:] | map(attribute='title') | join('、') }}</summary>
-      <div class="figures">{% for f in figures[4:] %}{{ figure(f) }}{% endfor %}</div>
+      <summary>更多走势 · {{ figures[shown:] | map(attribute='title') | join('、') }}</summary>
+      <div class="figures">{% for f in figures[shown:] %}{{ figure(f) }}{% endfor %}</div>
     </details>
     {% endif %}
     <p class="hint">图中数值均来自本报告保存的财务数据；桌面悬停、手机点按可读出每一期，每张图下的“本图数值”列出全部数值。</p>

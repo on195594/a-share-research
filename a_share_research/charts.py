@@ -324,7 +324,10 @@ def spark_line(periods: list[str], values: list[float | None]) -> dict | None:
               for i, v in enumerate(values)]
     bounds = [0.0] + [round((a + b) / 2, 3) for a, b in zip(xs, xs[1:])] + [100.0]
     return {"segments": [{"x1": a[0], "y1": a[1], "x2": b[0], "y2": b[1]} for a, b in zip(points, points[1:]) if a and b],
-            "dots": [{"x": p[0], "y": p[1], "last": i == len(points) - 1} for i, p in enumerate(points) if p],
+            # Every value with no neighbour on either side has no segment, so it is drawn as a dot.
+            "dots": [{"x": p[0], "y": p[1], "last": i == len(points) - 1,
+                      "isolated": not (i and points[i - 1]) and not (i + 1 < len(points) and points[i + 1])}
+                     for i, p in enumerate(points) if p],
             "slots": [{"x": bounds[i], "w": round(bounds[i + 1] - bounds[i], 3)} for i in range(len(periods))],
             "height": SPARK}
 
@@ -336,43 +339,52 @@ def vitals(body: dict) -> dict | None:
 
     def rows(kind, keys):
         group = series.get(kind) or {}
+        periods = group.get("periods") or []
+        if not periods:  # rows without periods have nothing to read; the group is left out
+            return [], [], []
         indexed = {r.get("id"): r for r in group.get("rows", [])}
-        return group.get("periods") or [], [(indexed[k], label) for k, label in keys if k in indexed]
+        return periods, periods[-8:], [(indexed[k], label) for k, label in keys if k in indexed]
 
-    periods, flows = rows("quarterly", FLOWS)
-    periods = periods[-8:]
+    _, quarters, flows = rows("quarterly", FLOWS)
     flow_rows = []
     for r, label in flows:
-        cells = [r["values"].get(p) or {} for p in periods]
-        tips = [_cell_tip(label, _period_label(p, "quarterly"), c, "亿元") for p, c in zip(periods, cells)]
+        cells = [r["values"].get(p) or {} for p in quarters]
+        tips = [_cell_tip(label, _period_label(p, "quarterly"), c, "亿元") for p, c in zip(quarters, cells)]
         spark = spark_columns([number(c.get("display")) for c in cells])
         for bar, tip in zip(spark["bars"] if spark else [], tips):
             bar["tip"] = tip
-        last = cells[-1] if cells else {}
+        last = cells[-1]
         flow_rows.append({"label": label, "spark": spark, "latest": last.get("display"),
-                          "unreconciled": bool(last.get("unreconciled")),
+                          "unreconciled": bool(last.get("unreconciled")), "present": spark is not None,
                           "yoy": (last.get("yoy") or {}).get("value"), "data": tips})
 
-    balance, stocks = rows("balance", STOCKS)
-    balance = balance[-8:]
+    every, balance, stocks = rows("balance", STOCKS)
+    # The same period end a year earlier, when the series saved it, is shown beside the latest.
+    year_ago = balance and f"{int(balance[-1][:4]) - 1}{balance[-1][4:]}"
+    year_ago = year_ago if year_ago in every else None
     stock_rows = []
     for r, label in stocks:
         cells = [r["values"].get(p) or {} for p in balance]
+        values = [number(c.get("display")) for c in cells]
         # A row with too few values keeps its place, so a gap reads as a gap rather than vanishing.
-        spark = spark_line(balance, [number(c.get("display")) for c in cells])
+        spark = spark_line(balance, values)
         tips = [_cell_tip(label, p, c, "亿元") for p, c in zip(balance, cells)]
         for slot, tip in zip(spark["slots"] if spark else [], tips):
             slot["tip"] = tip
-        last = cells[-1]
+        last, before = cells[-1], (r["values"].get(year_ago) or {}) if year_ago else {}
         stock_rows.append({"label": label, "spark": spark, "latest": last.get("display"),
-                           "unreconciled": bool(last.get("unreconciled")), "data": tips})
+                           "unreconciled": bool(last.get("unreconciled")),
+                           "present": any(v is not None for v in values),
+                           "year_ago": before.get("display"), "data": tips})
 
-    if not any(r["spark"] for r in flow_rows + stock_rows):
+    # The panel shows whenever some value can be read; a trend needs two, a reading only one.
+    if not any(r["present"] for r in flow_rows + stock_rows):
         return None
     return {"flows": flow_rows, "stocks": stock_rows,
-            "flow_period": periods and _period_label(periods[-1], "quarterly"),
-            "flow_span": periods and f"{_period_label(periods[0], 'quarterly')}–{_period_label(periods[-1], 'quarterly')}",
+            "flow_period": quarters and _period_label(quarters[-1], "quarterly"),
+            "flow_span": quarters and f"{_period_label(quarters[0], 'quarterly')}–{_period_label(quarters[-1], 'quarterly')}",
             "stock_period": balance and _period_label(balance[-1], "balance"),
+            "year_ago": year_ago and _period_label(year_ago, "balance"),
             "stock_span": balance and f"{_period_label(balance[0], 'balance')}–{_period_label(balance[-1], 'balance')}",
             "data": [d for r in flow_rows + stock_rows for d in r["data"]]}
 
