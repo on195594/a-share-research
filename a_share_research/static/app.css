@@ -479,7 +479,6 @@ details.block[open] { padding-bottom: 12px; }
 }
 .diff-cell dt { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
 .diff-cell dd { margin: 0; font-size: 13px; }
-.diff-arrow { color: var(--accent); margin: 0 4px; }
 
 /* ---------- candidate profit sparklines & proportional strip bars ---------- */
 .cand-spark {
@@ -493,14 +492,12 @@ details.block[open] { padding-bottom: 12px; }
 .market-strip { margin: 6px 0 8px; }
 .market-strip .readout { min-height: 0; margin: 4px 0 0; }
 .strip-bar { display: block; border-radius: 4px; overflow: hidden; background: var(--band); }
-.strip-bar.single-hue .seg { fill: var(--chart-1); stroke: var(--bg); stroke-width: 2; }
 .strip-bar .seg.b0, .seg-dot.b0 { fill: var(--chart-1); background: var(--chart-1); }
 .strip-bar .seg.b1, .seg-dot.b1 { fill: var(--chart-2); background: var(--chart-2); }
 .strip-bar .seg.b2, .seg-dot.b2 { fill: var(--chart-1-dim); background: var(--chart-1-dim); }
 .strip-bar .seg.b3, .seg-dot.b3 { fill: var(--muted); background: var(--muted); }
 .seg-key { display: inline-flex; align-items: center; gap: 4px; }
 .seg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.verdict-overview { margin: 8px 0 12px; }
 .filter-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .pill {
   display: inline-flex; align-items: center; gap: 5px;

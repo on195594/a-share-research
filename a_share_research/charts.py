@@ -855,7 +855,7 @@ def market_strip(batch: dict) -> dict | None:
 
 
 def verdict_summary(companies: list) -> dict | None:
-    """Breakdown of latest research verdicts across actively researched companies on the home page."""
+    """Latest-verdict counts behind the home page filter pills, and each company's group."""
     if not companies:
         return None
     buckets = ("值得继续研究", "需要谨慎", "暂不值得", "复核未通过")
@@ -865,13 +865,5 @@ def verdict_summary(companies: list) -> dict | None:
         key = c["verdict"] if c["passed"] and c["verdict"] in VERDICTS else "复核未通过"
         by_code[c["code"]] = key
         counts[key] += 1
-    total = len(companies)
-    active = [(label, counts[label]) for label in buckets if counts[label] > 0]
-    items, cursor = [], 0.0
-    for i, (label, count) in enumerate(active):
-        pct = round(count / total * 100, 1) if total else 0.0
-        w = round(100.0 - cursor if i == len(active) - 1 else count / total * 100, 2)
-        items.append({"label": label, "count": count, "pct": pct,
-                      "x": round(cursor, 2), "w": max(w, 0.0)})
-        cursor += w
-    return {"items": items, "total": total, "buckets": by_code}
+    items = [{"label": label, "count": counts[label]} for label in buckets if counts[label] > 0]
+    return {"items": items, "total": len(companies), "buckets": by_code}

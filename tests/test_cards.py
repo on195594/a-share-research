@@ -69,10 +69,10 @@ def test_card_text_is_never_truncated():
     assert '资料未覆盖 2026 年三季报' in compact
 
 
-def test_card_buckets_match_the_home_verdict_strip():
+def test_card_buckets_match_the_home_filter_counts():
     rows = [RECORDS[39], dict(RECORDS[25], passed=0)]
-    strip = charts.verdict_summary(rows)['buckets']
-    assert {r['code']: reading.card(r, r['body'])['bucket'] for r in rows} == strip
+    groups = charts.verdict_summary(rows)['buckets']
+    assert {r['code']: reading.card(r, r['body'])['bucket'] for r in rows} == groups
 
 
 def test_card_renders_standalone_with_report_dates_and_unicode_minus():

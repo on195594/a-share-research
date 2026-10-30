@@ -22,7 +22,7 @@
 | 申万行业与同业快照 | `test_industry_peers.py`、`test_peer_snapshots.py` |
 | 财务序列与报表核验 | `test_financial_series.py`、`test_financial_table.py` |
 | 价格参考与技术纪律 | `test_price.py` |
-| 图表与可视化几何 | `test_charts.py` |
+| 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py` |
 | 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_home_staleness.py` |
 | 精确计算与研究工具 | `test_research_tools.py` |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py` |
