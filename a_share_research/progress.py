@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import re
 
 from a_share_research import db, reading, service
@@ -138,26 +139,46 @@ def check(body: dict, snap: dict) -> list[str]:
             sides = {refs[r]["side"] for r in ids}
             if (field == "before" and sides != {"before"}) or (field == "impact" and sides != {"before", "current"}) or (field in {"change", "unresolved", "next_step"} and sides != {"current"}):
                 errors.append(f"条目 {i} {field} 旧新引用边界错误")
-            # No new derived numbers: use values already written in the specifically cited claims.
+            # Reuse the selected claims AND their saved citations, never unrelated rows/periods.
             support = " ".join(refs[r]["text"] for r in ids)
             codes = {v["code"][:6] for v in snap["inputs"].values()}
             for record in snap["inputs"].values():
                 codes |= {r["id"][1:7] for r in record["body"].get("table", []) if re.match(r"^P\d{6}\.", r["id"])}
             pattern = r"(?<!\d)(?:" + "|".join(sorted(codes)) + r")(?!\d)"
             candidates = [n for n, _ in _numbers(re.sub(pattern, " ", support))]
+            for key in ids:
+                for source in refs[key]['sources']:
+                    if source['kind'] == 'document':
+                        candidates += [n for n, _ in _numbers(re.sub(pattern, ' ', source['cite'].get('quote', '')))]
+                        continue
+                    row, cite = source['row'], source['cite']
+                    values = [value for field in ('values', 'exact_values')
+                              for period, value in row.get(field, {}).items()
+                              if not cite.get('period') or period == cite['period'] or row['id'].startswith('C.')]
+                    if row['id'].startswith('C.'):
+                        values += [v['value'] for group in ('inputs', 'normalized_inputs')
+                                   for v in (row.get('calculation') or {}).get(group, []) if 'value' in v]
+                    try:
+                        parsed = [float(value) for value in values]
+                    except (TypeError, ValueError):
+                        errors.append(f'条目 {i} {field} 的已存来源数值不可解析')
+                        continue
+                    if not all(math.isfinite(value) for value in parsed):
+                        errors.append(f'条目 {i} {field} 的已存来源包含非有限数值')
+                    candidates.extend(value for value in parsed if math.isfinite(value))
             if any(not _supported(n, precision, candidates) for n, precision in _numbers(re.sub(pattern, " ", value["text"]))):
                 errors.append(f"条目 {i} {field} 有引用中未保存的数字；比较不新增运算")
         if item["kind"] == "new_disclosure":
             old = documents(snap, "before")
             old_hashes = {d.get("sha256") for d in old if d.get("sha256")}
-            old_urls = {d.get("url") for d in old if d.get("url")}
+            unknown_urls = {d.get('url') for d in old if d.get('url') and not d.get('sha256')}
             change = item.get("change")
             ids = change.get("refs") if isinstance(change, dict) else []
             cited = [s["document"] for r in (ids if isinstance(ids, list) else []) if isinstance(r, str) and r in refs
                      for s in refs[r]["sources"] if s["kind"] == "document"]
             # Same document can add understanding, but is not a new disclosure relative to the old report.
             if not old or not any(d.get('sha256') and d.get('url') for d in old) or not cited or not any(d.get("sha256") and d.get("url") and d.get("announced")
-                                   and d["sha256"] not in old_hashes and d["url"] not in old_urls for d in cited):
+                                   and d["sha256"] not in old_hashes and d["url"] not in unknown_urls for d in cited):
                 errors.append(f"条目 {i} 新披露没有不同于旧报告的可识别原文；重复引用不得当新消息")
     return errors
 

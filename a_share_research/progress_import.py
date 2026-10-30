@@ -1,7 +1,8 @@
 """Import authorized, full research-v1 API exports into a NEW isolated database.
 
 No network, auth copying, production writes, model calls or reconstructed material snapshots.
-The exact export hash and evidence are retained as capture provenance, not a production identity.
+Original run identity is preserved. The export hash and evidence are additional capture provenance,
+not a reconstructed production material snapshot.
 """
 import argparse
 import hashlib
@@ -28,6 +29,8 @@ def import_exports(database: Path, files: list[Path]):
             raise ValueError('报告公司与信封不一致')
         if value['evidence'].get('material_sha256') != value['report'].get('material_sha256'):
             raise ValueError('导出证据与报告材料哈希不一致')
+        if value.get('identity') is not None and not isinstance(value['identity'], dict):
+            raise ValueError('导出运行身份格式无效')
         seen.add(value['id'])
         exports.append((value, hashlib.sha256(raw).hexdigest()))
     # An existing database, including production, can never be an import target.
@@ -40,8 +43,9 @@ def import_exports(database: Path, files: list[Path]):
                 body = value['report']
                 body_text = json.dumps(body, ensure_ascii=False)
                 parent = body.get('parent_report_id') or (body.get('prior') or {}).get('report_id')
-                identity = {'progress_capture': {'source': f"/api/reports/{value['id']}", 'export_sha256': sha,
-                                                'evidence': value['evidence'], 'basis': 'authorized_api_export_not_original_run_snapshot'}}
+                identity = dict(value.get('identity') or {})
+                identity['progress_capture'] = {'source': f"/api/reports/{value['id']}", 'export_sha256': sha,
+                                                'evidence': value['evidence'], 'basis': 'authorized_api_export_not_original_run_snapshot'}
                 conn.execute('INSERT INTO runs(id,kind,code,name,status,created_at,request,identity) VALUES (?,\'research\',?,?,\'done\',?,?,?)',
                              (value['run_id'], value['code'], value['name'], value['created_at'],
                               progress.encode({'question': value.get('question') or body.get('question'), 'parent_report_id': parent}),

@@ -89,6 +89,32 @@ def test_unknown_derived_number_is_not_accepted(captured):
     assert any('数字' in e for e in progress.check(body, progress.snapshot(captured, 39)))
 
 
+def test_saved_cited_amounts_are_usable_without_borrowing_other_periods(captured):
+    body, snap = candidate(), progress.snapshot(captured, 39)
+    body['items'][0]['change'] = {'text': '2026-06-30 经营现金流 -1.57 亿元。', 'refs': ['current:financial:0']}
+    assert progress.check(body, snap) == []  # captured claim says only "现金流转负"; its cited row has -1.57
+    body['items'][0]['change']['text'] = '2026-06-30 经营现金流 19.65 亿元。'
+    assert any('数字' in e for e in progress.check(body, snap))  # 19.65 is the uncited 2025 annual value
+    body['items'][0]['change']['text'] = '归母净利润增加 0.92 亿元。'
+    assert progress.check(body, snap) == []  # saved page-6 quote, not the paragraph text
+
+
+def test_same_document_can_be_reinterpreted_and_changed_hash_is_not_deduplicated(captured):
+    body, snap = candidate(), progress.snapshot(captured, 39)
+    for kind in ('reinterpretation', 'basis_revision', 'response', 'comparison'):
+        body['items'][0]['kind'] = kind
+        assert progress.check(body, snap) == []
+    body['items'][0]['kind'] = 'new_disclosure'
+    assert any('重复引用' in e for e in progress.check(body, snap))
+    # Metadata boundary mutation only: same URL with an actually different content identity
+    # is not proof of repetition. Semantic review must still verify the claimed revision.
+    doc = snap['inputs']['current']['body']['sources']['D6']['document']
+    doc['sha256'] = '0' * 64
+    assert progress.check(body, snap) == []
+    snap['inputs']['before']['body']['sources']['D6']['document'].pop('sha256')
+    assert any('新披露' in e for e in progress.check(body, snap))
+
+
 def test_missing_unrelated_and_failed_reports_do_not_get_progress(captured):
     assert progress.view(captured, 999)['status'] == 'unavailable'
     assert progress.view(captured, 37)['status'] == 'unavailable'
@@ -172,6 +198,23 @@ def test_api_exports_preserve_real_bodies_and_refuse_existing_target(captured, t
         assert imported.execute('SELECT count(*) FROM progress_calls').fetchone()[0] == 0
         with pytest.raises(FileExistsError):
             import_exports(target, files)
+    finally:
+        imported.close()
+
+
+def test_api_import_preserves_recorded_replay_identity(captured, tmp_path):
+    from a_share_research.progress_import import import_exports
+    exported = service.report_view(captured, 143)
+    assert exported['identity']['replay_of'] == 7
+    path = tmp_path / 'replay.json'
+    path.write_text(json.dumps(exported, ensure_ascii=False))
+    target = tmp_path / 'replay-import/app.db'
+    import_exports(target, [path])
+    imported = db.connect(target)
+    try:
+        identity = json.loads(imported.execute('SELECT identity FROM runs WHERE id=?', (exported['run_id'],)).fetchone()[0])
+        assert {k: v for k, v in identity.items() if k != 'progress_capture'} == exported['identity']
+        assert identity['replay_of'] == 7
     finally:
         imported.close()
 
