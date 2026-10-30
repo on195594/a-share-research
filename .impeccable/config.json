@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "a_share_research/static/app.css"
+        ],
+        "createdAt": "2026-10-30T09:11:33.853Z",
+        "reason": "Agent triage: DESIGN.md:112 explicitly specifies the accent stripe for selected matrix rows; this is an intentional selection marker, unchanged by 8cb46c8."
+      }
+    ]
+  }
+}
