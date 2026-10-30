@@ -239,3 +239,10 @@ th small { display: block; margin-left: 0; }
   summary::before, .btn { transition: none; }
   .btn:active { transform: none; }
 }
+
+/* Research increments use the existing reading column, without a card grid. */
+.research-increment { border-block-start: 1px solid var(--line); margin-block: 28px; padding-block-start: 16px; }
+.progress-step { margin-block: 20px; overflow-wrap: anywhere; }
+.progress-step h3 { font-size: 16px; margin-block-end: 8px; }
+.progress-step blockquote { margin-inline: 0; padding-inline-start: 16px; border-inline-start: 2px solid var(--line); }
+[id^="claim-"] { scroll-margin-block-start: 20px; }

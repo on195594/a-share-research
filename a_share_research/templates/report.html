@@ -10,7 +10,7 @@
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
       <p class="small">研究流程：已完成并通过复核。以下判断针对本次研究范围，不是买卖建议。</p>
-      <p class="conclusion">研究判断：{{ body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
+      <p class="conclusion" id="claim-summary-0" tabindex="-1">研究判断：{{ body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
     {% else %}
       {% if body.facts_reviewed and body.facts and body.facts.values() | select | list %}
       <p class="notice caution" role="status">独立复核没有通过，不展示结论。仅保留本次原文与数字检查通过、且独立复核未指出问题的条目；不代表报告结论可靠。</p>
@@ -22,14 +22,14 @@
       {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
     {% endif %}
     <p class="small">研究问题：{% if body.question %}{{ body.question | truncate(90, true, '…') }} <a href="#answer">完整问题与回答</a>{% else %}未记录具体问题。{% endif %}</p>
-    <details id="evidence" tabindex="-1" {% if request and request.query_params.get('evidence') == '1' %}open{% endif %}>
+    <details id="evidence" tabindex="-1" {% if request and (request.query_params.get('evidence') == '1' or request.query_params.get('claim', '').startswith('gaps:')) %}open{% endif %}>
       <summary>证据日期与本报告记录的缺口{% if evidence and evidence.gaps %} · {{ evidence.gaps|length }} 项{% else %} · 缺口未记录{% endif %}{% if evidence and evidence.missing_dates %} · 公告日不完整{% endif %}</summary>
       <p>基础披露：{{ body.document.title if body.document else '未记录' }}。财务覆盖期不代表相应原文已全部阅读。</p>
       {% if evidence and evidence.announced %}<p>已存披露记录的公告日：{{ evidence.announced | join('、') }}。</p>{% else %}<p>公告可得日期未记录，不能用报告生成时间补足。</p>{% endif %}
       {% if evidence and evidence.missing_dates and evidence.announced %}<p>另有 {{ evidence.missing_dates }} 处披露日期记录不完整，以上日期并不完整。</p>{% endif %}
       <p>基础披露抓取于：{{ body.document.retrieved_at if body.document and body.document.retrieved_at else '未记录' }}。这些日期只对应已保存资料，不代表全部证据截至此日。</p>
       <p>以下缺口沿用本报告保存的文字，本页未重新核验；可能包含程序提示和模型记录。本页不区分各项来源，也不判断是否已解决。</p>
-      {% if evidence and evidence.gaps %}<ul>{% for gap in evidence.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% else %}<p>未记录明确的证据缺口，不代表资料充分或没有风险。</p>{% endif %}
+      {% if evidence and evidence.gaps %}<ul>{% for gap in evidence.gaps %}<li id="claim-gaps-{{ loop.index0 }}" tabindex="-1">{{ gap }}</li>{% endfor %}</ul>{% else %}<p>未记录明确的证据缺口，不代表资料充分或没有风险。</p>{% endif %}
       <a href="?scope=1#research-scope">展开完整研究范围与原文</a>
     </details>
     {% if market %}
@@ -46,7 +46,7 @@
   <nav aria-label="报告章节">
     <ul class="toc">
       <li><a href="#risks">风险与反证</a></li>
-      {% if body.question %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
+      {% if body.question or content.answer %}<li><a href="#answer">{{ answer_title }}</a></li>{% endif %}
       {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点</a></li>{% endif %}
       <li><a href="#business">业务</a></li>
       <li><a href="#financial">财务</a></li>
@@ -61,33 +61,33 @@
   {% set documents = dict(body.sources or {}, D0=dict(document=body.document or {})) %}
   <section id="risks" class="risks" tabindex="-1">
     <h2>主要风险与反证</h2>
-    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents) }}
+    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", request.query_params.get("claim", "") if request else "") }}
     {% else %}<p class="muted">本报告未记录可列出的风险，不代表没有风险。</p>{% endif %}
   </section>
-  {% if body.question %}
+  {% if body.question or content.answer %}
   <section id="answer" tabindex="-1">
     <h2>{{ answer_title }}</h2>
     {% if feedback %}<p>核查原报告的{{ feedback_label }}</p>{% endif %}
-    <p>{{ feedback.text if feedback else body.question }}</p>
+    <p>{{ feedback.text if feedback else (body.question or '未记录专门问题，以下为已保存的回答。') }}</p>
     {% if body.parent_report_id %}<p><a href="/reports/{{ body.parent_report_id }}">查看原报告</a></p>{% endif %}
     {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。</p>{% endif %}
-    {{ items(content.answer or [], rows, "可核查的回答", documents) }}
+    {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", request.query_params.get("claim", "") if request else "") }}
   </section>
   {% endif %}
   {% if content.checkpoints %}
   <section id="checkpoints" tabindex="-1">
     <h2>下期检查点</h2>
     <p class="muted">下一期披露时应观察的事项；出处只证明基期事实，不是预测。</p>
-    {{ items(content.checkpoints, rows, "检查点", documents) }}
+    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", request.query_params.get("claim", "") if request else "") }}
   </section>
   {% endif %}
   <section id="business">
     <h2>业务</h2>
-    {{ items(content.business or [], rows, "可列出的业务事实", documents) }}
+    {{ items(content.business or [], rows, "可列出的业务事实", documents, "business", request.query_params.get("claim", "") if request else "") }}
   </section>
   <section id="financial">
     <h2>财务</h2>
-    {{ items(content.financial or [], rows, "可列出的财务事实", documents) }}
+    {{ items(content.financial or [], rows, "可列出的财务事实", documents, "financial", request.query_params.get("claim", "") if request else "") }}
   </section>
 
   <section id="data">
@@ -117,7 +117,7 @@
   <section>
     <h2>本次可复用的方法</h2>
     <p class="muted">来自本次核查，使用时仍须核对适用条件；可以通过下方请求核查提出反证。</p>
-    {{ items(body.methods, rows, "研究方法", documents) }}
+    {{ items(body.methods, rows, "研究方法", documents, "methods", request.query_params.get("claim", "") if request else "") }}
   </section>
   {% endif %}
   {% if body.methods_used %}

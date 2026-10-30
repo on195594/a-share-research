@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import db, price, research, screening
+from a_share_research import db, price, research, screening, progress
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +24,10 @@ def main() -> None:
         row = conn.execute("SELECT id, kind FROM runs WHERE status = 'queued'"
                            " ORDER BY request_id LIKE 'batch-%', id LIMIT 1").fetchone()
         if row is None:
+            comparison = conn.execute("SELECT id FROM research_progress WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+            if comparison:
+                progress.execute(conn, comparison["id"])
+                continue
             # Batch steps run only when no single-company task is waiting.
             if not screening.tick(conn):
                 time.sleep(2)

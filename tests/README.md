@@ -23,6 +23,7 @@
 | 申万行业同业发现 | `test_industry_peers.py` |
 | 财务序列与同行快照 | `test_financial_series.py`、`test_peer_snapshots.py` |
 | 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py` |
+| 公司研究进展 | `test_progress.py`：真实捕获的引用、重复公告反例、幂等、HTTP 与隔离导入；人工绑定的结构互变样本不代表真实模型验收 |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
 | API、任务交付与部署 | `test_service_http.py`、`test_service_delivery.py`、`test_deploy.py` |
 

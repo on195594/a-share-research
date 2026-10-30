@@ -94,6 +94,34 @@ CREATE TABLE IF NOT EXISTS api_keys (
     token_hash TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS research_progress (
+    id INTEGER PRIMARY KEY,
+    fingerprint TEXT NOT NULL UNIQUE,
+    version TEXT NOT NULL,
+    baseline_id INTEGER NOT NULL REFERENCES reports(id),
+    current_id INTEGER NOT NULL REFERENCES reports(id),
+    input_hashes TEXT NOT NULL,
+    status TEXT NOT NULL,
+    body TEXT,
+    review TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS progress_calls (
+    id INTEGER PRIMARY KEY,
+    progress_id INTEGER NOT NULL REFERENCES research_progress(id),
+    stage TEXT NOT NULL CHECK(stage IN ('generate', 'review')),
+    status TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    response TEXT,
+    identity TEXT,
+    usage TEXT,
+    seconds REAL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(progress_id, stage)
+);
 """
 
 

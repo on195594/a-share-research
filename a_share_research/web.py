@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import db, screening, sources, service, reading
+from a_share_research import db, screening, sources, service, reading, progress
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -565,7 +565,7 @@ def api_revoke(request: Request):
 
 
 @app.get("/stock/{code}")
-def stock_page(request: Request, code: str):
+def stock_page(request: Request, code: str, report: int | None = None, progress_item: int | None = None):
     if not (session := current_session(request)):
         return login_required()
     reports = conn.execute(
@@ -578,8 +578,43 @@ def stock_page(request: Request, code: str):
     ).fetchall()
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
+    selected = next((r for r in reports if r['id'] == report), None) if report is not None else next((r for r in reports if not r['replay_of']), reports[0])
+    if selected is None:
+        return not_found(request, session, "这份报告不属于当前公司。")
+    advancement = progress.view(conn, selected['id'])
+    draft = None
+    if advancement['status'] == 'passed' and progress_item is not None and 0 <= progress_item < len(advancement['body']['items']):
+        draft = advancement['body']['items'][progress_item]['next_step']['text']
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex,
-                  price=latest_price(code), comparison=reading.comparison(conn, reports[0]))
+                  price=latest_price(code), comparison=reading.comparison(conn, selected),
+                  selected=selected, progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
+
+
+@app.post('/reports/{report_id}/progress')
+def submit_progress(request: Request, report_id: int, csrf: str = Form('')):
+    if not (session := current_session(request)):
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, '页面已过期', '请返回公司档案重新提交。', 403)
+    try:
+        progress.submit(conn, report_id)
+    except service.RequestError as exc:
+        return message(request, session, '无法整理研究进展', str(exc), exc.status)
+    row = conn.execute('SELECT code FROM reports WHERE id=?', (report_id,)).fetchone()
+    return RedirectResponse(f'/stock/{row["code"]}?report={report_id}#research-progress', status_code=303)
+
+
+@app.get('/api/reports/{report_id}/progress')
+def api_progress(request: Request, report_id: int):
+    api_session(request)
+    return progress.view(conn, report_id)
+
+
+@app.post('/api/reports/{report_id}/progress', status_code=202)
+def api_submit_progress(request: Request, report_id: int):
+    api_session(request)
+    identifier = progress.submit(conn, report_id)
+    return {'version': progress.VERSION, 'progress_id': identifier, **progress.view(conn, report_id)}
 
 
 def latest_price(code: str) -> dict | None:

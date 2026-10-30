@@ -5,13 +5,14 @@
 <section class="narrow">
   <h1>{{ reports[0].name }}</h1>
   <p class="code">{{ code }}</p>
-  {{ price_block(price, code, csrf, request_id) }}
-  {% include "_comparison.html" %}
+  {% if progress is defined %}{% include "_progress.html" %}{% endif %}
+  <details><summary>查看程序数据对照</summary>{% include "_comparison.html" %}</details>
   <h2>研究记录</h2>
   <ul class="list">
   {% for r in reports %}
     <li>
       <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
+      {% if r.parent_report_id or r.prior_report_id %}<a href="?report={{ r.id }}#research-progress">查看这次研究进展</a>{% endif %}
       {{ research_context(r.question, r.parent_report_id, r.feedback_text, r.prior_report_id) }}
       {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
       <p>{% if r.passed %}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}
@@ -19,6 +20,7 @@
     </li>
   {% endfor %}
   </ul>
+  {{ price_block(price, code, csrf, request_id) }}
   <div class="actions">{{ research_form(code[:6], csrf, request_id, "重新研究", cls="btn") }}</div>
 </section>
 {% endblock %}

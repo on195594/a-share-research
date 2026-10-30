@@ -17,9 +17,9 @@
 </form>
 {% endmacro %}
 
-{% macro cites(item, rows, sources={}) %}
+{% macro cites(item, rows, sources={}, opened=false) %}
 {% if item.cites %}
-<details class="source">
+<details class="source"{% if opened %} open{% endif %}>
   <summary>出处</summary>
   <ul>
   {% for c in item.cites %}
@@ -43,10 +43,10 @@
 {% endif %}
 {% endmacro %}
 
-{% macro items(list, rows, label, sources={}) %}
+{% macro items(list, rows, label, sources={}, section='', focus='') %}
 <ul class="items">
 {% for item in list %}
-  <li><p>{{ item.text }}</p>{{ cites(item, rows, sources) }}</li>
+  <li{% if section %} id="claim-{{ section }}-{{ loop.index0 }}" tabindex="-1"{% endif %}><p>{{ item.text }}</p>{{ cites(item, rows, sources, focus == section ~ ':' ~ loop.index0) }}</li>
 {% else %}
   <li class="muted">没有{{ label }}。</li>
 {% endfor %}

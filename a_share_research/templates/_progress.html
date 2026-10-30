@@ -1,0 +1,69 @@
+{% macro claim(value, label, advancement) %}
+<div class="progress-step">
+  <h3>{{ label }}</h3><p>{{ value.text }}</p>
+  <details class="source"><summary>{{ label }}的依据</summary>
+  {% for key in value.refs %}{% set ref = advancement.refs[key] %}
+    <p><a href="{{ ref.url }}">{{ ref.label }}</a></p><blockquote>{{ ref.text }}</blockquote>
+    {% for source in ref.sources %}
+      {% if source.kind == 'document' %}
+        <p>{{ source.document.title or '原文标题未记录' }} · {{ '第 ' ~ source.cite.page ~ ' 页' if source.cite.page else '页码未记录' }}</p>
+        <blockquote>{{ source.cite.quote }}</blockquote>
+        {% if source.url %}<a href="{{ source.url }}" rel="noreferrer noopener">打开对应原文页</a>{% else %}<p class="muted small">未保存可核对的已读页码；请从报告查看原文记录。</p>{% endif %}
+      {% else %}
+        <p>{{ source.row.label }}（{{ source.row.unit }}）：{% for period, value in source.row['values'].items() %}{% if not source.cite.period or period == source.cite.period or period == 'result' %}{{ period }} {{ value }}{% if not loop.last %}；{% endif %}{% endif %}{% endfor %}</p>
+        {% if source.row.calculation %}<p>已有程序计算：{{ source.row.calculation.formula }}。<a href="{{ ref.url }}">查看原段落出处中的完整计算输入</a></p>{% endif %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+  </details>
+</div>
+{% endmacro %}
+<section id="research-progress" tabindex="-1">
+  <h2>这轮研究推进了什么</h2>
+  {% if progress.current %}
+  <p><a href="/reports/{{ progress.baseline.id }}">上次报告 {{ progress.baseline.id }}</a> → <a href="/reports/{{ progress.current.id }}">本次报告 {{ progress.current.id }}</a></p>
+  <p class="muted">财务覆盖：{{ progress.baseline.period }} → {{ progress.current.period }}。{% if progress.baseline.period == progress.current.period %}同一期研究，补充认识不代表新一期经营改善。{% endif %}</p>
+  <p>上次问题：{{ progress.baseline.question or '未记录专门问题' }}<br>本次问题：{{ progress.current.question or '未记录专门问题' }}</p>
+  {% endif %}
+  {% if progress.status == 'passed' %}
+    <p class="muted small">以下比较已完成独立复核；只解释这两份已存报告，不代表风险关闭或投资推荐。</p>
+    {% for item in progress.body['items'] %}
+    <article class="research-increment">
+      <h2>{{ loop.index }} · {{ progress_kinds[item.kind] }}</h2>
+      {{ claim(item.before, '上次认识', progress) }}
+      {{ claim(item.change, '本次新增或修正', progress) }}
+      {{ claim(item.impact, '判断影响及原因', progress) }}
+      {{ claim(item.unresolved, '仍未解决', progress) }}
+      {{ claim(item.next_step, '下一步', progress) }}
+      <p><a href="?report={{ selected.id }}&amp;progress_item={{ loop.index0 }}#progress-followup">把这一步带入关联追问</a></p>
+    </article>
+    {% endfor %}
+    {% if progress.body.limits %}<details><summary>比较范围与限制</summary><ul>{% for limit in progress.body.limits %}<li>{{ limit }}</li>{% endfor %}</ul></details>{% endif %}
+    <details id="progress-followup" tabindex="-1" {% if progress_draft %}open{% endif %}>
+      <summary>继续弄清未解决的问题</summary>
+      <form method="post" action="/research" class="search">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="request_id" value="{{ request_id }}-progress-question">
+        <input type="hidden" name="q" value="{{ code[:6] }}">
+        <input type="hidden" name="parent_report_id" value="{{ selected.id }}">
+        <label for="progress-question">基于报告 {{ selected.id }} 的追问，可先编辑</label>
+        <textarea id="progress-question" name="question" rows="4" maxlength="4000" required>{{ progress_draft or '' }}</textarea>
+        <p class="hint">仅提交后才开始新的关联研究；以上比较和原报告均保留。</p>
+        <button class="btn" type="submit">提交关联追问</button>
+      </form>
+    </details>
+  {% elif progress.status == 'missing' %}
+    <p>尚未形成已审查的研究进展。这不表示两份报告没有变化。</p>
+    <form method="post" action="/reports/{{ selected.id }}/progress" class="search">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <p class="hint">只比较两份已有报告，一次生成、一次复核；不重新取数，不改原报告。浏览和刷新不会启动。</p>
+      <button class="btn" type="submit">整理这两份报告的进展</button>
+    </form>
+  {% elif progress.status in ['queued', 'running'] %}
+    <p role="status">{{ '等待整理' if progress.status == 'queued' else '整理已开始，尚无最终结果' }}。<a href="?report={{ selected.id }}#research-progress">查看最新状态</a></p>
+    <p class="muted small">重复提交不会增加调用。若执行中断，保留原任务供核对，不自动重试。</p>
+  {% else %}
+    <p class="notice caution">{{ progress.reason }}</p>
+  {% endif %}
+  <p><a href="/reports/{{ selected.id }}">阅读本次完整报告与原文</a></p>
+</section>

@@ -55,6 +55,14 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## Agent 研究 API
 
+公司档案提供“这轮研究推进了什么”：对明确关联的已通过报告，显式整理旧认识、增量、判断影响、仍未知与下一步，逐项回到原证据。没有已复核结果时说明缺失，原报告与程序对照继续可读。生成/复核只在 worker 执行，各一次，不取新数据、不自动重试；浏览、刷新和返回不调用模型。
+
+`GET /api/reports/{id}/progress` 读取相同结果；`POST /api/reports/{id}/progress` 显式排队，同一前后报告与输入版本共用一个记录。鉴权沿用下述 API Key。附属记录不回写研究正文，升级会新增 `research_progress` / `progress_calls` 表，生产迁移及部署须另行确认。
+
+本地或隔离库可使用 `uv run --env-file .env python -m a_share_research.progress <本次报告ID>` 只读检查；追加 `--generate` 才执行最多一次生成和一次复核，不重新探索。中断任务保留状态和调用预留记录，须先核对进程/调用结果，不能删除记录重试。真实样本验证范围与当前阻碍见[实施计划](docs/implementation-plan.md#工作包与状态)。
+
+已有授权 API 消费者导出的完整 `research-v1` JSON 可用 `uv run python -m a_share_research.progress_import --database /path/to/new-isolated/app.db report-40.json report-41.json report-42.json report-44.json` 导入新建隔离库。目标已存在则拒绝；保留正文、报告 ID 与导出证据哈希，不伪造原运行材料快照，也不复制访问令牌。普通网页登录会话不能调用 Bearer API。
+
 Skills 等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
 
 ```bash
