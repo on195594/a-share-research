@@ -413,6 +413,9 @@ class Acquisition:
             return {"error": "本次共享取证额度已用尽；按已有证据修正并明确缺口，不能宣称已解决。"}, True
         started = time.monotonic()
         sig = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
+        # A failure is valid only for the evidence it saw. A newly read page can make an
+        # identical calculation valid; trace/gap changes alone must not enable retries.
+        failure_key = (sig, self.evidence_key())
         failed = False
         conflict = None
         try:
@@ -420,15 +423,15 @@ class Acquisition:
                 raise ValueError("修正只允许发现/读取披露与核验计算，不刷新行情或整套财务数据")
             if call.get("argumentsError"):
                 raise ValueError(call["argumentsError"])
-            if sig in self.failures:
-                return self.failures[sig], True
+            if failure_key in self.failures:
+                return self.failures[failure_key], True
             result = self.toolkit.run(name, args)
         except evidence.EvidenceError as exc:
             # Charge and persist the failed attempt, then fail closed without merging any source.
             failed, result, conflict = True, {"error": str(exc)}, exc
         except Exception as exc:
             failed, result = True, {"error": str(exc)}
-            self.failures[sig] = result
+            self.failures[failure_key] = result
             log.warning("run %s tool %s: %s", self.runner.run_id, name, exc, exc_info=True)
             gap = f"{name}：{exc}"
             if gap not in self.material.extra["gaps"]:

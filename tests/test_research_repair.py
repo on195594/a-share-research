@@ -332,3 +332,26 @@ def test_diagnostics_separates_current_mechanical_failure_from_pending_history()
     assert view['failure']['stage'] == 'check' and view['review_binding']['completed'] is False
     assert 'prompt' not in view['review_binding']
     assert service.diagnostics('failed', {'problems': body['problems']})['review_binding'] is None
+
+
+def test_newly_read_evidence_invalidates_failed_calculation_without_resetting_limits(session):
+    _, material, acquisition = session
+    material.pages.pop(9)
+    material.raw_pages.pop(9)
+    call = {'name': 'calculate', 'arguments': {
+        'label': '销售费用占营收比', 'operation': 'ratio_pct',
+        'left': {'source': 'D0', 'page': 9, 'quote': MATERIAL.raw_pages[9],
+                 'value': '7,253,499,600.68', 'unit': '元', 'period': '2025-12-31', 'label': '销售费用'},
+        'right': {'ref': 'T.revenue', 'period': '2025-12-31'}}}
+    deadline = acquisition.deadline
+    first, failed = acquisition.tool_result(call, 'explore')
+    assert failed and len(acquisition.traces) == 1
+    material.extra['gaps'].append('仍待核查销售费用原文')
+    repeated, failed = acquisition.tool_result(call, 'repair')
+    assert failed and repeated == first and len(acquisition.traces) == 1
+    _, failed = acquisition.tool_result(read(9), 'repair')
+    assert not failed
+    result, failed = acquisition.tool_result(call, 'repair')
+    assert not failed and result['values'] == {'result': '4.22'}
+    assert len(acquisition.traces) == 3 and _fetches(acquisition.traces) == 1
+    assert acquisition.deadline == deadline
