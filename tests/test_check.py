@@ -112,3 +112,23 @@ def test_feedback_reports_do_not_require_checkpoints():
                     methods=[])
     del result["checkpoints"]
     assert check(result, material) == []
+
+
+def test_question_thresholds_and_report_ids_are_terms_not_claims():
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "相对报告37，经营现金流是否仍高于600亿元？"
+    ok = report(answer=[{"text": "相对报告37，经营现金流615.22亿元，仍高于600亿元。", "cites": [{"ref": "T.op_cash"}]}])
+    assert check(ok, material) == []
+    # Mutation: a figure the question does not set as a threshold still needs a source.
+    bad = report(answer=[{"text": "相对报告37，经营现金流580.00亿元，低于600亿元。", "cites": [{"ref": "T.op_cash"}]}])
+    assert [p["where"] for p in check(bad, material)] == ["answer[0]"]
+    # Mutation: a report id is dropped only as an identifier; the same digits as a figure are still checked.
+    bad = report(answer=[{"text": "经营现金流占营收约37%。", "cites": [{"ref": "T.op_cash"}]}])
+    assert [p["where"] for p in check(bad, material)] == ["answer[0]"]
+
+
+def test_facts_supplied_in_the_question_still_need_sources():
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "经营现金流由924.64亿元降至600.50亿元的原因是什么？"
+    bad = report(answer=[{"text": "经营现金流降至600.50亿元。", "cites": [{"ref": "T.op_cash"}]}])
+    assert [p["where"] for p in check(bad, material)] == ["answer[0]"]

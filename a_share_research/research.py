@@ -446,6 +446,24 @@ def _without_codes(text: str, material: Material) -> str:
     return re.sub(r"(?<!\d)(?:" + "|".join(codes) + r")(?!\d)", " ", text) if codes else text
 
 
+REPORT_ID = re.compile(r"(?:报告|report)\s*#?\s*\d+", re.I)
+QUESTION_THRESHOLD = re.compile(
+    r"(?:阈值|门槛|低于|高于|不低于|不高于|超过|跌破|突破|[<>≤≥]=?)\s*(-?\d+(?:\.\d+)?)")
+
+
+def _question_terms(material: Material) -> list[float]:
+    """Thresholds the asker set ("是否高于150亿元", "增速<15%") are terms of the question, not claims to cite.
+    Facts the asker supplied (e.g. "由7.14亿元降至-1.57亿元") are not exempt and still need sources."""
+    return [abs(float(v)) for v in QUESTION_THRESHOLD.findall(str(material.extra.get("question") or ""))]
+
+
+def _checked_figures(text: str, material: Material) -> list[tuple[float, int]]:
+    """Figures needing a source: drop identifiers (stock codes, report ids) and the question's own thresholds."""
+    terms = _question_terms(material)
+    return [(v, d) for v, d in _numbers(_without_codes(REPORT_ID.sub(" ", text), material))
+            if not any(abs(v - t) <= 0.5 * 10 ** -d + 1e-9 for t in terms)]
+
+
 def _candidates(cites: list[dict], material: Material) -> list[float]:
     rows = {r["id"]: r for r in material.table}
     values = []
@@ -515,14 +533,14 @@ def check(report: dict, material: Material) -> list[dict]:
             if errors:
                 continue
             candidates = _candidates(cites, material)
-            for value, decimals in _numbers(_without_codes(str(item.get("text", "")), material)):
+            for value, decimals in _checked_figures(str(item.get("text", "")), material):
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
     candidates = _candidates(all_cites, material) + [float(v) for r in material.table
                                                    for fld in ("values", "exact_values")
                                                    for v in r.get(fld, {}).values()]
-    for value, decimals in _numbers(_without_codes(summary, material)):
+    for value, decimals in _checked_figures(summary, material):
         if not _supported(value, decimals, candidates):
             problems.append({"where": "summary", "problem": f"数字 {value:g} 在报告出处与表中找不到"})
     return problems
