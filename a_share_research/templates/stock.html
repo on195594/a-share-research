@@ -4,17 +4,20 @@
 {% from "_card.html" import full_card %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
-<section class="narrow">
+<section>
   {{ full_card(card, due) }}
   <div class="actions card-actions">
     <a class="btn" href="/reports/{{ card.id }}">阅读完整报告</a>
-    <a href="/reports/{{ card.id }}#more">追问或请求核查</a>
-    <a href="#records">全部 {{ reports | length }} 份报告</a>
+    <a class="link" href="/reports/{{ card.id }}#more">追问或请求核查</a>
+    <a class="link" href="#records">全部 {{ reports | length }} 份报告</a>
   </div>
   {% if progress is defined %}{% include "_progress.html" %}{% endif %}
   {% if vitals %}
+  <details class="block vitals-fold" id="vitals">
+  <summary>近 8 期走势（财务体征）· 取自 {{ vitals_report.created_at[:10] }} 的报告</summary>
   {{ vitals_panel(vitals, "财务体征") }}
   <p class="small muted">取自<a href="/reports/{{ vitals_report.id }}">{{ vitals_report.created_at[:10] }} 的报告</a>保存的{{ vitals.source or "经营序列" }}，财务覆盖至 {{ vitals_report.period }}；不是实时数据。</p>
+  </details>
   {% endif %}
   <details><summary>查看程序数据对照</summary>{% include "_comparison.html" %}</details>
   <h2 id="records">研究记录</h2>

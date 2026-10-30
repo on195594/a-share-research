@@ -15,8 +15,8 @@
   --placeholder: #707780;
   /* charts: validated pair (OKLCH chroma >= 0.10, CVD ΔE >= 12 on surface); text never wears them */
   --chart-1: #3A5BC7;
-  --chart-1-dim: #B9C5EE;
-  --chart-2: #C8742A;
+  --chart-1-dim: #9AABE4;
+  --chart-2: #00908A;
   --chart-grid: #E3E0D8;
   --chart-band: #E4E9F8;
   --column: 760px;
@@ -160,8 +160,10 @@ form.inline { display: inline; margin: 0; }
 .conclusion { font-size: 18px; font-weight: 600; line-height: 1.6; margin: 16px 0; }
 .snapshot { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 100px), 1fr)); margin: 16px 0 4px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-/* Hairlines between cells, drawn outward so the clipped outer edge stays the border. */
+/* Hairlines between cells, drawn outward so the clipped outer edge stays the border; the last
+   cell runs to the row end so a short last row leaves no empty box. */
 .snapshot div { margin: 0; padding: 8px 12px; box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line); }
+.snapshot div:last-child { grid-column: auto / -1; }
 .snapshot dt { color: var(--muted); font-size: 13px; }
 .snapshot dd { margin: 0; font-size: 17px; font-weight: 650; white-space: nowrap; letter-spacing: -0.01em; }
 .snapshot small, th small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 2px; }
@@ -280,14 +282,15 @@ nav[aria-label="报告章节"], #batch-sections {
 .verdict span.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .verdict + .conclusion { margin-top: 12px; }
 .pips { display: inline-flex; gap: 2px; vertical-align: 1px; margin-right: 6px; }
-.pips i { width: 10px; height: 6px; border-radius: 1px; background: var(--line); }
-.pips i.on { background: var(--accent); }
+/* Unlit steps are hollow so the lit one reads by position, not by a faint tint. */
+.pips i { width: 10px; height: 6px; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--control); }
+.pips i.on { background: var(--accent); box-shadow: none; }
 
 .ledger { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 10px 0; margin: 12px 0 0;
   border-block: 1px solid var(--line); font-size: 14px; color: var(--muted); }
-.ledger li { display: inline-flex; align-items: center; min-height: 32px; }
+.ledger li { display: inline-flex; align-items: center; min-height: 40px; }
 .ledger b { color: var(--ink); font-size: 16px; font-weight: 700; margin-right: 3px; }
-.ledger a { color: var(--muted); text-decoration: none; min-height: 32px; display: inline-flex; align-items: center; }
+.ledger a { color: var(--muted); text-decoration: none; min-height: 40px; display: inline-flex; align-items: center; }
 .ledger a:hover { color: var(--accent-strong); text-decoration: underline; }
 
 .question { font-weight: 600; }
@@ -440,10 +443,6 @@ details.block[open] { padding-bottom: 12px; }
 @media (forced-colors: active) { .matrix td { border: 1px solid CanvasText; } }
 
 /* home: one line per company, verdict on the right */
-.company-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
-.company-verdict { font-size: 14px; white-space: nowrap; }
-.companies p.small { margin-top: 0; }
-.companies > li[hidden] { display: none; }
 
 /* ---------- citation badges & section controls ---------- */
 .cite-meta {
@@ -505,11 +504,11 @@ details.block[open] { padding-bottom: 12px; }
 .filter-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .pill {
   display: inline-flex; align-items: center; gap: 5px;
-  font: inherit; font-size: 13px; padding: 4px 10px; min-height: 36px;
-  border: 1px solid var(--line); border-radius: var(--radius);
-  background: var(--surface); color: var(--ink); cursor: pointer;
+  font: inherit; font-size: 13px; padding: 4px 12px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink); cursor: pointer; text-decoration: none;
 }
-.pill:hover { border-color: var(--accent); background: var(--band); }
+.pill:hover { border-color: var(--accent); background: var(--band); color: var(--ink); text-decoration: none; }
 .pill.active { border-color: var(--accent); background: var(--band); color: var(--accent-strong); font-weight: 600; }
 .pill .num { color: var(--muted); font-size: 12px; font-weight: 400; }
 
@@ -557,22 +556,24 @@ details.block[open] { padding-bottom: 12px; }
 .card-list li { position: relative; counter-increment: item; padding: 0 0 0 30px; margin: 0 0 12px; line-height: 1.65; overflow-wrap: anywhere; }
 .card-list li::before { content: counter(item); position: absolute; left: 0; top: 2px; width: 20px; height: 20px; border-radius: 50%;
   font-size: 12px; line-height: 20px; text-align: center; background: var(--band); color: var(--muted); font-weight: 600; }
-.card-list.risk li::before { background: var(--caution-bg); color: var(--caution-ink); }
-a.plain { color: inherit; text-decoration: none; }
-a.plain:hover { text-decoration: underline; text-decoration-color: var(--control); }
+.card-list.after-first { counter-reset: item 1; }
+.card-list.risk { border-left: 3px solid var(--caution); padding-left: 12px; }
+.card-list.risk li::before { background: var(--caution-bg); color: var(--caution-ink); box-shadow: inset 0 0 0 1px var(--caution); }
+/* List items link to their place in the report; a faint underline says so on touch screens too. */
+a.plain { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
+a.plain:hover { text-decoration-color: var(--accent); }
 .card-fold { margin: 12px 0 0; border-top: 1px solid var(--line); }
-.card-keys + .card-note + .card-fold { border-top: 0; }
 .card-fold > summary { font-size: 14px; color: var(--accent); min-height: 44px; display: flex; align-items: center; }
 .card-fold[open] > summary { margin-bottom: 0; }
 .card-foot { display: flex; gap: 4px 20px; margin: 4px -16px 0; padding: 0 16px; border-top: 1px solid var(--line); font-size: 14px; }
 .card-foot a { min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; font-weight: 500; }
 .card-foot a:hover { text-decoration: underline; }
 /* Full card: a check-up table, one dimension per row, metrics flowing in a row. */
-.card.full { padding-bottom: 8px; margin: 12px 0 20px; }
+.card.full { padding-bottom: 16px; margin: 12px 0 20px; }
 .card-section { margin: 0; }
 .card-section h2.card-label { margin-top: 22px; }
 .checkup { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.checkup th, .checkup td { border: 0; border-top: 1px solid var(--line); padding: 10px 0; vertical-align: top; text-align: left; }
+.checkup th, .checkup td { border: 0; border-top: 1px solid var(--line); padding: 10px 0; vertical-align: top; text-align: left; white-space: normal; }
 .checkup tr:last-child th, .checkup tr:last-child td { border-bottom: 1px solid var(--line); }
 .checkup th { width: 44px; font-size: 13px; font-weight: 650; color: var(--muted); padding-top: 12px; }
 .checkup-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
@@ -584,8 +585,27 @@ a.plain:hover { text-decoration: underline; text-decoration-color: var(--control
 .checkup-prior { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .card-actions { margin-top: 0; }
 .active-runs h3 { margin-top: 8px; }
+@media (max-width: 420px) {
+  .card-keys { padding: 8px 0; }
+  .card-keys div { padding: 0 4px; }
+  .card-keys dd { font-size: 14px; }
+}
 @media (min-width: 1100px) {
   /* Cards spread to two columns on wide screens, beyond the reading column. */
   .wide { width: min(1120px, calc(100vw - 40px)); margin-left: calc(50% - min(560px, 50vw - 20px)); }
-  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Cards in a row share a height; the thesis takes the slack so the figures line up. */
+  .card { display: flex; flex-direction: column; }
+  .card-thesis { flex: 1 0 auto; }
+  .card-foot { margin-top: auto; }
 }
+
+/* Start form: one always-visible search row; the optional question folds below it. */
+.start { margin: 8px 0 0; }
+.start .search label[for="q"] { margin-top: 0; }
+.search details.question > summary { margin-top: 4px; }
+.search details.question textarea { margin-top: 4px; }
+.card-thesis + .card-label.risk { margin-top: 14px; }
+.card-keys + .card-note + .card-label.risk { margin-top: 14px; }
+.vitals-fold { margin-top: 8px; }
+.vitals-fold > summary { font-size: 15px; }

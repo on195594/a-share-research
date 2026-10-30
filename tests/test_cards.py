@@ -61,7 +61,10 @@ def test_card_text_is_never_truncated():
     # The summary card folds the lists but keeps every item whole; the full card shows them open.
     for html in (compact, full):
         assert all(escaped(t) in html for t in card['risks'] + card['checkpoints'])
-    assert f"{len(card['risks'])} 条风险与反证" in compact and '<details class="card-fold">' in compact
+    # The first counter-evidence stays outside the fold, as visible as the thesis; the rest fold.
+    first, fold = compact.index(escaped(card['risks'][0])), compact.index('<details class="card-fold">')
+    assert first < fold and f"其余 {len(card['risks']) - 1} 条风险与反证" in compact
+    assert 'claim=risks:1#claim-risks-1' in compact[fold:] and 'claim=risks:0#' not in compact[fold:]
     # The coverage predates the due report, so the card says so without claiming an announcement.
     assert '资料未覆盖 2026 年三季报' in compact
 
@@ -70,3 +73,25 @@ def test_card_buckets_match_the_home_verdict_strip():
     rows = [RECORDS[39], dict(RECORDS[25], passed=0)]
     strip = charts.verdict_summary(rows)['buckets']
     assert {r['code']: reading.card(r, r['body'])['bucket'] for r in rows} == strip
+
+
+def test_card_renders_standalone_with_report_dates_and_unicode_minus():
+    report = RECORDS[39]
+    card = reading.card(report, report['body'])
+    # Standalone card has created_at and coverage populated from report
+    assert card['created_at'] == report['created_at']
+    assert card['coverage'] is not None
+    # Render without manual dict merge
+    summary_html = str(CARD.summary_card(card))
+    full_html = str(CARD.full_card(card))
+    assert '研究于' in summary_html
+    assert '财务体检' in full_html
+
+    # Test signed values with unicode minus sign − and ascii minus -
+    mock_metric_ascii = {'label': '测试A', 'unit': '%', 'value': '-5.20', 'signed': True, 'unavailable': False, 'prior': '-3.10'}
+    mock_metric_unicode = {'label': '测试U', 'unit': '%', 'value': '−5.20', 'signed': True, 'unavailable': False, 'prior': '−3.10'}
+    mock_metric_pos = {'label': '测试P', 'unit': '%', 'value': '5.20', 'signed': True, 'unavailable': False, 'prior': '3.10'}
+    assert str(CARD.value(mock_metric_ascii)) == '-5.20<small>%</small>'
+    assert str(CARD.value(mock_metric_unicode)) == '−5.20<small>%</small>'
+    assert str(CARD.value(mock_metric_pos)) == '+5.20<small>%</small>'
+

@@ -164,6 +164,15 @@ def test_explicit_150_threshold_and_report_37_remain_readable_without_invented_s
     assert check(draft, material) == []
 
 
+@pytest.mark.parametrize("prefix", ["大于", "小于", "不大于", "不小于", "高于", "低于", "不高于", "不低于"])
+def test_chinese_comparative_threshold_prefixes_are_exempt(prefix):
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = f"相对报告37，经营现金流是否{prefix}150亿元？"
+    draft = report(answer=[{"text": f"相对报告37，经营现金流615.22亿元，{prefix}150.00亿元。",
+                            "cites": [{"ref": "T.op_cash"}]}])
+    assert check(draft, material) == []
+
+
 def test_unrecognized_threshold_units_are_not_silently_treated_as_unitless():
     material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
     material.extra["question"] = "经营现金流是否高于600美元？"

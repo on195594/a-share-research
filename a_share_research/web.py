@@ -301,16 +301,19 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
                                            {r["code"]: r["name"] for r in loaded["q20"] or []})
     companies, batch_only = latest_reports()
     pending, pending_more = reading.pending_reviews(conn)
-    bodies = {r["id"]: json.loads(r["body"]) for r in conn.execute(
-        f"SELECT id, body FROM reports WHERE id IN ({','.join('?' * len(companies))})", [c["id"] for c in companies])}
-    passed_before = {}
-    for r in conn.execute(
-            "SELECT r.id, r.code, r.verdict, r.created_at FROM reports r JOIN runs u ON u.id = r.run_id"
-            " WHERE r.passed = 1 AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC"):
-        passed_before.setdefault(r["code"], r)
-    cards = [reading.card(c, bodies[c["id"]], None if c["passed"] else passed_before.get(c["code"]))
-             | {"coverage": c["coverage"], "created_at": c["created_at"], "from_batch": c["from_batch"]}
-             for c in companies]
+    if companies:
+        bodies = {r["id"]: json.loads(r["body"]) for r in conn.execute(
+            f"SELECT id, body FROM reports WHERE id IN ({','.join('?' * len(companies))})", [c["id"] for c in companies])}
+        passed_before = {}
+        for r in conn.execute(
+                "SELECT r.id, r.code, r.verdict, r.created_at FROM reports r JOIN runs u ON u.id = r.run_id"
+                " WHERE r.passed = 1 AND json_extract(u.identity, '$.replay_of') IS NULL ORDER BY r.id DESC"):
+            passed_before.setdefault(r["code"], r)
+        cards = [reading.card(c, bodies[c["id"]], None if c["passed"] else passed_before.get(c["code"]))
+                 | {"from_batch": c["from_batch"]}
+                 for c in companies]
+    else:
+        cards = []
     listed = {r['id'] for r in pending}
     return render(request, "home.html", session, status, companies=cards, batch_only=batch_only,
                   verdict_summary=charts.verdict_summary(companies),

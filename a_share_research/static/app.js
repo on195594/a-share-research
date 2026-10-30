@@ -70,24 +70,22 @@ function reveal() {
 window.addEventListener("hashchange", reveal);
 if (location.hash) reveal();
 
-// Home page verdict filter pills: filter the researched companies list in place.
+// Home page verdict filter: each pill links to its group, so without a script it jumps there;
+// with one it shows only that group in place.
 document.addEventListener("click", (event) => {
   const pill = event.target.closest?.("[data-verdict-filter]");
   if (!pill) return;
+  event.preventDefault();
   const target = pill.dataset.verdictFilter;
-  const bar = pill.closest(".filter-pills");
-  if (bar) {
-    bar.querySelectorAll("[data-verdict-filter]").forEach((btn) => {
-      const on = btn === pill;
-      btn.classList.toggle("active", on);
-      btn.setAttribute("aria-pressed", String(on));
-    });
-  }
+  pill.parentElement.querySelectorAll("[data-verdict-filter]").forEach((el) => {
+    el.classList.toggle("active", el === pill);
+    if (el === pill) el.setAttribute("aria-current", "true"); else el.removeAttribute("aria-current");
+  });
   let shown = 0;
-  document.querySelectorAll(".companies > [data-verdict]").forEach((item) => {
-    const match = target === "all" || item.dataset.verdict === target;
-    item.hidden = !match;
-    if (match) shown += 1;
+  document.querySelectorAll(".companies > [data-verdict]").forEach((group) => {
+    const match = target === "all" || group.dataset.verdict === target;
+    group.hidden = !match;
+    if (match) shown += group.querySelectorAll(".card").length;
   });
   const status = document.querySelector("[data-filter-status]");
   if (status) status.textContent = `当前显示 ${shown} 家公司`;

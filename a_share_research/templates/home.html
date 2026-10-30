@@ -14,18 +14,21 @@
 {% endmacro %}
 {% block main %}
 <h1>研究首页</h1>
-<details class="start" {% if not pending or error or choices or recent or q %}open{% endif %}>
-  <summary>开始新的研究</summary>
+<section class="start" aria-labelledby="start-title">
+  <h2 class="visually-hidden" id="start-title">开始新的研究</h2>
   <form method="post" action="/research" class="search">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request_id" value="{{ request_id }}">
-    <label for="q">代码或简称</label>
+    <label for="q">研究一家公司</label>
     <div class="row">
-      <input id="q" name="q" value="{{ q or '' }}" placeholder="600519 或 茅台" autocomplete="off" enterkeyhint="go" required>
+      <input id="q" name="q" value="{{ q or '' }}" placeholder="代码或简称，如 600519 或 茅台" autocomplete="off" enterkeyhint="go" required>
       <button class="btn" type="submit">开始研究</button>
     </div>
-    <label for="question">想弄清什么？<span class="muted">（选填）</span></label>
-    <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：最新财报改变了什么，利润与现金流是否一致？">{{ question or '' }}</textarea>
+    <details class="question"{% if question %} open{% endif %}>
+      <summary>补充想弄清的问题（选填）</summary>
+      <label for="question" class="visually-hidden">想弄清什么？</label>
+      <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：最新财报改变了什么，利润与现金流是否一致？">{{ question or '' }}</textarea>
+    </details>
     <p class="hint">按问题补读定期报告、核对财务与计算，通常需要几分钟。银行、保险、券商暂不支持。</p>
   </form>
 
@@ -44,7 +47,7 @@
     </div>
   </div>
   {% endif %}
-</details>
+</section>
 
 <section aria-labelledby="attention">
   <h2 id="attention" tabindex="-1">待处理事项</h2>
@@ -65,37 +68,28 @@
     {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
   {% else %}<p>没有符合上述范围的待核查记录。</p>{% endif %}
   <details><summary>提醒范围</summary><p>仅列原报告存在且就绪、尚未通过复核的已提交核查；完成不等于已读，也不表示投资判断正确。</p><p>尚未接入持续的新公告监测，检查点也未记录可自动判定的到期日期。当前不能确认这两类事项，不代表没有新证据或风险。关联记录缺失的核查无法纳入本清单，可从公司档案核对历史任务。</p></details>
-  <p><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
 </section>
 
-<section class="wide" aria-labelledby="companies">
-  <h2 id="companies">主动研究过的公司 · {{ companies|length }} 家</h2>
-  {% if companies %}<p class="hint">按最新一份报告的判断分组，组内最近研究的在前；未通过复核的不展示判断。卡上数字均为研究时保存的值：增速为最新报告期累计同比，市盈率、股息率为 TTM、按研究当日收盘，不是实时行情。检查点尚不能自动判定是否到期。</p>{% endif %}
+<section aria-labelledby="companies">
+  <h2 id="companies" tabindex="-1">主动研究过的公司 · {{ companies|length }} 家</h2>
+  <p class="small"><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
+  {% if companies %}<p class="hint">按最新一份报告的判断分组，组内最近研究的在前；未通过复核的不展示判断。卡上数字均为研究时保存的值：营收与扣非为最新报告期累计同比，市盈率、股息率为 TTM、按研究当日收盘，不是实时行情。检查点尚不能自动判定是否到期。</p>{% endif %}
   {% if companies %}
   {% if verdict_summary is defined and verdict_summary %}
-  <div class="verdict-overview">
-    <svg width="100%" height="8" class="strip-bar single-hue" role="img" aria-label="主动研究过的公司最新判断分布">
-      {% for item in verdict_summary["items"] %}
-      <rect x="{{ item.x }}%" y="0" width="{{ item.w }}%" height="8" class="seg">
-        <title>{{ item.label }}：{{ item.count }} 家（{{ item.pct }}%）</title>
-      </rect>
-      {% endfor %}
-    </svg>
-    <div class="filter-pills" role="toolbar" aria-label="按最新研究判断筛选公司">
-      <button type="button" class="pill active" data-verdict-filter="all" aria-pressed="true">全部 <span class="num">{{ verdict_summary.total }}</span></button>
-      {% for item in verdict_summary["items"] %}
-      <button type="button" class="pill" data-verdict-filter="{{ item.label }}" aria-pressed="false">{{ item.label }} <span class="num">{{ item.count }}</span></button>
-      {% endfor %}
-    </div>
-    <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
-  </div>
+  <nav class="filter-pills" aria-label="按最新研究判断查看">
+    <a class="pill active" href="#companies" data-verdict-filter="all" aria-current="true">全部 <span class="num">{{ verdict_summary.total }}</span></a>
+    {% for item in verdict_summary["items"] %}
+    <a class="pill" href="#group-{{ item.label }}" data-verdict-filter="{{ item.label }}">{{ item.label }} <span class="num">{{ item.count }}</span></a>
+    {% endfor %}
+  </nav>
+  <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
   {% endif %}
-  <div class="companies">
+  <div class="companies wide">
   {% for label in ["值得继续研究", "需要谨慎", "暂不值得", "复核未通过"] %}
   {% set group = companies | selectattr("bucket", "equalto", label) | list %}
   {% if group %}
-  <section class="card-group" data-verdict="{{ label }}" aria-labelledby="group-{{ loop.index }}">
-    <h3 class="group-title" id="group-{{ loop.index }}">{{ label }} <span class="num">{{ group | length }}</span></h3>
+  <section class="card-group" data-verdict="{{ label }}" aria-labelledby="group-{{ label }}">
+    <h3 class="group-title" id="group-{{ label }}" tabindex="-1">{{ label }} <span class="num">{{ group | length }}</span></h3>
     <div class="cards">{% for c in group %}{{ summary_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>
   </section>
   {% endif %}
