@@ -433,14 +433,16 @@ def _supported(value: float, decimals: int, candidates: list[float]) -> bool:
     return any(abs(abs(c) * s - value) <= tolerance for c in candidates for s in SCALES)
 
 
-def _known_codes(material: Material) -> list[float]:
+def _without_codes(text: str, material: Material) -> str:
+    """Stock codes are identifiers, not figures: drop them rather than accept them as supported values."""
     codes = {material.code[:6]} | {r["id"][1:7] for r in material.table if re.match(r"^P\d{6}\.", r["id"])}
-    return [float(c) for c in codes if c.isdigit()]
+    codes = sorted(c for c in codes if c.isdigit())
+    return re.sub(r"(?<!\d)(?:" + "|".join(codes) + r")(?!\d)", " ", text) if codes else text
 
 
 def _candidates(cites: list[dict], material: Material) -> list[float]:
     rows = {r["id"]: r for r in material.table}
-    values = _known_codes(material)
+    values = []
     for cite in cites:
         if "ref" in cite and cite["ref"] in rows:
             row = rows[cite["ref"]]
@@ -520,14 +522,14 @@ def check(report: dict, material: Material) -> list[dict]:
                 elif not _quote_found(cite, material):
                     problems.append({"where": where, "problem": f"第 {cite.get('page')} 页找不到引文：{str(cite.get('quote', ''))[:60]}"})
             candidates = _candidates(cites, material)
-            for value, decimals in _numbers(str(item.get("text", ""))):
+            for value, decimals in _numbers(_without_codes(str(item.get("text", "")), material)):
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
     candidates = _candidates(all_cites, material) + [float(v) for r in material.table
                                                    for field in ("values", "exact_values")
                                                    for v in r.get(field, {}).values()]
-    for value, decimals in _numbers(summary):
+    for value, decimals in _numbers(_without_codes(summary, material)):
         if not _supported(value, decimals, candidates):
             problems.append({"where": "summary", "problem": f"数字 {value:g} 在报告出处与表中找不到"})
     return problems

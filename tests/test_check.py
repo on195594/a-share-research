@@ -21,6 +21,9 @@ def test_quote_not_in_cited_page_is_flagged():
 def test_years_and_months_are_not_checked_as_figures():
     ok = report(business=[{"text": "截至2025-12-31，600519在2025年12月销售费用增加主要因为广告宣传。", "cites": [SALES]}])
     assert check(ok, MATERIAL) == []
+    # A code is skipped as an identifier, never accepted as a figure at some scale (600519 × 1e-4 ≈ 60.05).
+    bad = report(business=[{"text": "600519销售费用率约60.05%。", "cites": [SALES]}])
+    assert [p["where"] for p in check(bad, MATERIAL)] == ["business[0]"]
 
 
 def test_cited_calculation_supports_its_verified_inputs_and_input_periods():

@@ -91,6 +91,8 @@ def _operand(side: dict, rows: dict, material) -> dict:
         raise ValueError("计算输入须为对象")
     clean = {k: v for k, v in side.items() if v is not None and v != ""}
     if set(clean) <= {"ref", "period"} and "ref" in clean and not (set(side) - {"ref", "period", "source", "page", "quote", "value", "unit", "label"}):
+        if clean["ref"] not in rows:
+            raise ValueError(f"表中没有 {clean['ref']}；可引用 financials 返回的行或此前计算得到的 C.n")
         row = rows[clean["ref"]]
         value_field = "exact_values" if "exact_values" in row else "values"
         period = clean.get("period") or ("result" if set(row.get(value_field, {})) == {"result"} else None)
@@ -98,6 +100,9 @@ def _operand(side: dict, rows: dict, material) -> dict:
             raise ValueError("表格输入须指定 period")
         if reason := row.get("unavailable", {}).get(period):
             raise ValueError(f"{period} 更正版本待核对：{reason}")
+        if period not in row.get(value_field, {}):
+            # Tell the model what exists so it can retry instead of guessing.
+            raise ValueError(f"{clean['ref']} 没有期间 {period}；可用期间：{'、'.join(sorted(row.get(value_field, {}))) or '无'}")
         return {"ref": clean["ref"], "period": period, "label": row["label"],
                 "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
     if {"page", "quote", "value", "unit"} <= set(clean) and not clean.get("ref"):

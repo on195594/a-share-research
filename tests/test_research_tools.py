@@ -35,8 +35,10 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     assert chained["calculation"]["inputs"][0]["period"] == "result"
     with pytest.raises(ValueError, match="单位"):
         calculate(table, "不同单位", "ratio", left, {"ref": "T.roe", "period": "2025-12-31"})
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="可用期间：.*2024-12-31"):
         calculate(table, "缺失", "ratio", left, right | {"period": "1900-06-30"})
+    with pytest.raises(ValueError, match="表中没有 T.nope"):
+        calculate(table, "缺失", "ratio", left, {"ref": "T.nope", "period": "2025-12-31"})
 
     # Direct calculations on verified PDF disclosure figures (exact quote token + unit conversion).
     pdf_2025 = {"source": "D0", "page": 9, "quote": "销售费用 7,253,499,600.68 5,639,300,059.49 28.62",
