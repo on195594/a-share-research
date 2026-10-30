@@ -399,6 +399,24 @@ def test_issue_on_a_deleted_item_closes_with_empty_targets_but_an_omission_canno
     assert [i["id"] for i in pending] == [omission_id]
 
 
+@pytest.mark.parametrize("where", ["missing", "risks[0]", "risks[1]"])
+def test_omission_needs_a_new_target_regardless_of_its_original_location(where):
+    ledger = ReviewLedger()
+    draft = REVIEW["report"]
+    accept(ledger, payload(ledger, draft, issues=[issue() | {"where": where}]))
+    before = ledger.snapshot()
+    decision = {"id": ledger.pending()[0]["id"], "status": "resolved", "reason": issue()["problem"],
+                "targets": [], "evidence": issue()["evidence"]}
+    with pytest.raises(ReviewFormatError, match=decision["id"]):
+        accept(ledger, payload(ledger, draft, resolutions=[decision]))
+    assert ledger.snapshot() == before  # Rejection cannot consume or close the pending omission.
+    # A bound reviewer can still give a real target, or refute the finding with stored evidence.
+    # These are structural protocol mutations, not claims that the captured criticism was resolved.
+    for valid in (decision | {"targets": ["risks[0]"]}, decision | {"status": "dismissed"}):
+        candidate = deepcopy(ledger)
+        assert accept(candidate, payload(candidate, draft, resolutions=[valid])) == []
+
+
 class Replies:
     """Feeds fixed protocol responses to review(); it renders no financial content of its own."""
 

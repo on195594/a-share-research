@@ -132,3 +132,40 @@ def test_facts_supplied_in_the_question_still_need_sources():
     material.extra["question"] = "经营现金流由924.64亿元降至600.50亿元的原因是什么？"
     bad = report(answer=[{"text": "经营现金流降至600.50亿元。", "cites": [{"ref": "T.op_cash"}]}])
     assert [p["where"] for p in check(bad, material)] == ["answer[0]"]
+
+
+@pytest.mark.parametrize("section", ["answer", "summary"])
+@pytest.mark.parametrize("text", ["经营现金流600亿元。", "经营现金流600亿元，未高于600亿元。"])
+def test_repeating_a_question_threshold_does_not_exempt_the_same_factual_amount(section, text):
+    # Boundary mutation of the real Moutai amounts: 600 is not the recorded 615.22.
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "相对报告37，经营现金流是否仍高于600亿元？"
+    draft = report(answer=[{"text": "经营现金流615.22亿元。", "cites": [{"ref": "T.op_cash"}]}])
+    draft[section] = (draft["verdict"] + "：" + text if section == "summary"
+                      else [{"text": text, "cites": [{"ref": "T.op_cash"}]}])
+    problems = check(draft, material)
+    assert len(problems) == 1 and "数字 600 " in problems[0]["problem"]
+    assert problems[0]["where"] == ("summary" if section == "summary" else "answer[0]")
+
+
+@pytest.mark.parametrize("threshold", ["600万元", "600%", "-600亿元", "600.1亿元"])
+def test_threshold_exemption_keeps_unit_sign_and_exact_value(threshold):
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "经营现金流是否高于600亿元？"
+    draft = report(answer=[{"text": f"经营现金流低于{threshold}。", "cites": [{"ref": "T.op_cash"}]}])
+    assert [p["where"] for p in check(draft, material)] == ["answer[0]"]
+
+
+def test_explicit_150_threshold_and_report_37_remain_readable_without_invented_sources():
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "相对报告37，经营现金流是否高于150亿元？"
+    draft = report(answer=[{"text": "相对报告37，经营现金流615.22亿元，高于150.00亿元。",
+                            "cites": [{"ref": "T.op_cash"}]}])
+    assert check(draft, material) == []
+
+
+def test_unrecognized_threshold_units_are_not_silently_treated_as_unitless():
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "经营现金流是否高于600美元？"
+    draft = report(answer=[{"text": "经营现金流低于600港元。", "cites": [{"ref": "T.op_cash"}]}])
+    assert [p["where"] for p in check(draft, material)] == ["answer[0]"]

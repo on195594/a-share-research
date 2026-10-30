@@ -160,7 +160,9 @@ class ReviewLedger:
             if status not in ("resolved", "unresolved", "dismissed") or not _text(resolution.get("reason")):
                 raise ReviewFormatError(f"{resolution['id']}：复核问题状态须为 resolved/unresolved/dismissed 且附理由")
             if status != "unresolved":
-                proof(resolution, targets=status == "resolved", removable=pending[resolution["id"]]["where"] != "missing")
+                original = pending[resolution["id"]]
+                proof(resolution, targets=status == "resolved",
+                      removable=original["type"] != "omission" and original["where"] != "missing")
             updated[resolution["id"]] |= {"status": status, "resolution": _decision_view(resolution),
                                            "reviewed_draft_sha256": draft}
 
@@ -212,7 +214,7 @@ problem: 具体问题, importance: 为什么会影响本次问题或结论, evid
 where 是单个位置，如 risks[0]、business[1]、gaps[0]、summary、verdict，或 missing。
 omission/claim 必须给支持批评的已读原文/表格/程序计算出处，不能只凭经验列风险清单；question 可无出处。
 resolutions: 对下方每个 unresolved_issues 的 ID 恰好一项 {id, status: resolved/unresolved/dismissed,
-reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；
+reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；omission 无论 where 指向何处都不能用空 targets 解决。
 dismissed 表示原批评不成立，必须用证据说明理由；unresolved 保留阻断并说明仍缺什么。不能因修复者声称完成或本轮未再提起就关闭。
 risk_resolutions: 对下方每个 changed_risks 的 ID 恰好一项 {id, status: retained/merged/dismissed,
 reason, targets, evidence}；可有依据地改写、合并或反驳原风险，多项可指向同一新版条目，不按条数或措辞机械否决。
