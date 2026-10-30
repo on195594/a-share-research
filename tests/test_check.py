@@ -1,10 +1,12 @@
 """Mechanical report checks, on excerpts and figures from 贵州茅台2025年年度报告 and TuShare."""
 
 import json
+from pathlib import Path
 
 import pytest
 
 from a_share_research.research import Material, ResearchError, check
+from a_share_research.sources import Document
 from support.reports import MATERIAL, SALES, report
 
 
@@ -53,6 +55,44 @@ def test_snapshot_preserves_prompt_and_checks():
     snapshot["data"]["table"].pop()
     with pytest.raises(ResearchError, match="哈希"):
         Material.from_snapshot(snapshot)
+
+
+@pytest.mark.parametrize("include_supplements", [False, True])
+def test_material_prompt_preserves_captured_base_disclosure_identity(include_supplements):
+    # Source-metadata regression on production report 37, not a replay of failed report 43.
+    records = json.loads((Path(__file__).parent / "data/continuation-records.json").read_text())["records"]
+    body = next(r["report"]["body"] for r in records if r["report"]["id"] == 37)
+    doc = Document(**body["document"])
+    supplements = {key: {"document": value["document"], "pages": {}}
+                   for key, value in body["sources"].items()}
+    # These captures contain source identities, not the complete page texts. Do not invent pages.
+    material = Material(doc.code, doc.name, doc, {}, {}, body["table"], body["market_date"],
+                        {"sources": supplements} if include_supplements else {})
+    before = material.snapshot()
+    prompt = material.prompt_block()
+    marker = "## 基础披露来源（source=D0；未写 source 的原文引文也对应 D0）\n"
+    identity = json.loads(prompt.split(marker, 1)[1].split("\n", 1)[0])
+    assert identity == {"document": body["document"], "read_pages": []}
+    assert doc.url and doc.sha256 and doc.announced
+    if include_supplements:
+        saved = json.loads(prompt.split("# 补充资料（source 标识用于 cites）\n", 1)[1].split("\n", 1)[0])
+        assert saved == supplements  # D0 does not overwrite the independent D1/D6 identities.
+    assert material.snapshot() == before
+    restored = Material.from_snapshot(json.loads(json.dumps(before)))
+    assert restored.prompt_block() == prompt and restored.snapshot()["sha256"] == before["sha256"]
+
+
+def test_material_prompt_keeps_unknown_url_and_actual_read_pages():
+    # Normal Moutai excerpt fixture has no captured URL; exposing metadata must not invent one.
+    prompt = MATERIAL.prompt_block()
+    marker = "## 基础披露来源（source=D0；未写 source 的原文引文也对应 D0）\n"
+    identity = json.loads(prompt.split(marker, 1)[1].split("\n", 1)[0])
+    assert identity["document"] == MATERIAL.doc.info()
+    assert identity["document"]["url"] == ""
+    assert identity["read_pages"] == sorted(MATERIAL.pages)
+    for page, text in MATERIAL.pages.items():
+        assert f'<page n="{page}">\n{text}\n</page>' in prompt
+    assert check(report(), MATERIAL) == []
 
 
 def test_checkpoint_thresholds_must_come_from_cited_figures():

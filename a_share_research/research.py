@@ -104,6 +104,8 @@ class Material:
         block = (
             f"公司：{self.name}（{self.code}）\n\n"
             f"## 财务与行情表（程序从 TuShare 生成；行情为 {self.market_date} 收盘）\n" + "\n".join(rows)
+            + "\n\n## 基础披露来源（source=D0；未写 source 的原文引文也对应 D0）\n"
+            + json.dumps({"document": self.doc.info(), "read_pages": sorted(self.pages)}, ensure_ascii=False)
             + f"\n\n## {self.doc.title}·管理层讨论与分析（原文，按页）\n{pages}"
         )
         if self.extra:
