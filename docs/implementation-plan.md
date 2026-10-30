@@ -92,20 +92,20 @@ Research 与 Skills 的生产 CLI → 研究 → 网页读取、临时公告及�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `0e54ad7`** 于 2026-10-30 13:53（北京时间）完成 web、worker 切换：修复 Codex 对 `6979671`（工作包 W 阅读界面图表化）的独立审查结论（原文 `review-6979671-20261030/`，accept with changes，4 重要 3 次要全修）——线图图例只给最新一期、缺失留空不沿用旧值；“四项债务合计”沿用来源名称；每张图下有“本图数值”列表作为 HTML 等价物，聚焦也更新读数；首页批次收益写明入场与估值日期；畸形锚点不再中断脚本；报告默认 4 张图、其余折进“更多走势”；证据计量与判断轨迹注明计数口径和研究范围差异；批次页单家收益的按请求计算写入文档。只改阅读层，无数据库、配置、依赖或成文/复核契约变化；例行发布按 AGENTS.md 常设授权执行，worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `251b9ff`** 于 2026-10-30 14:23（北京时间）完成 web、worker 切换：阅读层继续图表化——有经营序列的报告在“财务与走势”首位给“财务体征”小倍数表（近 8 个单季流量迷你柱、近 8 个期末时点迷你线，最新保存值与同比，悬停/点按逐期读数），取代单独的单季利润图；新增毛利率、加权 ROE、资产负债率与上年同期的哑铃对比；公司档案沿用最新带序列报告的体征；批次页以 20×4 因子分位热力矩阵领起，逐家明细折叠；首页公司一行一家、判断右置；报告头去掉重复的“研究判断：”并收紧估值快照。所有者要求本次不受规则文档束缚、开放设计，但图表仍只重画保存值，不新算财务数字。只改阅读层，无数据库、配置、依赖或成文/复核契约变化；例行发布按 AGENTS.md 常设授权执行，worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:0e54ad7` | `456b25959089305e9ed4b790f83b07caf4a40d9d5157873b3cd9d291f50198b0` |
-| `a-share-research-worker:0e54ad7` | `f904ef18a7455da4b1a54005f062cec5c5a3e5dc053cd33ddf932bc48988d5da` |
+| `a-share-research-web:251b9ff` | `415577f85cf5d4773026ce369eecdb57ebbc2bcbc8b85e633d32a0aa6ea55a34` |
+| `a-share-research-worker:251b9ff` | `435b6beab95a4c4bf8c0fcb29f308af480465788fac8a4966501cd6eb1ec1e6a` |
 
-**验证**：受影响 13 个测试文件 135 项通过（`test_charts.py` 9 项，线图与证据计量的输入改为真实捕获的卫星化学经营序列和报告 37 记录；图例不沿用旧值、计算计数两项经互变确认被钉住）；`test_progress.py` 一次本机 HTTP 读超时，单独重跑通过，未复现；未跑全集。本机开发实例（生产库只读快照）390px 走报告 44/37/43、首页、批次 1、公司档案均 200，“本图数值”列表 6/5/6/1/3 处，畸形锚点不报错，无脚本错误。按 [README 固定入口](../README.md#部署)构建并调用发布工具一次，空闲检查、备份、切换后健康检查与完整性巡检通过；未另做生产页面浏览器验收。
+**验证**：全集 304 项通过（`test_charts.py` 12 项，新增体征与哑铃 4 项，输入为真实捕获的五粮液、卫星化学经营序列与报告 37；近零迷你柱越过零线的问题由新测试在修复前捕获）。本机开发实例（生产库快照）390px 遍历报告 1–44、首页、批次列表与批次 1、三家公司档案及研究库：均为 200/404/409 预期状态，无横向溢出、无脚本错误；1280px 查看报告 44。生产私有会话 390px 复核首页、报告 44/37、批次 1、万华化学档案均 200、无横溢与脚本错误，体征/哑铃/矩阵按预期出现，随后退出撤销会话。
 
-**证据**：`deploy-0e54ad7-20261030-135319/`。备份：`~/a-share-research-data/backup-pre-0e54ad7-20261030-135320.db`。
+**证据**：`deploy-251b9ff-20261030-142353/`。备份：`~/a-share-research-data/backup-pre-251b9ff-20261030-142355.db`。
 
-**直接回退**：`a-share-research-web:rollback-0e54ad7` 与 `a-share-research-worker:rollback-0e54ad7` 来自原运行的 `6979671`（SHA 分别为 `b9507c3222060387628f062cf4af3aeecb67ef65d40d225958ba56e86aa899e8` 和 `ec999be8299440770880e9411c0a7acd696d0dcdee1cf16ac5d93b8d0f348cab`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；本次无数据变化，回退只换应用。
+**直接回退**：`a-share-research-web:rollback-251b9ff` 与 `a-share-research-worker:rollback-251b9ff` 来自原运行的 `0e54ad7`（SHA 分别为 `456b25959089305e9ed4b790f83b07caf4a40d9d5157873b3cd9d291f50198b0` 和 `f904ef18a7455da4b1a54005f062cec5c5a3e5dc053cd33ddf932bc48988d5da`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；本次无数据变化，回退只换应用。
 
-**历史限制**：`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
+**历史限制**：`0e54ad7` 的发布记录（证据 `deploy-0e54ad7-20261030-135319/`、备份 `backup-pre-0e54ad7-20261030-135320.db`、回退到 `6979671`）见 `git show 251b9ff:docs/implementation-plan.md`。`6979671` 的发布记录（证据 `deploy-6979671-20261030-132815/`、备份 `backup-pre-6979671-20261030-132816.db`、回退到 `98bdedd`）见 `git show cdfc3ec:docs/implementation-plan.md`；`98bdedd` 及更早的详情见 `git show 6979671:docs/implementation-plan.md`，既有证据和备份未删除。前次 `096aa2d`、`6faeb5c` 按当次要求跳过部署验证的事实不变；此前模型切换非金融评估集 9/10 通过，五粮液因遗漏可计算的 Q3 不利变化未通过、所有者知情授权上线；后续生产报告 40 通过。未做同材料跨模型比较，证据在 `terra-high-20261027-233921/`。
 
 ## 尚待完成与未采用项
 
