@@ -540,8 +540,10 @@ def check(report: dict, material: Material) -> list[dict]:
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
-    for i, note in enumerate(report.get("repair_rebuttals", [])):
-        errors = evidence.citation_errors(note.get("evidence"), registry, material.table)
+    # A full rewrite is raw model output, so the key may be echoed back in any shape.
+    for i, note in enumerate(report.get("repair_rebuttals") or []):
+        errors = evidence.citation_errors(note.get("evidence") if isinstance(note, dict) else None,
+                                          registry, material.table)
         problems += [{"where": f"repair_rebuttals[{i}]", "problem": error, "type": "citation_calculation"}
                      for error in errors]
     candidates = _candidates(all_cites, material) + [float(v) for r in material.table
