@@ -8,6 +8,10 @@ from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP
 
 from a_share_research import db, sources, evidence
+from a_share_research.checking import quote_found
+from a_share_research.material import financial_table
+from a_share_research.prompts import RULES, output_schema, parse_json
+from a_share_research.reviewing import digest
 
 log = logging.getLogger(__name__)
 
@@ -107,16 +111,14 @@ def _operand(side: dict, rows: dict, material) -> dict:
         return {"ref": clean["ref"], "period": period, "label": row["label"],
                 "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
     if {"page", "quote", "value", "unit"} <= set(clean) and not clean.get("ref"):
-        from a_share_research.evidence import NUMBER
-        from a_share_research.research import _quote_found
-        if material is None or not _quote_found(side, material):
+        if material is None or not quote_found(side, material):
             raise ValueError("计算输入的原文引文在已读取页面中找不到")
         raw = str(side["value"]).replace(",", "").replace("−", "-").strip()
         try:
             num = Decimal(raw)
         except ArithmeticError as exc:
             raise ValueError("计算输入必须是有限数字") from exc
-        tokens = [Decimal(t.replace(",", "").replace("−", "-")) for t in NUMBER.findall(str(side["quote"]))]
+        tokens = [Decimal(t.replace(",", "").replace("−", "-")) for t in evidence.NUMBER.findall(str(side["quote"]))]
         if not num.is_finite() or not any(num == t and num.as_tuple().exponent == t.as_tuple().exponent for t in tokens):
             raise ValueError("计算输入的数值（含正负号与小数位）须与所引原文中的原数完全一致")
         source = str(side.get("source") or "D0")
@@ -329,7 +331,6 @@ class ResearchTools:
                 "matched_pages": hits[:60], "pages": pages}
 
     def financials(self, code: str):
-        from a_share_research.research import financial_table
         code = self.code(code)
         if code in self.financial_cache:
             return self.financial_cache[code]
@@ -389,7 +390,6 @@ class Acquisition:
         self.failures = {}
 
     def evidence_key(self):
-        from a_share_research.reviewing import digest
         # Keep calculation rows/cache untouched; ignore only purpose names and generated IDs
         # when deciding whether another calculation added evidence.
         table = set()
@@ -454,7 +454,6 @@ class Acquisition:
         return result, failed
 
     def write(self, prompt, stage):
-        from a_share_research.research import _parse
         messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
         while True:
             # Keep room for a final draft and a review with its existing format correction.
@@ -475,7 +474,7 @@ class Acquisition:
             messages.append(response.message)
             calls = [c for c in response.message["content"] if c["type"] == "toolCall"]
             if not calls:
-                return _parse(response.text)
+                return parse_json(response.text)
             if reason:
                 # A tool-free final response cannot silently become another acquisition turn.
                 return None
@@ -490,7 +489,6 @@ class Acquisition:
 
 
 def explore(runner, material, *, acquisition=None, budget_seconds: float = 900):
-    from a_share_research.research import RULES, output_schema
     acquisition = acquisition or Acquisition(runner, material, budget_seconds=budget_seconds)
     latest = max(material.extra["catalog"].items(), key=lambda item: item[1].get("period", ""), default=None)
     latest_hint = ""

@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from a_share_research.checking import check
+from a_share_research.material import Material
+from a_share_research.prompts import RULES, output_schema
 from a_share_research.research import (
-    PATCH_SCHEMA, RULES, Material, RepairFormatError, check, merge_repair_patch, output_schema,
-    repair, repair_prompt, repair_result,
+    PATCH_SCHEMA, RepairFormatError, merge_repair_patch, repair, repair_prompt, repair_result,
 )
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from a_share_research.sources import Document

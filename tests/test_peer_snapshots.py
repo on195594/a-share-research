@@ -44,7 +44,7 @@ def test_captured_pair_preserves_values_negative_cash_and_exact_saved_ratios():
 
 
 def test_ratios_from_original_precision_still_map_to_the_saved_peer_rows():
-    from a_share_research.research import financial_table
+    from a_share_research.material import financial_table
     from a_share_research.research_tools import calculate
     from test_financial_series import CAPTURES, frames
     from test_financial_table import DATA
@@ -221,7 +221,7 @@ def test_two_inapplicable_ratios_keep_each_company_reason_without_a_ratio_row():
 
 
 def test_restatement_reason_blocks_a_value_and_does_not_silently_select_an_older_period():
-    from a_share_research.research import financial_table
+    from a_share_research.material import financial_table
     from test_financial_series import CAPTURES, frames
     body = captured()
     current = row(body, 'P000858.T.op_cash')
@@ -239,7 +239,7 @@ def test_restatement_reason_blocks_a_value_and_does_not_silently_select_an_older
 
 
 def test_text_gaps_are_not_parsed_as_structured_version_checks():
-    from a_share_research.research import financial_table
+    from a_share_research.material import financial_table
     from test_financial_series import CAPTURES, frames
     body = captured()
     protected = next(r for r in financial_table(frames(CAPTURES['000858']), {}) if r['id'] == 'T.op_cash')

@@ -1,7 +1,7 @@
 """Real 贵州茅台2025年报 excerpts and a report builder for citation checks."""
 from copy import deepcopy
 
-from a_share_research.research import Material
+from a_share_research.material import Material
 from a_share_research.sources import Document
 
 MATERIAL = Material(

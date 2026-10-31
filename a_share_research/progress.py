@@ -11,6 +11,7 @@ import math
 import re
 
 from a_share_research import db, reading, service
+from a_share_research.prompts import parse_json
 
 log = logging.getLogger(__name__)
 VERSION = "research-progress-v1"
@@ -260,12 +261,11 @@ def execute(conn, progress_id: int) -> None:
     if not row:
         return
     try:
-        from a_share_research.research import _parse
         snap = snapshot(conn, row["current_id"])
         if snap["fingerprint"] != row["fingerprint"]:
             raise ValueError("输入版本发生变化")
         data = prompt_input(snap)
-        body = _parse(call(conn, progress_id, "generate", PROMPT + "\n输入：\n" + data))
+        body = parse_json(call(conn, progress_id, "generate", PROMPT + "\n输入：\n" + data))
         if body is None:
             raise ValueError('生成结果不是可解析的 JSON 对象；不重试')
         errors = check(body, snap)
@@ -278,7 +278,7 @@ def execute(conn, progress_id: int) -> None:
                          "任一不成立须passed=false并在issues说明。输出严格JSON："
                          '{"passed":true,"items":[{"references":true,"novelty":true,"impact":true,"unknowns":true,"scope":true,"next_step":true}],"issues":[]}。'
                          "items 与被复核条目一一对应，各项须明确布尔值。\n输入：" + data + "\n候选：" + encode(body) + "\n程序问题：" + encode(errors))
-        review = _parse(call(conn, progress_id, "review", review_prompt))
+        review = parse_json(call(conn, progress_id, "review", review_prompt))
         conn.execute("UPDATE research_progress SET review=? WHERE id=?", (encode(review), progress_id))
         count = len(body['items']) if isinstance(body, dict) and isinstance(body.get('items'), list) else 0
         errors += review_errors(review, count)

@@ -20,7 +20,8 @@ from a_share_research.db import SHANGHAI
 from a_share_research.batches import load, group_return, returns, FROZEN_BY
 from a_share_research.reading import research_state
 from a_share_research.service import create_batch as create, freeze_batch as freeze
-from a_share_research.research import METRICS, _parse
+from a_share_research.material import METRICS
+from a_share_research.prompts import parse_json
 # Keep the existing import surface for callers and frozen backtest experiments.
 from a_share_research.screening_factors import (
     RULE, FINANCIAL_INDUSTRIES, _months_after, announced_by, annual_rows,
@@ -336,7 +337,7 @@ def select(conn, batch: dict) -> dict:
     attempts = []
     for _ in range(2):
         completion = model.complete(prompt, timeout=600, max_tokens=12000)
-        draft = _parse(completion.text)
+        draft = parse_json(completion.text)
         problems = selection_problems(draft, candidates, rule)
         attempts.append({"identity": completion.identity, "usage": completion.usage,
                          "seconds": round(completion.seconds, 1), "problems": problems})

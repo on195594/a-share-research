@@ -17,7 +17,7 @@ from test_financial_series import CAPTURES, build, frames
 
 from a_share_research import charts, reading, screening
 from a_share_research.price import compute
-from a_share_research.research import financial_table
+from a_share_research.material import financial_table
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDS = json.loads((ROOT / "tests/data/continuation-records.json").read_text())["records"]

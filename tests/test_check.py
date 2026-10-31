@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research.research import Material, ResearchError, check
+from a_share_research.material import Material, ResearchError
+from a_share_research.checking import check
 from a_share_research.sources import Document
 from support.reports import MATERIAL, SALES, report
 

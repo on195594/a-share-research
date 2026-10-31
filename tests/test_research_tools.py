@@ -10,7 +10,9 @@ import pytest
 from jinja2 import Environment, FileSystemLoader
 
 from a_share_research import db, service
-from a_share_research.research import Material, check, financial_table, _research_context, _verified_facts, _review_issues
+from a_share_research.material import Material, financial_table
+from a_share_research.checking import check
+from a_share_research.research import _research_context, _verified_facts, _review_issues
 from a_share_research.research_tools import calculate
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report

@@ -18,7 +18,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |
+| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 编排单股研究（取材料 `material.py`、机械核对 `checking.py`、成文契约 `prompts.py`、取证工具 `research_tools.py`），`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
 | `docs/` | 方案、项目契约、路线图、实施与部署状态；`PRODUCT.md` / `DESIGN.md` 是界面设计入口 |

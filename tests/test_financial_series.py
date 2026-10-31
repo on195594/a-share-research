@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from a_share_research.research import Material, financial_series, financial_table
+from a_share_research.material import Material, financial_series, financial_table
 from a_share_research.reading import since_prior
 from a_share_research.research_tools import calculate
 from support.reports import MATERIAL

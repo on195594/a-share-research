@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from a_share_research import db, service
-from a_share_research.research import check, _research_context
+from a_share_research.checking import check
+from a_share_research.research import _research_context
 from a_share_research.research_tools import research_methods
 from support.reports import MATERIAL, report
 

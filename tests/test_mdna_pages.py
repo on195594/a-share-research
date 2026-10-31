@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from a_share_research.research import _page_offset, mdna_pages
+from a_share_research.material import _page_offset, mdna_pages
 from a_share_research.sources import Document
 
 

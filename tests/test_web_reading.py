@@ -63,7 +63,7 @@ def test_financial_periods_preserve_source_dates_and_explain_coverage():
 
 def test_financial_table_keeps_comparable_periods_after_preceding_periods_expand():
     import re
-    from a_share_research.research import financial_table
+    from a_share_research.material import financial_table
     from test_financial_series import CAPTURES, frames
     template = (TEMPLATES / 'report.html').read_text()
     start = template.index('    <details class="block" id="data"')

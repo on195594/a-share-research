@@ -8,7 +8,10 @@ import pytest
 
 from a_share_research.evidence import (EvidenceError, source_registry, projection, quote_match,
                                       citation_link, citation_errors, report_source_view)
-from a_share_research.research import Material, check, _parse, _verified_facts
+from a_share_research.material import Material
+from a_share_research.checking import check
+from a_share_research.prompts import parse_json
+from a_share_research.research import _verified_facts
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest, legacy_issue_view, PROTOCOL
 from a_share_research.research_tools import record_stop
 from a_share_research import service, db
@@ -355,7 +358,7 @@ def test_stop_is_deduplicated_separate_from_review_failure():
     record_stop(material, "fetch_limit")
     assert len(material.extra["stop_reasons"]) == 1
     assert "failure" not in material.extra
-    assert _parse("") is None and _parse("not JSON") is None
+    assert parse_json("") is None and parse_json("not JSON") is None
 
 
 def test_full_api_keeps_report_sources_when_old_material_has_no_supplements(tmp_path):

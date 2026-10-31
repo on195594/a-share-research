@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from a_share_research import db, evidence, research, sources
+from a_share_research.material import mdna_pages
 from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from support.reports import MATERIAL, CASH, SALES_ROW, report
@@ -460,7 +461,7 @@ def test_rereading_gathered_mdna_page_is_not_a_conflict_but_other_text_is(tmp_pa
     layout = json.loads((Path(__file__).parent / 'data/annual-report-sections.json').read_text())['600346']['pages']
     doc = sources.Document('600346.SH', '恒力石化', '2025年年度报告', '2025-12-31', '2026-04-15', '',
                            pages=list(layout), raw_pages=list(layout))
-    pages = research.mdna_pages(doc)
+    pages = mdna_pages(doc)
     assert pages[15] != layout[14]
     material = research.Material(code=doc.code, name=doc.name, doc=doc, pages=pages,
                                  raw_pages={n: layout[n - 1] for n in pages}, table=[], market_date='2026-10-30', extra={})
