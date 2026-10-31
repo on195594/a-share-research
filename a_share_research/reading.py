@@ -1,8 +1,10 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
 import json
 import re
+from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
+from functools import lru_cache
 
 from a_share_research import charts, db, service
 
@@ -247,7 +249,7 @@ def evidence_ledger(content: dict, rows: dict, evidence: dict) -> dict:
 
 def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
                    passed: bool = False, since: str | None = None, code_prefix: str | None = None,
-                   limit: int = -1, offset: int = 0) -> list:
+                   limit: int = -1, offset: int = 0, include_checkpoint: bool = True) -> list:
     """Newest non-replay report per company among eligible reports, with bounded summaries.
 
     Search matches any historical name/code literally; source counts exclude replays.
@@ -267,6 +269,7 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
     if code_prefix is not None:
         where.append("p.code LIKE ?")
         params.append(code_prefix[:6] + ".%")
+    checkpoint = "json_extract(r.body, '$.checkpoints[0].text')" if include_checkpoint else "NULL"
     return conn.execute(
         "WITH latest AS (SELECT p.code, MAX(p.id) AS id,"
         " SUM(COALESCE(u.request_id, '') NOT LIKE 'batch-%') AS own"
@@ -275,7 +278,7 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
         " OR instr(lower(p.code), lower(?)) > 0)),"
         " selected AS (SELECT * FROM latest ORDER BY id DESC LIMIT ? OFFSET ?)"
         " SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, s.own,"
-        " json_extract(r.body, '$.checkpoints[0].text') AS checkpoint,"
+        f" {checkpoint} AS checkpoint,"
         " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch, r.coverage"
         " FROM selected s JOIN reports r ON r.id = s.id"
         " JOIN runs u ON u.id = r.run_id ORDER BY r.id DESC",
@@ -299,6 +302,34 @@ def report_bodies(conn, ids: list[int]) -> dict:
         return {}
     return {r["id"]: json.loads(r["body"]) for r in conn.execute(
         f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
+
+
+@lru_cache(maxsize=256)
+def _report_card(conn, revision: tuple, metadata: tuple) -> dict:
+    report = dict(metadata)
+    body = conn.execute("SELECT body FROM reports WHERE id = ?", (report['id'],)).fetchone()
+    return card(report, json.loads(body['body']))
+
+
+def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
+    """Cache compact cards, never report bodies; direct SQL edits invalidate them too."""
+    if not reports:
+        return []
+    cursor = conn.execute('PRAGMA data_version')
+    connection = cursor.connection  # Unwrap the web thread-local connection proxy.
+    # data_version covers other connections; total_changes covers writes on this connection.
+    revision = (cursor.fetchone()[0], connection.total_changes)
+    # Transaction-local content must not survive a rollback in the process cache.
+    build = _report_card.__wrapped__ if connection.in_transaction else _report_card
+    cards = []
+    for report in reports:
+        metadata = tuple((k, report[k]) for k in
+                         ('id', 'code', 'name', 'passed', 'verdict', 'created_at', 'coverage'))
+        item = deepcopy(build(connection, revision, metadata))
+        previous = passed_before.get(report['code']) if not report['passed'] else None
+        item['last_passed'] = dict(previous) if previous is not None else None
+        cards.append(item | {'from_batch': report['from_batch']})
+    return cards
 
 
 def comparison(conn, report) -> dict:

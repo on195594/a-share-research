@@ -280,17 +280,14 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
         loaded = batches.load(batch)
         performance = charts.batch_returns(loaded, batches.returns(loaded),
                                            {r["code"]: r["name"] for r in loaded["q20"] or []})
-    latest = reading.latest_reports(conn)
+    latest = reading.latest_reports(conn, include_checkpoint=False)
     companies = [r for r in latest if r["own"]]
     batch_only = sum(1 for r in latest if not r["own"])
     pending, pending_more = reading.pending_reviews(conn)
     if companies:
-        bodies = reading.report_bodies(conn, [c["id"] for c in companies])
         passed_before = {r["code"]: r for r in reading.latest_reports(
-            conn, codes=[c["code"] for c in companies], passed=True)}
-        cards = [reading.card(c, bodies[c["id"]], None if c["passed"] else passed_before.get(c["code"]))
-                 | {"from_batch": c["from_batch"]}
-                 for c in companies]
+            conn, codes=[c["code"] for c in companies], passed=True, include_checkpoint=False)}
+        cards = reading.report_cards(conn, companies, passed_before)
     else:
         cards = []
     listed = {r['id'] for r in pending}

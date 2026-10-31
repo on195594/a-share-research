@@ -381,11 +381,17 @@ def compact_calls(conn: sqlite3.Connection) -> dict:
 
 def save_material(conn, run_id: int, snapshot: dict) -> str:
     """Persist changed snapshots (including trace/stops), repairing the identity hash if needed."""
-    text, sha = json.dumps(snapshot, ensure_ascii=False), snapshot["sha256"]
+    sha = snapshot["sha256"]
+    # Avoid serializing and binding the full snapshot on unchanged tool rounds.
+    row = conn.execute("SELECT json_extract(identity, '$.material_sha256') FROM runs WHERE id = ?",
+                       (run_id,)).fetchone()
+    if row is None or row[0] == sha:
+        return sha
+    text = json.dumps(snapshot, ensure_ascii=False)
     conn.execute(
         "UPDATE runs SET material = ?, identity = json_set(coalesce(identity, '{}'), '$.material_sha256', ?)"
-        " WHERE id = ? AND (material IS NOT ? OR json_extract(identity, '$.material_sha256') IS NOT ?)",
-        (text, sha, run_id, text, sha),
+        " WHERE id = ? AND coalesce(json_extract(identity, '$.material_sha256'), '') != ?",
+        (text, sha, run_id, sha),
     )
     return sha
 

@@ -2,6 +2,7 @@
 
 import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Self
@@ -50,6 +51,15 @@ class ResearchError(Exception):
     pass
 
 
+def _snapshot_key(value):
+    """Compare ordered JSON structure without serializing or copying long page strings."""
+    if isinstance(value, dict):
+        return (dict, tuple((_snapshot_key(k), _snapshot_key(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return (type(value), tuple(_snapshot_key(v) for v in value))
+    return (type(value), repr(value) if isinstance(value, float) else value)
+
+
 @dataclass
 class Material:
     code: str
@@ -60,6 +70,8 @@ class Material:
     table: list[dict]
     market_date: str
     extra: dict = field(default_factory=dict)
+    _cached_key: tuple | None = field(default=None, init=False, repr=False, compare=False)
+    _cached_snapshot: dict | None = field(default=None, init=False, repr=False, compare=False)
 
     def snapshot(self) -> dict:
         data = {
@@ -70,7 +82,13 @@ class Material:
         }
         if self.extra:
             data["extra"] = self.extra
-        return {"version": 2 if self.extra else 1, "sha256": material_hash(data), "data": data}
+        key = _snapshot_key(data)
+        if key != self._cached_key:
+            self._cached_snapshot = {"version": 2 if self.extra else 1,
+                                     "sha256": material_hash(data), "data": deepcopy(data)}
+            self._cached_key = key
+        # Callers may edit a snapshot; neither they nor later material edits may poison the cache.
+        return deepcopy(self._cached_snapshot)
 
     @classmethod
     def from_snapshot(cls, snapshot: dict) -> Self:
