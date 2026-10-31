@@ -218,10 +218,9 @@ class ResearchTools:
         """Catalog key for a document, adding it on first sight so read_disclosure can open it."""
         catalog = self.material.extra["catalog"]
         key = next((k for k, v in catalog.items() if v["url"] == doc.url), None)
-        if key is not None:
-            for field in ("code", "period", "url", "sha256"):
-                if catalog[key].get(field) and getattr(doc, field) and catalog[key][field] != getattr(doc, field):
-                    raise evidence.EvidenceError(f"来源 {key} 的 {field} 与既有身份冲突")
+        if key is not None and (field := evidence.identity_conflict(
+                catalog[key], doc.info(), ("code", "period", "url", "sha256"), partial=True)):
+            raise evidence.EvidenceError(f"来源 {key} 的 {field} 与既有身份冲突")
         if key is None:
             key = f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
             catalog[key] = doc.info()
@@ -231,9 +230,7 @@ class ResearchTools:
     def run(self, name: str, args: dict) -> dict | list:
         if not isinstance(args, dict):
             raise ValueError("工具参数须为对象")
-        # A renamed purpose does not create new arithmetic evidence or a second C.n row.
-        cache_args = {k: v for k, v in args.items() if k != "label"} if name == "calculate" else args
-        key = json.dumps([name, cache_args], sort_keys=True, ensure_ascii=False)
+        key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
         spec = next((tool for tool in TOOLS if tool["name"] == name), None)
         if spec is None or set(args) - spec["parameters"]["properties"].keys() or not set(spec["parameters"]["required"]) <= args.keys():
             raise ValueError("未知工具或参数不完整")
@@ -292,9 +289,9 @@ class ResearchTools:
         expected = existing.get("document", {})
         if not doc.pages:
             sources.fetch(doc)
-        for field in ("code", "period", "url", "sha256", "title", "announced"):
-            if expected.get(field) and expected[field] != getattr(doc, field):
-                raise evidence.EvidenceError(f"来源 {source} 的 {field} 与已存证据冲突，未合并新页")
+        if field := evidence.identity_conflict(expected, doc.info(),
+                                               ("code", "period", "url", "sha256", "title", "announced")):
+            raise evidence.EvidenceError(f"来源 {source} 的 {field} 与已存证据冲突，未合并新页")
         if expected.get("retrieved_at"):
             doc.retrieved_at = expected["retrieved_at"]
         if page > len(doc.pages):
@@ -389,7 +386,15 @@ class Acquisition:
 
     def evidence_key(self):
         from a_share_research.reviewing import digest
-        return digest({"sources": self.material.source_registry(), "table": self.material.table,
+        # Keep calculation rows/cache untouched; ignore only purpose names and generated IDs
+        # when deciding whether another calculation added evidence.
+        table = set()
+        for row in self.material.table:
+            if row["id"].startswith("C."):
+                row = row | {"id": "C", "calculation": {k: v for k, v in row["calculation"].items()
+                                                        if k != "requested_label"}}
+            table.add(digest(row))
+        return digest({"sources": self.material.source_registry(), "table": sorted(table),
                        "methods": self.material.extra.get("methods_used", [])})
 
     def stopped(self):
@@ -415,7 +420,8 @@ class Acquisition:
         sig = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
         # A failure is valid only for the evidence it saw. A newly read page can make an
         # identical calculation valid; trace/gap changes alone must not enable retries.
-        failure_key = (sig, self.evidence_key())
+        # A same-value new C.n is not progress, but can satisfy a previously missing reference.
+        failure_key = (sig, self.evidence_key(), tuple(row["id"] for row in self.material.table))
         failed = False
         conflict = None
         try:
@@ -460,11 +466,11 @@ class Acquisition:
                                  "timestamp": int(time.time() * 1000)})
             tools = [] if reason else [t for t in TOOLS if stage != "repair" or t["name"] in REPAIR_TOOLS]
             payload = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
+            db.save_material(self.runner.conn, self.runner.run_id, self.material.snapshot())
             response = self.runner.call(stage, payload, messages=messages, tools=tools)
             messages.append(response.message)
             calls = [c for c in response.message["content"] if c["type"] == "toolCall"]
             if not calls:
-                db.save_material(self.runner.conn, self.runner.run_id, self.material.snapshot())
                 return _parse(response.text)
             if reason:
                 # A tool-free final response cannot silently become another acquisition turn.

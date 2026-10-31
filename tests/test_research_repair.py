@@ -83,7 +83,7 @@ def test_review_missing_previous_page_can_acquire_repair_and_close_with_new_bind
                             'id': ledger.pending()[0]['id'], 'status': 'resolved', 'reason': '补读并引用销售费用表',
                             'targets': ['financial[0]'], 'evidence': [SALES_ROW]}])]
     old_hash = material.snapshot()['sha256']
-    result, problems, ledger, reviewed = research.revise(runner, material, original, ledger, acquisition=acquisition)
+    result, problems, reviewed = research.revise(runner, material, original, ledger, acquisition=acquisition)
     assert result == fixed and problems == [] and reviewed
     assert runner.calls == 4 and len(material.extra['tools']) == 1
     assert material.pages[9] == MATERIAL.pages[9]
@@ -103,7 +103,7 @@ def test_already_read_evidence_only_needs_citation_repair_without_fetch(session)
     original = report()
     original['financial'][0]['cites'] = []
     runner.responses = [report(), lambda: bound(material, report())]
-    result, problems, _, reviewed = research.revise(runner, material, original, ReviewLedger(), acquisition=acquisition)
+    result, problems, reviewed = research.revise(runner, material, original, ReviewLedger(), acquisition=acquisition)
     assert result == report() and not problems and reviewed
     assert material.extra['tools'] == [] and runner.calls == 2
 
@@ -120,7 +120,7 @@ def test_mechanical_failure_never_claims_fresh_review_or_closes_old_issue(sessio
     bad = report()
     bad['financial'][0]['cites'] = []
     runner.responses = [bad, bad]
-    _, problems, ledger, reviewed = research.revise(runner, material, bad, ledger, acquisition=acquisition)
+    _, problems, reviewed = research.revise(runner, material, bad, ledger, acquisition=acquisition)
     assert not reviewed and ledger.pending() == pending and len(ledger.rounds) == 1
     assert any(p.get('id') == pending[0]['id'] for p in problems)
     assert research._verified_facts(bad, problems, reviewed=reviewed) == {}
@@ -278,7 +278,7 @@ def test_unavailable_disclosure_and_unknown_gap_remain_unresolved_after_repairs(
     runner.responses = [lambda: bound(material, original, issues=[question]),
                         [read(99)], unknown, still_missing,
                         [read(99)], unknown, still_missing]
-    result, problems, ledger, reviewed = research.revise(runner, material, original, ledger, acquisition=acquisition)
+    result, problems, reviewed = research.revise(runner, material, original, ledger, acquisition=acquisition)
     assert result == unknown and reviewed and len(problems) == 1
     assert problems[0]['status'] == 'unresolved' and len(ledger.rounds) == 3
     assert runner.calls == 7 and len(acquisition.traces) == 1
@@ -305,8 +305,11 @@ def test_renaming_a_calculation_does_not_manufacture_new_evidence(session):
     assert not failed
     before = acquisition.evidence_key()
     second, failed = acquisition.tool_result({'name': 'calculate', 'arguments': args | {'label': '经营现金流差额'}}, 'repair')
-    assert not failed and first == second and acquisition.evidence_key() == before
-    assert len([r for r in material.table if r['id'].startswith('C.')]) == 1
+    assert not failed and first['id'] != second['id'] and acquisition.evidence_key() == before
+    assert first['calculation']['requested_label'] == args['label']
+    assert second['calculation']['requested_label'] == '经营现金流差额'
+    assert acquisition.toolkit.run('calculate', args) == first  # original full-argument cache semantics
+    assert len([r for r in material.table if r['id'].startswith('C.')]) == 2
 
 
 def test_duplicate_disclosure_identity_and_conflicting_identity_are_distinct(session):
@@ -355,3 +358,60 @@ def test_newly_read_evidence_invalidates_failed_calculation_without_resetting_li
     assert not failed and result['values'] == {'result': '4.22'}
     assert len(acquisition.traces) == 3 and _fetches(acquisition.traces) == 1
     assert acquisition.deadline == deadline
+
+
+def test_stop_state_is_saved_before_a_model_interruption(session):
+    runner, material, acquisition = session
+    acquisition.rounds = 12
+    runner.responses = [research.ResearchError('中断')]
+    with pytest.raises(research.ResearchError, match='中断'):
+        acquisition.write('保留停止原因', 'repair')
+    saved = research.replay_material(runner.conn, runner.run_id)
+    assert saved.extra['stop_reasons'] == material.extra['stop_reasons']
+    assert saved.extra['stop_reasons'][0]['reason'] == 'round_limit'
+    assert saved.extra['gaps'] == material.extra['gaps']
+
+
+def test_calculation_progress_ignores_only_purpose_not_operation_or_inputs(session):
+    _, material, acquisition = session
+    args = {'label': '经营现金流变化', 'operation': 'difference',
+            'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
+            'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}
+    acquisition.tool_result({'name': 'calculate', 'arguments': args}, 'repair')
+    first = acquisition.evidence_key()
+    acquisition.tool_result({'name': 'calculate', 'arguments': args | {'operation': 'ratio'}}, 'repair')
+    second = acquisition.evidence_key()
+    assert first != second
+    acquisition.tool_result({'name': 'calculate', 'arguments': args | {'left': args['right'], 'right': args['left']}}, 'repair')
+    assert acquisition.evidence_key() != second
+    assert len(material.extra['tools']) == 3
+
+
+@pytest.mark.parametrize('field', ['code', 'period', 'url', 'sha256', 'title', 'announced'])
+def test_partial_and_fetched_source_identity_have_distinct_missing_field_rules(field):
+    original = BODY['document']
+    assert original[field]
+    missing = dict(original, **{field: ''})
+    assert evidence.identity_conflict(original, missing, partial=True) is None
+    assert evidence.identity_conflict(original, missing) == field
+    conflicting = dict(original, **{field: original[field] + ' altered'})
+    assert evidence.identity_conflict(original, conflicting, partial=True) == field
+    assert evidence.identity_conflict(original, conflicting) == field
+
+
+def test_new_same_value_calculation_id_unlocks_dependent_failure_without_counting_progress(session):
+    _, material, acquisition = session
+    args = {'label': '现金流差额', 'operation': 'difference',
+            'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
+            'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}
+    acquisition.tool_result({'name': 'calculate', 'arguments': args}, 'repair')
+    dependent = {'name': 'calculate', 'arguments': {'label': '现金流差额占营收', 'operation': 'ratio_pct',
+                 'left': {'ref': 'C.2'}, 'right': {'ref': 'T.revenue', 'period': '2025-12-31'}}}
+    _, failed = acquisition.tool_result(dependent, 'repair')
+    assert failed
+    before = acquisition.evidence_key()
+    row, failed = acquisition.tool_result({'name': 'calculate', 'arguments': args | {'label': '经营现金流差额'}}, 'repair')
+    assert not failed and row['id'] == 'C.2' and acquisition.evidence_key() == before
+    result, failed = acquisition.tool_result(dependent, 'repair')
+    assert not failed and result['values'] == {'result': '-17.98'}
+    assert len(material.extra['tools']) == 4 and _fetches(material.extra['tools']) == 0

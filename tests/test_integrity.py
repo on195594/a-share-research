@@ -174,3 +174,30 @@ def test_wrongly_typed_json_is_listed_and_the_check_carries_on(tmp_path):
     assert problems == [f"任务 {run_id}：运行身份无法解析", "报告 1：正文与写入时的哈希不符",
                         "报告 1：正文不是 JSON 对象"]
     assert counts["reports"] == 2 and counts["pdfs"] == 1
+
+
+def test_material_save_deduplicates_full_snapshot_but_repairs_identity_and_keeps_diagnostics(tmp_path):
+    from copy import deepcopy
+    conn, run_id = research_db(tmp_path)
+    snapshot = deepcopy(MATERIAL.snapshot())
+    before = conn.total_changes
+    assert db.save_material(conn, run_id, snapshot) == snapshot['sha256']
+    assert conn.total_changes == before
+    # A matching body cannot hide stale run identity; preserve unrelated metadata while repairing it.
+    db.update_run(conn, run_id, identity=json.dumps({'material_sha256': None, 'replay_of': 12}))
+    before = conn.total_changes
+    db.save_material(conn, run_id, snapshot)
+    assert conn.total_changes == before + 1
+    identity = json.loads(conn.execute('SELECT identity FROM runs WHERE id=?', (run_id,)).fetchone()[0])
+    assert identity == {'material_sha256': snapshot['sha256'], 'replay_of': 12}
+    # Diagnostic changes are part of the full snapshot even when financial evidence is unchanged.
+    snapshot['data']['extra'] = {'stop_reasons': [{'stage': 'repair', 'reason': 'tool_limit'}]}
+    snapshot['sha256'] = _material_hash(snapshot['data'])
+    before = conn.total_changes
+    db.save_material(conn, run_id, snapshot)
+    assert conn.total_changes == before + 1
+    stored = json.loads(conn.execute('SELECT material FROM runs WHERE id=?', (run_id,)).fetchone()[0])
+    assert stored == json.loads(json.dumps(snapshot))
+    db.save_material(conn, run_id, snapshot)
+    assert conn.total_changes == before + 1
+    conn.close()

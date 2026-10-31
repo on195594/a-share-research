@@ -10,6 +10,12 @@ class EvidenceError(ValueError):
 IDENTITY = ("code", "name", "title", "period", "announced", "url", "sha256", "retrieved_at")
 
 
+def identity_conflict(expected, actual, fields=IDENTITY, *, partial=False):
+    """First conflicting known field; partial metadata may omit fields, fetched identities may not."""
+    return next((field for field in fields if expected.get(field)
+                 and (not partial or actual.get(field)) and expected[field] != actual.get(field)), None)
+
+
 def safe_url(value):
     if not isinstance(value, str):
         return None
@@ -60,9 +66,8 @@ def source_registry(document=None, pages=None, raw_pages=None, sources=None, cat
             raise EvidenceError("来源记录身份格式无效")
         if key in entries:
             listed, read = entries[key]["document"] or {}, value.get("document") or {}
-            for field in IDENTITY:
-                if listed.get(field) and read.get(field) and listed[field] != read[field]:
-                    raise EvidenceError(f"来源 {key} 的 {field} 与目录冲突")
+            if field := identity_conflict(listed, read, partial=True):
+                raise EvidenceError(f"来源 {key} 的 {field} 与目录冲突")
             value = value | {"document": listed | {k: v for k, v in read.items() if v}}
         entries[key] = value
     result = {}

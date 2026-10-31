@@ -867,8 +867,7 @@ def revise(runner, material, report, ledger, *, acquisition=None):
             break
         ledger.protect_risks(report)
         report = repair(runner, material, report, problems, acquisition=acquisition)
-        db.save_material(runner.conn, runner.run_id, material.snapshot())
-    return report, problems, ledger, reviewed
+    return report, problems, reviewed
 
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
@@ -877,15 +876,6 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     db.update_run(conn, run_id, status="running", step="gather", started_at=db.now())
     runner = Runner(conn, run_id)
     identity: dict = {}
-
-    def save_material(mat: Material, *, with_company: bool = True) -> str:
-        snapshot = mat.snapshot()
-        identity["material_sha256"] = snapshot["sha256"]
-        fields = {"identity": json.dumps(identity), "material": json.dumps(snapshot, ensure_ascii=False)}
-        if with_company:
-            fields |= {"code": mat.code, "name": mat.name}
-        db.update_run(conn, run_id, **fields)
-        return snapshot["sha256"]
 
     try:
         identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
@@ -904,19 +894,18 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                     material.extra["prior"] = prior
                     if not material.extra["question"]:
                         material.extra["question"] = prior_question(prior)
-        save_material(material)
+        db.update_run(conn, run_id, code=material.code, name=material.name)
+        db.save_material(conn, run_id, material.snapshot())
         acquisition = None
         if replay_of is None:
             from a_share_research.research_tools import Acquisition, explore
             acquisition = Acquisition(runner, material)
             report = explore(runner, material, acquisition=acquisition)
-            material_sha256 = save_material(material)
         else:
             report = compose(runner, material)
-            material_sha256 = identity["material_sha256"]
         ledger = ReviewLedger()
-        report, problems, ledger, reviewed = revise(runner, material, report, ledger, acquisition=acquisition)
-        material_sha256 = save_material(material)
+        report, problems, reviewed = revise(runner, material, report, ledger, acquisition=acquisition)
+        material_sha256 = db.save_material(conn, run_id, material.snapshot())
         period = max([material.doc.period] + [p for r in material.table if r["id"].startswith("T.") for p in r["values"]])
         body = {
             "code": material.code, "name": material.name, "period": period,
@@ -980,7 +969,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         db.update_run(conn, run_id, identity=json.dumps(identity, ensure_ascii=False))
         if "material" in locals():
             # Diagnostics belong to run metadata, not the evidence hashed by the reviewer.
-            save_material(material, with_company=False)
+            db.save_material(conn, run_id, material.snapshot())
 
 
 def main() -> None:

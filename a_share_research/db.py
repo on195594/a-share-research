@@ -202,13 +202,15 @@ def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=
     )
 
 
-def save_material(conn, run_id: int, snapshot: dict) -> None:
-    """Store a material snapshot and keep the run identity's hash of it in step."""
+def save_material(conn, run_id: int, snapshot: dict) -> str:
+    """Persist changed snapshots (including trace/stops), repairing the identity hash if needed."""
+    text, sha = json.dumps(snapshot, ensure_ascii=False), snapshot["sha256"]
     conn.execute(
         "UPDATE runs SET material = ?, identity = json_set(coalesce(identity, '{}'), '$.material_sha256', ?)"
-        " WHERE id = ?",
-        (json.dumps(snapshot, ensure_ascii=False), snapshot["sha256"], run_id),
+        " WHERE id = ? AND (material IS NOT ? OR json_extract(identity, '$.material_sha256') IS NOT ?)",
+        (text, sha, run_id, text, sha),
     )
+    return sha
 
 
 def save_report(conn, run_id: int, code: str, name: str, period: str, passed: bool,
