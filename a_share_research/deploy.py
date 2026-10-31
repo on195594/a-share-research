@@ -42,6 +42,18 @@ def idle(database: Path) -> None:
         raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy} 或研究进展 {progress} 尚未空闲")
 
 
+KEEP_BACKUPS = 3
+
+
+def prune_backups(data: Path, keep: int = KEEP_BACKUPS) -> list[str]:
+    """Keep the newest release backups (owner's standing rule, 10-31); never touches app.db."""
+    backups = sorted(data.glob("backup-pre-*.db"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for old in backups[keep:]:
+        for path in (old, old.with_name(old.name + "-shm"), old.with_name(old.name + "-wal")):
+            path.unlink(missing_ok=True)
+    return [old.name for old in backups[keep:]]
+
+
 def fingerprints(database: Path) -> dict:
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         conn.execute("BEGIN")
@@ -159,8 +171,10 @@ def deploy(code: str, evidence: Path) -> None:
         save("integrity-after.json", check)
         if not check["ok"]:
             raise RuntimeError("发布后完整性检查失败")
+        pruned = prune_backups(data)  # Only after a verified release; a failed one keeps every backup.
         save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
-                               "backup": str(backup), "backup_counts": counts, "at": db.now()})
+                               "backup": str(backup), "backup_counts": counts, "pruned_backups": pruned,
+                               "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
         log.exception("发布失败，恢复原应用镜像；保留备份与证据")
