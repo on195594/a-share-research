@@ -148,3 +148,23 @@ def test_execute_gathers_fresh_material_instead_of_interrupted_snapshot(conn, sn
     assert resumed["error"] == "服务重启后自动恢复"
     worker.recover(conn)
     assert row(conn, run_id)["status"] == "failed"
+
+
+def test_resumed_run_clears_error_on_success(conn):
+    from a_share_research import price
+    run_id, _ = interrupted(conn)
+    worker.recover(conn)
+    assert row(conn, run_id)["error"] == worker.AUTO_RESUME_ERROR
+    # Research passed branch clears error
+    research.publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"summary": "值得继续研究"})
+    finished = row(conn, run_id)
+    assert finished["status"] == "done"
+    assert finished["error"] is None
+
+    # Price done branch clears error
+    price_run = db.create_run(conn, "600519", "price-resume-1", kind="price", status="running")
+    db.update_run(conn, price_run, error=worker.AUTO_RESUME_ERROR)
+    price.publish(conn, price_run, "600519", "贵州茅台", {"as_of": "2026-10-31", "expires": "2026-11-01", "summary": "2025-12-31 估值"})
+    finished_price = row(conn, price_run)
+    assert finished_price["status"] == "done"
+    assert finished_price["error"] is None

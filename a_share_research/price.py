@@ -103,7 +103,7 @@ def publish(conn, run_id: int, code: str, name: str | None, body: dict) -> None:
             "INSERT INTO prices (run_id, code, name, as_of, expires, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (run_id, code, name, body["as_of"], body["expires"], json.dumps(body, ensure_ascii=False), db.now()),
         )
-        db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
+        db.update_run(conn, run_id, status="done", step=None, error=None, finished_at=db.now())
 
 
 def execute(conn, run_id: int) -> None:

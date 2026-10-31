@@ -352,7 +352,7 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
     with db.transaction(conn):
         db.save_report(conn, run_id, material.code, material.name, period, passed, verdict, body)
         if passed:
-            db.update_run(conn, run_id, status="done", step=None, finished_at=db.now())
+            db.update_run(conn, run_id, status="done", step=None, error=None, finished_at=db.now())
         else:
             db.update_run(conn, run_id, status="failed", step=None, finished_at=db.now(),
                           error="研究核查未通过，不展示结论")
