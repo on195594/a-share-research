@@ -3,7 +3,7 @@
 ## 组织
 
 - `test_*.py`：按业务能力保存回归断言，不按某次交付或版本另建重复测试。
-- `data/`：真实采集的 JSON/PDF 样本，属于回归输入，不是临时文件。采集来源与口径见样本内元数据及使用它的测试。
+- `data/`：真实采集的 JSON（含 `.json.gz`）/PDF 样本，属于回归输入，不是临时文件。采集来源与口径见样本内元数据及使用它的测试。
 - `support/reports.py`：茅台年报摘录、财务数字和引文检查用报告构造器。
 - `support/continuation.py`：真实生产/K2 报告记录及 SQLite 装载器。
 - `support/templates.py`：统一开启自动转义的 Jinja 环境与报告渲染入口。
@@ -29,6 +29,7 @@
 | 历史回测与离线实验 | `test_backtest.py`、`test_backtest_experiment.py` |
 | 公司研究进展 | `test_progress.py`：真实捕获的引用、重复公告反例、幂等、HTTP 与隔离导入；人工绑定的结构互变样本不代表真实模型验收 |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
+| 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、历史压缩、巡检互变） |
 | API、会话与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py` |
 
 完整离线回归：`uv run pytest -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。

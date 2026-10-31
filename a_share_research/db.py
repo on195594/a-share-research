@@ -406,6 +406,7 @@ def main() -> None:
     print(json.dumps(compact_calls(conn)))
     if args.vacuum:
         conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # in WAL mode VACUUM leaves the whole file in the log
     conn.close()
 
 
