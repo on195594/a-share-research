@@ -40,7 +40,12 @@ def legacy_database(path, columns="present"):
 
 
 def assert_derived(conn):
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    for index, table, column in (("calls_by_run", "calls", "run_id"),
+                                 ("runs_by_status", "runs", "status"),
+                                 ("sessions_by_expires", "sessions", "expires_at")):
+        assert index in {row["name"] for row in conn.execute(f"PRAGMA index_list({table})")}
+        assert [row["name"] for row in conn.execute(f"PRAGMA index_info({index})")] == [column]
     assert {"prompt_base", "prompt_block"} <= {row[1] for row in conn.execute("PRAGMA table_info(calls)")}
     assert conn.execute("SELECT count(*) FROM runs WHERE replay_of IS NOT json_extract(identity, '$.replay_of')").fetchone()[0] == 0
     assert conn.execute(f"SELECT count(*) FROM reports r WHERE coverage IS NOT {db.COVERAGE}").fetchone()[0] == 0
@@ -165,11 +170,32 @@ def test_v3_repairs_writes_missed_during_v2_rollback(tmp_path):
 def test_future_additive_version_remains_usable(tmp_path):
     path = tmp_path / "app.db"
     conn = db.connect(path)
-    conn.execute("PRAGMA user_version = 6")
+    conn.execute("PRAGMA user_version = 7")
     conn.close()
     conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
     assert conn.total_changes == 0
+    conn.close()
+
+
+def test_v6_indexes_preserve_records_and_are_idempotent(tmp_path):
+    path = tmp_path / "app.db"
+    conn = db.connect(path)
+    load(conn)
+    before = sorted(conn.iterdump())
+    for index in ("calls_by_run", "runs_by_status", "sessions_by_expires"):
+        conn.execute(f"DROP INDEX {index}")
+    conn.execute("PRAGMA user_version = 5")
+    changes = conn.total_changes
+    for _ in range(2):
+        with db.transaction(conn):
+            db._migrate_v6(conn)
+        assert sorted(conn.iterdump()) == before
+        assert conn.total_changes == changes
+    conn.close()
+    conn = db.connect(path)
+    assert_derived(conn)
+    assert sorted(conn.iterdump()) == before
     conn.close()
 
 

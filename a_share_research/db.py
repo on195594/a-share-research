@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS runs (
     material TEXT,
     request TEXT
 );
+CREATE INDEX IF NOT EXISTS runs_by_status ON runs(status);
 CREATE TABLE IF NOT EXISTS calls (
     id INTEGER PRIMARY KEY,
     run_id INTEGER NOT NULL REFERENCES runs(id),
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS calls (
     created_at TEXT NOT NULL,
     identity TEXT
 );
+CREATE INDEX IF NOT EXISTS calls_by_run ON calls(run_id);
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY,
     run_id INTEGER NOT NULL UNIQUE REFERENCES runs(id),
@@ -89,6 +91,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     expires_at REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS sessions_by_expires ON sessions(expires_at);
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -181,7 +184,13 @@ def _migrate_v5(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE calls ADD COLUMN prompt_block TEXT")
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5)
+def _migrate_v6(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE INDEX IF NOT EXISTS calls_by_run ON calls(run_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS runs_by_status ON runs(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS sessions_by_expires ON sessions(expires_at)")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6)
 
 
 def now() -> str:
@@ -191,7 +200,6 @@ def now() -> str:
 def connect(path: Path | None = None) -> sqlite3.Connection:
     path = path or DATA / "app.db"
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Shared by the web threadpool; sqlite3 serializes access to one connection.
     conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
@@ -372,12 +380,18 @@ def compact_calls(conn: sqlite3.Connection) -> dict:
 
 
 def save_material(conn, run_id: int, snapshot: dict) -> str:
-    """Persist changed snapshots (including trace/stops), repairing the identity hash if needed."""
-    text, sha = json.dumps(snapshot, ensure_ascii=False), snapshot["sha256"]
+    """Persist snapshots when their SHA changes; skip serialization and writes on a match."""
+    sha = snapshot["sha256"]
+    # Avoid serializing and binding the full snapshot on unchanged tool rounds.
+    row = conn.execute("SELECT json_extract(identity, '$.material_sha256') FROM runs WHERE id = ?",
+                       (run_id,)).fetchone()
+    if row is None or row[0] == sha:
+        return sha
+    text = json.dumps(snapshot, ensure_ascii=False)
     conn.execute(
         "UPDATE runs SET material = ?, identity = json_set(coalesce(identity, '{}'), '$.material_sha256', ?)"
-        " WHERE id = ? AND (material IS NOT ? OR json_extract(identity, '$.material_sha256') IS NOT ?)",
-        (text, sha, run_id, text, sha),
+        " WHERE id = ? AND coalesce(json_extract(identity, '$.material_sha256'), '') != ?",
+        (text, sha, run_id, sha),
     )
     return sha
 

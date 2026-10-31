@@ -81,6 +81,22 @@ class Settings:
         return self.base_url.startswith("https://")
 
 
+class ThreadLocalConnectionProxy:
+    """Forward connection access to one SQLite connection per calling thread."""
+
+    def __init__(self):
+        self._path = db.DATA / "app.db"
+        self._local = threading.local()
+        # Keep startup schema initialization and migration failures eager.
+        self._local.conn = db.connect(self._path)
+
+    def __getattr__(self, name):
+        connection = getattr(self._local, "conn", None)
+        if connection is None:
+            connection = self._local.conn = db.connect(self._path)
+        return getattr(connection, name)
+
+
 settings = Settings.from_env()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -91,7 +107,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 templates.env.globals["funnel_chart"] = charts.funnel
 templates.env.globals["citation_link"] = citation_link
 templates.env.globals["report_source_view"] = report_source_view
-conn = db.connect()
+conn = ThreadLocalConnectionProxy()
 
 
 # ---------- security ----------
@@ -264,17 +280,14 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
         loaded = batches.load(batch)
         performance = charts.batch_returns(loaded, batches.returns(loaded),
                                            {r["code"]: r["name"] for r in loaded["q20"] or []})
-    latest = reading.latest_reports(conn)
+    latest = reading.latest_reports(conn, include_checkpoint=False)
     companies = [r for r in latest if r["own"]]
     batch_only = sum(1 for r in latest if not r["own"])
     pending, pending_more = reading.pending_reviews(conn)
     if companies:
-        bodies = reading.report_bodies(conn, [c["id"] for c in companies])
         passed_before = {r["code"]: r for r in reading.latest_reports(
-            conn, codes=[c["code"] for c in companies], passed=True)}
-        cards = [reading.card(c, bodies[c["id"]], None if c["passed"] else passed_before.get(c["code"]))
-                 | {"from_batch": c["from_batch"]}
-                 for c in companies]
+            conn, codes=[c["code"] for c in companies], passed=True, include_checkpoint=False)}
+        cards = reading.report_cards(conn, companies, passed_before)
     else:
         cards = []
     listed = {r['id'] for r in pending}
@@ -619,7 +632,7 @@ def start_price(request: Request, code: str = Form(""), request_id: str = Form("
 
 # ---------- candidate batches ----------
 
-# The shared connection is not safe for concurrent statements from the request threadpool.
+    # The thread-local web connection serializes writes per thread; batches serialize updates explicitly.
 batch_writes = threading.Lock()
 
 @app.get("/batches")

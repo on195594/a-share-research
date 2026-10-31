@@ -1,8 +1,12 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
+import hashlib
 import json
 import re
+from collections import OrderedDict
+from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
+from threading import Lock
 
 from a_share_research import charts, db, service
 
@@ -247,7 +251,7 @@ def evidence_ledger(content: dict, rows: dict, evidence: dict) -> dict:
 
 def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
                    passed: bool = False, since: str | None = None, code_prefix: str | None = None,
-                   limit: int = -1, offset: int = 0) -> list:
+                   limit: int = -1, offset: int = 0, include_checkpoint: bool = True) -> list:
     """Newest non-replay report per company among eligible reports, with bounded summaries.
 
     Search matches any historical name/code literally; source counts exclude replays.
@@ -267,6 +271,7 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
     if code_prefix is not None:
         where.append("p.code LIKE ?")
         params.append(code_prefix[:6] + ".%")
+    checkpoint = "json_extract(r.body, '$.checkpoints[0].text')" if include_checkpoint else "NULL"
     return conn.execute(
         "WITH latest AS (SELECT p.code, MAX(p.id) AS id,"
         " SUM(COALESCE(u.request_id, '') NOT LIKE 'batch-%') AS own"
@@ -275,7 +280,7 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
         " OR instr(lower(p.code), lower(?)) > 0)),"
         " selected AS (SELECT * FROM latest ORDER BY id DESC LIMIT ? OFFSET ?)"
         " SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, s.own,"
-        " json_extract(r.body, '$.checkpoints[0].text') AS checkpoint,"
+        f" {checkpoint} AS checkpoint,"
         " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch, r.coverage"
         " FROM selected s JOIN reports r ON r.id = s.id"
         " JOIN runs u ON u.id = r.run_id ORDER BY r.id DESC",
@@ -299,6 +304,59 @@ def report_bodies(conn, ids: list[int]) -> dict:
         return {}
     return {r["id"]: json.loads(r["body"]) for r in conn.execute(
         f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
+
+
+_CARD_CACHE_SIZE = 256
+_card_cache: OrderedDict[tuple, dict] = OrderedDict()
+_card_cache_lock = Lock()
+
+
+def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
+    """Share compact cards across connections; body edits must also update body_sha256."""
+    if not reports:
+        return []
+    cursor = conn.execute('PRAGMA database_list')
+    db_path = next(row['file'] for row in cursor if row['name'] == 'main')
+    # In-memory databases have no stable path; uncommitted changes stay out of the cache.
+    cacheable = bool(db_path) and not cursor.connection.in_transaction
+    ids = [report['id'] for report in reports]
+    hashes = dict(conn.execute(
+        f"SELECT id, body_sha256 FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids))
+    keys, resolved = {}, {}
+    for report in reports:
+        metadata = tuple((k, report[k]) for k in
+                         ('code', 'name', 'passed', 'verdict', 'created_at', 'coverage'))
+        key = (db_path, report['id'], hashes[report['id']], metadata)
+        keys[report['id']] = key
+        if cacheable and key[2]:
+            with _card_cache_lock:
+                if key in _card_cache:
+                    resolved[report['id']] = _card_cache[key]
+                    _card_cache.move_to_end(key)
+
+    missing = [report_id for report_id in ids if report_id not in resolved]
+    if missing:
+        rows = conn.execute(
+            f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in missing)})", missing)
+        for row in rows:
+            key = keys[row['id']]
+            item = card(dict(key[3]) | {'id': row['id']}, json.loads(row['body']))
+            resolved[row['id']] = item
+            # Never cache legacy bodies without hashes or a body changed between the two reads.
+            if cacheable and key[2] and hashlib.sha256(row['body'].encode()).hexdigest() == key[2]:
+                with _card_cache_lock:
+                    _card_cache[key] = item
+                    _card_cache.move_to_end(key)
+                    while len(_card_cache) > _CARD_CACHE_SIZE:
+                        _card_cache.popitem(last=False)
+
+    cards = []
+    for report in reports:
+        item = deepcopy(resolved[report['id']])
+        previous = passed_before.get(report['code']) if not report['passed'] else None
+        item['last_passed'] = dict(previous) if previous is not None else None
+        cards.append(item | {'from_batch': report['from_batch']})
+    return cards
 
 
 def comparison(conn, report) -> dict:

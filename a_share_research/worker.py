@@ -8,6 +8,22 @@ from a_share_research import db, model, price, research, screening, progress
 log = logging.getLogger(__name__)
 
 
+AUTO_RESUME_ERROR = "服务重启后自动恢复"
+
+
+def recover(conn) -> None:
+    """Requeue an interrupted worker run once; CLI runs belong to their own process."""
+    with db.transaction(conn):
+        rows = conn.execute("SELECT id, error FROM runs WHERE status='running' AND request_id IS NOT NULL").fetchall()
+        for row in rows:
+            if row["error"] == AUTO_RESUME_ERROR:
+                db.update_run(conn, row["id"], status="failed", step=None, finished_at=db.now(),
+                              error="研究中断（已自动恢复仍未完成，请重新开始）")
+            else:
+                db.update_run(conn, row["id"], status="queued", step="resumed", finished_at=None,
+                              error=AUTO_RESUME_ERROR)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
@@ -19,12 +35,7 @@ def main() -> None:
              runtime["pi_version"], runtime["node_version"], runtime["provider"],
              runtime["model"], runtime["model_source"])
     conn = db.connect()
-    # A web run left 'running' by a previous worker cannot be resumed; the user can start it again.
-    # Command-line runs (no request_id) belong to their own process and are left alone.
-    conn.execute(
-        "UPDATE runs SET status = 'failed', step = NULL, error = '研究中断（服务重启），请重新开始', finished_at = ?"
-        " WHERE status = 'running' AND request_id IS NOT NULL", (db.now(),),
-    )
+    recover(conn)
     screening.recover(conn)
     log.info("worker ready")
     while True:

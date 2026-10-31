@@ -1,0 +1,129 @@
+{
+  "source": "TuShare fina_audit",
+  "captured_at": "2026-10-31T17:40:28+08:00",
+  "start_date": "20210101",
+  "end_date": "20261023",
+  "companies": {
+    "000651.SZ": [
+      {
+        "ts_code": "000651.SZ",
+        "ann_date": "20260429",
+        "end_date": "20251231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 3960000.0,
+        "audit_agency": "中审众环会计师事务所",
+        "audit_sign": "邱以武,邬夏霏"
+      },
+      {
+        "ts_code": "000651.SZ",
+        "ann_date": "20250428",
+        "end_date": "20241231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 3960000.0,
+        "audit_agency": "中审众环会计师事务所",
+        "audit_sign": "邱以武,王慧军"
+      },
+      {
+        "ts_code": "000651.SZ",
+        "ann_date": "20240430",
+        "end_date": "20231231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 3960000.0,
+        "audit_agency": "中审众环会计师事务所",
+        "audit_sign": "吴梓豪,邱以武"
+      },
+      {
+        "ts_code": "000651.SZ",
+        "ann_date": "20230429",
+        "end_date": "20221231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 3960000.0,
+        "audit_agency": "中审众环会计师事务所",
+        "audit_sign": "吴梓豪,邱以武"
+      },
+      {
+        "ts_code": "000651.SZ",
+        "ann_date": "20220430",
+        "end_date": "20211231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 3960000.0,
+        "audit_agency": "中审众环会计师事务所",
+        "audit_sign": "韩振平,邱以武"
+      },
+      {
+        "ts_code": "000651.SZ",
+        "ann_date": "20210429",
+        "end_date": "20201231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 3960000.0,
+        "audit_agency": "中审众环会计师事务所",
+        "audit_sign": "韩振平,耿霆"
+      }
+    ],
+    "002648.SZ": [
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20260324",
+        "end_date": "20251231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 1300000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "叶贤斌,高丽"
+      },
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20250325",
+        "end_date": "20241231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 1300000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "叶贤斌,高丽"
+      },
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20240326",
+        "end_date": "20231231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 1300000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "叶贤斌,高丽"
+      },
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20230429",
+        "end_date": "20221231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 950000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "蒋晓东,高丽"
+      },
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20220830",
+        "end_date": "20220630",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 950000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "蒋晓东,高丽"
+      },
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20220322",
+        "end_date": "20211231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 950000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "蒋晓东,高丽"
+      },
+      {
+        "ts_code": "002648.SZ",
+        "ann_date": "20210413",
+        "end_date": "20201231",
+        "audit_result": "标准无保留意见",
+        "audit_fees": 950000.0,
+        "audit_agency": "天健会计师事务所",
+        "audit_sign": "蒋晓东,叶贤斌"
+      }
+    ]
+  }
+}

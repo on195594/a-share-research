@@ -11,7 +11,7 @@
 | F 基本面深度与信号升级 | F1/F3a、步骤 0、1a/1c、1b 历史快照阅读及 `peers` 同业发现已上线；步骤 2 第一阶段已上线；F2 保留原规则 | [升级方案](investment-upgrade.md)；逐值公告映射、F3b、步骤 2 后续及 3–4 待确认 |
 | W 阅读界面图表化（10-30） | 报告页“财务与走势”、判断刻度、批次收益与因子分位、首页批次对比与公司判断轨迹已上线；图表由 `charts.py` 纯函数从已存值计算几何，服务端 SVG | 真实使用后观察 2 分钟读懂报告的目标；旧报告按表回退，不回填经营序列 |
 | K 研究积累与降噪 | K2 工程交付已收尾；双组有限对照、真实跨期回应与 K3 个案完成；K4 保留规则已写入 | 真实关闭及关闭后不再继承保留为 K3 非阻塞观察，见[积累方案](research-accumulation.md) |
-| 公司研究进展 | 已上线。生产验收首对万华 41→44 于 10-30 12:56 生成、复核各一次，复核未通过（第 4 条把同一半年报的补充引文标为新披露），按停止标准未提交五粮液 40→42 | 是否修正分类边界后再验收，待所有者决定；验收边界见[积累方案](research-accumulation.md#公司研究进展) |
+| 公司研究进展 | 已上线。生产验收首对万华 41→44 于 10-30 12:56 生成、复核各一次，复核未通过（第 4 条把同一半年报的补充引文标为新披露），按停止标准未提交五粮液 40→42 | 分类边界已修复并获准整合推送，尚未部署或重验真实样本；验收边界见[积累方案](research-accumulation.md#公司研究进展) |
 
 已完成且已部署的近期工作包（详情见上述历史版本对应小节）：
 
@@ -24,24 +24,26 @@
 
 **未部署**：`compact-calls --vacuum` 在 VACUUM 后截断 WAL（本次生产是手动执行），只影响维护命令，随下次发布。
 
-**公司研究进展分类边界（本地候选，未部署）**：依据操作者对万华41→44的失败描述及真实捕获的通用元数据反例，补充逐引用的新发布必要条件，生成和独立复核使用同一来源分类。没有万华原始失败候选，不称为真实重放或语义修复通过。不改既有失败记录、报告、调用额度或指纹版本；万华/五粮液不重新执行。基线对照中，旧资料补读、同URL换哈希、明确更正稿换URL三项原先均可误入新披露，新代码全部拒绝；合法新公告仍可候选。最终完整离线回归576通过、7项Pi/worker配置检查跳过；独立审查者另跑进展47项及6个元数据边界断言全部通过，关闭缺期间/空URL异常、普通同名公告误挡及明确更正标题绕过。无模型调用；混合新旧引用的语义新增及未显式标注的更正关系仍待真实复核。
+**公司研究进展分类边界（整合推送获批，未部署）**：依据操作者对万华41→44的失败描述及真实捕获的通用元数据反例，补充逐引用的新发布必要条件，生成和独立复核使用同一来源分类。没有万华原始失败候选，不称为真实重放或语义修复通过。不改既有失败记录、报告、调用额度或指纹版本；万华/五粮液不重新执行。基线对照中，旧资料补读、同URL换哈希、明确更正稿换URL三项原先均可误入新披露，新代码全部拒绝；合法新公告仍可候选。最终完整离线回归576通过、7项Pi/worker配置检查跳过；独立审查者另跑进展47项及6个元数据边界断言全部通过，关闭缺期间/空URL异常、普通同名公告误挡及明确更正标题绕过。无模型调用；混合新旧引用的语义新增及未显式标注的更正关系仍待真实复核。
+
+**分类修复整合（10-31）**：按所有者明确授权，将 `1a6ab92` 无冲突整合最新 main `2b9d9d7`，保留持久推理daemon、快照/首页缓存、v6索引与线程连接、TuShare持久缓存、PDF并发和worker研究任务恢复。进展模块同期未改；模型调用接口兼容，已发出请求不重试，研究任务恢复不改进展失败记录。原输入指纹及一次生成/一次复核门槛不变。对最终整合代码重新运行受影响回归91通过、24跳过，完整 `pytest -q -rs tests` 为681通过、31跳过（30项Pi/worker环境检查、1项未启用付费模型测试），另有1条既有Starlette/httpx弃用警告；未沿用旧候选计数。本轮只合并推送，不部署、不调用模型、不写生产；万华原失败候选仍不可访问，不能称语义验收通过。
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `aa338ed`** 于 2026-10-31 12:38（北京时间）经所有者当次授权（v5 加法迁移及历史调用压缩）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `8086328` 只有资料块去重 `462e0fe` 和文档改动。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `09c2748`** 于 2026-10-31 19:07（北京时间）经所有者当次授权（P2 性能与容灾优化：TuShare 封闭区间 SQLite 缓存、PDF 提取优化、Worker 断点安全恢复）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `dc9bccd` 引入了 TuShare 历史数据本地持久化缓存、PDF 并发提取，以及 Worker 任务中断后安全恢复与幂等性保证。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:aa338ed` | `e796481e7e14ce412afdb2e044966a62d3fe54d52b9740350657a5412b4fd08b` |
-| `a-share-research-worker:aa338ed` | `55af8028348eb9d103e4e826afaba0c1e6e640659194590242544cb8dd3e1a67` |
+| `a-share-research-web:09c2748` | `bf81b7128bcc2ebce82160340e1b8f48bdd079659be66d7e47de6fa9e1afa61d` |
+| `a-share-research-worker:09c2748` | `ee71182912146dd1cf01d4a41c30a743bb89018e427ba5544674e6b69b204aa6` |
 
-**验证**：离线全集 555 通过、7 环境跳过；放回位置与转义有互变测试。生产库副本演练迁移与压缩后全部调用还原一致。新代码隔离库真实研究五粮液一次，done、通过复核，首轮探索与复核的资料块均已切出（证据 `smoke-462e0fe-20261031/`）。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过；随后在 worker 内执行 `compact-calls --vacuum`：149 条调用 20.3MB→1.7MB，`wal_checkpoint(TRUNCATE)` 后 `app.db` 48.6MB→40.4MB，再次巡检 347 条调用全部还原并与哈希一致。公网 Chromium（390 宽）首页、公司页（万华化学）与报告页 48 均 200、无横向溢出与脚本错误，会话已退出。
+**验证**：离线全集 660 通过、31 环境跳过；全量（含 worker 环境）690 通过、1 跳过；TuShare 缓存写入/读取、大 PDF 提取一致性、Worker 任务中断排队恢复与幂等提交均有精准回归测试。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过。公网与本机 HTTP 探测正常（200 OK）。
 
-**证据**：`deploy-aa338ed-20261031-123812/`（含 `compact-calls.json`、`integrity-after-compact.json`）。备份（v5 压缩前整库）：`~/a-share-research-data/backup-pre-aa338ed-20261031-123813.db`。
+**证据**：`deploy-09c2748-20261031-190607/`（含 `manifest.json`、`worker-preflight.json`、`integrity-after.json`）。备份：`~/a-share-research-data/backup-pre-09c2748-20261031-190607.db`。
 
-**直接回退**：`a-share-research-web:rollback-aa338ed` 与 `a-share-research-worker:rollback-aa338ed` 即原运行的 `8086328`（`bb52337b…7f7d`、`29a7aef8…2a3b`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。`8086328` 的应用代码在 v5 库上照常读写，但其完整性巡检不认识 `prompt_block`，会把约 340 条调用误报为哈希不符；需要可信巡检时改回退到 `fd8397f`（`rollback-8086328` 标签，不检查调用提示），或停两服务后用上述备份整库恢复。
+**直接回退**：`a-share-research-web:rollback-09c2748` 与 `a-share-research-worker:rollback-09c2748` 即原运行的 `dc9bccd`（`cc7a0fea…3d61`、`c353172c…0de9`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。
 
-**更早发布**：`8086328` 的发布记录（证据 `deploy-8086328-20261031-115341/`、备份 `backup-pre-8086328-20261031-115342.db`、回退到 `fd8397f`）见 `git show aa338ed:docs/implementation-plan.md`；`fd8397f` 见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
+**更早发布**：`dc9bccd` 的发布记录（证据 `deploy-dc9bccd-20261031-173230/`、备份 `backup-pre-dc9bccd-20261031-173230.db`、回退到 `80cac7c`）见 `git show 09c2748:docs/implementation-plan.md`；`80cac7c` 见 `git show dc9bccd:docs/implementation-plan.md`；`aa338ed` 见 `git show 80cac7c:docs/implementation-plan.md`；`8086328` 见 `git show aa338ed:docs/implementation-plan.md`；`fd8397f` 见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
 
 ## 尚待完成与未采用项
 

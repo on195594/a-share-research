@@ -5,10 +5,13 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 
 import pandas as pd
@@ -19,12 +22,73 @@ from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
 from a_stock_lib.providers.tushare_valuation import TushareValuationProvider
 
 from a_share_research.db import DATA, SHANGHAI
+from a_share_research import db
 from a_share_research.companies import CNINFO, SESSION, SourceError, company
 
 log = logging.getLogger(__name__)
 KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "一季度报告": "03-31", "三季度报告": "09-30"}
 PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.IGNORECASE)
 TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[一三]季度报告)")
+
+FINANCIAL_APIS = {"fina_indicator", "income", "cashflow", "fina_audit", "balancesheet"}
+HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal"}
+
+
+def _tushare_cache_key(api: str, params: dict) -> str | None:
+    if os.environ.get("TUSHARE_CACHE") == "0":
+        return None
+    today = datetime.now(SHANGHAI).date()
+    bound = params.get("trade_date") or params.get("end_date")
+    try:
+        historical = bool(bound) and date.fromisoformat(str(bound)) < today
+    except ValueError:
+        return None
+    if not historical or api not in FINANCIAL_APIS | HISTORICAL_APIS:
+        return None
+    key = {"api": api, "params": params}
+    return hashlib.sha256(json.dumps(key, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def tushare_query(pro, api: str, **params) -> pd.DataFrame:
+    """Cache historical raw responses, before a-stock-lib normalizes dates and numbers."""
+    key = _tushare_cache_key(api, params)
+    if key is None:
+        return pro.query(api, **params)
+    path = db.DATA / "tushare_cache.db"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
+            row = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (key,)).fetchone()
+            if row:
+                saved = json.loads(row[0])
+                if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
+                    raise ValueError("TuShare cache is not a split DataFrame")
+                return pd.DataFrame(**saved)
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        log.warning("TuShare %s cache read failed; fetching upstream", api, exc_info=True)
+    frame = pro.query(api, **params)
+    # Empty results may mean the provider has not published the data yet.
+    if isinstance(frame, pd.DataFrame) and not frame.empty:
+        try:
+            # Python's JSON float encoding preserves precision and leaves date/code strings intact.
+            data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
+            with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
+                conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
+        except Exception:
+            log.warning("TuShare %s cache write failed", api, exc_info=True)
+    return frame
+
+
+class TushareCacheClient:
+    """a-stock-lib client factory; retain its validation, throttling and retry policy."""
+
+    def __init__(self, token: str):
+        self.pro = ts.pro_api(token)
+
+    def __getattr__(self, api: str):
+        return partial(tushare_query, self.pro, api)
 
 
 @dataclass
@@ -168,11 +232,19 @@ def fetch(doc: Document) -> Document:
     doc.sha256 = hashlib.sha256(payload).hexdigest()
     doc.retrieved_at = datetime.now(SHANGHAI).isoformat(timespec="seconds")
     pdf = store_pdf(DATA / "pdf", payload, doc.sha256)
-    doc.pages = _pages(pdf, doc.sha256, "-layout")
-    doc.raw_pages = _pages(pdf, doc.sha256, "-raw")
+    doc.pages, doc.raw_pages = _page_pair(pdf, doc.sha256)
     if len(doc.raw_pages) != len(doc.pages):
         raise SourceError(f"{doc.url}: page count differs between text extractions")
     return doc
+
+
+def _page_pair(pdf: Path, sha: str) -> tuple[list[str], list[str]]:
+    if not pdf.with_suffix(".layout.json").exists() and not pdf.with_suffix(".raw.json").exists():
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            layout = pool.submit(_pages, pdf, sha, "-layout")
+            raw = pool.submit(_pages, pdf, sha, "-raw")
+            return layout.result(), raw.result()
+    return _pages(pdf, sha, "-layout"), _pages(pdf, sha, "-raw")
 
 
 def store_pdf(directory: Path, payload: bytes, sha: str) -> Path:
@@ -239,7 +311,7 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
     try:
-        deducted = ts.pro_api(os.environ["TUSHARE_TOKEN"]).fina_indicator(
+        deducted = TushareCacheClient(os.environ["TUSHARE_TOKEN"]).fina_indicator(
             ts_code=to_tushare_stock_code(code), start_date=start.replace("-", ""),
             fields="ts_code,ann_date,end_date,update_flag,profit_dedt")
         if not isinstance(deducted, pd.DataFrame) or not {"ann_date", "end_date", "profit_dedt"} <= set(deducted.columns):
@@ -248,7 +320,7 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
             deducted[column] = pd.to_datetime(deducted[column], format="%Y%m%d").dt.strftime("%Y-%m-%d")
     except Exception as exc:
         raise SourceError(f"TuShare fina_indicator: {exc}") from exc
-    provider = TushareFinancialProvider()
+    provider = TushareFinancialProvider(client_factory=TushareCacheClient)
     return {
         "income": _frame(provider.fetch_income_history(code, start_date=start)),
         "cashflow": _frame(provider.fetch_cashflow_history(code, start_date=start)),
