@@ -68,6 +68,6 @@ Wiki 依据：`agent-research-evidence-gate` 的按缺口补证，`agent-experie
 
 ## 6. 排期与停止条件
 
-R3 的验证记录见[实施计划](implementation-plan.md#r3-推进记录)；批次 E 的阶段与验收见[方案第 7 节](screening-experiment.md#7-分阶段)。
+R3 的验证记录见实施计划（`git show 52d1eec:docs/implementation-plan.md`「R3 推进记录」）；批次 E 的阶段与验收见[方案第 7 节](screening-experiment.md#7-分阶段)。
 
 接口能真实提交并读到可核查结果、追问与纠错可用、研究验收通过即停止扩展。批次 E 按方案分阶段推进。金融股仍须对应财务口径和评估子集；不增加向量库、独立知识库、事件总线、多 Agent 流水线或自动交易。
