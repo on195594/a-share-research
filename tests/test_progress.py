@@ -106,7 +106,7 @@ def test_same_document_can_be_reinterpreted_and_changed_hash_is_not_deduplicated
     # is not proof of repetition. Semantic review must still verify the claimed revision.
     doc = snap['inputs']['current']['body']['sources']['D6']['document']
     doc['sha256'] = '0' * 64
-    assert progress.check(body, snap) == []
+    assert any('version_unverified' in e for e in progress.check(body, snap))
     snap['inputs']['before']['body']['sources']['D6']['document'].pop('sha256')
     assert any('新披露' in e for e in progress.check(body, snap))
 
@@ -287,3 +287,100 @@ def test_http_read_refresh_and_duplicate_queue_never_call_models(captured, tmp_p
     assert captured.execute('SELECT count(*) FROM progress_calls').fetchone()[0] == 0
     assert captured.execute('SELECT count(*) FROM calls').fetchone()[0] == 0
     web_module.conn.close()
+
+
+def publication_case(captured):
+    """Captured claims, with explicitly varied publication metadata; not model acceptance."""
+    snap = progress.snapshot(captured, 39)
+    document = snap['inputs']['current']['body']['sources']['D6']['document']
+    # Isolate publication chronology from the other already-known sources.
+    snap['inputs']['before']['created_at'] = '2026-10-20T12:00:00+08:00'
+    snap['inputs']['current']['created_at'] = '2026-10-23T12:00:00+08:00'
+    return snap, document
+
+
+def test_known_pdf_different_url_or_page_is_not_new(captured):
+    snap, doc = publication_case(captured)
+    doc['url'] += '?mirror=1'
+    assert progress.disclosure_status(doc, snap) == 'known_document'
+    body = candidate()
+    body['items'][0]['kind'] = 'new_disclosure'
+    assert progress.check(body, snap)
+
+
+@pytest.mark.parametrize('company', ['603606.SH', '600519.SH'])
+@pytest.mark.parametrize('announced,expected', [('2026-10-19','earlier_material'),
+                                               ('2026-10-20','unknown_time'),
+                                               ('2026-10-21','new_publication_candidate'),
+                                               ('2026-10-24','unknown_time')])
+def test_publication_date_not_discovery_or_financial_period(captured, company, announced, expected):
+    snap, doc = publication_case(captured)
+    doc.update(code=company, title=doc['title']+'（日期边界变体）', url=doc['url']+'?different=1',
+               sha256='0'*64, announced=announced)
+    assert progress.disclosure_status(doc, snap) == expected
+    body = candidate()
+    body['items'][0]['kind'] = 'new_disclosure'
+    assert bool(progress.check(body, snap)) == (expected != 'new_publication_candidate')
+    constraints = json.loads(progress.prompt_input(snap))['disclosure_constraints']
+    assert any(s['status']==expected for s in constraints['current:answer:0'])
+
+
+@pytest.mark.parametrize('field', ['code','title','url','sha256','announced'])
+def test_missing_identity_never_guesses_new_publication(captured, field):
+    snap, doc = publication_case(captured)
+    doc.pop(field)
+    assert progress.disclosure_status(doc, snap) == 'unknown_identity'
+
+
+def test_changed_pdf_is_unverified_version_not_known_or_new(captured):
+    snap, doc = publication_case(captured)
+    doc.update(sha256='0'*64, announced='2026-10-21')
+    assert progress.disclosure_status(doc, snap) == 'version_unverified'
+    doc['url'] += '?new-location=1'
+    # Generic announcement titles repeat; absent financial period is not a version link.
+    assert progress.disclosure_status(doc, snap) == 'new_publication_candidate'
+    # A basis revision remains expressible, without mechanical endorsement of its semantic truth.
+    body = candidate()
+    body['items'][0]['kind'] = 'basis_revision'
+    assert progress.check(body, snap) == []
+    assert '更正基数不等于经营变化' in progress.PROMPT
+
+
+def test_same_hash_with_wrong_company_is_identity_conflict(captured):
+    snap, doc = publication_case(captured)
+    doc['code']='600519.SH'
+    assert progress.disclosure_status(doc, snap) == 'identity_conflict'
+
+
+def test_missing_or_invalid_baseline_time_cannot_certify_publication(captured):
+    snap, doc = publication_case(captured)
+    doc.update(title=doc['title']+'（日期边界变体）',url=doc['url']+'?different=1',sha256='0'*64)
+    for value in ('', '2026-10-20', 'not-a-date'):
+        snap['inputs']['before']['created_at']=value
+        assert progress.disclosure_status(doc, snap)=='unknown_time'
+
+
+def test_missing_optional_period_and_null_old_url_degrade_without_crashing(captured):
+    snap, doc = publication_case(captured)
+    for old in progress.documents(snap, 'before'):
+        old['url'] = None
+    doc.update(sha256='0'*64, announced='2026-10-21')
+    doc.pop('period')
+    # No identifiable baseline remains: cannot certify a new publication.
+    assert progress.disclosure_status(doc, snap) == 'unknown_identity'
+
+
+def test_same_period_report_changed_hash_and_url_still_needs_version_check(captured):
+    snap, doc = publication_case(captured)
+    old = snap['inputs']['before']['body']['sources']['D6']['document']
+    # Financial-period linkage is an explicit metadata boundary mutation.
+    old['period'] = doc['period'] = '2026-06-30'
+    doc.update(sha256='0'*64, url=doc['url']+'?different=1', announced='2026-10-21')
+    assert progress.disclosure_status(doc, snap) == 'version_unverified'
+
+
+@pytest.mark.parametrize('suffix', ['（更正后）', '（修订版）'])
+def test_explicit_correction_title_not_promoted_by_new_url_and_hash(captured, suffix):
+    snap, doc = publication_case(captured)
+    doc.update(title=doc['title']+suffix, sha256='0'*64, url=doc['url']+'?different=1', announced='2026-10-21')
+    assert progress.disclosure_status(doc, snap) == 'version_unverified'
