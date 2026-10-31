@@ -168,7 +168,7 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 
 ## 部署
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份，`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。旧镜像写下的完整提示可用 `docker exec a-share-research-worker python -m a_share_research.db compact-calls --vacuum` 压缩：逐任务事务、提交前核对还原、可重复执行；改写生产数据，需当次授权。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。旧镜像写下的完整提示可用 `docker exec a-share-research-worker python -m a_share_research.db compact-calls --vacuum` 压缩：逐任务事务、提交前核对还原、可重复执行；改写生产数据，需当次授权。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 

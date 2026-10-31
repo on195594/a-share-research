@@ -81,6 +81,22 @@ class Settings:
         return self.base_url.startswith("https://")
 
 
+class ThreadLocalConnectionProxy:
+    """Forward connection access to one SQLite connection per calling thread."""
+
+    def __init__(self):
+        self._path = db.DATA / "app.db"
+        self._local = threading.local()
+        # Keep startup schema initialization and migration failures eager.
+        self._local.conn = db.connect(self._path)
+
+    def __getattr__(self, name):
+        connection = getattr(self._local, "conn", None)
+        if connection is None:
+            connection = self._local.conn = db.connect(self._path)
+        return getattr(connection, name)
+
+
 settings = Settings.from_env()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -91,7 +107,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 templates.env.globals["funnel_chart"] = charts.funnel
 templates.env.globals["citation_link"] = citation_link
 templates.env.globals["report_source_view"] = report_source_view
-conn = db.connect()
+conn = ThreadLocalConnectionProxy()
 
 
 # ---------- security ----------
@@ -619,7 +635,7 @@ def start_price(request: Request, code: str = Form(""), request_id: str = Form("
 
 # ---------- candidate batches ----------
 
-# The shared connection is not safe for concurrent statements from the request threadpool.
+    # The thread-local web connection serializes writes per thread; batches serialize updates explicitly.
 batch_writes = threading.Lock()
 
 @app.get("/batches")

@@ -299,7 +299,7 @@ def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "ow
     draft = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
     l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
           "frozen_by": by}
-    # RETURNING, not rowcount: the web connection is shared and other writes change its counters.
+    # RETURNING, not rowcount: keeps the update and atomic id retrieval within one statement.
     updated = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
                            " WHERE id = ? AND status = 'proposed' RETURNING id",
                            (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id)).fetchone()
