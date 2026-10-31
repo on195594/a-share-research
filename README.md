@@ -173,7 +173,7 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
-- worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口。
+- worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口；推理默认启用进程局部 Node.js 长驻守护（通过临时 Unix Domain Socket 通信，消除冷启动；`PI_DAEMON=0` 可回退为单次 CLI 启动）。
 
 worker 启动时先离线预检 Node、Pi 安装目录、模型存储、所配置模型及本地凭据配置，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `node a_share_research/pi_infer.mjs --check`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。兼容缺省存储（使用内置模型或环境凭据）与带 BOM 的 JSON；文件损坏、模型不存在或没有可用凭据配置仍会阻断。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、存储或凭据环境，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
 

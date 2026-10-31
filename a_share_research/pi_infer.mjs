@@ -3,7 +3,7 @@
 import { readFile, chmod, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const preflight = process.argv[2] === "--check";

@@ -147,6 +147,7 @@ class DaemonManager:
         with self.lock:
             if os.environ.get("PI_DAEMON") == "0" or _daemon_failed_pid == os.getpid():
                 self.close()
+                self.last_transport = "oneshot"
                 return _complete_once(request)
             started = time.monotonic()
             sending = False
@@ -166,6 +167,7 @@ class DaemonManager:
                     out = json.loads(response.read())
                     if not isinstance(out, dict) or (response.status != 200 and not out.get("error")):
                         raise ValueError(f"invalid pi daemon response (HTTP {response.status})")
+                    self.last_transport = "daemon"
                     return out
                 finally:
                     connection.close()
@@ -176,6 +178,7 @@ class DaemonManager:
                                      {"requested": {k: request.get(k) for k in ("provider", "model")}},
                                      time.monotonic() - started) from exc
                 logger.warning("Pi daemon unavailable; falling back to one-shot completion: %s", exc)
+                self.last_transport = "oneshot"
                 return _complete_once(request)
 
 
@@ -281,7 +284,9 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000,
         identity["pi_infer_sha256"] = hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
         if not request["provider"] or not request["model"]:
             raise ValueError("MODEL_PROVIDER and MODEL_ID are required")
-        out = _daemon(os.getpid()).complete(request)
+        daemon = _daemon(os.getpid())
+        out = daemon.complete(request)
+        identity["request_parameters"]["transport"] = getattr(daemon, "last_transport", "daemon")
         identity.update({k: out.get(k) for k in
                          ("pi_version", "parameters", "node_version", "model_source", "extension")})
         if out.get("provider") or out.get("model"):
