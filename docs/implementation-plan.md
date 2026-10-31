@@ -30,18 +30,18 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `b36b15d`** 于 2026-10-31 22:02（北京时间）经所有者当次授权完成 web、worker 切换（例行发布，无配置、凭据、依赖或迁移变更；worker 仍为 `cpus: 0.6`）。内容：发布空闲检查纳入排队/运行中的研究进展任务（此类任务不会重启）；按审查结论撤下收益可忽略的首页卡片 LRU、PDF 双路并发与研究取数上从不命中的 TuShare 缓存包装（初筛/回测保留缓存，Node 长驻推理保留待生产实测）；同时上线 `54676a4` 研究进展解析修复。审查与依据见 `plan-review-perf-20261031/`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `74f187e`** 于 2026-10-31 22:18（北京时间）经所有者当次授权完成 web、worker 切换（例行发布，无配置、凭据、依赖或迁移变更）。内容：机械校验不再把页码引用、字母数字产品代号当数字；问题阈值的“以上/以下”后置写法同样豁免；PDF 表格跨行断开的金额在两段均出现在引文时按所引页拼回核对。依据为对 10 次复核前修正的离线重放（`repair-trigger-diagnosis-20261031/`）：误伤触发的 run 60、62 归零，run 63 去掉代号误伤，其余 5 处真实引用错误照常拦截。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:b36b15d` | `1da3876248ea539c3d594ef26b7b765d5a2602fd97833274d3f86953e52714ba` |
-| `a-share-research-worker:b36b15d` | `3c29ec109eb9902fee265497b942cff5590c6212449bb76a12a02afc093044d6` |
+| `a-share-research-web:74f187e` | `e5d5ed81b815805e1793e571c64e4afa301eb04812a366098598f9d9f2a6f008` |
+| `a-share-research-worker:74f187e` | `f36d24d37f9299c6e111b8c455d9ba27bb1a94d99e445e36da25aec38af8bdd2` |
 
-**验证**：离线全集 673 通过、31 环境跳过；空闲检查互变测试（去掉进展判断即失败）。发布工具一次通过，完整性巡检 0 问题；新 worker 内真实 TuShare 取数 603606 五表正常；公网首页、公司页、报告页手机宽度 200、无溢出与脚本错误。证据 `deploy-b36b15d-20261031-220236/`，备份 `~/a-share-research-data/backup-pre-b36b15d-20261031-220237.db`。
+**验证**：离线全集 676 通过、31 环境跳过；三项规则各配互变测试（含货币前缀与缺小数段的反例）。发布工具一次通过，完整性巡检 0 问题；新 worker 内重放结果与本机一致（`recheck-in-worker.txt`）。证据 `deploy-74f187e-20261031-221753/`，备份 `~/a-share-research-data/backup-pre-74f187e-20261031-221754.db`。
 
-**直接回退**：`a-share-research-web:rollback-b36b15d`、`a-share-research-worker:rollback-b36b15d` 即原运行的 `09c2748`（`bf81b712…a61d`、`ee711829…6aa4`），分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-74f187e`、`a-share-research-worker:rollback-74f187e` 即原运行的 `b36b15d`（`1da38762…14ba`、`3c29ec10…44d6`），分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
-**更早发布**：`09c2748` 见 `git show b36b15d:docs/implementation-plan.md`，再早各次沿该版本的「更早发布」链接追溯。
+**更早发布**：`b36b15d`（发布空闲检查纳入研究进展、撤下首页卡片 LRU/PDF 并发/研究取数缓存包装）见 `git show 74f187e:docs/implementation-plan.md`，再早各次沿该版本的「更早发布」链接追溯。
 
 ## 尚待完成与未采用项
 
@@ -51,7 +51,7 @@
 - **三档结论诊断（K2 对照后）**：抽查真实“需要谨慎”与“值得继续研究”报告，核对问题、证据与结论是否一致。确有原因再单独立项，不预设硬分档。
 - **11 月候选批次待发起**：由所有者或受托 Agent 在网页发起，见[实验方案](screening-experiment.md#4-对照与前瞻模拟)。这是草案即冻与 `screen-v1.1` 提示的首次实跑。
 - **复核/修正阶段提示缓存未采用**（10-31）：这两个阶段的缓存命中为 0，但每次研究的首次复核/修正没有可复用前缀，复核（无工具）与修正（带补证工具）之间也不能共享；能命中的只有同一研究内的第二次复核或修正。评估集 10 家中仅 3 家进入修正，收益约每 10 家 0.1 美元，不值得为调整提示词顺序再跑评估集。
-- **部署备份**：10-31 经授权删除 `796e4b6`、`fd8397f`、`8086328`、`aa338ed` 四份；现有 `80cac7c`、`dc9bccd`、`09c2748`、`b36b15d` 四份，下次经授权清理时按 [K4](research-accumulation.md#k4-存储保留针对-p1-后半) 保留最近 3 份。
+- **部署备份**：10-31 经授权删除 `796e4b6`、`fd8397f`、`8086328`、`aa338ed` 四份；现有 `80cac7c`、`dc9bccd`、`09c2748`、`b36b15d`、`74f187e` 五份，下次经授权清理时按 [K4](research-accumulation.md#k4-存储保留针对-p1-后半) 保留最近 3 份。
 - **跨公司比较输入精简未采用**：约 83k→50k tokens 的表示改变了入选频数，单批实验不足以证明质量未降；证据在 `upgrade-20261026/digest-size/`。
 - **三档结论校准未采用**：11 份材料的两组重放结论一致，不足以解释原结论偏谨慎；证据在 `calibration-20261027/` 和 `codex-review-20261027/`。
 - **放开“外部知识”用于提出假设未采用**（10-29）：评估集非金融 9/10，比亚迪两次因现金压力风险遗漏或数字无出处未通过，推断类表述占比未见增益；保留原规则。证据在 `external-knowledge-20261029/`。
