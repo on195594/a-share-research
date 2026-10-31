@@ -55,7 +55,7 @@
 {% endmacro %}
 
 {% macro item(entry, index, rows, sources, section, focus) %}
-  <li{% if section %} id="claim-{{ section }}-{{ index }}" tabindex="-1"{% endif %}><p>{{ entry.text }}</p>{{ cites(entry, rows, sources, focus == section ~ ':' ~ index) }}</li>
+  <li{% if section %} id="claim-{{ section }}-{{ index }}" tabindex="-1"{% endif %}><p>{{ entry.text }}</p>{% if entry.forecast is mapping %}{% set f = entry.forecast %}{% set r = rows.get(f.metric) or {} %}<p class="forecast">预测 · {{ r.label or f.metric }} <span class="date">{{ f.period }}</span>：<span class="num">{{ f.low }}–{{ f.high }}</span>{{ r.unit }}，把握 {{ f.confidence }}%</p>{% endif %}{{ cites(entry, rows, sources, focus == section ~ ':' ~ index) }}</li>
 {% endmacro %}
 
 {# `limit` keeps the first entries in view and folds the rest; a focused claim opens the fold. #}

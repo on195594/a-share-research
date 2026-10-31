@@ -171,6 +171,7 @@ form.inline { display: inline; margin: 0; }
 .items { list-style: none; padding: 0; margin: 0; }
 .items > li { padding: 12px 0; border-top: 1px solid var(--line); }
 .items > li > p { margin: 0; }
+.items > li > p.forecast { margin-top: 6px; font-size: 14px; color: var(--muted); }
 .risks h2 { color: var(--caution); }
 .risks .items > li { border-top: 0; border-left: 3px solid var(--caution); margin-bottom: 16px; padding: 2px 0 2px 14px; }
 

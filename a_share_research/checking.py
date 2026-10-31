@@ -3,7 +3,7 @@
 import re
 from decimal import Decimal
 
-from a_share_research import evidence
+from a_share_research import evidence, forecasts
 from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.material import Material
 
@@ -126,6 +126,9 @@ def check(report: dict, material: Material) -> list[dict]:
         sections.append("methods")
     if not material.extra.get("feedback") or "checkpoints" in report:
         sections.append("checkpoints")
+    if "checkpoints" in sections and not material.extra.get("feedback"):
+        if problem := forecasts.count_problem(report.get("checkpoints")):
+            problems.append({"where": "checkpoints", "problem": problem})
     for section in sections:
         items = report.get(section)
         if not isinstance(items, list) or (not items and section != "methods"):
@@ -144,6 +147,8 @@ def check(report: dict, material: Material) -> list[dict]:
                 problems.append({"where": where, "problem": "text 中不要写出处编号"})
             if not cites:
                 problems.append({"where": where, "problem": "没有出处"})
+            if section == "checkpoints" and "forecast" in item:
+                problems += [{"where": where, "problem": p} for p in forecasts.problems(item["forecast"], material.table)]
             errors = evidence.citation_errors(cites, registry, material.table)
             problems += [{"where": where, "problem": error, "type": "citation_calculation"} for error in errors]
             if errors:

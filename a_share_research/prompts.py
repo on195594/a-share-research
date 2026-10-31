@@ -3,6 +3,8 @@
 import json
 from typing import TYPE_CHECKING
 
+from a_share_research import forecasts
+
 if TYPE_CHECKING:  # the web process imports this module and must not pull in market providers
     from a_share_research.material import Material
 
@@ -18,8 +20,12 @@ SCHEMA = """输出且只输出一个 JSON 对象：
 出处有两种：原文引文 {"source": "D0 或工具给的文档标识", "page": 页码, "quote": "该页原文中连续的一段，逐字复制，20–200 字"}；表格/程序计算 {"ref": "T.revenue 或 C.1 等实际行标识", "period": "实际期间键，跨期论断可省略"}。"""
 
 
-CHECKPOINTS = ('\n另加 "checkpoints": [{"text": "下一期披露中应观察的事项与方向，以及出现什么情况会削弱当前判断", "cites": [基期事实的出处]}]，1–3 条。'
-               '这是条件，不是预测：出处只证明基期事实；观察阈值须来自出处或程序计算，不自拟数字。')
+CHECKPOINTS = ('\n另加 "checkpoints": [{"text": "下一期披露中应观察的事项与方向，以及出现什么情况会削弱当前判断", "cites": [基期事实的出处], '
+               '"forecast": {"metric": "T.* 行标识", "period": "{next_period}", "low": 数字, "high": 数字, "confidence": 60 | 75 | 90}}]，1–3 条。'
+               '出处只证明基期事实；text 中的观察阈值须来自出处或程序计算，不自拟数字。'
+               '\n至少 2 条检查点带 forecast：对下一期定期报告（期间 {next_period}，累计口径同财务表）中你认为最能检验本报告判断的财务表行给出闭区间预测，'
+               '单位与该行一致；confidence 是你认为实际值落入区间的概率（%）。这是会在披露后由程序记分的预测：'
+               '区间要反映你的真实判断，不要为求命中而放宽，也不要机械照搬本期数值。预测数字只放在 forecast 中，不写进 text。')
 PRIOR = ('\n上下文中的 prior 是同一公司此前一份报告当时列出的风险与检查点：只是待复核的旧议程，不是事实来源，也不是完整的取证清单；'
          '结论按本次证据独立给出，新披露中的重大反证优先。answer 末尾逐条说明这些旧风险与旧检查点在本期的状态'
          '（仍存在 / 已缓解 / 已证伪 / 无法判断）并引用本次资料；risks 只保留当前仍可能推翻判断的风险。')
@@ -28,7 +34,8 @@ PRIOR = ('\n上下文中的 prior 是同一公司此前一份报告当时列出�
 def output_schema(material: "Material") -> str:
     schema = SCHEMA
     if not material.extra.get("feedback"):
-        schema += CHECKPOINTS
+        base = forecasts.base_period(material.table)
+        schema += CHECKPOINTS.replace("{next_period}", forecasts.next_period(base) if base else "下一期")
     if material.extra.get("question"):
         schema += '\n另加 "answer": [{"text": "直接回答本次问题", "cites": [出处]}]，不得省略。'
     if material.extra.get("feedback"):

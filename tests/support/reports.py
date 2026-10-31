@@ -34,7 +34,9 @@ def report(**changes):
         "business": [{"text": "销售费用增加主要因为广告宣传。", "cites": [SALES]}],
         "financial": [{"text": "销售费用同比增长28.62%，约72.53亿元。", "cites": [SALES_ROW]}],
         "checkpoints": [{"text": "下一期经营现金流若仍低于615.22亿元，说明现金转化尚未恢复。",
-                         "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}]}],
+                         "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}],
+                         "forecast": {"metric": "T.op_cash", "period": "2026-03-31", "low": 100, "high": 260,
+                                      "confidence": 60}}],
     }
     return deepcopy(base | changes)
 

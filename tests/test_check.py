@@ -97,8 +97,8 @@ def test_material_prompt_keeps_unknown_url_and_actual_read_pages():
 
 
 def test_checkpoint_thresholds_must_come_from_cited_figures():
-    bad = report(checkpoints=[{"text": "下一期经营现金流若低于700.00亿元，说明现金转化未恢复。",
-                               "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}]}])
+    bad = report()
+    bad["checkpoints"][0]["text"] = "下一期经营现金流若低于700.00亿元，说明现金转化未恢复。"
     assert [p["where"] for p in check(bad, MATERIAL)] == ["checkpoints[0]"]
     # Reports written before checkpoints existed fail the current contract on replay.
     legacy = report()
