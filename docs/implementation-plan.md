@@ -21,24 +21,24 @@
 - **取证与修正闭环**（`796e4b6`）：探索与两次修正共用取证会话与额度，补证前核对来源身份与页文。评估集 10/10，证据 `eval-3d53928-20261031/`、`eval-control-fb137ad-20261031/`。
 - **初筛解耦、SVG 几何防护、Pi 启动预检**（10-30）：`screening_factors.py` 纯函数化、图表零值/负值边界、worker 领取任务前检查 Pi 运行时。
 
-**未部署**：`52d1eec` 把 `research.py` 拆为 `material.py`（取材料与快照）、`checking.py`（机械核对）、`prompts.py`（成文契约与 JSON 解析），`research.py` 只留阶段编排，消除与 `research_tools.py` 的循环导入；无行为变化，离线全集 546 通过、7 环境跳过。
+- **`research.py` 拆分**（`52d1eec`，随 `fd8397f` 部署）：拆出 `material.py`（取材料与快照）、`checking.py`（机械核对）、`prompts.py`（成文契约与 JSON 解析），`research.py` 只留阶段编排，消除与 `research_tools.py` 的循环导入；无行为变化。
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `796e4b6`** 于 2026-10-31 10:19（北京时间）按例行发布授权完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `05d0c3f` 包含取证与修正闭环及审查修复 `3d53928`。无数据库迁移、生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `fd8397f`** 于 2026-10-31 11:24（北京时间）按例行发布授权完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `796e4b6` 只有 `research.py` 拆分 `52d1eec`（无行为变化）和文档改动。无数据库迁移、生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:796e4b6` | `addfbe91342302f924677919a75a1c67c8181cbf80cb579421b8806aff4824c1` |
-| `a-share-research-worker:796e4b6` | `e17f906bc6fad887e9dc935d1f6f9b4a19a9cf1b1bfe7f592015ff07e8691ae8` |
+| `a-share-research-web:fd8397f` | `14fe0727ae84e60effa37708de5c2ded9ae9195e65498439eb6d502f8dc7ce4e` |
+| `a-share-research-worker:fd8397f` | `7dfc1118f6f57bfb78264f848e7a1e9accdb091eef35676736ee21d8a2ad283d` |
 
-**验证**：发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检（gpt-6.1-sol 就绪）通过；公网入口 Chromium（390 宽）验收首页、公司页（万华化学）与报告页 48，均 200、无横向溢出与脚本错误，会话已退出。
+**验证**：离线全集 546 通过、7 环境跳过（与拆分前一致）；拆分后源码在隔离库真实研究万华化学一次，done、报告通过复核（213s / 9 次调用，证据 `smoke-52d1eec-20261031/`）。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检（gpt-6.1-sol 就绪）通过；公网入口 Chromium（390 宽）验收首页、公司页（万华化学）与报告页 48，均 200、无横向溢出与脚本错误，会话已退出。
 
-**证据**：`deploy-796e4b6-20261031-101936/`。备份：`~/a-share-research-data/backup-pre-796e4b6-20261031-101937.db`。
+**证据**：`deploy-fd8397f-20261031-112423/`。备份：`~/a-share-research-data/backup-pre-fd8397f-20261031-112425.db`。
 
-**直接回退**：`a-share-research-web:rollback-796e4b6` 与 `a-share-research-worker:rollback-796e4b6` 即原运行的 `05d0c3f`（`40affc28…64a9`、`2df5f742…8759`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；无迁移，无需恢复数据库。
+**直接回退**：`a-share-research-web:rollback-fd8397f` 与 `a-share-research-worker:rollback-fd8397f` 即原运行的 `796e4b6`（`addfbe91…24c1`、`e17f906b…1ae8`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；无迁移，无需恢复数据库。
 
-**更早发布**：各次发布的证据目录、备份文件名与回退链见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
+**更早发布**：`796e4b6` 的发布记录（证据 `deploy-796e4b6-20261031-101936/`、备份 `backup-pre-796e4b6-20261031-101937.db`、回退到 `05d0c3f`）见 `git show fd8397f:docs/implementation-plan.md`；再早各次的证据、备份与回退链见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
 
 ## 尚待完成与未采用项
 
