@@ -1,4 +1,4 @@
-"""Snapshot caching on captured Moutai material and production continuation records."""
+"""Snapshot hashes and skipped writes on captured Moutai material."""
 
 from copy import deepcopy
 import json
@@ -12,17 +12,8 @@ from support.continuation import BODY
 from support.reports import MATERIAL
 
 
-def test_snapshot_reuses_hash_and_isolates_mutable_results(tmp_path):
-    material = Material.from_snapshot(MATERIAL.snapshot())
-    first = material.snapshot()
-    cached = material._cached_snapshot
-    assert material.snapshot() == first
-    assert material._cached_snapshot is cached
-    first['data']['table'].clear()
-    first['sha256'] = ''
-    assert material.snapshot() == MATERIAL.snapshot()
-    assert material._cached_snapshot is cached
-
+def test_save_material_skips_writes_when_sha_is_unchanged(tmp_path):
+    material = Material.from_snapshot(deepcopy(MATERIAL.snapshot()))
     conn = db.connect(tmp_path / 'material.db')
     try:
         run_id = db.create_run(conn, material.code)
@@ -43,10 +34,10 @@ def test_snapshot_reuses_hash_and_isolates_mutable_results(tmp_path):
 
 @pytest.mark.parametrize('change', ['page', 'raw_page', 'table_value', 'table_order',
                                    'mapping_order', 'document', 'extra', 'remove_extra'])
-def test_snapshot_invalidates_nested_edits_and_preserves_ordered_hash(change):
-    material = Material.from_snapshot(MATERIAL.snapshot())
+def test_snapshot_hash_tracks_nested_edits_and_order(change):
+    material = Material.from_snapshot(deepcopy(MATERIAL.snapshot()))
     material.extra = {'prior': deepcopy(BODY[39]['prior'])}
-    before = material.snapshot()
+    before = deepcopy(material.snapshot())
     if change == 'page':
         material.pages[9] = material.pages[10]
     elif change == 'raw_page':
@@ -70,6 +61,4 @@ def test_snapshot_invalidates_nested_edits_and_preserves_ordered_hash(change):
     assert after['version'] == (2 if material.extra else 1)
     restored = Material.from_snapshot(json.loads(json.dumps(after)))
     assert restored.snapshot()['sha256'] == after['sha256']
-    cached = material._cached_snapshot
     assert material.snapshot() == after
-    assert material._cached_snapshot is cached

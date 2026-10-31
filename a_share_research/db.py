@@ -380,7 +380,7 @@ def compact_calls(conn: sqlite3.Connection) -> dict:
 
 
 def save_material(conn, run_id: int, snapshot: dict) -> str:
-    """Persist changed snapshots (including trace/stops), repairing the identity hash if needed."""
+    """Persist snapshots when their SHA changes; skip serialization and writes on a match."""
     sha = snapshot["sha256"]
     # Avoid serializing and binding the full snapshot on unchanged tool rounds.
     row = conn.execute("SELECT json_extract(identity, '$.material_sha256') FROM runs WHERE id = ?",
