@@ -23,7 +23,10 @@ REPORT_ID = re.compile(r"(?:报告|report)\s*#?\s*\d+", re.I)
 # Page references ("第11—12页") and product/project codes ("HDM1002", "GLP-1") are identifiers, not figures.
 # Currency prefixes stay figures so "RMB100亿" still needs a source.
 PAGE_REF = re.compile(r"第\s*\d+(?:\s*[、,，和及至~—–-]+\s*\d+)*\s*页")
-CODE_TOKEN = re.compile(r"(?<![A-Za-z0-9.])(?!(?:RMB|CNY|USD|US|HKD|HK|EUR|JPY|GBP)-?\d)[A-Za-z]+-?\d[A-Za-z0-9-]*")
+# A code has at least two letters, is not a currency or ratio label, and is not followed by a unit.
+CODE_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9.])(?!(?:RMB|CNY|USD|US|HKD|HK|EUR|JPY|GBP|ROE|ROA|ROIC|PE|PB|PS|EPS|BPS|DPS|TTM)-?\d)"
+    r"[A-Za-z]{2,}-?\d[A-Za-z0-9-]*(?![.\d]|\s*(?:%|％|倍|(?:万亿|亿|万)?元|个百分点|美元|港元))", re.I)
 _VALUE = r"(?P<value>[-−+]?\d[\d,]*(?:\.\d+)?)(?![\d.,])\s*"
 _UNIT = r"(?P<unit>(?:万亿|亿|万)?元|个百分点|[%％]|倍|天|(?!\s*[\w%％]))"
 QUESTION_THRESHOLD = re.compile(

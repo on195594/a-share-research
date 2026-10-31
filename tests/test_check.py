@@ -187,7 +187,8 @@ def test_page_references_and_product_codes_are_identifiers_not_figures():
                             "cites": [SALES_ROW]}])
     assert check(draft, MATERIAL) == []
     # Mutation: the same digits as amounts, or behind a currency prefix, still need sources.
-    for text in ("销售费用约51亿元。", "研发投入1002万元。", "销售费用约RMB100亿元。", "HDM 1002万元。"):
+    for text in ("销售费用约51亿元。", "研发投入1002万元。", "销售费用约RMB100亿元。", "HDM 1002万元。",
+                 "销售费用约rmb100亿元。", "ROE15.2%。", "PE30倍。", "EPS2.35元。", "ABC1002万元。", "XY15%。"):
         bad = report(answer=[{"text": text, "cites": [SALES_ROW]}])
         assert [p["where"] for p in check(bad, MATERIAL)] == ["answer[0]"], text
 
