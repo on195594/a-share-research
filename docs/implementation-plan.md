@@ -26,20 +26,20 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `dc9bccd`** 于 2026-10-31 17:33（北京时间）经所有者当次授权（P1 性能优化：长驻 Node.js 推理守护进程、快照 SHA 快速跳过、跨线程首页卡片 LRU 缓存）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `80cac7c` 引入长驻守护进程（中位本地调用耗时 780ms 降至 4.5ms），首页卡片 35ms 降至 1.15ms，消除大字段读写放大。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `09c2748`** 于 2026-10-31 19:07（北京时间）经所有者当次授权（P2 性能与容灾优化：TuShare 封闭区间 SQLite 缓存、PDF 提取优化、Worker 断点安全恢复）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `dc9bccd` 引入了 TuShare 历史数据本地持久化缓存、PDF 并发提取，以及 Worker 任务中断后安全恢复与幂等性保证。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:dc9bccd` | `cc7a0feaf0c29d43d340b695baa74885444a4957da969dd630fc5d23681f3d61` |
-| `a-share-research-worker:dc9bccd` | `c353172cb848cc571c428fc160a3e08e370a5ccf961b76c9609dff28466f0de9` |
+| `a-share-research-web:09c2748` | `bf81b7128bcc2ebce82160340e1b8f48bdd079659be66d7e47de6fa9e1afa61d` |
+| `a-share-research-worker:09c2748` | `ee71182912146dd1cf01d4a41c30a743bb89018e427ba5544674e6b69b204aa6` |
 
-**验证**：离线全集 581 通过、31 环境跳过；全量（含 worker 环境）611 通过、1 跳过；真实在线模型调用验证通过。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过。公网与本机 HTTP 探测正常（200 OK）。
+**验证**：离线全集 660 通过、31 环境跳过；全量（含 worker 环境）690 通过、1 跳过；TuShare 缓存写入/读取、大 PDF 提取一致性、Worker 任务中断排队恢复与幂等提交均有精准回归测试。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过。公网与本机 HTTP 探测正常（200 OK）。
 
-**证据**：`deploy-dc9bccd-20261031-173230/`（含 `manifest.json`、`worker-preflight.json`、`integrity-after.json`）。备份：`~/a-share-research-data/backup-pre-dc9bccd-20261031-173230.db`。
+**证据**：`deploy-09c2748-20261031-190607/`（含 `manifest.json`、`worker-preflight.json`、`integrity-after.json`）。备份：`~/a-share-research-data/backup-pre-09c2748-20261031-190607.db`。
 
-**直接回退**：`a-share-research-web:rollback-dc9bccd` 与 `a-share-research-worker:rollback-dc9bccd` 即原运行的 `80cac7c`（`15ec09bd…116`、`404be441…0de9`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-09c2748` 与 `a-share-research-worker:rollback-09c2748` 即原运行的 `dc9bccd`（`cc7a0fea…3d61`、`c353172c…0de9`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。
 
-**更早发布**：`80cac7c` 的发布记录（证据 `deploy-80cac7c-20261031-161335/`、备份 `backup-pre-80cac7c-20261031-161336.db`、回退到 `aa338ed`）见 `git show dc9bccd:docs/implementation-plan.md`；`aa338ed` 见 `git show 80cac7c:docs/implementation-plan.md`；`8086328` 见 `git show aa338ed:docs/implementation-plan.md`；`fd8397f` 见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
+**更早发布**：`dc9bccd` 的发布记录（证据 `deploy-dc9bccd-20261031-173230/`、备份 `backup-pre-dc9bccd-20261031-173230.db`、回退到 `80cac7c`）见 `git show 09c2748:docs/implementation-plan.md`；`80cac7c` 见 `git show dc9bccd:docs/implementation-plan.md`；`aa338ed` 见 `git show 80cac7c:docs/implementation-plan.md`；`8086328` 见 `git show aa338ed:docs/implementation-plan.md`；`fd8397f` 见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
 
 ## 尚待完成与未采用项
 
