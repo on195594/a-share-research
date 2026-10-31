@@ -43,12 +43,9 @@ def _tushare_cache_key(api: str, params: dict) -> str | None:
         historical = bool(bound) and date.fromisoformat(str(bound)) < today
     except ValueError:
         return None
-    if api not in FINANCIAL_APIS and not (api in HISTORICAL_APIS and historical):
+    if not historical or api not in FINANCIAL_APIS | HISTORICAL_APIS:
         return None
-    # Open-ended financial queries can gain new disclosures; reuse them only within this day.
     key = {"api": api, "params": params}
-    if api in FINANCIAL_APIS and not historical:
-        key["as_of"] = today.isoformat()
     return hashlib.sha256(json.dumps(key, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -74,12 +71,12 @@ def tushare_query(pro, api: str, **params) -> pd.DataFrame:
     frame = pro.query(api, **params)
     # Empty results may mean the provider has not published the data yet.
     if isinstance(frame, pd.DataFrame) and not frame.empty:
-        # Python's JSON float encoding preserves precision and leaves date/code strings intact.
-        data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
         try:
+            # Python's JSON float encoding preserves precision and leaves date/code strings intact.
+            data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
             with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
                 conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
-        except (OSError, sqlite3.Error):
+        except Exception:
             log.warning("TuShare %s cache write failed", api, exc_info=True)
     return frame
 

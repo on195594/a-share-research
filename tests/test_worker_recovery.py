@@ -1,4 +1,4 @@
-"""Real SQLite restart transitions and captured material reuse, without model calls."""
+"""Real SQLite restart transitions and fresh gathering, without model calls."""
 
 from copy import deepcopy
 import json
@@ -7,9 +7,8 @@ import sys
 
 import pytest
 
-from a_share_research import db, integrity, research, worker
-from a_share_research.research_tools import Acquisition
-from support.continuation import RECORDS, BODY
+from a_share_research import db, research, service, worker
+from support.continuation import RECORDS
 from support.reports import MATERIAL
 
 
@@ -33,15 +32,14 @@ def row(conn, run_id):
 
 
 def test_first_restart_requeues_once_and_preserves_request_and_material(conn):
-    run_id, request = interrupted(conn)
+    run_id, _ = interrupted(conn)
     db.save_material(conn, run_id, MATERIAL.snapshot())
     before = row(conn, run_id)
     worker.recover(conn)
     resumed = row(conn, run_id)
     assert resumed["status"] == "queued" and resumed["step"] == "resumed"
-    assert resumed["error"] is None and resumed["finished_at"] is None
-    assert json.loads(resumed["request"]) == request | {"auto_resume_count": 1}
-    assert all(resumed[k] == before[k] for k in ("material", "started_at", "request_id", "identity"))
+    assert resumed["error"] == "服务重启后自动恢复" and resumed["finished_at"] is None
+    assert all(resumed[k] == before[k] for k in ("request", "material", "started_at", "request_id", "identity"))
     # Another restart before dispatch must not consume a second attempt.
     worker.recover(conn)
     assert row(conn, run_id) == resumed
@@ -51,6 +49,7 @@ def test_first_restart_requeues_once_and_preserves_request_and_material(conn):
     assert failed["status"] == "failed" and failed["step"] is None and failed["finished_at"]
     assert failed["error"] == "研究中断（已自动恢复仍未完成，请重新开始）"
     assert failed["material"] == before["material"]
+    assert failed["request"] == before["request"]
     worker.recover(conn)
     assert row(conn, run_id) == failed
 
@@ -61,10 +60,30 @@ def test_legacy_null_requests_also_have_one_attempt(conn, request_json, kind):
     run_id = db.create_run(conn, MATERIAL.code, request_id="recovery", kind=kind, status="running")
     db.update_run(conn, run_id, request=request_json)
     worker.recover(conn)
-    assert json.loads(row(conn, run_id)["request"])["auto_resume_count"] == 1
+    assert row(conn, run_id)["request"] == request_json
+    assert row(conn, run_id)["error"] == "服务重启后自动恢复"
     db.update_run(conn, run_id, status="running")
     worker.recover(conn)
     assert row(conn, run_id)["status"] == "failed"
+    assert row(conn, run_id)["request"] == request_json
+
+
+def test_resumed_request_can_be_submitted_idempotently(conn):
+    record = next(r for r in RECORDS if r["run"]["request_id"] and r["run"]["request"])
+    code, request_id = record["report"]["code"], record["run"]["request_id"]
+    question = record["run"]["request"]["question"]
+    run_id = service.submit(conn, code, request_id, question=question)
+    original_request = row(conn, run_id)["request"]
+    db.update_run(conn, run_id, status="running", step="explore")
+    worker.recover(conn)
+    assert row(conn, run_id)["request"] == original_request
+    assert service.submit(conn, code, request_id, question=question) == run_id
+    with pytest.raises(service.RequestError) as exc:
+        service.submit(conn, code, request_id, question="")
+    assert exc.value.status == 409
+    db.update_run(conn, run_id, status="running", step="review")
+    worker.recover(conn)
+    assert service.submit(conn, code, request_id, question=question) == run_id
 
 
 def test_cli_and_nonrunning_runs_are_untouched(conn):
@@ -107,44 +126,25 @@ def execute_until(conn, run_id, boundary):
     return observed
 
 
-@pytest.mark.parametrize("explored", [False, True])
-def test_execute_restores_material_before_restarting_exploration(conn, explored, tmp_path):
-    run_id, _ = interrupted(conn)
-    material = research.Material.from_snapshot(deepcopy(MATERIAL.snapshot()))
-    if explored:
-        material.extra = {"prior": deepcopy(BODY[39]["prior"]), "question": BODY[39]["question"]}
-    snapshot = material.snapshot()
-    db.save_material(conn, run_id, snapshot)
-    worker.recover(conn)
-    before = row(conn, run_id)
-    # Stop just before constructing the exploration session; gather and all DB writes run normally.
-    observed = execute_until(conn, run_id, Acquisition.__init__)
-    assert observed["material"].snapshot() == snapshot
-    assert observed["runner"].run_id == run_id
-    resumed = row(conn, run_id)
-    assert resumed["material"] == before["material"] and resumed["started_at"] == before["started_at"]
-    assert integrity.check(tmp_path / "worker.db", tmp_path / "pdf")[0] == []
-    worker.recover(conn)
-    assert row(conn, run_id)["status"] == "failed"
-
-
-def test_execute_without_snapshot_still_gathers(conn):
-    run_id, _ = interrupted(conn)
-    worker.recover(conn)
-    assert execute_until(conn, run_id, research.gather)["code"] == MATERIAL.code
-
-
-@pytest.mark.parametrize("damage", ["hash", "company"])
-def test_execute_rejects_corrupt_or_wrong_company_snapshot(conn, damage):
+@pytest.mark.parametrize("snapshot_state", ["captured", "hash", "company", "missing"])
+def test_execute_gathers_fresh_material_instead_of_interrupted_snapshot(conn, snapshot_state):
     run_id, _ = interrupted(conn)
     snapshot = deepcopy(MATERIAL.snapshot())
-    if damage == "hash":
+    if snapshot_state == "hash":
         snapshot["data"]["pages"].clear()
-    else:
+    elif snapshot_state == "company":
         db.update_run(conn, run_id, code="002648.SZ")
-    db.update_run(conn, run_id, material=json.dumps(snapshot))
+    if snapshot_state != "missing":
+        db.update_run(conn, run_id, material=json.dumps(snapshot))
     worker.recover(conn)
-    research.execute(conn, run_id)
-    failed = row(conn, run_id)
-    assert failed["status"] == "failed"
-    assert ("哈希不匹配" if damage == "hash" else "公司不一致") in failed["error"]
+    before = row(conn, run_id)
+    # Stop at the real gather boundary, before external source calls.
+    observed = execute_until(conn, run_id, research.gather)
+    assert observed["code"] == before["code"]
+    resumed = row(conn, run_id)
+    assert resumed["status"] == "running" and resumed["step"] == "gather"
+    assert resumed["started_at"] == before["started_at"]
+    assert resumed["request"] == before["request"]
+    assert resumed["error"] == "服务重启后自动恢复"
+    worker.recover(conn)
+    assert row(conn, run_id)["status"] == "failed"

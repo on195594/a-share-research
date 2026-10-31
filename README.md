@@ -41,9 +41,9 @@ uv run --env-file .env.web.dev uvicorn a_share_research.web:app --port 8610  # �
 
 `.env.web`（本机开发可用 `.env.web.dev`）只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 
-初筛与研究财报查询共用 `DATA_DIR/tushare_cache.db`：历史日行情与有历史截止日的财报响应持久缓存；开放时间范围的财报查询按上海日期隔离，当日行情和空结果不缓存。设置 `TUSHARE_CACHE=0` 可完全旁路缓存，直接查询 TuShare（不改写已有缓存）。历史披露若发生更正，需刷新对应缓存后再恢复缓存查询。
+初筛与研究财报查询共用 `DATA_DIR/tushare_cache.db`：仅缓存 `trade_date` 或 `end_date` 早于上海当天日期的历史行情与财报响应；开放时间范围、当天及未来日期的查询和空结果不缓存。设置 `TUSHARE_CACHE=0` 可完全旁路缓存，直接查询 TuShare（不改写已有缓存）。历史披露若发生更正，需刷新对应缓存后再恢复缓存查询。
 
-worker 重启时，带 `request_id` 的中断任务自动重新排队一次，沿用同一任务的已保存材料快照并重新开始探索、成文和复核；再次中断则标记失败。恢复次数保存在 `runs.request.auto_resume_count`，命令行独立任务不参与自动恢复。
+worker 重启时，带 `request_id` 的中断任务自动重新排队一次，重新获取干净材料并开始探索、成文和复核；再次中断则标记失败。恢复标记保存在 `runs.error`，`runs.request` 保持原样；命令行独立任务不参与自动恢复。
 
 AI 或脚本做浏览器验收时不走 GitHub。使用当前源码的工具，在能访问数据目录的宿主签发短期浏览器会话；`--storage-state` 独占创建 0600 文件，不把令牌打印到工具输出：
 
