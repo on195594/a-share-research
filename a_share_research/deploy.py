@@ -36,8 +36,10 @@ def idle(database: Path) -> None:
         active = conn.execute("SELECT id FROM runs WHERE status IN ('queued','running')").fetchall()
         busy = conn.execute("SELECT id FROM batches WHERE status NOT IN ('failed','done')"
                             " AND (status != 'tracking' OR step IS NOT NULL)").fetchall()
-    if active or busy:
-        raise RuntimeError(f"发布中止：研究任务 {active} 或批次 {busy} 尚未空闲")
+        # Progress comparisons never restart once running, so a release must not interrupt them.
+        progress = conn.execute("SELECT id FROM research_progress WHERE status IN ('queued','running')").fetchall()
+    if active or busy or progress:
+        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy} 或研究进展 {progress} 尚未空闲")
 
 
 def fingerprints(database: Path) -> dict:

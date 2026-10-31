@@ -26,18 +26,22 @@ def stored(tmp_path: Path) -> Path:
     return sources.store_pdf(tmp_path, PDF.read_bytes(), SHA)
 
 
-def test_parallel_pdf_extraction_matches_serial_bytes_and_reuses_cache(tmp_path):
+def pair(pdf: Path) -> tuple:
+    return tuple(sources._pages(pdf, SHA, mode) for mode in ("-layout", "-raw"))
+
+
+def test_pdf_text_cache_is_reused_and_one_missing_mode_is_rebuilt(tmp_path):
     serial = stored(tmp_path / "serial")
-    expected = tuple(sources._pages(serial, SHA, mode) for mode in ("-layout", "-raw"))
-    parallel = stored(tmp_path / "parallel")
-    assert sources._page_pair(parallel, SHA) == expected
+    expected = pair(serial)
+    parallel = stored(tmp_path / "second")
+    assert pair(parallel) == expected
     for suffix in (".layout.json", ".raw.json"):
         assert parallel.with_suffix(suffix).read_bytes() == serial.with_suffix(suffix).read_bytes()
     stamps = [parallel.with_suffix(s).stat().st_mtime_ns for s in (".layout.json", ".raw.json")]
-    assert sources._page_pair(parallel, SHA) == expected
+    assert pair(parallel) == expected
     assert stamps == [parallel.with_suffix(s).stat().st_mtime_ns for s in (".layout.json", ".raw.json")]
     parallel.with_suffix(".raw.json").unlink()
-    assert sources._page_pair(parallel, SHA) == expected
+    assert pair(parallel) == expected
     assert parallel.with_suffix(".layout.json").stat().st_mtime_ns == stamps[0]
 
 

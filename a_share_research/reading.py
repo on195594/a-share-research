@@ -1,12 +1,8 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
-import hashlib
 import json
 import re
-from collections import OrderedDict
-from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
-from threading import Lock
 
 from a_share_research import charts, db, service
 
@@ -306,57 +302,11 @@ def report_bodies(conn, ids: list[int]) -> dict:
         f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
 
 
-_CARD_CACHE_SIZE = 256
-_card_cache: OrderedDict[tuple, dict] = OrderedDict()
-_card_cache_lock = Lock()
-
-
 def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
-    """Share compact cards across connections; body edits must also update body_sha256."""
-    if not reports:
-        return []
-    cursor = conn.execute('PRAGMA database_list')
-    db_path = next(row['file'] for row in cursor if row['name'] == 'main')
-    # In-memory databases have no stable path; uncommitted changes stay out of the cache.
-    cacheable = bool(db_path) and not cursor.connection.in_transaction
-    ids = [report['id'] for report in reports]
-    hashes = dict(conn.execute(
-        f"SELECT id, body_sha256 FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids))
-    keys, resolved = {}, {}
-    for report in reports:
-        metadata = tuple((k, report[k]) for k in
-                         ('code', 'name', 'passed', 'verdict', 'created_at', 'coverage'))
-        key = (db_path, report['id'], hashes[report['id']], metadata)
-        keys[report['id']] = key
-        if cacheable and key[2]:
-            with _card_cache_lock:
-                if key in _card_cache:
-                    resolved[report['id']] = _card_cache[key]
-                    _card_cache.move_to_end(key)
-
-    missing = [report_id for report_id in ids if report_id not in resolved]
-    if missing:
-        rows = conn.execute(
-            f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in missing)})", missing)
-        for row in rows:
-            key = keys[row['id']]
-            item = card(dict(key[3]) | {'id': row['id']}, json.loads(row['body']))
-            resolved[row['id']] = item
-            # Never cache legacy bodies without hashes or a body changed between the two reads.
-            if cacheable and key[2] and hashlib.sha256(row['body'].encode()).hexdigest() == key[2]:
-                with _card_cache_lock:
-                    _card_cache[key] = item
-                    _card_cache.move_to_end(key)
-                    while len(_card_cache) > _CARD_CACHE_SIZE:
-                        _card_cache.popitem(last=False)
-
-    cards = []
-    for report in reports:
-        item = deepcopy(resolved[report['id']])
-        previous = passed_before.get(report['code']) if not report['passed'] else None
-        item['last_passed'] = dict(previous) if previous is not None else None
-        cards.append(item | {'from_batch': report['from_batch']})
-    return cards
+    """Compact home-page cards; a failed report also links the company's last passed one."""
+    bodies = report_bodies(conn, [report['id'] for report in reports])
+    return [card(r, bodies[r['id']], None if r['passed'] else passed_before.get(r['code']))
+            | {'from_batch': r['from_batch']} for r in reports]
 
 
 def comparison(conn, report) -> dict:

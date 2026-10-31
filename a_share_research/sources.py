@@ -7,11 +7,10 @@ import os
 import re
 import sqlite3
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from functools import cache, partial
+from functools import cache
 from pathlib import Path
 
 import pandas as pd
@@ -79,16 +78,6 @@ def tushare_query(pro, api: str, **params) -> pd.DataFrame:
         except Exception:
             log.warning("TuShare %s cache write failed", api, exc_info=True)
     return frame
-
-
-class TushareCacheClient:
-    """a-stock-lib client factory; retain its validation, throttling and retry policy."""
-
-    def __init__(self, token: str):
-        self.pro = ts.pro_api(token)
-
-    def __getattr__(self, api: str):
-        return partial(tushare_query, self.pro, api)
 
 
 @dataclass
@@ -232,19 +221,11 @@ def fetch(doc: Document) -> Document:
     doc.sha256 = hashlib.sha256(payload).hexdigest()
     doc.retrieved_at = datetime.now(SHANGHAI).isoformat(timespec="seconds")
     pdf = store_pdf(DATA / "pdf", payload, doc.sha256)
-    doc.pages, doc.raw_pages = _page_pair(pdf, doc.sha256)
+    doc.pages = _pages(pdf, doc.sha256, "-layout")
+    doc.raw_pages = _pages(pdf, doc.sha256, "-raw")
     if len(doc.raw_pages) != len(doc.pages):
         raise SourceError(f"{doc.url}: page count differs between text extractions")
     return doc
-
-
-def _page_pair(pdf: Path, sha: str) -> tuple[list[str], list[str]]:
-    if not pdf.with_suffix(".layout.json").exists() and not pdf.with_suffix(".raw.json").exists():
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            layout = pool.submit(_pages, pdf, sha, "-layout")
-            raw = pool.submit(_pages, pdf, sha, "-raw")
-            return layout.result(), raw.result()
-    return _pages(pdf, sha, "-layout"), _pages(pdf, sha, "-raw")
 
 
 def store_pdf(directory: Path, payload: bytes, sha: str) -> Path:
@@ -311,7 +292,7 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
     try:
-        deducted = TushareCacheClient(os.environ["TUSHARE_TOKEN"]).fina_indicator(
+        deducted = ts.pro_api(os.environ["TUSHARE_TOKEN"]).fina_indicator(
             ts_code=to_tushare_stock_code(code), start_date=start.replace("-", ""),
             fields="ts_code,ann_date,end_date,update_flag,profit_dedt")
         if not isinstance(deducted, pd.DataFrame) or not {"ann_date", "end_date", "profit_dedt"} <= set(deducted.columns):
@@ -320,7 +301,7 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
             deducted[column] = pd.to_datetime(deducted[column], format="%Y%m%d").dt.strftime("%Y-%m-%d")
     except Exception as exc:
         raise SourceError(f"TuShare fina_indicator: {exc}") from exc
-    provider = TushareFinancialProvider(client_factory=TushareCacheClient)
+    provider = TushareFinancialProvider()
     return {
         "income": _frame(provider.fetch_income_history(code, start_date=start)),
         "cashflow": _frame(provider.fetch_cashflow_history(code, start_date=start)),
