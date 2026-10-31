@@ -16,7 +16,7 @@
 | `docs/project-contract.md` | `a-share-research`、`a-stock-agent-skills`、`a-stock-lib` 跨项目职责边界 | 单项目内部实现细节 |
 | `docs/roadmap.md` | 能力演进方向、阶段进入/停止条件与方法论借鉴 | 具体工作包状态与部署记录 |
 | `docs/implementation-plan.md` | 当前工作包状态、剩余验收项、当前生产部署与回退命令 | 产品长文与设计规范 |
-| `docs/screening-experiment.md`、`docs/investment-upgrade.md`、`docs/research-accumulation.md` | 各自专题（初筛实验 E、基本面升级 F、研究积累 K）的设计、验收口径与实验结论 | 当前部署与工作包状态（归实施计划） |
+| `docs/screening-experiment.md`、`docs/investment-upgrade.md`、`docs/research-accumulation.md`、`docs/judgment-validation.md` | 各自专题（初筛实验 E、基本面升级 F、研究积累 K、判断验证 V）的设计、验收口径与实验结论 | 当前部署与工作包状态（归实施计划） |
 
 ## 授权
 
@@ -65,6 +65,7 @@
 
 ## 验证与交付
 
+- **北极星是赚钱**：工程是磨刀，砍菜才是目的。新工作包立项写明服务的赚钱环节（发现候选 / 形成判断 / 避开大亏 / 复盘改进）和预期改善的判断记分（[判断验证方案](docs/judgment-validation.md)）；说不出的标为维护或故障修复。测试通过、审查干净不等于投资进展。
 - 不写 mock，不造合成数据。确定性代码（引文匹配、数字核对、派生计算、价格与筛选计算）配精准测试，输入取自真实采集的数据。
 - **按影响范围轻量验证**：日常针对性修复、提示词优化和工具增强，只需运行确定性测试 + 验证受影响的真实案例与 1 个正常案例即可交付；仅在切换底层模型、或改动影响全局成文/复核契约时才跑一次评估集（见方案第 8 节）。不默认重复全集或多轮盲审。
 - 页面改动在本机开发实例用真实浏览器、手机尺寸走一遍主流程。
