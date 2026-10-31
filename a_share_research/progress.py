@@ -52,8 +52,8 @@ def snapshot(conn, current_id: int) -> dict:
             raise service.RequestError("报告正文与保存哈希不符，停止比较", 409)
         material = json.loads(report["material"] or "null")
         if material:
-            from a_share_research.research import _material_hash
-            if _material_hash(material["data"]) != material["sha256"]:
+            from a_share_research.evidence import material_hash
+            if material_hash(material["data"]) != material["sha256"]:
                 raise service.RequestError("材料快照哈希不符，停止比较", 409)
             if body.get("material_sha256") != material["sha256"]:
                 raise service.RequestError("正文与材料不是同一保存版本，停止比较", 409)
@@ -115,7 +115,7 @@ def documents(snap, side):
 
 def check(body: dict, snap: dict) -> list[str]:
     """Structural/ref/numeric guards; semantic novelty always also needs independent review."""
-    from a_share_research.research import _numbers, _supported
+    from a_share_research.evidence import numbers, supported
     refs, errors = references(snap), []
     if not isinstance(body, dict) or set(body) != {"items", "limits"}:
         return ["结果须仅含 items 和 limits"]
@@ -145,11 +145,11 @@ def check(body: dict, snap: dict) -> list[str]:
             for record in snap["inputs"].values():
                 codes |= {r["id"][1:7] for r in record["body"].get("table", []) if re.match(r"^P\d{6}\.", r["id"])}
             pattern = r"(?<!\d)(?:" + "|".join(sorted(codes)) + r")(?!\d)"
-            candidates = [n for n, _ in _numbers(re.sub(pattern, " ", support))]
+            candidates = [n for n, _ in numbers(re.sub(pattern, " ", support))]
             for key in ids:
                 for source in refs[key]['sources']:
                     if source['kind'] == 'document':
-                        candidates += [n for n, _ in _numbers(re.sub(pattern, ' ', source['cite'].get('quote', '')))]
+                        candidates += [n for n, _ in numbers(re.sub(pattern, ' ', source['cite'].get('quote', '')))]
                         continue
                     row, cite = source['row'], source['cite']
                     values = [value for field in ('values', 'exact_values')
@@ -166,7 +166,7 @@ def check(body: dict, snap: dict) -> list[str]:
                     if not all(math.isfinite(value) for value in parsed):
                         errors.append(f'条目 {i} {field} 的已存来源包含非有限数值')
                     candidates.extend(value for value in parsed if math.isfinite(value))
-            if any(not _supported(n, precision, candidates) for n, precision in _numbers(re.sub(pattern, " ", value["text"]))):
+            if any(not supported(n, precision, candidates) for n, precision in numbers(re.sub(pattern, " ", value["text"]))):
                 errors.append(f"条目 {i} {field} 有引用中未保存的数字；比较不新增运算")
         if item["kind"] == "new_disclosure":
             old = documents(snap, "before")

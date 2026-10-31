@@ -78,7 +78,8 @@ def test_review_missing_previous_page_can_acquire_repair_and_close_with_new_bind
     ledger = ReviewLedger()
     missing = {'type': 'question', 'where': 'financial[0]', 'problem': '需补读销售费用原文',
                'importance': '财务解释须有正式披露支持', 'evidence': []}
-    runner.responses = [lambda: bound(material, original, issues=[missing]), [read(9)], fixed,
+    runner.responses = [lambda: bound(material, original, issues=[missing]), [read(9)], {'ops': [{'op': 'replace', 'where': f'{section}[0]', 'value': fixed[section][0]}
+                                          for section in ('business', 'financial')]},
                         lambda: bound(material, fixed, resolutions=[{
                             'id': ledger.pending()[0]['id'], 'status': 'resolved', 'reason': '补读并引用销售费用表',
                             'targets': ['financial[0]'], 'evidence': [SALES_ROW]}])]
@@ -102,7 +103,8 @@ def test_already_read_evidence_only_needs_citation_repair_without_fetch(session)
     runner, material, acquisition = session
     original = report()
     original['financial'][0]['cites'] = []
-    runner.responses = [report(), lambda: bound(material, report())]
+    runner.responses = [{'ops': [{'op': 'replace', 'where': 'financial[0]', 'value': report()['financial'][0]}]},
+                        lambda: bound(material, report())]
     result, problems, reviewed = research.revise(runner, material, original, ReviewLedger(), acquisition=acquisition)
     assert result == report() and not problems and reviewed
     assert material.extra['tools'] == [] and runner.calls == 2
@@ -119,7 +121,7 @@ def test_mechanical_failure_never_claims_fresh_review_or_closes_old_issue(sessio
     pending = ledger.pending()
     bad = report()
     bad['financial'][0]['cites'] = []
-    runner.responses = [bad, bad]
+    runner.responses = [{}, {}]
     _, problems, reviewed = research.revise(runner, material, bad, ledger, acquisition=acquisition)
     assert not reviewed and ledger.pending() == pending and len(ledger.rounds) == 1
     assert any(p.get('id') == pending[0]['id'] for p in problems)
@@ -129,7 +131,7 @@ def test_mechanical_failure_never_claims_fresh_review_or_closes_old_issue(sessio
 def test_frozen_repair_never_offers_tools_or_changes_material(session):
     runner, material, _ = session
     before = deepcopy(material.snapshot())
-    runner.responses = [report()]
+    runner.responses = [{}]
     assert research.repair(runner, material, report(), []) == report()
     assert runner.offered == [[]] and material.snapshot() == before
 
@@ -276,8 +278,8 @@ def test_unavailable_disclosure_and_unknown_gap_remain_unresolved_after_repairs(
         return bound(material, unknown, resolutions=[{'id': ledger.pending()[0]['id'],
                      'status': 'unresolved', 'reason': '未能取得所需证据，缺口仍在'}])
     runner.responses = [lambda: bound(material, original, issues=[question]),
-                        [read(99)], unknown, still_missing,
-                        [read(99)], unknown, still_missing]
+                        [read(99)], {'gaps': unknown['gaps']}, still_missing,
+                        [read(99)], {'gaps': unknown['gaps']}, still_missing]
     result, problems, reviewed = research.revise(runner, material, original, ledger, acquisition=acquisition)
     assert result == unknown and reviewed and len(problems) == 1
     assert problems[0]['status'] == 'unresolved' and len(ledger.rounds) == 3
@@ -415,3 +417,39 @@ def test_new_same_value_calculation_id_unlocks_dependent_failure_without_countin
     result, failed = acquisition.tool_result(dependent, 'repair')
     assert not failed and result['values'] == {'result': '-17.98'}
     assert len(material.extra['tools']) == 4 and _fetches(material.extra['tools']) == 0
+
+
+def test_patch_fallback_keeps_acquisition_budget_and_persisted_evidence(session):
+    runner, material, acquisition = session
+    material.pages.pop(9)
+    material.raw_pages.pop(9)
+    acquisition.rounds = 11
+    deadline = acquisition.deadline
+    runner.responses = [[read(9)], {'ops': 'invalid'}, report()]
+    assert research.repair(runner, material, report(), [], acquisition=acquisition) == report()
+    assert acquisition.rounds == 12 and acquisition.deadline == deadline
+    assert runner.calls == 3 and runner.offered[-2:] == [[], []]
+    assert len(acquisition.traces) == 1
+    restored = research.replay_material(runner.conn, runner.run_id)
+    assert restored.pages[9] == MATERIAL.pages[9]
+    assert restored.snapshot()['sha256'] == material.snapshot()['sha256']
+
+
+@pytest.mark.parametrize('frozen', [False, True])
+def test_patch_fallback_cannot_expand_small_model_cap(session, frozen):
+    runner, material, acquisition = session
+    runner.max_calls = 1
+    runner.responses = [{'ops': 'invalid'}, report()]
+    with pytest.raises(research.ResearchError, match='上限'):
+        research.repair(runner, material, report(), [], acquisition=None if frozen else acquisition)
+    assert runner.calls == 1 and runner.offered == [[]]
+    assert acquisition.traces == []
+
+
+def test_frozen_invalid_patch_fallback_stays_tool_free(session):
+    runner, material, acquisition = session
+    before = material.snapshot()
+    runner.responses = [{'ops': 'invalid'}, report()]
+    assert research.repair(runner, material, report(), []) == report()
+    assert runner.calls == 2 and runner.offered == [[], []]
+    assert material.snapshot() == before and acquisition.traces == []

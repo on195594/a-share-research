@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from a_share_research import db
-from a_share_research.sources import due_report
+from a_share_research.companies import due_report
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = {r["id"]: r for r in json.loads((ROOT / "tests/data/report-coverage.json").read_text())["reports"]}

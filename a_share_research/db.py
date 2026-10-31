@@ -132,6 +132,41 @@ COVERAGE = ("MAX(r.period, COALESCE((SELECT MAX(v.key) FROM json_each(r.body, '$
             " json_each(t.value, '$.values') v WHERE json_extract(t.value, '$.id') LIKE 'T.%'), ''))")
 
 
+def _migrate_v1(conn: sqlite3.Connection) -> None:
+    for table, names in (("runs", ("identity", "material", "request")),
+                         ("calls", ("identity",)), ("reports", ("body_sha256",))):
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name in names:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+
+
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE runs ADD COLUMN replay_of INTEGER")
+    conn.execute("ALTER TABLE reports ADD COLUMN coverage TEXT")
+    conn.execute("UPDATE runs SET replay_of = json_extract(identity, '$.replay_of')")
+    conn.execute(f"UPDATE reports AS r SET coverage = {COVERAGE}")
+    conn.execute("CREATE INDEX reports_by_code_coverage ON reports(code, coverage)")
+    conn.execute("CREATE INDEX runs_by_replay_of ON runs(replay_of)")
+
+
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    for event, suffix in (("INSERT", "ai"), ("UPDATE OF identity", "au")):
+        condition = " WHEN NEW.identity IS NOT NULL" if event == "INSERT" else ""
+        conn.execute(f"CREATE TRIGGER runs_replay_of_{suffix} AFTER {event} ON runs{condition} BEGIN"
+                     " UPDATE runs SET replay_of = json_extract(NEW.identity, '$.replay_of')"
+                     " WHERE id = NEW.id; END")
+    for event, suffix in (("INSERT", "ai"), ("UPDATE OF body, period", "au")):
+        conn.execute(f"CREATE TRIGGER reports_coverage_{suffix} AFTER {event} ON reports BEGIN"
+                     f" UPDATE reports SET coverage = (SELECT {COVERAGE} FROM reports r WHERE r.id = NEW.id)"
+                     " WHERE id = NEW.id; END")
+    conn.execute("UPDATE runs SET replay_of = json_extract(identity, '$.replay_of')")
+    conn.execute(f"UPDATE reports AS r SET coverage = {COVERAGE}")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3)
+
+
 def now() -> str:
     return datetime.now(SHANGHAI).isoformat(timespec="seconds")
 
@@ -142,21 +177,20 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # Shared by the web threadpool; sqlite3 serializes access to one connection.
     conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(SCHEMA)
-    migrations = [("runs", ("identity", "material", "request")), ("calls", ("identity",)), ("reports", ("body_sha256",))]
-    if any(name not in {r["name"] for r in conn.execute(f"PRAGMA table_info({t})")} for t, names in migrations for name in names):
-        try:
-            with transaction(conn):
-                for table, names in migrations:
-                    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-                    for name in names:
-                        if name not in existing:
-                            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
-        except Exception:
-            conn.close()
-            raise
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(SCHEMA)
+        for version, migrate in enumerate(MIGRATIONS, start=1):
+            if conn.execute("PRAGMA user_version").fetchone()[0] < version:
+                # Another process may finish the migration while we wait for the write lock.
+                with transaction(conn):
+                    if conn.execute("PRAGMA user_version").fetchone()[0] < version:
+                        migrate(conn)
+                        conn.execute(f"PRAGMA user_version = {version}")
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 

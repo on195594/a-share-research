@@ -14,6 +14,8 @@
 
 ## 项目目录
 
+`web.py` 负责鉴权、参数与渲染，页面数据查询集中在只读的 `reading.py`，提交写入由 `service.py` 承接。`companies.py`、`batches.py` 与 `evidence.py` 提供共享资料和纯函数，网页不加载行情供应商依赖。
+
 | 路径 | 内容 |
 |---|---|
 | `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 为单股研究，`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |
@@ -166,6 +168,8 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 
 ## 部署
 
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列，v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器并补齐一次。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段，派生列由触发器继续维护，再次升级无需补齐。
+
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
@@ -193,7 +197,7 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查 → 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。失败恢复原应用镜像，保留数据和证据；不自动恢复数据库或删除备份。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据或数据库迁移变更需要单独安排回退，不使用此工具。
+工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查 → 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。失败恢复原应用镜像，保留数据和证据；不自动恢复数据库或删除备份。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和非加法迁移需要单独安排回退，不使用此工具；只做加法、旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。
 
 业务表指纹只在两服务停止的窗口内比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `pi_infer.mjs` 的 `reasoning` 分别记录，模型未变时不追加模型配置检查或研究调用。
 

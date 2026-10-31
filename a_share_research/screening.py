@@ -17,6 +17,9 @@ import tushare as ts
 
 from a_share_research import db, model, service
 from a_share_research.db import SHANGHAI
+from a_share_research.batches import load, group_return, returns, FROZEN_BY
+from a_share_research.reading import research_state
+from a_share_research.service import create_batch as create, freeze_batch as freeze
 from a_share_research.research import METRICS, _parse
 # Keep the existing import surface for callers and frozen backtest experiments.
 from a_share_research.screening_factors import (
@@ -44,33 +47,9 @@ class ScreenError(Exception):
 
 # ---------- storage ----------
 
-def create(conn, request_id: str) -> int:
-    """Queue a batch; one live batch per calendar month (failed ones do not count)."""
-    month = datetime.now(SHANGHAI).strftime("%Y-%m")
-    row = conn.execute(
-        "INSERT INTO batches (request_id, status, created_at, rule) SELECT ?, 'queued', ?, ?"
-        " WHERE NOT EXISTS (SELECT 1 FROM batches WHERE substr(created_at, 1, 7) = ? AND status != 'failed')"
-        " ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, db.now(), json.dumps(RULE, ensure_ascii=False), month),
-    ).fetchone()
-    if row:
-        return row["id"]
-    existing = conn.execute("SELECT id FROM batches WHERE request_id = ?", (request_id,)).fetchone()
-    if existing:
-        return existing["id"]
-    raise service.RequestError("本月已有批次；每月一个独立批次", 409)
-
-
 def _save(conn, batch_id: int, **fields) -> None:
     fields = {k: json.dumps(v, ensure_ascii=False) if isinstance(v, dict | list) else v for k, v in fields.items()}
     db.update_batch(conn, batch_id, updated_at=db.now(), **fields)
-
-
-def load(row) -> dict:
-    batch = dict(row)
-    for key in ("rule", "universe", "q20", "q5", "selection", "l5", "entry", "marks"):
-        batch[key] = json.loads(batch[key]) if batch.get(key) else None
-    return batch
 
 
 # ---------- data ----------
@@ -226,7 +205,7 @@ def reusable_report(conn, code: str, since: str):
     return conn.execute(
         "SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.code = ? AND r.passed = 1 AND u.status = 'done' AND r.created_at >= ?"
-        " AND json_extract(u.identity, '$.replay_of') IS NULL"
+        " AND u.replay_of IS NULL"
         # A continuation's answer is about its earlier report, not the batch question.
         " AND json_type(r.body, '$.prior') IS NOT 'object' ORDER BY r.id DESC LIMIT 1",
         (code, since),
@@ -244,22 +223,6 @@ def link_research(conn, batch_id: int, q20: list[dict]) -> list[dict]:
             row["run_id"] = service.submit(conn, row["code"][:6], f"batch-{batch_id}-{row['code']}",
                                            name=row["name"], question=QUESTION)
     return q20
-
-
-def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
-    """(all finished, rows with current status/report) for the linked runs."""
-    done = True
-    for row in q20:
-        run = conn.execute("SELECT u.status, u.error, r.id AS report_id, r.passed, r.verdict, r.body"
-                           " FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?",
-                           (row["run_id"],)).fetchone()
-        row["research_status"] = run["status"]
-        row["report_id"] = run["report_id"]
-        row["verdict"] = run["verdict"] if run["passed"] else None
-        row["research_error"] = run["error"]
-        if run["status"] in ("queued", "running"):
-            done = False
-    return done, q20
 
 
 def _report_digest(conn, report_id: int | None) -> dict | None:
@@ -383,41 +346,6 @@ def select(conn, batch: dict) -> dict:
     return {"draft": None, "attempts": attempts, "error": "；".join(problems)}
 
 
-FROZEN_BY = {"owner": "所有者确认", "auto": "草案生成后按模型草案自动冻结，未经人工确认",
-             "delegate": "所有者授权 Claude 代为冻结"}
-
-
-def freeze(conn, batch_id: int, codes: list[str], note: str, by: str = "owner") -> None:
-    """Final picks; validated against the batch and frozen once. `by` is a FROZEN_BY key."""
-    row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
-    if row is None:
-        raise service.RequestError("批次不存在", 404)
-    batch = load(row)
-    if batch["status"] != "proposed":
-        raise service.RequestError("批次不在待确认状态", 409)
-    rule = batch["rule"]
-    allowed = {r["code"]: r for r in batch["q20"] if r.get("verdict") and r["verdict"] != "暂不值得"}
-    codes = list(dict.fromkeys(codes))
-    if not codes or len(codes) > rule["picks"] or any(c not in allowed for c in codes):
-        raise service.RequestError(f"请从研究通过的候选中选择 1–{rule['picks']} 家")
-    counts: dict[str, int] = {}
-    for code in codes:
-        counts[allowed[code]["industry"]] = counts.get(allowed[code]["industry"], 0) + 1
-    if max(counts.values()) > rule["picks_per_industry"]:
-        raise service.RequestError(f"同一行业最多 {rule['picks_per_industry']} 家")
-    if len(note) > 2000:
-        raise service.RequestError("说明不超过 2000 字")
-    draft = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
-    l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
-          "frozen_by": by}
-    # RETURNING, not rowcount: the web connection is shared and other writes change its counters.
-    updated = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
-                           " WHERE id = ? AND status = 'proposed' RETURNING id",
-                           (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id)).fetchone()
-    if updated is None:
-        raise service.RequestError("批次已被冻结", 409)
-
-
 # ---------- simulation ----------
 
 def _positive(value) -> bool:
@@ -503,33 +431,6 @@ def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) ->
             raise ScreenError(f"{code} {end} 的计算点位无效")
         out[code] = {"date": str(last["trade_date"]), "value": value}
     return out
-
-
-def group_return(entry: dict, mark: dict, codes: list[str], seats: int, cost: float) -> float | None:
-    """Equal-weight unit NAV return: unfilled or empty seats are cash; cost applied once on the whole group."""
-    if not codes:
-        return None
-    total = 0.0
-    for code in codes:
-        e, m = entry["prices"].get(code, {}), mark["prices"].get(code)
-        if e.get("filled") and m:
-            total += m["close"] * m["adj"] / (e["open"] * e["adj"])
-        else:
-            total += 1.0
-    total += seats - len(codes)
-    return (total / seats) * (1 - cost) - 1
-
-
-def returns(batch: dict) -> dict | None:
-    entry, mark, rule = batch.get("entry"), (batch.get("marks") or {}).get("latest"), batch["rule"]
-    if not entry or not mark:
-        return None
-    q20 = [r["code"] for r in batch["q20"]]
-    groups = {"L5": (batch["l5"]["codes"], rule["picks"]), "Q5": (batch["q5"], rule["picks"]), "Q20": (q20, len(q20))}
-    out = {name: group_return(entry, mark, codes, seats, rule["cost"]) for name, (codes, seats) in groups.items()}
-    for code, b in mark["benchmarks"].items():
-        out[code] = b["value"] / entry["benchmarks"][code]["value"] - 1
-    return {"date": mark["date"], "values": out}
 
 
 def mark_on(pro, batch: dict, day: str, previous: dict | None = None) -> dict:

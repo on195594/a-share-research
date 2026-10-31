@@ -107,7 +107,8 @@ def _operand(side: dict, rows: dict, material) -> dict:
         return {"ref": clean["ref"], "period": period, "label": row["label"],
                 "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
     if {"page", "quote", "value", "unit"} <= set(clean) and not clean.get("ref"):
-        from a_share_research.research import NUMBER, _quote_found
+        from a_share_research.evidence import NUMBER
+        from a_share_research.research import _quote_found
         if material is None or not _quote_found(side, material):
             raise ValueError("计算输入的原文引文在已读取页面中找不到")
         raw = str(side["value"]).replace(",", "").replace("−", "-").strip()
@@ -462,7 +463,7 @@ class Acquisition:
                 gap = "共享取证已到停止条件；未完成的取证仍未知。"
                 if gap not in self.material.extra["gaps"]:
                     self.material.extra["gaps"].append(gap)
-                messages.append({"role": "user", "content": gap + "请输出完整报告，不能将缺口当作证据或已解决。",
+                messages.append({"role": "user", "content": gap + "请按本轮输出格式给出最终结果，不能将缺口当作证据或已解决。",
                                  "timestamp": int(time.time() * 1000)})
             tools = [] if reason else [t for t in TOOLS if stage != "repair" or t["name"] in REPAIR_TOOLS]
             payload = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)

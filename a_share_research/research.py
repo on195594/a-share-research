@@ -1,11 +1,11 @@
 """One company's financial-report research: gather → compose → check → review → (repair, at most twice) → save."""
 
 import argparse
-import hashlib
 import json
 import logging
 import re
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Self
@@ -14,13 +14,15 @@ import pandas as pd
 
 from a_share_research import db, model, sources, evidence
 from a_share_research.sources import Document
+from a_share_research.service import MAX_CALLS
+from a_share_research.evidence import material_hash
+from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 
 log = logging.getLogger(__name__)
 
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
-MAX_CALLS = 21  # shared run guard, including acquisition in repairs and review format corrections
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 # (id, label, unit, statement, column, divisor)
 METRICS = [
@@ -84,14 +86,14 @@ class Material:
         }
         if self.extra:
             data["extra"] = self.extra
-        return {"version": 2 if self.extra else 1, "sha256": _material_hash(data), "data": data}
+        return {"version": 2 if self.extra else 1, "sha256": material_hash(data), "data": data}
 
     @classmethod
     def from_snapshot(cls, snapshot: dict) -> Self:
         if snapshot.get("version") not in (1, 2):
             raise ResearchError("不支持的材料快照版本")
         data = snapshot["data"]
-        if _material_hash(data) != snapshot["sha256"]:
+        if material_hash(data) != snapshot["sha256"]:
             raise ResearchError("材料快照哈希不匹配")
         return cls(
             code=data["code"], name=data["name"], doc=Document(**data["doc"]),
@@ -123,12 +125,6 @@ class Material:
         block += "\n\n# 程序计算依据\n" + json.dumps(
             [r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False)
         return block
-
-
-def _material_hash(data: dict) -> str:
-    # Preserve input order too: page/row ordering affects the model prompt.
-    return hashlib.sha256(json.dumps(data, ensure_ascii=False, separators=(",", ":"),
-                                    allow_nan=False).encode()).hexdigest()
 
 
 def replay_material(conn, source_run: int) -> Material:
@@ -414,29 +410,8 @@ def gather(code: str) -> Material:
 
 
 # ---------- mechanical checks ----------
-
-NUMBER = re.compile(r"[-−+]?\d[\d,]*(?:\.\d+)?(?![\d.])(?!\s*[年月日])")
-ISO_DATE = re.compile(r"(?<!\d)(?:19|20)\d{2}[-/](?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
-SCALES = (1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e2, 1e4)
 SQUASH = re.compile(r"\s+")
 REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a-z_]+)")
-
-
-def _numbers(text: str) -> list[tuple[float, int]]:
-    out = []
-    for token in NUMBER.findall(ISO_DATE.sub(" ", text)):
-        clean = token.replace(",", "").replace("−", "-")
-        decimals = len(clean.split(".")[1]) if "." in clean else 0
-        value = abs(float(clean))
-        if decimals == 0 and (value <= 12 or 1900 <= value <= 2100):
-            continue  # ordinals, months, years
-        out.append((value, decimals))
-    return out
-
-
-def _supported(value: float, decimals: int, candidates: list[float]) -> bool:
-    tolerance = 0.5 * 10 ** -decimals + 1e-9
-    return any(abs(abs(c) * s - value) <= tolerance for c in candidates for s in SCALES)
 
 
 def _without_codes(text: str, material: Material) -> str:
@@ -539,6 +514,12 @@ def check(report: dict, material: Material) -> list[dict]:
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
+    # A full rewrite is raw model output, so the key may be echoed back in any shape.
+    for i, note in enumerate(report.get("repair_rebuttals") or []):
+        errors = evidence.citation_errors(note.get("evidence") if isinstance(note, dict) else None,
+                                          registry, material.table)
+        problems += [{"where": f"repair_rebuttals[{i}]", "problem": error, "type": "citation_calculation"}
+                     for error in errors]
     candidates = _candidates(all_cites, material) + [float(v) for r in material.table
                                                    for fld in ("values", "exact_values")
                                                    for v in r.get(fld, {}).values()]
@@ -685,8 +666,118 @@ def _review_issues(text: str) -> list[dict]:
     return verdict["issues"]
 
 
-def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict], *, acquisition=None) -> dict | None:
-    prompt = f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请修正后输出完整的新报告。
+REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods")
+PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
+{"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
+ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
+add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods；不能整段替换。value 是完整条目 {"text": "论断", "cites": [出处]}。
+出处格式：原文 {"source": "实际文档标识", "page": 页码, "quote": "该页连续原文，逐字复制，20–200 字"}；表格/程序计算 {"ref": "实际行标识", "period": "实际期间键，跨期论断可省略"}。
+verdict、summary、gaps 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组；未提到的字段与条目由程序逐字保留。
+可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
+程序将 rebuttals 放入合并稿的 repair_rebuttals，供独立复核员作为待核查数据阅读；它不是解决声明，不接受 status/resolutions/risk_resolutions，也不能关闭问题或豁免旧风险去向复核。
+"""
+
+
+class RepairFormatError(ValueError):
+    pass
+
+
+def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material: Material) -> dict:
+    """Apply an atomic patch against original positions without mutating either input."""
+    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "rebuttals"}:
+        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、rebuttals；不要输出完整报告")
+    if not isinstance(patch.get("ops", []), list):
+        raise RepairFormatError("补丁 ops 必须是数组；无需改动条目时可省略或用 []")
+    replacements, additions = {}, {}
+    for i, op in enumerate(patch.get("ops", [])):
+        label = f"ops[{i}]："
+        if not isinstance(op, dict) or op.get("op") not in ("replace", "delete", "add"):
+            raise RepairFormatError(label + "op 必须是 replace/delete/add")
+        kind, where = op["op"], op.get("where")
+        keys = {"op", "where"} if kind == "delete" else {"op", "where", "value"}
+        if not keys <= op.keys():
+            raise RepairFormatError(label + f"{kind} 必须包含字段 {sorted(keys)}")
+        match = re.fullmatch(r"([a-z]+)\[(0|[1-9]\d*)\]", where) if isinstance(where, str) else None
+        section = where if kind == "add" else match[1] if match else None
+        if not isinstance(section, str) or section not in REPAIR_SECTIONS:
+            raise RepairFormatError(label + f"章节或位置不存在：{where}；replace/delete 用章节[序号]，add 用章节名；章节仅 {', '.join(REPAIR_SECTIONS)}")
+        items = report.get(section, [])
+        if kind == "add" and items is None:
+            items = []
+        if not isinstance(items, list):
+            raise RepairFormatError(label + f"原报告 {section} 不是条目数组，不能按序号操作")
+        if kind != "delete":
+            item = op["value"]
+            if not isinstance(item, dict):
+                raise RepairFormatError(label + "value 必须是条目对象")
+        if kind == "add":
+            additions.setdefault(section, []).append(op["value"])
+            continue
+        index = int(match[2])
+        if index >= len(items):
+            raise RepairFormatError(label + f"{where} 越界；原报告 {section} 共 {len(items)} 条，序号从 0 开始；新增用 add")
+        target = (section, index)
+        if target in replacements:
+            raise RepairFormatError(label + f"{where} 重复操作（包括既删又改）；同一原条目只允许一次 replace 或 delete")
+        replacements[target] = None if kind == "delete" else op["value"]
+    if "rebuttals" in patch:
+        pending_ids = {p["id"] for p in problems if p.get("id")}
+        seen = set()
+        if not isinstance(patch["rebuttals"], list):
+            raise RepairFormatError("rebuttals 必须是数组")
+        for i, note in enumerate(patch["rebuttals"]):
+            if (not isinstance(note, dict) or set(note) != {"id", "reason", "evidence"}
+                    or not isinstance(note["id"], str) or note["id"] not in pending_ids or note["id"] in seen
+                    or not isinstance(note["reason"], str) or not note["reason"].strip()
+                    or not isinstance(note["evidence"], list) or not note["evidence"]
+                    or not all(isinstance(cite, dict) for cite in note["evidence"])):
+                raise RepairFormatError(f"rebuttals[{i}] 须含唯一的未解决问题 id、非空 reason、非空出处对象数组 evidence；不能自行指定解决状态")
+            seen.add(note["id"])
+    merged = deepcopy(report)
+    merged.pop("repair_rebuttals", None)
+    required = {*SECTIONS}
+    if material.extra.get("question"):
+        required.add("answer")
+    if material.extra.get("feedback"):
+        required.add("methods")
+        if merged.get("methods") is None:
+            merged["methods"] = []
+    else:
+        required.add("checkpoints")
+    for section in {s for s, _ in replacements} | additions.keys():
+        merged[section] = [deepcopy(replacements.get((section, i), item))
+                           for i, item in enumerate(report.get(section) or [])
+                           if (section, i) not in replacements or replacements[section, i] is not None]
+        merged[section].extend(deepcopy(additions.get(section, [])))
+        if not merged[section] and section not in required:
+            merged.pop(section)
+    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps") if k in patch})
+    if patch.get("rebuttals"):
+        merged["repair_rebuttals"] = deepcopy(patch["rebuttals"])
+    return merged
+
+
+def repair_result(report: dict | None, response: str, problems: list[dict], material: Material) -> dict | None:
+    if report is None:
+        return _parse(response)
+
+    patch = _parse(response)
+    if patch is None:
+        raise RepairFormatError("补丁输出不是合法 JSON 对象")
+    return merge_repair_patch(report, patch, problems, material)
+
+
+def repair_prompt(material: Material, report: dict | None, problems: list[dict]) -> str:
+    if report is None:
+        output = "请修正后输出完整的新报告。\n" + output_schema(material)
+        original = "（上一次输出不是合法 JSON）"
+    else:
+        output = PATCH_SCHEMA
+        indexed = {key: {f"{key}[{i}]": item for i, item in enumerate(value)}
+                   if key in REPAIR_SECTIONS and isinstance(value, list) else value
+                   for key, value in report.items() if key != "repair_rebuttals"}
+        original = json.dumps(indexed, ensure_ascii=False, indent=1)
+    return f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请按本轮输出格式修正。
 可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
 补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
 以下是内部质量检查，不是用户对另一份报告提出的纠错；正文只完成原研究任务。
@@ -694,26 +785,36 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 
 {RULES}
 
-{output_schema(material)}
+{output}
 
 # 问题
 {json.dumps(problems, ensure_ascii=False, indent=1)}
 
 # 原报告
-{json.dumps(report, ensure_ascii=False, indent=1) if report else "（上一次输出不是合法 JSON）"}
+{original}
 
 # 资料
 {material.prompt_block()}"""
-    if acquisition is not None:
+
+
+def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict], *, acquisition=None) -> dict | None:
+    def response(original):
+        prompt = repair_prompt(material, original, problems)
+        if acquisition is None:
+            return runner.ask("repair", prompt)  # Frozen replay never acquires evidence.
         prompt += """
 # 补证与引用
 先区分已有原文未引用、需要补读、仍无法取得的证据。已有页直接给支持主张的 cites；
-缺页或跨期/同业口径不全时可用同一组只读工具自主补证及 calculate，不凭表值伪造原文。
-补证与探索共用剩余额度；工具失败或无新证据时明确缺口，必要时撤回不成立的论断，
-但重要遗漏与用户要求不能靠一句“未知”自动关闭，必须接受独立复核。来源冲突不得混合。"""
-        return acquisition.write(prompt, "repair")
-    # Frozen replay and callers without an acquisition session never fetch new evidence.
-    return _parse(runner.ask("repair", prompt))
+缺页或跨期/同业口径不全时可用只读披露工具补证及 calculate，不凭表值伪造原文。
+补证、补丁及格式失败后的完整改写共用剩余额度；工具失败或无新证据时明确缺口。
+重要遗漏与用户要求不能靠一句“未知”自动关闭，仍须独立复核。按本轮输出格式作答。"""
+        return json.dumps(acquisition.write(prompt, "repair"), ensure_ascii=False)
+
+    try:
+        return repair_result(report, response(report), problems, material)
+    except RepairFormatError as exc:
+        log.warning("Invalid repair patch; falling back to full rewrite: %s", exc)
+        return _parse(response(None))
 
 
 # ---------- run ----------
@@ -780,9 +881,9 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
     Only its risks and checkpoints travel: no verdict or summary, so the new judgment starts from evidence.
     """
     row = conn.execute(
-        f"SELECT r.id, r.body, r.created_at, {db.COVERAGE} AS coverage FROM reports r JOIN runs u ON u.id = r.run_id"
+        "SELECT r.id, r.body, r.created_at, r.coverage FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.code = ? AND r.run_id < ? AND r.passed = 1 AND u.status = 'done'"
-        " AND json_extract(u.identity, '$.replay_of') IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
+        " AND u.replay_of IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
         " ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
     if row is None:
@@ -797,36 +898,6 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
 def prior_question(prior: dict) -> str:
     """The question a continuation asks when the user brought none."""
     return f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
-
-
-VALUATION = ("M.pe_ttm", "M.pb", "M.dv_ttm")
-
-
-def since_prior(old: list[dict], new: list[dict]) -> dict:
-    """What changed in the program tables between two reports; shown to people, never cited by the model.
-
-    Values are compared only within the same row and period: cumulative figures of different periods are
-    not subtracted, and a row the old report never collected is listed rather than treated as zero.
-    """
-    before = {r["id"]: r["values"] for r in old}
-    rows = [r for r in new if r["id"].startswith("T.")]
-    seen = {p for r in old if r["id"].startswith("T.") for p in r["values"]}
-    added = sorted({p for r in rows for p in r["values"]} - seen)
-    newest = max(seen, default="")
-    return {
-        "disclosed": [p for p in added if p > newest],
-        "backfilled": [p for p in added if p <= newest],  # comparison periods, not new disclosures
-        "revised": [{"label": r["label"], "unit": r["unit"], "period": p, "before": before[r["id"]][p], "after": v}
-                    for r in rows if r["id"] in before for p, v in r["values"].items()
-                    if p in before[r["id"]] and before[r["id"]][p] != v],
-        # Rows usually stay in the table with an empty value, so absence is per row and period.
-        "uncollected": [r["label"] for r in new
-                        if (r["id"].startswith("T.") and any(p in seen and p not in before.get(r["id"], {}) for p in r["values"]))
-                        or (r["id"] in VALUATION and r["values"] and r["id"] not in before)],
-        "valuation": [{"label": r["label"], "unit": r["unit"], "before": next(iter(before[r["id"]].items()), None),
-                       "after": next(iter(r["values"].items()), None), "unchanged": before[r["id"]] == r["values"]}
-                      for r in new if r["id"] in VALUATION and r["id"] in before],
-    }
 
 
 def publish(conn, run_id: int, material: Material, period: str, passed: bool,

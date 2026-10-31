@@ -5,24 +5,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 
 
-RULE = {
-    "version": "screen-v1.1",  # v1.1 adds the windfall flag; scoring and picks unchanged
-    "min_list_years": 3,
-    "min_total_mv_yi": 100,
-    "min_avg_amount_yi": 1,
-    "amount_days": 20,
-    "momentum_days": 60, "drawdown_flag": -0.3,  # recorded and shown, never scored
-    # Recorded and shown, never scored: in the 2016–2025 backtest these picks lagged the rest (screening-experiment §5).
-    "windfall_flag": {"min_growth": 0.5, "max_pe": 10},
-    "weights": {"roe": 0.2, "cash": 0.2, "growth": 0.2, "pe": 0.4},
-    "industry": "SW2021 L1",
-    "min_group": 10,
-    "q20": 20, "q20_per_industry": 3,
-    "picks": 5, "picks_per_industry": 2,
-    "cost": 0.002,  # flat round-trip cost on unit NAV
-    "benchmarks": {"H00906.CSI": "中证800全收益", "H00300.CSI": "沪深300全收益"},
-    "horizons_months": [3, 6, 12],
-}
+from a_share_research.batches import RULE
 
 
 FINANCIAL_INDUSTRIES = {"银行", "保险", "证券", "多元金融", "非银金融"}

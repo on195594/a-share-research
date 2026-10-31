@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 from a_share_research import db
-from a_share_research.research import _material_hash
+from a_share_research.evidence import material_hash
 
 
 def check(database: Path, pdf_dir: Path) -> tuple[list[str], dict]:
@@ -56,15 +56,22 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
             continue
         sha = snapshot["sha256"]
         materials[run["id"]] = sha
-        if _material_hash(snapshot["data"]) != sha:
+        if material_hash(snapshot["data"]) != sha:
             problems.append(f"任务 {run['id']}：材料快照内容与其哈希不符")
         identity = _object(run["identity"])
         if identity is None:
             problems.append(f"任务 {run['id']}：运行身份无法解析")
         elif identity.get("material_sha256") not in (None, sha):
             problems.append(f"任务 {run['id']}：运行身份记录的材料哈希与快照不符")
+    if any(row["name"] == "replay_of" for row in conn.execute("PRAGMA table_info(runs)")):
+        for run in conn.execute(
+            "SELECT id FROM runs WHERE CASE WHEN identity IS NULL OR json_valid(identity)"
+            " THEN replay_of IS NOT json_extract(identity, '$.replay_of') END ORDER BY id"
+        ):
+            problems.append(f"任务 {run['id']}：replay_of 与运行身份 JSON 不一致")
     # A database not yet opened by this version lacks the column; its reports are all unhashed.
     hashed = any(row["name"] == "body_sha256" for row in conn.execute("PRAGMA table_info(reports)"))
+    covered = any(row["name"] == "coverage" for row in conn.execute("PRAGMA table_info(reports)"))
     reports = unhashed = 0
     for report in conn.execute(f"SELECT id, run_id, body, {'body_sha256' if hashed else 'NULL'} AS body_sha256"
                                " FROM reports ORDER BY id"):
@@ -78,6 +85,9 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
             problems.append(f"报告 {report['id']}：正文不是 JSON 对象")
         elif body.get("material_sha256") is not None and materials.get(report["run_id"]) != body["material_sha256"]:
             problems.append(f"报告 {report['id']}：引用的材料快照与任务 {report['run_id']} 记录不符")
+    if covered:
+        for report in conn.execute(f"SELECT id FROM reports r WHERE coverage IS NOT {db.COVERAGE} ORDER BY id"):
+            problems.append(f"报告 {report['id']}：coverage 与正文重算不一致")
     for price in conn.execute("SELECT id, body FROM prices ORDER BY id"):
         if _object(price["body"]) is None:
             problems.append(f"价格参考 {price['id']}：正文不是 JSON 对象")

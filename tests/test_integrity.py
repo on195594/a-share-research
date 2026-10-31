@@ -12,8 +12,10 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, integrity, price, sources
-from a_share_research.research import _material_hash, publish
+from a_share_research.research import publish
+from a_share_research.evidence import material_hash
 from support.reports import MATERIAL
+from support.continuation import RECORDS
 from test_price import DATA as PRICES
 
 PDF = Path(__file__).parent / "data" / "601138-buyback-announcement.pdf"
@@ -155,7 +157,7 @@ def test_exploration_progress_keeps_the_identity_hash_in_step(tmp_path):
     conn, run_id = research_db(tmp_path)
     progressed = MATERIAL.snapshot()
     progressed["data"]["market_date"] = "2026-10-21"
-    progressed["sha256"] = _material_hash(progressed["data"])
+    progressed["sha256"] = material_hash(progressed["data"])
     db.save_material(conn, run_id, progressed)
     conn.close()
     assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == []
@@ -187,17 +189,55 @@ def test_material_save_deduplicates_full_snapshot_but_repairs_identity_and_keeps
     db.update_run(conn, run_id, identity=json.dumps({'material_sha256': None, 'replay_of': 12}))
     before = conn.total_changes
     db.save_material(conn, run_id, snapshot)
-    assert conn.total_changes == before + 1
+    assert conn.total_changes == before + 2
     identity = json.loads(conn.execute('SELECT identity FROM runs WHERE id=?', (run_id,)).fetchone()[0])
     assert identity == {'material_sha256': snapshot['sha256'], 'replay_of': 12}
     # Diagnostic changes are part of the full snapshot even when financial evidence is unchanged.
     snapshot['data']['extra'] = {'stop_reasons': [{'stage': 'repair', 'reason': 'tool_limit'}]}
-    snapshot['sha256'] = _material_hash(snapshot['data'])
+    snapshot['sha256'] = material_hash(snapshot['data'])
     before = conn.total_changes
     db.save_material(conn, run_id, snapshot)
-    assert conn.total_changes == before + 1
+    assert conn.total_changes == before + 2
     stored = json.loads(conn.execute('SELECT material FROM runs WHERE id=?', (run_id,)).fetchone()[0])
     assert stored == json.loads(json.dumps(snapshot))
     db.save_material(conn, run_id, snapshot)
-    assert conn.total_changes == before + 1
+    assert conn.total_changes == before + 2
+    conn.close()
+
+
+@pytest.mark.parametrize("column", ["replay_of", "coverage"])
+def test_derived_column_mismatch_is_reported_read_only(tmp_path, column):
+    conn = db.connect(tmp_path / "app.db")
+    record = next(record for record in RECORDS if record["report"]["id"] == 143)
+    report = record["report"]
+    run = db.create_run(conn, report["code"])
+    db.update_run(conn, run, identity=json.dumps(record["run"]["identity"]))
+    db.save_report(conn, run, report["code"], report["name"], report["period"], report["passed"],
+                   report["verdict"], report["body"])
+    assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == []
+    if column == "replay_of":
+        conn.execute("UPDATE runs SET replay_of = NULL WHERE id = ?", (run,))
+        expected = f"任务 {run}：replay_of 与运行身份 JSON 不一致"
+    else:
+        conn.execute("UPDATE reports SET coverage = NULL")
+        expected = "报告 1：coverage 与正文重算不一致"
+    conn.close()
+    before = (tmp_path / "app.db").read_bytes()
+    assert integrity.check(tmp_path / "app.db", tmp_path / "pdf")[0] == [expected]
+    assert (tmp_path / "app.db").read_bytes() == before
+
+
+def test_coverage_check_reports_all_mismatches_in_one_query(tmp_path):
+    from support.continuation import load
+
+    conn = db.connect(tmp_path / "app.db")
+    load(conn)
+    conn.execute("UPDATE reports SET coverage = NULL")
+    statements = []
+    conn.set_trace_callback(statements.append)
+    problems, _ = integrity._check_rows(conn)
+    assert [p for p in problems if "coverage" in p] == [
+        f"报告 {r['report']['id']}：coverage 与正文重算不一致"
+        for r in sorted(RECORDS, key=lambda r: r['report']['id'])]
+    assert len([s for s in statements if "json_each" in s]) == 1
     conn.close()

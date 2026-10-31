@@ -163,21 +163,16 @@ def test_long_question_is_discoverable_without_losing_text():
 
 
 def test_context_queries_execute_against_current_schema_without_writing_research(tmp_path):
-    import ast
-    from a_share_research import db
-    tree = ast.parse((ROOT / 'a_share_research/web.py').read_text())
-    conn = db.connect(tmp_path / 'empty.db')
-    checked = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'execute' and node.args:
-            query = node.args[0]
-            if isinstance(query, ast.Constant) and isinstance(query.value, str) and ' AS question' in query.value:
-                cursor = conn.execute(query.value, (('601899.SH', 35, '601899.SH', 35, 35) if 'FROM runs' in query.value else ('601899.SH',)))
-                columns = {column[0] for column in cursor.description}
-                assert {'question', 'feedback_text'} <= columns
-                assert cursor.fetchall() == []
-                checked += 1
-    assert checked == 2
+    from a_share_research import db, reading
+    from support.continuation import load
+
+    conn = db.connect(tmp_path / 'reading.db')
+    load(conn)
+    before = conn.total_changes
+    for rows in (reading.followups(conn, '603606.SH', 37), reading.stock_reports(conn, '603606.SH')):
+        assert rows
+        assert all({'question', 'feedback_text'} <= set(row.keys()) for row in rows)
+    assert conn.total_changes == before
     conn.close()
 
 

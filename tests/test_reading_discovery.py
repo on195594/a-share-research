@@ -98,11 +98,42 @@ def test_search_render_escapes_query_and_uses_get_without_research_action():
 
 
 def test_reverse_link_uses_real_continuation_question_from_report_body(conn):
-    import ast
-    tree = ast.parse((ROOT / 'a_share_research/web.py').read_text())
-    query = next(node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
-                 and isinstance(node.value, str) and 'FROM runs u LEFT JOIN reports f' in node.value)
-    rows = conn.execute(query, ('603606.SH', 37, '603606.SH', 37, 37)).fetchall()
+    rows = reading.followups(conn, '603606.SH', 37)
     assert len(rows) == 1 and rows[0]['id'] == 56
     html = str(ENV.get_template('_macros.html').module.followup_link(rows[0]))
     assert '接续研究：相对上次研究' in html and '/runs/56' in html
+
+
+def test_latest_reports_filters_before_grouping_and_bounds_company_scope(conn):
+    before = conn.total_changes
+    assert [r['id'] for r in reading.latest_reports(conn)] == [39, 25, 12]
+    assert reading.latest_reports(conn, codes=[]) == []
+    assert [r['id'] for r in reading.latest_reports(conn, codes=['600519.SH'])] == [12]
+    assert [r['id'] for r in reading.latest_reports(conn, code_prefix='603606', passed=True,
+                                                  since='2026-10-20', limit=1)] == [39]
+    assert reading.latest_reports(conn, since='2026-10-31') == []
+    assert [r['id'] for r in reading.latest_reports(conn, limit=1, offset=1)] == [25]
+    assert conn.total_changes == before
+    # A failed latest report must not hide the earlier reviewed report.
+    conn.execute('UPDATE reports SET passed=0 WHERE id=39')
+    assert [r['id'] for r in reading.latest_reports(conn, codes=['603606.SH'])] == [39]
+    assert [r['id'] for r in reading.latest_reports(conn, codes=['603606.SH'], passed=True)] == [37]
+
+
+def test_moved_read_queries_use_captured_records_and_do_not_write(conn):
+    before = conn.total_changes
+    report = reading.report(conn, 39)
+    assert reading.report_for_run(conn, report['run_id'])['id'] == 39
+    assert reading.report_run(conn, report['run_id'])['status'] == 'done'
+    run = reading.run(conn, report['run_id'])
+    assert run['code'] == report['code']
+    assert reading.api_run(conn, run['id'])['report_id'] == 39
+    assert reading.api_reports(conn, '603606')[0]['id'] == 39
+    assert reading.stock_reports(conn, '000651.SZ')[0]['replay_of'] is not None
+    assert reading.report_bodies(conn, [39])[39] == json.loads(report['body'])
+    assert reading.report_bodies(conn, []) == {}
+    assert reading.active_runs(conn) == []
+    assert reading.queue_ahead(conn, run['id'])[0] == 0
+    assert reading.latest_batch(conn) is None and reading.batch_list(conn) == []
+    assert reading.batch(conn, 1) is None and reading.latest_price(conn, run['code']) is None
+    assert conn.total_changes == before

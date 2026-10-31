@@ -211,6 +211,9 @@ def test_api_import_preserves_recorded_replay_identity(captured, tmp_path):
         identity = json.loads(imported.execute('SELECT identity FROM runs WHERE id=?', (exported['run_id'],)).fetchone()[0])
         assert {k: v for k, v in identity.items() if k != 'progress_capture'} == exported['identity']
         assert identity['replay_of'] == 7
+        assert imported.execute('SELECT replay_of FROM runs WHERE id=?', (exported['run_id'],)).fetchone()[0] == 7
+        assert imported.execute(f'SELECT coverage IS {db.COVERAGE} FROM reports r WHERE id=?',
+                                (exported['id'],)).fetchone()[0] == 1
     finally:
         imported.close()
 
