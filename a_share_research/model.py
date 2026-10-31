@@ -299,6 +299,9 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000,
         if (out["provider"], out["model"]) != (request["provider"], request["model"]):
             raise ValueError("model identity mismatch")
     except Exception as exc:
+        daemon = _daemon(os.getpid())
+        identity["request_parameters"]["transport"] = getattr(daemon, "last_transport",
+                                                              "oneshot" if os.environ.get("PI_DAEMON") == "0" or _daemon_failed_pid == os.getpid() else "daemon")
         raise ModelError(str(exc), identity, time.monotonic() - started) from exc
     return Completion(out["text"], out["usage"],
                       time.monotonic() - started, identity, out["message"])

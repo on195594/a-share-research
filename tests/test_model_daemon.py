@@ -490,6 +490,9 @@ def test_live_completion_tools_timeout_and_fallback(payload):
             assert completion.identity["parameters"]["transport"] == "sse"
             assert completion.identity["pi_infer_sha256"] == hashlib.sha256(model.SCRIPT.read_bytes()).hexdigest()
         assert normal.text.strip() and fallback.text.strip()
-        assert normal.identity == fallback.identity
+        assert normal.identity["request_parameters"]["transport"] == "daemon"
+        assert fallback.identity["request_parameters"]["transport"] == "oneshot"
+        core = lambda id_dict: {k: (v if k != "request_parameters" else {pk: pv for pk, pv in v.items() if pk != "transport"}) for k, v in id_dict.items()}
+        assert core(normal.identity) == core(fallback.identity)
     finally:
         daemon.close()
