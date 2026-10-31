@@ -8,7 +8,7 @@ import pytest
 from a_share_research.material import Material, ResearchError
 from a_share_research.checking import check
 from a_share_research.sources import Document
-from support.reports import MATERIAL, SALES, report
+from support.reports import MATERIAL, SALES, SALES_ROW, report
 
 
 def test_number_missing_from_cited_source_is_flagged():
@@ -179,3 +179,50 @@ def test_unrecognized_threshold_units_are_not_silently_treated_as_unitless():
     material.extra["question"] = "经营现金流是否高于600美元？"
     draft = report(answer=[{"text": "经营现金流低于600港元。", "cites": [{"ref": "T.op_cash"}]}])
     assert [p["where"] for p in check(draft, material)] == ["answer[0]"]
+
+
+def test_page_references_and_product_codes_are_identifiers_not_figures():
+    # Captured 10-30 drafts: "半年报第51页" (run 62) and "HDM1002" (run 63) triggered full repairs.
+    draft = report(answer=[{"text": "销售费用同比增长28.62%（年报第51页、第11—12页）；HDM1002、GLP-1 研发另述。",
+                            "cites": [SALES_ROW]}])
+    assert check(draft, MATERIAL) == []
+    # Mutation: the same digits as amounts, or behind a currency prefix, still need sources.
+    for text in ("销售费用约51亿元。", "研发投入1002万元。", "销售费用约RMB100亿元。", "HDM 1002万元。"):
+        bad = report(answer=[{"text": text, "cites": [SALES_ROW]}])
+        assert [p["where"] for p in check(bad, MATERIAL)] == ["answer[0]"], text
+
+
+def test_trailing_comparative_repeats_a_question_threshold():
+    # Captured run 62: the question set "高于150亿元"; the checkpoint wrote "保持在150亿元以上".
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.extra["question"] = "在手订单是否仍高于150亿元？"
+    draft = report(answer=[{"text": "经营现金流615.22亿元，订单能否保持在150亿元以上仍待核查。",
+                            "cites": [{"ref": "T.op_cash"}]}])
+    assert check(draft, material) == []
+    # Mutation: another value or unit with the same trailing word is still a claim.
+    for text in ("订单保持在160亿元以上。", "订单保持在150万元以上。"):
+        bad = report(answer=[{"text": text, "cites": [{"ref": "T.op_cash"}]}])
+        assert [p["where"] for p in check(bad, material)] == ["answer[0]"], text
+
+
+SPLIT = json.loads((Path(__file__).parent / "data" / "split-table-amounts.json").read_text())
+
+
+def split_material() -> Material:
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    material.pages[SPLIT["page"]] = SPLIT["layout"]
+    material.raw_pages[SPLIT["page"]] = SPLIT["raw"]
+    return material
+
+
+def test_table_amounts_split_across_lines_are_rejoined_from_the_quoted_page():
+    # Captured run 60: "24,213,317." and "52" sit on different lines in both extractions.
+    cite = {"page": SPLIT["page"], "quote": SPLIT["quote"]}
+    draft = report(financial=[{"text": "存货跌价准备合计24,213,317.52元，年初28,798,226.34元。", "cites": [cite]}])
+    assert check(draft, split_material()) == []
+    # Mutation: a near-miss amount, or a quote without the decimal half, is not supported.
+    bad = report(financial=[{"text": "存货跌价准备合计24,213,317.53元。", "cites": [cite]}])
+    assert [p["where"] for p in check(bad, split_material())] == ["financial[0]"]
+    first_line = {"page": SPLIT["page"], "quote": SPLIT["quote"].split("\n")[0]}
+    bad = report(financial=[{"text": "存货跌价准备合计24,213,317.52元。", "cites": [first_line]}])
+    assert [p["where"] for p in check(bad, split_material())] == ["financial[0]"]

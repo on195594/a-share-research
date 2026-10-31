@@ -20,10 +20,16 @@ def _without_codes(text: str, material: Material) -> str:
 
 
 REPORT_ID = re.compile(r"(?:报告|report)\s*#?\s*\d+", re.I)
+# Page references ("第11—12页") and product/project codes ("HDM1002", "GLP-1") are identifiers, not figures.
+# Currency prefixes stay figures so "RMB100亿" still needs a source.
+PAGE_REF = re.compile(r"第\s*\d+(?:\s*[、,，和及至~—–-]+\s*\d+)*\s*页")
+CODE_TOKEN = re.compile(r"(?<![A-Za-z0-9.])(?!(?:RMB|CNY|USD|US|HKD|HK|EUR|JPY|GBP)-?\d)[A-Za-z]+-?\d[A-Za-z0-9-]*")
+_VALUE = r"(?P<value>[-−+]?\d[\d,]*(?:\.\d+)?)(?![\d.,])\s*"
+_UNIT = r"(?P<unit>(?:万亿|亿|万)?元|个百分点|[%％]|倍|天|(?!\s*[\w%％]))"
 QUESTION_THRESHOLD = re.compile(
-    r"(?:阈值|门槛|低于|高于|不低于|不高于|小于|大于|不小于|不大于|超过|跌破|突破|[<>≤≥]=?)\s*"
-    r"(?P<value>[-−+]?\d[\d,]*(?:\.\d+)?)(?![\d.,])\s*"
-    r"(?P<unit>(?:万亿|亿|万)?元|个百分点|[%％]|倍|天|(?!\s*[\w%％]))")
+    r"(?:阈值|门槛|低于|高于|不低于|不高于|小于|大于|不小于|不大于|超过|跌破|突破|[<>≤≥]=?)\s*" + _VALUE + _UNIT)
+# The same threshold written with a trailing comparative: "保持在150亿元以上".
+TRAILING_THRESHOLD = re.compile(_VALUE + r"(?P<unit>(?:万亿|亿|万)?元|个百分点|[%％]|倍|天)?\s*(?:以上|以下|之上|之下)")
 
 
 def _threshold_key(match: re.Match) -> tuple[Decimal, str]:
@@ -34,13 +40,42 @@ def _threshold_key(match: re.Match) -> tuple[Decimal, str]:
 
 def _checked_figures(text: str, material: Material) -> list[tuple[float, int]]:
     """Only the explicit threshold occurrence is a question term; equal factual amounts still need sources."""
-    terms = {_threshold_key(m) for m in QUESTION_THRESHOLD.finditer(str(material.extra.get("question") or ""))}
-    text = QUESTION_THRESHOLD.sub(lambda m: " " if _threshold_key(m) in terms else m[0], text)
-    return _numbers(_without_codes(REPORT_ID.sub(" ", text), material))
+    question = str(material.extra.get("question") or "")
+    terms = {_threshold_key(m) for pattern in (QUESTION_THRESHOLD, TRAILING_THRESHOLD) for m in pattern.finditer(question)}
+    for pattern in (QUESTION_THRESHOLD, TRAILING_THRESHOLD):
+        text = pattern.sub(lambda m: " " if _threshold_key(m) in terms else m[0], text)
+    text = CODE_TOKEN.sub(" ", PAGE_REF.sub(" ", REPORT_ID.sub(" ", text)))
+    return _numbers(_without_codes(text, material))
+
+
+# pdftotext breaks some table amounts across lines ("24,213,317." / "52", or "5,145,019,390" / ".17").
+SPLIT_NUMBER = re.compile(r"(?<![\d.,])(\d[\d,]*)(?:\.[ \t]*\n\s*(\d+)|[ \t]*\n\s*\.(\d+))(?![\d.,])")
+
+
+# A quote that carries one of those halves: "317." with no decimals, or ".17" with no whole part.
+SPLIT_HALF = re.compile(r"\d\.(?!\d)|(?<![\d.])\.\d")
+
+
+def _split_numbers(cite: dict, registry: dict) -> list[float]:
+    """Rejoin amounts split across lines on the quoted pages, only when both halves appear in the quote."""
+    pages = evidence.quote_match(cite, registry)
+    if not pages:
+        return []
+    quote, source = str(cite["quote"]), registry[cite.get("source", "D0")]
+    values = []
+    for n in pages:
+        for field in ("raw_pages", "pages"):
+            for m in SPLIT_NUMBER.finditer(source[field].get(n, "")):
+                whole, fraction = m[1], m[2] or m[3]
+                if (re.search(rf"(?<![\d,]){re.escape(whole)}(?![\d,])", quote)
+                        and re.search(rf"(?<![\d,]){fraction}(?!\d)", quote)):
+                    values.append(float(f"{whole.replace(',', '')}.{fraction}"))
+    return values
 
 
 def _candidates(cites: list[dict], material: Material) -> list[float]:
     rows = {r["id"]: r for r in material.table}
+    registry = None
     values = []
     for cite in cites:
         if "ref" in cite and cite["ref"] in rows:
@@ -54,6 +89,9 @@ def _candidates(cites: list[dict], material: Material) -> list[float]:
                 values += [float(i["value"]) for i in calc.get(group, []) if "value" in i]
         elif "quote" in cite:
             values += [v for v, _ in _numbers(cite["quote"])]
+            if SPLIT_HALF.search(str(cite["quote"])):
+                registry = registry or material.source_registry()
+                values += _split_numbers(cite, registry)
     return values
 
 
