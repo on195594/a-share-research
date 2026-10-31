@@ -26,20 +26,20 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `aa338ed`** 于 2026-10-31 12:38（北京时间）经所有者当次授权（v5 加法迁移及历史调用压缩）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `8086328` 只有资料块去重 `462e0fe` 和文档改动。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `80cac7c`** 于 2026-10-31 16:14（北京时间）经所有者当次授权（P0 性能优化：v6 索引加法迁移与 Web 线程安全连接隔离）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `aa338ed` 增加了 `calls_by_run`、`runs_by_status`、`sessions_by_expires` 索引，`web.conn` 升级为 `ThreadLocalConnectionProxy`，清理了历史共享连接注释。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:aa338ed` | `e796481e7e14ce412afdb2e044966a62d3fe54d52b9740350657a5412b4fd08b` |
-| `a-share-research-worker:aa338ed` | `55af8028348eb9d103e4e826afaba0c1e6e640659194590242544cb8dd3e1a67` |
+| `a-share-research-web:80cac7c` | `15ec09bde4cde5b7de68452ceb7ed882f5058d6f19d7c1266afb3bd2c7176116` |
+| `a-share-research-worker:80cac7c` | `404be44147b4b97a19f2d2124281df7b85ea642ca76ef694f845924d3f28c220` |
 
-**验证**：离线全集 555 通过、7 环境跳过；放回位置与转义有互变测试。生产库副本演练迁移与压缩后全部调用还原一致。新代码隔离库真实研究五粮液一次，done、通过复核，首轮探索与复核的资料块均已切出（证据 `smoke-462e0fe-20261031/`）。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过；随后在 worker 内执行 `compact-calls --vacuum`：149 条调用 20.3MB→1.7MB，`wal_checkpoint(TRUNCATE)` 后 `app.db` 48.6MB→40.4MB，再次巡检 347 条调用全部还原并与哈希一致。公网 Chromium（390 宽）首页、公司页（万华化学）与报告页 48 均 200、无横向溢出与脚本错误，会话已退出。
+**验证**：离线全集 558 通过、7 环境跳过；多线程连接复用、事务写读隔离、迁移幂等性均有针对性测试。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过；真实生产库自动应用 v6 迁移，`PRAGMA user_version = 6`，3 个新增高频索引全部生效。公网与本机 HTTP 探测正常（200 OK）。
 
-**证据**：`deploy-aa338ed-20261031-123812/`（含 `compact-calls.json`、`integrity-after-compact.json`）。备份（v5 压缩前整库）：`~/a-share-research-data/backup-pre-aa338ed-20261031-123813.db`。
+**证据**：`deploy-80cac7c-20261031-161335/`（含 `manifest.json`、`worker-preflight.json`、`integrity-after.json`）。备份（v6 迁移前整库）：`~/a-share-research-data/backup-pre-80cac7c-20261031-161336.db`。
 
-**直接回退**：`a-share-research-web:rollback-aa338ed` 与 `a-share-research-worker:rollback-aa338ed` 即原运行的 `8086328`（`bb52337b…7f7d`、`29a7aef8…2a3b`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。`8086328` 的应用代码在 v5 库上照常读写，但其完整性巡检不认识 `prompt_block`，会把约 340 条调用误报为哈希不符；需要可信巡检时改回退到 `fd8397f`（`rollback-8086328` 标签，不检查调用提示），或停两服务后用上述备份整库恢复。
+**直接回退**：`a-share-research-web:rollback-80cac7c` 与 `a-share-research-worker:rollback-80cac7c` 即原运行的 `aa338ed`（`e796481e…08b`、`55af8028…1a67`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`。`aa338ed` 的应用代码在 v6 库上照常读写并忽略多余索引。
 
-**更早发布**：`8086328` 的发布记录（证据 `deploy-8086328-20261031-115341/`、备份 `backup-pre-8086328-20261031-115342.db`、回退到 `fd8397f`）见 `git show aa338ed:docs/implementation-plan.md`；`fd8397f` 见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
+**更早发布**：`aa338ed` 的发布记录（证据 `deploy-aa338ed-20261031-123812/`、备份 `backup-pre-aa338ed-20261031-123813.db`、回退到 `8086328`）见 `git show 80cac7c:docs/implementation-plan.md`；`8086328` 见 `git show aa338ed:docs/implementation-plan.md`；`fd8397f` 见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
 
 ## 尚待完成与未采用项
 
