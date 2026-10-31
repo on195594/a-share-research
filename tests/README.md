@@ -27,6 +27,7 @@
 | 精确计算与研究工具 | `test_research_tools.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证共享补证、额度、来源冲突及跨材料账本，不代表模型语义验收） |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py` |
 | 历史回测与离线实验 | `test_backtest.py`、`test_backtest_experiment.py`、`test_backtest_identity.py` |
+| 判断记分（V0 超额、V1 检查点预测） | `test_validation.py` |
 | 公司研究进展 | `test_progress.py`：真实捕获的引用、重复公告反例、幂等、HTTP 与隔离导入；人工绑定的结构互变样本不代表真实模型验收 |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
 | 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、历史压缩、巡检互变） |
