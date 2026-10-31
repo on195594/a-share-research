@@ -1,5 +1,6 @@
 """SQLite storage: runs, model calls, reports and candidate batches."""
 
+import argparse
 import hashlib
 import json
 import os
@@ -164,7 +165,13 @@ def _migrate_v3(conn: sqlite3.Connection) -> None:
     conn.execute(f"UPDATE reports AS r SET coverage = {COVERAGE}")
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3)
+def _migrate_v4(conn: sqlite3.Connection) -> None:
+    # A tool-loop round resends the whole conversation; such a call may store only what it appended
+    # to the call named here (see compact_prompt). Older images never set it and still write full prompts.
+    conn.execute("ALTER TABLE calls ADD COLUMN prompt_base INTEGER REFERENCES calls(id)")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4)
 
 
 def now() -> str:
@@ -227,13 +234,71 @@ def update_run(conn: sqlite3.Connection, run_id: int, **fields) -> None:
 
 
 def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=None,
-             seconds=None, error=None, identity=None) -> None:
-    conn.execute(
-        "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at, identity)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (run_id, step, prompt, response, json.dumps(usage) if usage else None, seconds, error, now(),
-         json.dumps(identity) if identity is not None else None),
+             seconds=None, error=None, identity=None, base: tuple[int, str] | None = None) -> int:
+    """Record a call; with base=(call id, its full prompt) a tool-loop round stores only its appended messages."""
+    stored, base_id = prompt, None
+    if base is not None and (delta := compact_prompt(base[1], prompt)) is not None:
+        stored, base_id = delta, base[0]
+    cur = conn.execute(
+        "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at, identity, prompt_base)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, step, stored, response, json.dumps(usage) if usage else None, seconds, error, now(),
+         json.dumps(identity) if identity is not None else None, base_id),
     )
+    return cur.lastrowid
+
+
+def expand_prompt(base: str, delta: str) -> str:
+    old, extra = json.loads(base), json.loads(delta)
+    return json.dumps({"messages": old["messages"] + extra["append"], "tools": extra["tools"]}, ensure_ascii=False)
+
+
+def compact_prompt(base: str, prompt: str) -> str | None:
+    """What a tool-loop payload appends to the previous round's, or None unless expanding it gives prompt exactly."""
+    try:
+        old, new = json.loads(base), json.loads(prompt)
+    except ValueError:
+        return None
+    if not (isinstance(old, dict) and isinstance(new, dict) and old.keys() == new.keys() == {"messages", "tools"}):
+        return None
+    # A changed earlier message or a different serialization fails the exact round trip.
+    delta = json.dumps({"append": new["messages"][len(old["messages"]):], "tools": new["tools"]}, ensure_ascii=False)
+    return delta if expand_prompt(base, delta) == prompt else None
+
+
+def call_prompt(conn: sqlite3.Connection, call_id: int) -> str:
+    """The exact prompt a call sent, rebuilt along its chain of appended rounds."""
+    chain = []
+    while call_id is not None:
+        row = conn.execute("SELECT prompt, prompt_base FROM calls WHERE id = ?", (call_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"调用 {call_id} 不存在")
+        chain.append(row[0])
+        call_id = row[1]
+    prompt = chain.pop()
+    while chain:
+        prompt = expand_prompt(prompt, chain.pop())
+    return prompt
+
+
+def compact_calls(conn: sqlite3.Connection) -> dict:
+    """Re-store earlier full tool-loop prompts as appended rounds, one run per transaction, verified before commit."""
+    counts = {"compacted": 0, "bytes_before": 0, "bytes_after": 0}
+    for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM calls ORDER BY run_id").fetchall():
+        with transaction(conn):
+            previous = None
+            for call_id, stored, base_id in conn.execute(
+                    "SELECT id, prompt, prompt_base FROM calls WHERE run_id = ? ORDER BY id", (run_id,)).fetchall():
+                prompt = stored if base_id is None else call_prompt(conn, call_id)
+                if base_id is None and previous and (delta := compact_prompt(previous[1], prompt)) is not None:
+                    conn.execute("UPDATE calls SET prompt = ?, prompt_base = ? WHERE id = ?", (delta, previous[0], call_id))
+                    if call_prompt(conn, call_id) != prompt:
+                        raise RuntimeError(f"调用 {call_id} 压缩后无法还原原提示，本任务未改动")
+                    counts["compacted"] += 1
+                    counts["bytes_before"] += len(prompt.encode())
+                    counts["bytes_after"] += len(delta.encode())
+                previous = (call_id, prompt)
+    return counts
 
 
 def save_material(conn, run_id: int, snapshot: dict) -> str:
@@ -260,3 +325,19 @@ def save_report(conn, run_id: int, code: str, name: str, period: str, passed: bo
 def update_batch(conn: sqlite3.Connection, batch_id: int, **fields) -> None:
     sets = ", ".join(f"{k} = ?" for k in fields)
     conn.execute(f"UPDATE batches SET {sets} WHERE id = ?", (*fields.values(), batch_id))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Database maintenance")
+    parser.add_argument("command", choices=["compact-calls"])
+    parser.add_argument("--vacuum", action="store_true", help="reclaim the freed pages afterwards")
+    args = parser.parse_args()
+    conn = connect()
+    print(json.dumps(compact_calls(conn)))
+    if args.vacuum:
+        conn.execute("VACUUM")
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()

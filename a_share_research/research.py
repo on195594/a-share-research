@@ -30,6 +30,7 @@ class Runner:
         self.max_calls = min(max_calls, MAX_CALLS)
         self.deadline = time.monotonic() + 1800
         self.stage = "gather"
+        self.chain = None  # (call id, full prompt) of the last tool-loop round, so the next stores only its additions
 
     def call(self, step: str, prompt: str, *, messages=None, tools=None):
         self.stage = step
@@ -44,11 +45,15 @@ class Runner:
             result = model.complete(prompt, timeout=timeout, max_tokens=16000, messages=messages, tools=tools)
         except Exception as exc:
             db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: 模型阶段未完成（未保存供应商异常原文）",
-                        identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None))
+                        identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None),
+                        base=self.chain if messages is not None else None)
             raise ModelStageError("模型阶段未完成") from exc
-        db.log_call(self.conn, self.run_id, step, prompt,
-                    response=json.dumps(result.message, ensure_ascii=False) if messages is not None else result.text,
-                    usage=result.usage, seconds=result.seconds, identity=result.identity)
+        call_id = db.log_call(self.conn, self.run_id, step, prompt,
+                              response=json.dumps(result.message, ensure_ascii=False) if messages is not None else result.text,
+                              usage=result.usage, seconds=result.seconds, identity=result.identity,
+                              base=self.chain if messages is not None else None)
+        if messages is not None:
+            self.chain = (call_id, prompt)
         log.info("run %s %s: %.0fs", self.run_id, step, result.seconds)
         return result
 

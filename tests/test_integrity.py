@@ -92,7 +92,7 @@ def test_integrity_check_lists_each_injected_corruption_and_writes_nothing(tmp_p
     stored(pdf_dir)
     conn.close()
     assert integrity.check(tmp_path / "app.db", pdf_dir) == (
-        [], {"runs_with_material": 1, "reports": 1, "reports_without_hash": 0, "pdfs": 1})
+        [], {"runs_with_material": 1, "calls": 0, "reports": 1, "reports_without_hash": 0, "pdfs": 1})
 
     conn = sqlite3.connect(tmp_path / "app.db", isolation_level=None)
     conn.execute("UPDATE reports SET body = replace(body, '600519', '600518')")
@@ -135,7 +135,7 @@ def test_database_without_the_body_hash_column_is_checked_read_only(tmp_path):
     conn.commit()
     conn.close()
     assert integrity.check(tmp_path / "old.db", tmp_path / "none") == (
-        [], {"runs_with_material": 0, "reports": 1, "reports_without_hash": 1, "pdfs": 0})
+        [], {"runs_with_material": 0, "calls": 0, "reports": 1, "reports_without_hash": 1, "pdfs": 0})
 
 
 def test_price_reference_and_run_status_commit_together(tmp_path):

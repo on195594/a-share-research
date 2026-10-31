@@ -168,7 +168,7 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 
 ## 部署
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列，v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器并补齐一次。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段，派生列由触发器继续维护，再次升级无需补齐。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列，v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器并补齐一次。v4 增加 `calls.prompt_base`：工具循环的后续轮次只存相对上一轮新增的消息，`db.call_prompt()` 逐字节还原，完整性巡检核对每条调用记录的提示哈希；旧镜像照常写完整提示。已有历史调用用 `docker exec a-share-research-worker python -m a_share_research.db compact-calls --vacuum` 一次性压缩（逐任务事务、提交前核对还原结果，可重复执行），属于改写生产数据，执行需当次授权。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段，派生列由触发器继续维护，再次升级无需补齐。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
