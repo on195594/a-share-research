@@ -31,6 +31,7 @@ class Runner:
         self.deadline = time.monotonic() + 1800
         self.stage = "gather"
         self.chain = None  # (call id, full prompt) of the last tool-loop round, so the next stores only its additions
+        self.material = None  # set once gathered; its prompt block is stored once however many prompts carry it
 
     def call(self, step: str, prompt: str, *, messages=None, tools=None):
         self.stage = step
@@ -46,16 +47,19 @@ class Runner:
         except Exception as exc:
             db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: 模型阶段未完成（未保存供应商异常原文）",
                         identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None),
-                        base=self.chain if messages is not None else None)
+                        base=self.chain if messages is not None else None, block=self.block())
             raise ModelStageError("模型阶段未完成") from exc
         call_id = db.log_call(self.conn, self.run_id, step, prompt,
                               response=json.dumps(result.message, ensure_ascii=False) if messages is not None else result.text,
                               usage=result.usage, seconds=result.seconds, identity=result.identity,
-                              base=self.chain if messages is not None else None)
+                              base=self.chain if messages is not None else None, block=self.block())
         if messages is not None:
             self.chain = (call_id, prompt)
         log.info("run %s %s: %.0fs", self.run_id, step, result.seconds)
         return result
+
+    def block(self) -> str | None:
+        return self.material.prompt_block() if self.material is not None else None
 
     def ask(self, step: str, prompt: str) -> str:
         return self.call(step, prompt).text
@@ -409,6 +413,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                         material.extra["question"] = prior_question(prior)
         db.update_run(conn, run_id, code=material.code, name=material.name)
         db.save_material(conn, run_id, material.snapshot())
+        runner.material = material
         acquisition = None
         if replay_of is None:
             acquisition = Acquisition(runner, material)

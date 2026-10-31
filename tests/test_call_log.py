@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from a_share_research import db, integrity
+from a_share_research.prompts import RULES, SCHEMA
 
 CHAIN = json.loads(gzip.decompress((Path(__file__).parent / "data" / "explore-call-chain.json.gz").read_bytes()))
 PROMPTS = [call["prompt"] for call in CHAIN["calls"]]
@@ -54,7 +55,8 @@ def test_logged_chain_rebuilds_every_round(tmp_path):
 def test_backfill_compacts_full_rows_once_and_keeps_prompts(tmp_path):
     conn = chained(tmp_path / "app.db", base=False)
     counts = db.compact_calls(conn)
-    assert counts["compacted"] == 2 and counts["bytes_after"] < counts["bytes_before"] / 2
+    # Round 1 gives up its material block; rounds 2 and 3 keep only what they appended.
+    assert counts["compacted"] == 3 and counts["bytes_after"] < counts["bytes_before"] / 2
     ids = [r[0] for r in conn.execute("SELECT id FROM calls ORDER BY id")]
     assert [db.call_prompt(conn, i) for i in ids] == PROMPTS
     assert db.compact_calls(conn)["compacted"] == 0
@@ -87,4 +89,51 @@ def test_integrity_reports_a_broken_chain(tmp_path):
     conn.execute("DELETE FROM calls WHERE id = ?", (first,))
     conn.close()
     problems, _ = integrity.check(path, tmp_path / "pdf")
-    assert problems == [f"模型调用 {first + 1}：提示无法从前一轮还原", f"模型调用 {first + 2}：提示无法从前一轮还原"]
+    assert problems == [f"模型调用 {first + 1}：提示无法还原（前一轮或共享块缺失）", f"模型调用 {first + 2}：提示无法还原（前一轮或共享块缺失）"]
+
+
+BLOCK = db.material_block(PROMPTS[0])
+# What compose sends for the same material: the plain-text stage shares the block with exploration.
+COMPOSE = f"你是 A 股财报研究员，为普通投资者写一份研究报告。\n\n{RULES}\n\n{SCHEMA}\n\n# 资料\n{BLOCK}"
+
+
+def test_material_block_is_cut_once_from_plain_and_tool_loop_prompts(tmp_path):
+    assert len(BLOCK) > 30000 and db._escaped(BLOCK) in PROMPTS[0]
+    conn = db.connect(tmp_path / "app.db")
+    run = db.create_run(conn, "600309.SH", status="running")
+    ids = [db.log_call(conn, run, "explore", PROMPTS[0], block=BLOCK),
+           db.log_call(conn, run, "compose", COMPOSE, block=BLOCK),
+           db.log_call(conn, run, "review", "你是独立复核员。", block=BLOCK)]
+    rows = conn.execute("SELECT prompt, prompt_block FROM calls ORDER BY id").fetchall()
+    assert [json.loads(r["prompt_block"])["escaped"] if r["prompt_block"] else None for r in rows] == [True, False, None]
+    assert conn.execute("SELECT count(*) FROM prompt_blocks").fetchone()[0] == 1
+    assert len(rows[1]["prompt"]) < len(COMPOSE) - len(BLOCK) + 1
+    assert [db.call_prompt(conn, i) for i in ids] == [PROMPTS[0], COMPOSE, "你是独立复核员。"]
+    conn.close()
+
+
+def test_backfill_cuts_material_from_old_full_rows(tmp_path):
+    conn = chained(tmp_path / "app.db", base=False)
+    run = conn.execute("SELECT run_id FROM calls").fetchone()[0]
+    db.log_call(conn, run, "compose", COMPOSE)
+    db.log_call(conn, run, "review", COMPOSE + "\n\n# 上一次复核输出被拒\n缺少 issues 数组")
+    assert db.compact_calls(conn)["compacted"] == 5
+    ids = [r[0] for r in conn.execute("SELECT id FROM calls ORDER BY id")]
+    assert [db.call_prompt(conn, i) for i in ids] == [*PROMPTS, COMPOSE, COMPOSE + "\n\n# 上一次复核输出被拒\n缺少 issues 数组"]
+    assert conn.execute("SELECT count(*) FROM prompt_blocks").fetchone()[0] == 1
+    assert db.compact_calls(conn)["compacted"] == 0
+    conn.close()
+
+
+def test_integrity_reports_calls_built_on_a_damaged_block(tmp_path):
+    path = tmp_path / "app.db"
+    conn = db.connect(path)
+    run = db.create_run(conn, "600309.SH", status="running")
+    sha = hashlib.sha256(COMPOSE.encode()).hexdigest()
+    first = db.log_call(conn, run, "compose", COMPOSE, block=BLOCK, identity={"prompt_sha256": sha})
+    db.log_call(conn, run, "compose", COMPOSE, block=BLOCK, identity={"prompt_sha256": sha})
+    conn.execute("UPDATE prompt_blocks SET text = text || ' '")
+    conn.close()
+    problems, _ = integrity.check(path, tmp_path / "pdf")
+    assert problems == [f"模型调用 {first}：提示与调用时记录的哈希不符",
+                        f"模型调用 {first + 1}：提示与调用时记录的哈希不符"]

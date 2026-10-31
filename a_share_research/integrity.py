@@ -63,18 +63,16 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
             problems.append(f"任务 {run['id']}：运行身份无法解析")
         elif identity.get("material_sha256") not in (None, sha):
             problems.append(f"任务 {run['id']}：运行身份记录的材料哈希与快照不符")
-    # Tool-loop rounds may store only their appended messages; the rebuilt prompt must hash as when sent.
-    chained = any(row["name"] == "prompt_base" for row in conn.execute("PRAGMA table_info(calls)"))
+    # Calls may store only appended rounds and cut out shared blocks; the rebuilt prompt must hash as when sent.
     calls = 0
-    for call in conn.execute(f"SELECT id, prompt, {'prompt_base' if chained else 'NULL'} AS prompt_base, identity"
-                             " FROM calls ORDER BY id"):
+    for call in conn.execute("SELECT id, identity FROM calls ORDER BY id"):
         calls += 1
         identity = _object(call["identity"])
         sha = identity.get("prompt_sha256") if identity else None
         try:
-            prompt = call["prompt"] if call["prompt_base"] is None else db.call_prompt(conn, call["id"])
+            prompt = db.call_prompt(conn, call["id"])
         except (ValueError, KeyError, TypeError):
-            problems.append(f"模型调用 {call['id']}：提示无法从前一轮还原")
+            problems.append(f"模型调用 {call['id']}：提示无法还原（前一轮或共享块缺失）")
             continue
         if sha is not None and hashlib.sha256(prompt.encode()).hexdigest() != sha:
             problems.append(f"模型调用 {call['id']}：提示与调用时记录的哈希不符")

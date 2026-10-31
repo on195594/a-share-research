@@ -123,6 +123,10 @@ CREATE TABLE IF NOT EXISTS progress_calls (
     created_at TEXT NOT NULL,
     UNIQUE(progress_id, stage)
 );
+CREATE TABLE IF NOT EXISTS prompt_blocks (
+    sha256 TEXT PRIMARY KEY,  -- of text; a long block (the research material) shared by several prompts
+    text TEXT NOT NULL
+);
 """
 
 
@@ -171,7 +175,13 @@ def _migrate_v4(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE calls ADD COLUMN prompt_base INTEGER REFERENCES calls(id)")
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4)
+def _migrate_v5(conn: sqlite3.Connection) -> None:
+    # JSON {"sha256", "at", "escaped"}: the prompt_blocks text was cut out of prompt at character
+    # offset at (JSON-escaped inside a tool-loop payload when escaped). Older images write full prompts.
+    conn.execute("ALTER TABLE calls ADD COLUMN prompt_block TEXT")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5)
 
 
 def now() -> str:
@@ -234,18 +244,59 @@ def update_run(conn: sqlite3.Connection, run_id: int, **fields) -> None:
 
 
 def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=None,
-             seconds=None, error=None, identity=None, base: tuple[int, str] | None = None) -> int:
-    """Record a call; with base=(call id, its full prompt) a tool-loop round stores only its appended messages."""
+             seconds=None, error=None, identity=None, base: tuple[int, str] | None = None,
+             block: str | None = None) -> int:
+    """Record a call; with base=(call id, its full prompt) a tool-loop round stores only its appended messages,
+    and a block (the research material) found in what remains is stored once in prompt_blocks."""
     stored, base_id = prompt, None
     if base is not None and (delta := compact_prompt(base[1], prompt)) is not None:
         stored, base_id = delta, base[0]
+    stored, block_ref = _cut_block(conn, stored, block)
     cur = conn.execute(
-        "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at, identity, prompt_base)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at, identity,"
+        " prompt_base, prompt_block) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, step, stored, response, json.dumps(usage) if usage else None, seconds, error, now(),
-         json.dumps(identity) if identity is not None else None, base_id),
+         json.dumps(identity) if identity is not None else None, base_id, block_ref),
     )
     return cur.lastrowid
+
+
+# Where research prompts put the material, and what may follow it; only used to compact old rows.
+BLOCK_HEADINGS = ("\n# 资料\n", "\n# 起始材料\n")
+BLOCK_TRAILERS = ("\n\n# 上一次复核输出被拒", "\n# 补证与引用")
+
+
+def _escaped(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)[1:-1]
+
+
+def _cut_block(conn: sqlite3.Connection, stored: str, block: str | None) -> tuple[str, str | None]:
+    if not block:
+        return stored, None
+    for escaped, form in ((False, block), (True, _escaped(block))):
+        if (at := stored.find(form)) >= 0:
+            sha = hashlib.sha256(block.encode()).hexdigest()
+            conn.execute("INSERT OR IGNORE INTO prompt_blocks (sha256, text) VALUES (?, ?)", (sha, block))
+            return stored[:at] + stored[at + len(form):], json.dumps({"sha256": sha, "at": at, "escaped": escaped})
+    return stored, None
+
+
+def material_block(prompt: str) -> str | None:
+    """The material section of a prompt written before blocks were cut out at call time."""
+    text = prompt
+    try:
+        text = json.loads(prompt)["messages"][0]["content"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        pass
+    if not isinstance(text, str):
+        return None
+    for heading in BLOCK_HEADINGS:
+        if (start := text.find(heading)) >= 0:
+            block = text[start + len(heading):]
+            for trailer in BLOCK_TRAILERS:
+                block = block.split(trailer, 1)[0]
+            return block.rstrip("\n")
+    return None
 
 
 def expand_prompt(base: str, delta: str) -> str:
@@ -267,14 +318,25 @@ def compact_prompt(base: str, prompt: str) -> str | None:
 
 
 def call_prompt(conn: sqlite3.Connection, call_id: int) -> str:
-    """The exact prompt a call sent, rebuilt along its chain of appended rounds."""
+    """The exact prompt a call sent, rebuilt along its chain of appended rounds and shared blocks.
+
+    Works on databases from before v4/v5 too (the integrity check reads pre-release backups)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(calls)")}
+    select = ", ".join(c if c in columns else f"NULL AS {c}" for c in ("prompt", "prompt_base", "prompt_block"))
     chain = []
     while call_id is not None:
-        row = conn.execute("SELECT prompt, prompt_base FROM calls WHERE id = ?", (call_id,)).fetchone()
+        row = conn.execute(f"SELECT {select} FROM calls WHERE id = ?", (call_id,)).fetchone()
         if row is None:
             raise ValueError(f"调用 {call_id} 不存在")
-        chain.append(row[0])
-        call_id = row[1]
+        text, call_id, ref = row
+        if ref is not None:
+            ref = json.loads(ref)
+            block = conn.execute("SELECT text FROM prompt_blocks WHERE sha256 = ?", (ref["sha256"],)).fetchone()
+            if block is None:
+                raise ValueError(f"共享块 {ref['sha256']} 不存在")
+            form = _escaped(block[0]) if ref["escaped"] else block[0]
+            text = text[:ref["at"]] + form + text[ref["at"]:]
+        chain.append(text)
     prompt = chain.pop()
     while chain:
         prompt = expand_prompt(prompt, chain.pop())
@@ -282,21 +344,29 @@ def call_prompt(conn: sqlite3.Connection, call_id: int) -> str:
 
 
 def compact_calls(conn: sqlite3.Connection) -> dict:
-    """Re-store earlier full tool-loop prompts as appended rounds, one run per transaction, verified before commit."""
+    """Re-store earlier full prompts as appended rounds and shared material blocks, one run per transaction,
+    each rewritten call verified to rebuild exactly before commit."""
     counts = {"compacted": 0, "bytes_before": 0, "bytes_after": 0}
     for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM calls ORDER BY run_id").fetchall():
         with transaction(conn):
             previous = None
-            for call_id, stored, base_id in conn.execute(
-                    "SELECT id, prompt, prompt_base FROM calls WHERE run_id = ? ORDER BY id", (run_id,)).fetchall():
-                prompt = stored if base_id is None else call_prompt(conn, call_id)
-                if base_id is None and previous and (delta := compact_prompt(previous[1], prompt)) is not None:
-                    conn.execute("UPDATE calls SET prompt = ?, prompt_base = ? WHERE id = ?", (delta, previous[0], call_id))
-                    if call_prompt(conn, call_id) != prompt:
-                        raise RuntimeError(f"调用 {call_id} 压缩后无法还原原提示，本任务未改动")
-                    counts["compacted"] += 1
-                    counts["bytes_before"] += len(prompt.encode())
-                    counts["bytes_after"] += len(delta.encode())
+            for call_id, stored, base_id, block_ref in conn.execute(
+                    "SELECT id, prompt, prompt_base, prompt_block FROM calls WHERE run_id = ? ORDER BY id",
+                    (run_id,)).fetchall():
+                prompt = call_prompt(conn, call_id)
+                if base_id is None and block_ref is None:
+                    new, new_base = prompt, None
+                    if previous and (delta := compact_prompt(previous[1], prompt)) is not None:
+                        new, new_base = delta, previous[0]
+                    new, new_ref = _cut_block(conn, new, material_block(prompt))
+                    if new != stored:
+                        conn.execute("UPDATE calls SET prompt = ?, prompt_base = ?, prompt_block = ? WHERE id = ?",
+                                     (new, new_base, new_ref, call_id))
+                        if call_prompt(conn, call_id) != prompt:
+                            raise RuntimeError(f"调用 {call_id} 压缩后无法还原原提示，本任务未改动")
+                        counts["compacted"] += 1
+                        counts["bytes_before"] += len(prompt.encode())
+                        counts["bytes_after"] += len(new.encode())
                 previous = (call_id, prompt)
     return counts
 
