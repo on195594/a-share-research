@@ -376,11 +376,7 @@ def mdna_pages(doc: Document) -> dict[int, str]:
         start, end = span
     else:
         raise ResearchError("年报中找不到“管理层讨论与分析”一节")
-    pages = {}
-    for n in range(start, end + 1):
-        lines = (re.sub(r"[ \t　]+", " ", line).strip() for line in doc.pages[n - 1].splitlines())
-        pages[n] = "\n".join(line for line in lines if line)
-    return pages
+    return {n: evidence.normalize_page(doc.pages[n - 1]) for n in range(start, end + 1)}
 
 
 def gather(code: str) -> Material:

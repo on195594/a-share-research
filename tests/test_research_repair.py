@@ -453,3 +453,24 @@ def test_frozen_invalid_patch_fallback_stays_tool_free(session):
     assert research.repair(runner, material, report(), []) == report()
     assert runner.calls == 2 and runner.offered == [[], []]
     assert material.snapshot() == before and acquisition.traces == []
+
+
+def test_rereading_gathered_mdna_page_is_not_a_conflict_but_other_text_is(tmp_path):
+    # 恒力石化 2025 real layout pages: gather stores MD&A pages whitespace-normalized, tools read layout text.
+    layout = json.loads((Path(__file__).parent / 'data/annual-report-sections.json').read_text())['600346']['pages']
+    doc = sources.Document('600346.SH', '恒力石化', '2025年年度报告', '2025-12-31', '2026-04-15', '',
+                           pages=list(layout), raw_pages=list(layout))
+    pages = research.mdna_pages(doc)
+    assert pages[15] != layout[14]
+    material = research.Material(code=doc.code, name=doc.name, doc=doc, pages=pages,
+                                 raw_pages={n: layout[n - 1] for n in pages}, table=[], market_date='2026-10-30', extra={})
+    conn = db.connect(tmp_path / 'isolated.db')
+    acquisition = Acquisition(research.Runner(conn, db.create_run(conn, doc.code, status='running')), material)
+    result, failed = acquisition.tool_result(read(15), 'repair')
+    assert not failed and result['pages'] == {15: pages[15]} and material.pages[15] == pages[15]
+    # Mutation: a different real page under the same number still fails closed without merging.
+    acquisition.toolkit.documents['D0'].pages[16] = layout[30]
+    with pytest.raises(evidence.EvidenceError, match='已读页内容冲突'):
+        acquisition.tool_result(read(17), 'repair')
+    assert material.pages[17] == pages[17]
+    conn.close()

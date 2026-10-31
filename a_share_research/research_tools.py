@@ -305,8 +305,11 @@ class ResearchTools:
         raw_pages = {n: doc.raw_pages[n - 1] for n in selected}
         for mode, addition in (("pages", pages), ("raw_pages", raw_pages)):
             old = existing.get(mode, {})
-            if any(n in old and old[n] != text for n, text in addition.items()):
+            if any(n in old and evidence.normalize_page(old[n]) != evidence.normalize_page(text)
+                   for n, text in addition.items()):
                 raise evidence.EvidenceError(f"来源 {source} 的已读页内容冲突，未合并新页")
+            # Held pages keep their stored text (cited quotes stay put); only spacing may differ.
+            addition.update({n: old[n] for n in addition if n in old})
         # Validate source identity before committing any page or document metadata.
         candidate = deepcopy(self.material.extra["sources"])
         if source != "D0":

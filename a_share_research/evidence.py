@@ -18,6 +18,12 @@ def identity_conflict(expected, actual, fields=IDENTITY, *, partial=False):
                  and (not partial or actual.get(field)) and expected[field] != actual.get(field)), None)
 
 
+def normalize_page(text):
+    """Whitespace-collapsed page text; gathered D0 pages are stored in this form, tool reads are not."""
+    lines = (re.sub(r"[ \t　]+", " ", line).strip() for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
+
+
 def safe_url(value):
     if not isinstance(value, str):
         return None
