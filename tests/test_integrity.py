@@ -26,6 +26,21 @@ def stored(tmp_path: Path) -> Path:
     return sources.store_pdf(tmp_path, PDF.read_bytes(), SHA)
 
 
+def test_parallel_pdf_extraction_matches_serial_bytes_and_reuses_cache(tmp_path):
+    serial = stored(tmp_path / "serial")
+    expected = tuple(sources._pages(serial, SHA, mode) for mode in ("-layout", "-raw"))
+    parallel = stored(tmp_path / "parallel")
+    assert sources._page_pair(parallel, SHA) == expected
+    for suffix in (".layout.json", ".raw.json"):
+        assert parallel.with_suffix(suffix).read_bytes() == serial.with_suffix(suffix).read_bytes()
+    stamps = [parallel.with_suffix(s).stat().st_mtime_ns for s in (".layout.json", ".raw.json")]
+    assert sources._page_pair(parallel, SHA) == expected
+    assert stamps == [parallel.with_suffix(s).stat().st_mtime_ns for s in (".layout.json", ".raw.json")]
+    parallel.with_suffix(".raw.json").unlink()
+    assert sources._page_pair(parallel, SHA) == expected
+    assert parallel.with_suffix(".layout.json").stat().st_mtime_ns == stamps[0]
+
+
 def test_page_text_cache_is_reused_only_for_the_same_pdf_and_extractor(tmp_path):
     pdf = stored(tmp_path)
     pages = sources._pages(pdf, SHA, "-layout")

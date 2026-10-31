@@ -388,19 +388,22 @@ def revise(runner, material, report, ledger, *, acquisition=None):
 
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
-    run = conn.execute("SELECT code, request, request_id FROM runs WHERE id = ?", (run_id,)).fetchone()
+    run = conn.execute("SELECT code, request, request_id, material, started_at FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
-    db.update_run(conn, run_id, status="running", step="gather", started_at=db.now())
+    db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now())
     runner = Runner(conn, run_id)
     identity: dict = {}
 
     try:
         identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
         db.update_run(conn, run_id, identity=json.dumps(identity))
-        material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
-        if material.code[:6] != code[:6]:
+        if run["material"] is not None:
+            material = Material.from_snapshot(json.loads(run["material"]))
+        else:
+            material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
+        if material.code[:6] != code[:6] or material.doc.code != material.code:
             raise ResearchError("重放材料与目标公司不一致")
-        if replay_of is None:
+        if replay_of is None and run["material"] is None:
             material.extra["question"] = request.get("question", "")
             material.extra["feedback"] = request.get("feedback")
             material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"))

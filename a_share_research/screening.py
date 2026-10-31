@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import tushare as ts
 
-from a_share_research import db, model, service
+from a_share_research import db, model, service, sources
 from a_share_research.db import SHANGHAI
 from a_share_research.batches import load, group_return, returns, FROZEN_BY
 from a_share_research.reading import research_state
@@ -60,10 +60,10 @@ def _pro():
 
 
 def _query(pro, api: str, **params) -> pd.DataFrame:
-    """One TuShare call with two retries; the last error names the endpoint and parameters."""
+    """Cached TuShare call with two retries; the last error names the endpoint and parameters."""
     for attempt in range(3):
         try:
-            return pro.query(api, **params)
+            return sources.tushare_query(pro, api, **params)
         except Exception as exc:
             if attempt == 2:
                 raise ScreenError(f"{api} {params.get('ts_code') or params.get('trade_date') or ''}: {exc}") from exc
