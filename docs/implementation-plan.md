@@ -20,25 +20,25 @@
 - **技术债 T1–T3**（`05d0c3f`）：v1–v3 加法迁移与触发器维护派生列；读取收敛到 `reading.py`；修复改为条目补丁、非法补丁退回整份重写。证据 `techdebt-20261031/`。
 - **取证与修正闭环**（`796e4b6`）：探索与两次修正共用取证会话与额度，补证前核对来源身份与页文。评估集 10/10，证据 `eval-3d53928-20261031/`、`eval-control-fb137ad-20261031/`。
 - **初筛解耦、SVG 几何防护、Pi 启动预检**（10-30）：`screening_factors.py` 纯函数化、图表零值/负值边界、worker 领取任务前检查 Pi 运行时。
-
 - **`research.py` 拆分**（`52d1eec`，随 `fd8397f` 部署）：拆出 `material.py`（取材料与快照）、`checking.py`（机械核对）、`prompts.py`（成文契约与 JSON 解析），`research.py` 只留阶段编排，消除与 `research_tools.py` 的循环导入；无行为变化。
+- **调用日志增量存储**（`8086328`）：v4 加法迁移新增 `calls.prompt_base`，工具循环后续轮次只存新增消息并须逐字节还原；完整性巡检逐条核对调用时的提示哈希。经所有者当次授权，上线后压缩历史调用，生产库 75MB→46MB。
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `fd8397f`** 于 2026-10-31 11:24（北京时间）按例行发布授权完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `796e4b6` 只有 `research.py` 拆分 `52d1eec`（无行为变化）和文档改动。无数据库迁移、生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `8086328`** 于 2026-10-31 11:53（北京时间）经所有者当次授权（v4 加法迁移及历史调用压缩）完成 web、worker 切换，从已推送 main 的干净归档构建。相对上次 `fd8397f` 只有调用日志增量存储和文档改动。无生产配置、凭据或依赖变更；worker 仍为 `cpus: 0.6`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:fd8397f` | `14fe0727ae84e60effa37708de5c2ded9ae9195e65498439eb6d502f8dc7ce4e` |
-| `a-share-research-worker:fd8397f` | `7dfc1118f6f57bfb78264f848e7a1e9accdb091eef35676736ee21d8a2ad283d` |
+| `a-share-research-web:8086328` | `bb52337bfe6dff3eb837ddb420db02f93d7aada6783a2b2112fdcae629c57f7d` |
+| `a-share-research-worker:8086328` | `29a7aef8c68be3263c60db10436afdc466256865bd9e63de140f1653eb162a3b` |
 
-**验证**：离线全集 546 通过、7 环境跳过（与拆分前一致）；拆分后源码在隔离库真实研究万华化学一次，done、报告通过复核（213s / 9 次调用，证据 `smoke-52d1eec-20261031/`）。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检（gpt-6.1-sol 就绪）通过；公网入口 Chromium（390 宽）验收首页、公司页（万华化学）与报告页 48，均 200、无横向溢出与脚本错误，会话已退出。
+**验证**：离线全集 552 通过、7 环境跳过；还原守卫有互变测试。生产库副本演练迁移、压缩与 VACUUM 后全部调用还原一致，`fd8397f` 旧代码在 v4 库上连接与写入正常。新代码隔离库真实研究长江电力一次，done、通过复核，探索第 2–8 轮只存新增（证据 `smoke-8086328-20261031/`）。发布工具执行一次，空闲检查、完整性巡检（0 问题）与 worker Pi 预检通过；随后在 worker 内执行 `compact-calls --vacuum`：198 条调用 31.2MB→4.7MB，`wal_checkpoint(TRUNCATE)` 后 `app.db` 75MB→46MB，再次巡检 347 条调用全部还原并与哈希一致。公网 Chromium（390 宽）首页、公司页（万华化学）与报告页 48 均 200、无横向溢出与脚本错误，会话已退出。
 
-**证据**：`deploy-fd8397f-20261031-112423/`。备份：`~/a-share-research-data/backup-pre-fd8397f-20261031-112425.db`。
+**证据**：`deploy-8086328-20261031-115341/`（含 `compact-calls.json`、`integrity-after-compact.json`）。备份（压缩前整库）：`~/a-share-research-data/backup-pre-8086328-20261031-115342.db`。
 
-**直接回退**：`a-share-research-web:rollback-fd8397f` 与 `a-share-research-worker:rollback-fd8397f` 即原运行的 `796e4b6`（`addfbe91…24c1`、`e17f906b…1ae8`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；无迁移，无需恢复数据库。
+**直接回退**：`a-share-research-web:rollback-8086328` 与 `a-share-research-worker:rollback-8086328` 即原运行的 `fd8397f`（`14fe0727…7ce4e`、`7dfc1118…283d`）。分别标回对应 `:latest`，执行 `docker compose up -d --no-build --no-deps web worker`；旧代码忽略 `prompt_base` 照常写完整提示，已压缩的历史调用用新代码 `db.call_prompt()` 还原。需回到压缩前的数据时，停两服务后用上述备份整库恢复。
 
-**更早发布**：`796e4b6` 的发布记录（证据 `deploy-796e4b6-20261031-101936/`、备份 `backup-pre-796e4b6-20261031-101937.db`、回退到 `05d0c3f`）见 `git show fd8397f:docs/implementation-plan.md`；再早各次的证据、备份与回退链见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
+**更早发布**：`fd8397f` 的发布记录（证据 `deploy-fd8397f-20261031-112423/`、备份 `backup-pre-fd8397f-20261031-112425.db`、回退到 `796e4b6`）见 `git show 8086328:docs/implementation-plan.md`；`796e4b6` 见 `git show fd8397f:docs/implementation-plan.md`；再早各次见 `git show 52d1eec:docs/implementation-plan.md` 的「历史限制」。
 
 ## 尚待完成与未采用项
 
@@ -48,7 +48,7 @@
 - **三档结论诊断（K2 对照后）**：抽查真实“需要谨慎”与“值得继续研究”报告，核对问题、证据与结论是否一致。确有原因再单独立项，不预设硬分档。
 - **11 月候选批次待发起**：由所有者或受托 Agent 在网页发起，见[实验方案](screening-experiment.md#4-对照与前瞻模拟)。这是草案即冻与 `screen-v1.1` 提示的首次实跑。
 - **复核/修正阶段提示缓存未采用**（10-31）：这两个阶段的缓存命中为 0，但每次研究的首次复核/修正没有可复用前缀，复核（无工具）与修正（带补证工具）之间也不能共享；能命中的只有同一研究内的第二次复核或修正。评估集 10 家中仅 3 家进入修正，收益约每 10 家 0.1 美元，不值得为调整提示词顺序再跑评估集。
-- **调用日志增量存储暂缓**（10-31）：探索每轮都在 `calls.prompt` 重存完整对话，约占生产库 73MB 中的 52MB，发布备份整库复制。改为只存每轮新增消息需要迁移，库到约 200MB 或所有者要求时再做。
+- **复核/修正提示去重未做**：纯文本提示每次仍存全文（资料块约占九成，生产约 15MB）。如需再压缩，可按内容哈希共享资料块，目前规模不必要。
 - **跨公司比较输入精简未采用**：约 83k→50k tokens 的表示改变了入选频数，单批实验不足以证明质量未降；证据在 `upgrade-20261026/digest-size/`。
 - **三档结论校准未采用**：11 份材料的两组重放结论一致，不足以解释原结论偏谨慎；证据在 `calibration-20261027/` 和 `codex-review-20261027/`。
 - **放开“外部知识”用于提出假设未采用**（10-29）：评估集非金融 9/10，比亚迪两次因现金压力风险遗漏或数字无出处未通过，推断类表述占比未见增益；保留原规则。证据在 `external-knowledge-20261029/`。
