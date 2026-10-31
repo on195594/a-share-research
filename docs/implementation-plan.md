@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-10-31。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
+更新：2026-11-01。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
 
 ## 工作包与状态
 
@@ -11,7 +11,7 @@
 | F 基本面深度与信号升级 | F1/F3a、步骤 0、1a/1c、1b 历史快照阅读及 `peers` 同业发现已上线；步骤 2 第一阶段已上线；F2 保留原规则 | [升级方案](investment-upgrade.md)；逐值公告映射、F3b、步骤 2 后续及 3–4 待确认 |
 | W 阅读界面图表化（10-30） | 报告页“财务与走势”、判断刻度、批次收益与因子分位、首页批次对比与公司判断轨迹已上线；图表由 `charts.py` 纯函数从已存值计算几何，服务端 SVG | 真实使用后观察 2 分钟读懂报告的目标；旧报告按表回退，不回填经营序列 |
 | K 研究积累与降噪 | K2 工程交付已收尾；双组有限对照、真实跨期回应与 K3 个案完成；K4 保留规则已写入 | 真实关闭及关闭后不再继承保留为 K3 非阻塞观察，见[积累方案](research-accumulation.md) |
-| V 判断验证（优先，10-31 立项） | V0 只读超额 CLI 完成（`0cd016b`，抽 3 份与 TuShare 后复权独立复算一致）；V1 检查点预测已实现，评估集进行中，未部署 | 评估集通过后例行发布；20/60/120 个交易日后重跑 V0；2026 年报及 2027 一季报披露后首次 V1 记分 |
+| V 判断验证（优先，10-31 立项） | V0 只读超额 CLI 完成（抽 3 份与 TuShare 后复权独立复算一致）；V1 检查点预测已上线（`eb667f1`，评估集 10/10） | 评估集通过后例行发布；20/60/120 个交易日后重跑 V0；2026 年报及 2027 一季报披露后首次 V1 记分 |
 | 公司研究进展 | 已上线。生产验收首对万华 41→44 于 10-30 12:56 生成、复核各一次，复核未通过（第 4 条把同一半年报的补充引文标为新披露），按停止标准未提交五粮液 40→42 | 分类边界已修复，随 `b36b15d` 部署，尚未重验真实样本；验收边界见[积累方案](research-accumulation.md#公司研究进展) |
 
 已完成且已部署的近期工作包（详情见上述历史版本对应小节）：
@@ -27,18 +27,18 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `e4f30e4`** 于 2026-10-31 22:20（北京时间）例行发布 web、worker，无配置、凭据、依赖或迁移变更；内容见上文「性能整改与校验误伤」。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `eb667f1`**（代码 `0cd016b`）于 2026-11-01 00:34（北京时间）例行发布 web、worker，无配置、凭据、依赖或迁移变更；内容为批次 V 的 V0 超额 CLI 与 V1 检查点预测（[判断验证方案](judgment-validation.md)）。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:e4f30e4` | `92f89554e1380010cb54929d2465bd539c4de057977124ded0fa9f19ff01a64e` |
-| `a-share-research-worker:e4f30e4` | `a0cc726597395746f3df375770297d79858d9475fa27b4265206751615fc8cc6` |
+| `a-share-research-web:eb667f1` | `1b2be7b2efa3090bde5d632ec5580ef9b7dcf0e696bc4c7d67e3ac054df9facf` |
+| `a-share-research-worker:eb667f1` | `916f83f218de8b02f3fb04002ab4ef7c26cc259f120eb29e8b35f71e71591898` |
 
-**验证**：离线全集 676 通过、31 环境跳过；校验三项规则各有互变测试（含比率标签、货币前缀、缺小数段反例）；发布工具通过、完整性巡检 0 问题；对 10 份真实草稿重放，三类误伤归零、5 处真实引用错误照常拦截。证据 `deploy-e4f30e4-20261031-222020/`，备份 `~/a-share-research-data/backup-pre-e4f30e4-20261031-222022.db`。
+**验证**：离线全集 690 通过、31 环境跳过；评估集非金融 10/10（中国神华首跑因巨潮 PDF 下载中断、未调用模型即失败，重跑通过），平均 302 秒 / 11.5 次调用（上次 3d53928 为 200 秒 / 10.5 次），5 家进入修正（上次 3 家），无一由预测格式或预测内容引起；共 21 条预测，把握 60% 13 条、75% 8 条。开发实例 390px 报告页显示预测且无横向溢出；生产首页、旧报告 49、公司页均 200 且无溢出，旧报告检查点照常显示。发布工具通过、完整性巡检 0 问题。证据 `eval-v1-forecasts-20261031/`、`deploy-eb667f1-20261101-003359/`，备份 `~/a-share-research-data/backup-pre-eb667f1-20261101-003401.db`。
 
-**直接回退**：`a-share-research-web:rollback-e4f30e4`、`a-share-research-worker:rollback-e4f30e4` 即原运行的 `74f187e`（`e5d5ed81…f008`、`f36d24d3…bdd2`）；再退到 `b36b15d` 用 `rollback-74f187e`，分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-eb667f1`、`a-share-research-worker:rollback-eb667f1` 即原运行的 `e4f30e4`（`92f89554…a64e`、`a0cc7265…c6`）；再退到 `74f187e` 用 `rollback-e4f30e4`，分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。新报告检查点多出的 `forecast` 字段旧镜像会忽略。
 
-**更早发布**：`74f187e`、`b36b15d`、`09c2748` 的完整记录依次见 `git show c0b3a7a:`、`git show 07ba07c:`、`git show b36b15d:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
+**更早发布**：`e4f30e4` 的完整记录见 `git show 1b41f2a:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
 ## 尚待完成与未采用项
 
