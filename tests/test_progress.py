@@ -384,3 +384,39 @@ def test_explicit_correction_title_not_promoted_by_new_url_and_hash(captured, su
     snap, doc = publication_case(captured)
     doc.update(title=doc['title']+suffix, sha256='0'*64, url=doc['url']+'?different=1', announced='2026-10-21')
     assert progress.disclosure_status(doc, snap) == 'version_unverified'
+
+
+def test_non_dict_document_returns_unknown_identity(captured):
+    snap, _ = publication_case(captured)
+    assert progress.disclosure_status(None, snap) == 'unknown_identity'
+    assert progress.disclosure_status('not-a-dict', snap) == 'unknown_identity'
+
+
+def test_malformed_or_none_sources_gracefully_degrade_without_crashing(captured):
+    snap, doc = publication_case(captured)
+    snap['inputs']['before']['body']['sources']['D99'] = None
+    snap['inputs']['before']['body']['sources']['D100'] = {'document': None}
+    snap['inputs']['current']['body']['sources']['D101'] = {'document': None}
+    snap['inputs']['current']['body']['answer'][0]['cites'].append({'source': 'D101', 'page': 1})
+    refs = progress.references(snap)
+    assert 'current:answer:0' in refs
+    assert progress.disclosure_status(doc, snap) in {'known_document', 'new_publication_candidate', 'version_unverified', 'earlier_material', 'unknown_time', 'unknown_identity'}
+
+
+def test_legacy_baseline_without_document_code_resolves_properly(captured):
+    snap, doc = publication_case(captured)
+    for d in progress.documents(snap, 'before'):
+        d.pop('code', None)
+    assert progress.disclosure_status(doc, snap) == 'known_document'
+
+    doc_new = dict(doc, sha256='0'*64, url=doc['url']+'?diff=1', announced='2026-10-21')
+    assert progress.disclosure_status(doc_new, snap) == 'new_publication_candidate'
+
+
+def test_whitespace_baseline_fields_rejected_as_unknown_identity(captured):
+    snap, doc = publication_case(captured)
+    for d in progress.documents(snap, 'before'):
+        d['url'] = '   '
+    doc.update(sha256='0'*64, url=doc['url']+'?diff=1', announced='2026-10-21')
+    assert progress.disclosure_status(doc, snap) == 'unknown_identity'
+

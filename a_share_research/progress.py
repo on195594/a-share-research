@@ -94,7 +94,8 @@ def references(snap: dict) -> dict:
                             sources.append({"kind": "table", "cite": cite, "row": table})
                     else:
                         source = documents.get(cite.get("source", "D0"), {})
-                        doc, pages = source.get("document", {}), source.get("pages") or []
+                        doc = (source.get("document") or {}) if isinstance(source, dict) else {}
+                        pages = (source.get("pages") or []) if isinstance(source, dict) else []
                         page = cite.get("page")
                         url = doc.get("url", "")
                         safe_url = url.startswith(("https://", "http://"))
@@ -112,11 +113,22 @@ def references(snap: dict) -> dict:
 
 def documents(snap, side):
     body = snap["inputs"][side]["body"]
-    return [body.get("document") or {}, *[v.get("document", {}) for v in (body.get("sources") or {}).values()]]
+    docs = []
+    d0 = body.get("document")
+    if isinstance(d0, dict):
+        docs.append(d0)
+    for v in (body.get("sources") or {}).values():
+        if isinstance(v, dict):
+            doc = v.get("document")
+            if isinstance(doc, dict):
+                docs.append(doc)
+    return docs
 
 
 def disclosure_status(document, snap):
     """Necessary publication conditions, not proof that a claim is semantically new."""
+    if not isinstance(document, dict):
+        return "unknown_identity"
     required = ("code", "title", "url", "sha256", "announced")
     if any(not isinstance(document.get(k), str) or not document[k].strip() for k in required):
         return "unknown_identity"
@@ -124,15 +136,18 @@ def disclosure_status(document, snap):
         return "unknown_identity"
     old = documents(snap, "before")
     url = document["url"].split("#")[0]
+    before_code = snap["inputs"]["before"].get("code") or snap["inputs"]["before"]["body"].get("code")
     for previous in old:
         if previous.get("sha256") == document["sha256"]:
-            return "known_document" if previous.get("code") == document["code"] else "identity_conflict"
+            return "known_document" if (previous.get("code") or before_code) == document["code"] else "identity_conflict"
     if re.search(r"更正|修订|修正", document["title"]):
         return "version_unverified"  # Explicit version notice still needs its correction evidence.
     for previous in old:
         same_url = (previous.get("url") or "").split("#")[0] == url
+        prev_code = previous.get("code") or before_code
         same_title = bool(document.get("period")) and all(
-            previous.get(k) == document.get(k) for k in ("code", "period", "title"))
+            (prev_code if k == "code" else previous.get(k)) == document.get(k)
+            for k in ("code", "period", "title"))
         if same_url or same_title:
             # A changed PDF is neither silently deduplicated nor assumed newly published.
             return "version_unverified"
@@ -150,7 +165,9 @@ def disclosure_status(document, snap):
         return "unknown_time"  # Date-only publication cannot order events within the baseline day.
     if announced < before:
         return "earlier_material"
-    if not any(all(d.get(k) for k in required) for d in old):
+    if not any(all(isinstance(d.get(k) or (before_code if k == "code" else None), str)
+                   and (d.get(k) or (before_code if k == "code" else "")).strip()
+                   for k in required) for d in old):
         return "unknown_identity"
     return "new_publication_candidate"
 
@@ -165,6 +182,7 @@ def check(body: dict, snap: dict) -> list[str]:
     """Structural/ref/numeric guards; semantic novelty always also needs independent review."""
     from a_share_research.evidence import numbers, supported
     refs, errors = references(snap), []
+    constraints = None
     if not isinstance(body, dict) or set(body) != {"items", "limits"}:
         return ["结果须仅含 items 和 limits"]
     if not isinstance(body["items"], list) or not body["items"]:
@@ -219,9 +237,10 @@ def check(body: dict, snap: dict) -> list[str]:
         if item["kind"] == "new_disclosure":
             change = item.get("change")
             ids = change.get("refs") if isinstance(change, dict) else []
-            candidates = disclosure_constraints(snap, refs)
+            if constraints is None:
+                constraints = disclosure_constraints(snap, refs)
             statuses = [source["status"] for key in (ids if isinstance(ids, list) else [])
-                        if isinstance(key, str) for source in candidates.get(key, [])]
+                        if isinstance(key, str) for source in constraints.get(key, [])]
             if "new_publication_candidate" not in statuses:
                 errors.append(f"条目 {i} 新披露缺少可核验的新发布原文；重复引用不得当新消息；来源分类：{','.join(statuses) or '无原文'}")
     return errors
@@ -290,9 +309,10 @@ kind 可选 new_disclosure/reinterpretation/comparison/basis_revision/response/n
 
 
 def prompt_input(snap):
+    refs = references(snap)
     return encode({"reports": {side: {k: v for k, v in record.items() if k not in {"material", "capture"}}
-                               for side, record in snap["inputs"].items()}, "registry": references(snap),
-                               "disclosure_constraints": disclosure_constraints(snap, references(snap))})
+                               for side, record in snap["inputs"].items()}, "registry": refs,
+                   "disclosure_constraints": disclosure_constraints(snap, refs)})
 
 
 def claim(conn, progress_id):
