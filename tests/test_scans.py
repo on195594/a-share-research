@@ -51,6 +51,11 @@ class CapturedSources:
         self.calendar_windows.append((start, end))
         return [d for d in DAYS if start <= d <= end]
 
+    def report_rc_window(self, as_of):
+        # No sell-side capture in these announcement replays; leave its coverage unavailable.
+        return {'trading_days': 0, 'covered_days': 0, 'missing_days': [], 'truncated_days': [],
+                'reason': '公告扫描重放未采集卖方预测'}
+
 
 @pytest.fixture
 def conn(tmp_path):
@@ -64,6 +69,46 @@ def run_scan(conn, source=None, at=AT):
     scan_id = scans.submit(conn)
     scans.execute(conn, scan_id, source=source or CapturedSources(), at=at)
     return scans.view(conn, scan_id)
+
+
+def test_consensus_prefetch_once_even_without_subscriptions(conn, monkeypatch):
+    from a_share_research import sources
+    from test_advisor_sources import DailyReports
+    pro = DailyReports()
+    monkeypatch.setattr(sources.ts, 'pro_api', lambda token: pro)
+    monkeypatch.setenv('TUSHARE_TOKEN', 'captured-response-only')
+    monkeypatch.delenv('TUSHARE_CACHE', raising=False)
+    monkeypatch.setenv('REPORT_RC_DAILY_BUDGET', '1')
+
+    class Prefetch(CapturedSources):
+        calls = []
+
+        def report_rc_window(self, as_of):
+            self.calls.append(as_of)
+            return scans.MarketSources().report_rc_window(as_of)
+
+    source = Prefetch()
+    result = run_scan(conn, source, at='2026-08-27T18:00:00+08:00')
+    assert source.calls == ['2026-08-26'] and pro.calls == ['20260826']
+    prefetch = result['summary']['consensus_prefetch']
+    assert prefetch['covered'] == 1 and len(prefetch['missing']) == prefetch['trading_days'] - 1
+    assert '预算' in prefetch['reason']
+    assert result['status'] == 'done' and result['summary']['failures'] == []
+    assert scans.announcement_failure(conn, '603606') is None
+
+
+def test_consensus_prefetch_error_is_not_an_announcement_failure(conn):
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+
+    class FailedPrefetch(CapturedSources):
+        def report_rc_window(self, as_of):
+            raise RuntimeError('卖方预测频次超限')
+
+    result = run_scan(conn, FailedPrefetch())
+    assert result['status'] == 'done' and result['summary']['failures'] == []
+    assert result['summary']['announcements_succeeded'] == ['603606']
+    assert '频次超限' in result['summary']['consensus_prefetch']['reason']
+    assert scans.announcement_failure(conn, '603606') is None
 
 
 def priced(conn):

@@ -9,6 +9,7 @@ from support.continuation import load
 from support.valuation import BODY, RECORD, ROWS, assumptions
 from test_service_http import server  # Existing isolated real HTTP fixture.
 from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, run_scan
+from test_advisor_sources import CALENDAR
 
 
 def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
@@ -16,8 +17,11 @@ def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
     load(conn)
     body = deepcopy(BODY)
     body['valuation'] = assumptions()
+    days = [d for d in CALENDAR if '20260728' <= d <= '20261026']
+    coverage = {'trading_days': len(days), 'covered_days': len({r['report_date'] for r in ROWS} & set(days)),
+                'truncated_days': []}
     body['valuation_calc'] = valuation.compute(body['valuation'], body['table'], body['market_date'],
-                                               consensus=valuation.consensus(ROWS, [2026, 2027, 2028], body['market_date']))
+                                               consensus=valuation.consensus(ROWS, [2026, 2027, 2028], body['market_date'], coverage=coverage))
     # Add the new fields to an actual saved report using the normal persistence API.
     run = service.submit(conn, '603606', 'a2-current')
     report_id = db.save_report(conn, run, RECORD['code'], RECORD['name'], RECORD['period'], True, RECORD['verdict'], body)
@@ -30,7 +34,8 @@ def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
     assert card['period'] == RECORD['period'] and card['summary'] == body['summary']
     assert card['risks'] == [r['text'] for r in body['risks'][:3]]
     assert card['valuation_calc']['zone'] == body['valuation_calc']['zone']
-    assert card['valuation_calc']['consensus']['status'] == 'ok'
+    assert card['valuation_calc']['consensus']['status'] == 'partial'
+    assert card['valuation_calc']['consensus']['coverage'] == coverage
     assert card['valuation_calc']['scenarios']['中性'] == {'annual_return': body['valuation_calc']['scenarios']['中性']['annual_return']}
     compact = service.report_view(conn, report_id, compact=True)['report']
     assert compact['valuation'] == body['valuation'] and compact['valuation_calc'] == body['valuation_calc']

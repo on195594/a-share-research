@@ -402,9 +402,11 @@ def calculate_valuation(value: dict, material: Material, *, replay: bool = False
             comparison = {"status": "unavailable", "reason": "历史快照重放不获取新的卖方预测"}
         else:
             try:
-                response = sources.report_rc(material.code)
-                comparison = (response if response["status"] == "unavailable" else
-                              valuation.consensus(response["rows"], valuation.years(material.table), material.market_date))
+                response = sources.report_rc_window(material.market_date, code=material.code)
+                comparison = valuation.consensus(response["rows"], valuation.years(material.table),
+                                                 material.market_date, coverage=response)
+                if response.get("reason"):
+                    comparison["reason"] = response["reason"]
             except Exception as exc:
                 log.warning("report_rc %s unavailable (%s)", material.code, type(exc).__name__)
                 comparison = {"status": "unavailable", "reason": "卖方预测取数或解析失败"}

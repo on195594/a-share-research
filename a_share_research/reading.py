@@ -427,6 +427,7 @@ def card(report, body: dict, last_passed=None) -> dict:
                     if latest and len(latest) >= 7 and latest[:4].isdigit() else (latest or None))
     return {'id': report['id'], 'code': report['code'], 'name': report['name'], 'passed': passed,
             'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
+            'consensus': (body.get('valuation_calc') or {}).get('consensus') if passed else None,
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
             'period': period_label, 'created_at': created_at, 'coverage': coverage,

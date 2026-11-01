@@ -74,7 +74,9 @@
       <p class="muted small">来源：报告行情日对应的 TuShare 历史市盈率，剔除空值与非正值；只作参照，不自动决定退出倍数。</p>
       {% else %}<p class="muted">未记录可用的近 5 年 PE 分位，资料缺口见报告记录。</p>{% endif %}
       <h3>所采集卖方预测，不作测算输入</h3>
-      {% if calc.consensus and calc.consensus.status == 'ok' %}
+      {% from "_consensus.html" import coverage_note %}
+      {{ coverage_note(calc.consensus) }}
+      {% if calc.consensus and calc.consensus.status in ('ok', 'partial') and calc.consensus.years %}
       <p class="muted small">截至 {{ calc.as_of }} 的近 90 天预测，同一机构同一年度只保留最新一条；归母净利润口径，单位亿元。</p>
       <div class="table-wrap" tabindex="0" role="region" aria-label="所采集卖方年度利润预测对照">
         <table>

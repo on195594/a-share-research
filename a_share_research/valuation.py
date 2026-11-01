@@ -187,7 +187,7 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
             "pe_reference": pe_reference, "consensus": comparison, "assumptions": assumptions}
 
 
-def consensus(rows: list[dict], years: list[int], as_of: str) -> dict:
+def consensus(rows: list[dict], years: list[int], as_of: str, *, coverage=None) -> dict:
     """Latest report per organization/year within the point-in-time 90-day window."""
     cutoff = date.fromisoformat(as_of)
     latest = {}
@@ -216,4 +216,12 @@ def consensus(rows: list[dict], years: list[int], as_of: str) -> dict:
         profits = [np for _, np in samples]
         result[str(year)] = {"median": median(profits), "n_orgs": len(samples), "min": min(profits), "max": max(profits),
                              "oldest_days": max((cutoff - reported).days for reported, _ in samples)}
-    return _json_numbers({"status": "ok" if result else "none", "years": result})
+    status = "ok" if result else "none"
+    if coverage is not None:
+        if coverage["covered_days"] == 0:
+            status = "unavailable"
+        elif coverage["covered_days"] < coverage["trading_days"]:
+            status = "partial"
+    return _json_numbers({"status": status, "years": result, "coverage":
+                          {key: coverage[key] for key in ("trading_days", "covered_days", "truncated_days")}
+                          if coverage is not None else None})

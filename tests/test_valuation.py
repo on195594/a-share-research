@@ -74,7 +74,7 @@ def test_consensus_real_rows_unit_deduplication_and_point_in_time():
     assert valuation.consensus(huatai, [2028], '2026-10-26')['years']['2028']['median'] == 24.03
     newest = next(r for r in huatai if r['quarter'] == '2028Q4' and r['report_date'] == '20261030')
     assert newest['np'] / newest['eps'] / 10000 == pytest.approx(8.25)
-    assert valuation.consensus(ROWS, [2029], '2026-10-31') == {'status': 'none', 'years': {}}
+    assert valuation.consensus(ROWS, [2029], '2026-10-31') == {'status': 'none', 'years': {}, 'coverage': None}
     assert valuation.consensus(ROWS, [2026], '2027-02-01')['status'] == 'none'
     assert valuation.consensus([newest], [2028], '2027-01-28')['status'] == 'ok'  # day 90
     assert valuation.consensus([newest], [2028], '2027-01-29')['status'] == 'none'

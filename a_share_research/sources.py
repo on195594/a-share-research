@@ -7,7 +7,6 @@ import os
 import re
 import sqlite3
 import subprocess
-import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -32,6 +31,8 @@ TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[�
 
 FINANCIAL_APIS = {"fina_indicator", "income", "cashflow", "fina_audit", "balancesheet"}
 HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal", "report_rc"}
+REPORT_RC_DAILY_BUDGET = 8
+REPORT_RC_ROW_CAP = 3000  # 上限未经官方文档核实，达到即视为可能截断
 
 
 def _tushare_cache_key(api: str, params: dict) -> str | None:
@@ -49,11 +50,10 @@ def _tushare_cache_key(api: str, params: dict) -> str | None:
     return hashlib.sha256(json.dumps(key, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def tushare_query(pro, api: str, **params) -> pd.DataFrame:
-    """Cache historical raw responses, before a-stock-lib normalizes dates and numbers."""
+def _tushare_cached(api: str, params: dict) -> pd.DataFrame | None:
     key = _tushare_cache_key(api, params)
     if key is None:
-        return pro.query(api, **params)
+        return None
     path = db.DATA / "tushare_cache.db"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +68,40 @@ def tushare_query(pro, api: str, **params) -> pd.DataFrame:
                 return pd.DataFrame(**saved)
     except (OSError, sqlite3.Error, ValueError, TypeError):
         log.warning("TuShare %s cache read failed; fetching upstream", api, exc_info=True)
+    return None
+
+
+class ReportRCBudgetExhausted(SourceError):
+    pass
+
+
+def _reserve_report_rc_call() -> None:
+    """Count upstream attempts atomically across worker/CLI processes, including errors."""
+    budget = int(os.environ.get("REPORT_RC_DAILY_BUDGET", REPORT_RC_DAILY_BUDGET))
+    day = datetime.now(SHANGHAI).date().isoformat()
+    path = db.DATA / "tushare_cache.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
+        conn.execute("INSERT OR IGNORE INTO report_rc_budget VALUES (?, 0)", (day,))
+        reserved = conn.execute("UPDATE report_rc_budget SET calls=calls+1 WHERE day=? AND calls<? RETURNING calls",
+                                (day, budget)).fetchone()
+    if reserved is None:
+        raise ReportRCBudgetExhausted(f"卖方预测每日上游调用预算已用尽（{budget} 次）")
+
+
+def tushare_query(pro, api: str, **params) -> pd.DataFrame:
+    """Cache historical raw responses, before a-stock-lib normalizes dates and numbers."""
+    cached = _tushare_cached(api, params)
+    if cached is not None:
+        return cached
+    if api == "report_rc":
+        _reserve_report_rc_call()
     frame = pro.query(api, **params)
+    key = _tushare_cache_key(api, params)
+    if key is None:
+        return frame
+    path = db.DATA / "tushare_cache.db"
     # Empty results may mean the provider has not published the data yet.
     if isinstance(frame, pd.DataFrame) and not frame.empty:
         try:
@@ -359,7 +392,7 @@ def pe_reference(code: str, market_date: str) -> dict:
         raise SourceError(f"TuShare daily_basic 历史 PE 分位不可用：{exc}") from exc
 
 
-def report_rc_rows(frame: pd.DataFrame, code: str) -> list[dict]:
+def report_rc_rows(frame: pd.DataFrame, code: str | None = None) -> list[dict]:
     """Validate the response before handing sell-side data to the pure consensus calculator."""
     if not isinstance(frame, pd.DataFrame):
         raise SourceError("TuShare report_rc 返回的不是数据表")
@@ -368,8 +401,8 @@ def report_rc_rows(frame: pd.DataFrame, code: str) -> list[dict]:
     required = {"ts_code", "report_date", "org_name", "quarter", "np"}
     if not required <= set(frame.columns):
         raise SourceError("TuShare report_rc 缺少 ts_code、report_date、org_name、quarter 或 np")
-    if not frame["ts_code"].eq(to_tushare_stock_code(code)).all():
-        raise SourceError("TuShare report_rc 返回了其他公司的预测")
+    if code is not None:
+        frame = frame.loc[frame["ts_code"].eq(to_tushare_stock_code(code))]
     selected = frame[sorted(required)].copy()
     selected["report_date"] = pd.to_datetime(selected["report_date"], errors="raise").dt.strftime("%Y-%m-%d")
     selected["np"] = pd.to_numeric(selected["np"], errors="raise")
@@ -381,28 +414,52 @@ def report_rc_rows(frame: pd.DataFrame, code: str) -> list[dict]:
 
 def _report_rc_limited(exc: Exception) -> bool:
     message = str(exc).lower()
-    return any(part in message for part in ("频次", "限频", "每分钟", "rate limit", "over limit"))
+    return any(part in message for part in ("频次", "限频", "超限", "每分钟", "每小时", "每天", "每日", "rate limit", "over limit"))
 
 
-def report_rc(code: str) -> dict:
-    """Last 120 days; retry a one-call-per-minute limit once, then degrade to unavailable."""
+def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None) -> dict:
+    """Backfill market-wide daily reports newest first; optionally select one company."""
+    from a_share_research import screening
+
+    cutoff = date.fromisoformat(as_of)
+    end = min(cutoff, datetime.now(SHANGHAI).date() - timedelta(days=1))
+    start = cutoff - timedelta(days=days)
+    result = {"rows": [], "trading_days": 0, "covered_days": 0, "missing_days": [], "truncated_days": []}
+
+    def failure(exc):
+        reason = str(exc).replace(os.environ.get("TUSHARE_TOKEN") or "\x00", "[REDACTED]")
+        result["reason"] = f"TuShare report_rc: {reason}"
+        log.warning("report_rc window %s: %s", as_of, reason)
+
     try:
         pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
-        end = datetime.now(SHANGHAI).date()
-        params = {"ts_code": to_tushare_stock_code(code),
-                  "start_date": (end - timedelta(days=120)).strftime("%Y%m%d"),
-                  "end_date": end.strftime("%Y%m%d")}
-        for attempt in range(2):
-            try:
-                rows = report_rc_rows(tushare_query(pro, "report_rc", **params), code)
-                return {"status": "ok" if rows else "none", "rows": rows}
-            except Exception as exc:
-                if attempt == 0 and _report_rc_limited(exc):
-                    log.warning("TuShare report_rc rate limited for %s; retrying in 61 seconds", code)
-                    time.sleep(61)
-                    continue
-                raise
+        trading_days = sorted(set(screening._trade_days(
+            pro, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))), reverse=True) if start <= end else []
     except Exception as exc:
-        reason = str(exc).replace(os.environ.get("TUSHARE_TOKEN") or "\x00", "[REDACTED]")
-        log.warning("TuShare report_rc unavailable for %s: %s", code, reason)
-        return {"status": "unavailable", "reason": f"TuShare report_rc: {reason}"}
+        failure(exc)
+        return result
+    result["trading_days"] = len(trading_days)
+    stopped = False
+    for day in trading_days:
+        params = {"start_date": day, "end_date": day}
+        try:
+            frame = _tushare_cached("report_rc", params)
+            if frame is None:
+                if stopped:
+                    result["missing_days"].append(day)
+                    continue
+                frame = tushare_query(pro, "report_rc", **params)
+            rows = report_rc_rows(frame, code)
+            # A daily query must never silently lend coverage to a different date.
+            if not frame.empty and not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(date.fromisoformat(day)).all():
+                raise SourceError(f"report_rc {day} 返回了其他日期的预测")
+            result["rows"].extend(rows)
+            result["covered_days"] += 1
+            if len(frame) >= REPORT_RC_ROW_CAP:
+                result["truncated_days"].append(day)
+        except Exception as exc:
+            failure(exc)
+            result["missing_days"].append(day)
+            if isinstance(exc, ReportRCBudgetExhausted) or _report_rc_limited(exc):
+                stopped = True
+    return result

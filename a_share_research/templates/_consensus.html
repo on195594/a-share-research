@@ -1,0 +1,5 @@
+{% macro coverage_note(consensus) %}
+{% if consensus and consensus.coverage %}
+<p class="muted small">卖方预测：{{ {'partial': '部分覆盖', 'unavailable': '暂不可用', 'ok': '已覆盖', 'none': '无符合条件的样本'}.get(consensus.status, consensus.status) }}，覆盖 {{ consensus.coverage.covered_days }}/{{ consensus.coverage.trading_days }} 个交易日。{% if consensus.coverage.truncated_days %}其中 {{ consensus.coverage.truncated_days | length }} 日可能截断（{{ consensus.coverage.truncated_days | join('、') }}）。{% endif %}</p>
+{% endif %}
+{% endmacro %}

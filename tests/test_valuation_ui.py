@@ -1,8 +1,8 @@
 """Render A1 from the captured report table and computed results; no model or provider calls."""
 from copy import deepcopy
 
-from a_share_research import valuation
-from support.templates import render
+from a_share_research import reading, valuation
+from support.templates import ENV, render
 from support.valuation import BODY, RECORD, ROWS, assumptions
 
 
@@ -62,3 +62,34 @@ def test_unpriced_and_calculation_gap_keep_reason_and_escape_external_text():
     html = page(body)
     assert '&lt;script&gt;missing M.total_mv&lt;/script&gt;' in html
     assert '本次未生成参考区间' in html and '三种情景' not in html
+
+
+def test_partial_coverage_keeps_statistics_and_appears_on_cards():
+    body = calculated()
+    from test_advisor_sources import CALENDAR
+    days = [d for d in CALENDAR if '20260728' <= d <= '20261026']
+    covered = sorted({r['report_date'].replace('-', '') for r in ROWS} & set(days))
+    coverage = {'trading_days': len(days), 'covered_days': len(covered), 'truncated_days': covered[:1]}
+    # Coverage is derived from captured dates; the truncation flag is an explicit boundary mutation.
+    comparison = valuation.consensus(ROWS, [2026, 2027, 2028], body['market_date'], coverage=coverage)
+    body['valuation_calc'] = valuation.compute(body['valuation'], body['table'], body['market_date'], consensus=comparison)
+    html = page(body)
+    note = f'覆盖 {len(covered)}/{len(days)} 个交易日'
+    assert note in html and '部分覆盖' in html and '可能截断' in html
+    for stats in comparison['years'].values():
+        assert f'{stats["median"]:.2f}' in html
+    card = reading.card(RECORD | {'passed': True}, body)
+    template = ENV.get_template('_card.html').module
+    for rendered in (template.summary_card(card), template.full_card(card)):
+        assert note in rendered and '部分覆盖' in rendered and '可能截断' in rendered
+
+
+def test_unavailable_and_partial_without_samples_show_coverage():
+    body = calculated()
+    comparison = body['valuation_calc']['consensus']
+    comparison.update(status='unavailable', years={}, coverage={'trading_days': 1, 'covered_days': 0, 'truncated_days': []})
+    html = page(body)
+    assert '覆盖 0/1 个交易日' in html and '卖方预测暂不可用' in html
+    comparison.update(status='partial', coverage={'trading_days': 2, 'covered_days': 1, 'truncated_days': []})
+    html = page(body)
+    assert '部分覆盖' in html and '覆盖 1/2 个交易日' in html and '未采集到符合日期' in html

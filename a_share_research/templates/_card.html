@@ -1,4 +1,5 @@
 {% from "_charts.html" import verdict_pips, verdict_scale %}
+{% from "_consensus.html" import coverage_note %}
 {# Investment cards. Layers, top to bottom: identity and verdict; the one-line thesis; a check-up of
    saved figures grouped by dimension; then counter-evidence and checkpoints. Text is never truncated:
    the summary card folds the lists behind a disclosure, the full card shows them. #}
@@ -43,6 +44,7 @@
   </header>
   {{ dates(c, due, from_batch) }}
   {% if c.passed %}
+  {{ coverage_note(c.consensus) }}
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
   {% if c.figures %}
   <dl class="card-keys">
@@ -71,6 +73,7 @@
   </header>
   {{ dates(c, due) }}
   {% if c.passed %}
+  {{ coverage_note(c.consensus) }}
   {% if c.verdict %}{{ verdict_scale(c.verdict) }}{% endif %}
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
   {% if c.dims %}

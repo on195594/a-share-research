@@ -244,6 +244,10 @@ class MarketSources:
         from a_share_research import screening
         return screening._trade_days(screening._pro(), start.replace('-', ''), end.replace('-', ''))
 
+    def report_rc_window(self, as_of):
+        from a_share_research import sources
+        return sources.report_rc_window(as_of)
+
 
 def normalize_announcements(rows: list[dict], code: str) -> list[dict]:
     from a_share_research import sources
@@ -339,6 +343,17 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         return
     summary = {'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
                'announcements_succeeded': []}
+    try:
+        prefetch = source.report_rc_window((instant(at).date() - timedelta(days=1)).isoformat())
+        summary['consensus_prefetch'] = {
+            'covered': prefetch['covered_days'], 'missing': prefetch['missing_days'],
+            'trading_days': prefetch['trading_days'], 'truncated_days': prefetch['truncated_days']}
+        if prefetch.get('reason'):
+            summary['consensus_prefetch']['reason'] = prefetch['reason']
+            log.warning('scan %s consensus prefetch: %s', scan_id, prefetch['reason'])
+    except Exception as exc:
+        log.exception('scan %s consensus prefetch failed', scan_id)
+        summary['consensus_prefetch'] = {'covered': 0, 'missing': [], 'reason': str(exc)}
     try:
         scope = subscriptions(conn)
         history = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute(
