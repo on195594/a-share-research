@@ -417,8 +417,11 @@ def _report_rc_limited(exc: Exception) -> bool:
     return any(part in message for part in ("频次", "限频", "超限", "每分钟", "每小时", "每天", "每日", "rate limit", "over limit"))
 
 
-def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None) -> dict:
-    """Backfill market-wide daily reports newest first; optionally select one company."""
+def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None, cache_only: bool = False) -> dict:
+    """Read daily market-wide reports; optionally backfill within the shared daily budget.
+
+    Batch freeze uses cache_only: missing report days remain missing, never trigger upstream calls.
+    """
     from a_share_research import screening
 
     cutoff = date.fromisoformat(as_of)
@@ -432,9 +435,18 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None) -> 
         log.warning("report_rc window %s: %s", as_of, reason)
 
     try:
-        pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
-        trading_days = sorted(set(screening._trade_days(
-            pro, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))), reverse=True) if start <= end else []
+        calendar_params = {"exchange": "SSE", "is_open": "1", "start_date": start.strftime("%Y%m%d"),
+                           "end_date": end.strftime("%Y%m%d")}
+        calendar = _tushare_cached("trade_cal", calendar_params) if cache_only else None
+        pro = None
+        if start > end:
+            trading_days = []
+        elif calendar is not None:
+            trading_days = sorted(set(calendar["cal_date"]), reverse=True)
+        else:
+            pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
+            trading_days = sorted(set(screening._trade_days(
+                pro, calendar_params["start_date"], calendar_params["end_date"])), reverse=True)
     except Exception as exc:
         failure(exc)
         return result
@@ -445,7 +457,7 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None) -> 
         try:
             frame = _tushare_cached("report_rc", params)
             if frame is None:
-                if stopped:
+                if stopped or cache_only:
                     result["missing_days"].append(day)
                     continue
                 frame = tushare_query(pro, "report_rc", **params)
@@ -463,3 +475,22 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None) -> 
             if isinstance(exc, ReportRCBudgetExhausted) or _report_rc_limited(exc):
                 stopped = True
     return result
+
+
+def coverage_counts(window: dict, codes: list[str], as_of: str) -> dict:
+    """Count distinct organizations, retaining partial daily coverage without extrapolating."""
+    end = date.fromisoformat(as_of)
+    metadata = {key: value for key, value in window.items() if key != "rows"}
+    organizations = {code: set() for code in codes}
+    for row in window["rows"]:
+        code, org = row["ts_code"], row.get("org_name")
+        if code in organizations and isinstance(org, str) and org.strip():
+            organizations[code].add(org.strip())
+    return {code: metadata | {"organizations": len(orgs), "start": str(end - timedelta(days=90)), "end": str(end)}
+            for code, orgs in organizations.items()}
+
+
+def batch_coverage(batch: dict) -> dict:
+    as_of = date.fromisoformat(batch["as_of"]).isoformat()
+    window = report_rc_window(as_of, days=90, cache_only=True)
+    return coverage_counts(window, [r["code"] for r in batch["q20"] + (batch.get("s10") or [])], as_of)

@@ -208,7 +208,15 @@ def _migrate_v7(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7)
+def _migrate_v8(conn: sqlite3.Connection) -> None:
+    # Nullable JSON snapshots: no rewrite of existing batches or their frozen rules.
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(batches)")}
+    for column in ("s10", "sq3", "sl3", "coverage", "small_selection"):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE batches ADD COLUMN {column} TEXT")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8)
 
 
 def now() -> str:

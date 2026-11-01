@@ -1,0 +1,3759 @@
+{
+ "source": "TuShare cached by backtest-20261025b on 2026-10-25; 2025-10-31 eligible 食品饮料/家用电器 companies with complete cached financials, plus two small companies each from 纺织服饰/轻工制造/公用事业 to exercise quotas. Factors are derived by existing production factors/evaluate from raw cached statements; no network or altered company rows. Regression subsets only, not historical small-cap batches. Frozen large scores use unchanged screen-v1.1 score().",
+ "as_of": "20251031",
+ "benchmark_days": [
+  "20250926",
+  "20250929",
+  "20250930",
+  "20251009",
+  "20251010",
+  "20251013",
+  "20251014",
+  "20251015",
+  "20251016",
+  "20251017",
+  "20251020",
+  "20251021",
+  "20251022",
+  "20251023",
+  "20251024",
+  "20251027",
+  "20251028",
+  "20251029",
+  "20251030",
+  "20251031"
+ ],
+ "suspended": [
+  "000407.SZ",
+  "000851.SZ",
+  "300018.SZ",
+  "300131.SZ",
+  "300353.SZ",
+  "300424.SZ",
+  "301181.SZ",
+  "603014.SH",
+  "603118.SH",
+  "603843.SH",
+  "688588.SH",
+  "920680.BJ"
+ ],
+ "small_market_rows": [
+  {
+   "ts_code": "605011.SH",
+   "name": "杭州热电",
+   "industry": "供气供热",
+   "market": "主板",
+   "list_date": "20210630",
+   "delist_date": null,
+   "close": 21.83,
+   "pe_ttm": 46.443,
+   "total_mv": 873418.3,
+   "industry_sw": "公用事业",
+   "avg_amount": 93430.0821
+  },
+  {
+   "ts_code": "603866.SH",
+   "name": "桃李面包",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20151222",
+   "delist_date": null,
+   "close": 5.45,
+   "pe_ttm": 22.6392,
+   "total_mv": 871846.9395,
+   "industry_sw": "食品饮料",
+   "avg_amount": 64011.4167
+  },
+  {
+   "ts_code": "603801.SH",
+   "name": "志邦家居",
+   "industry": "家居用品",
+   "market": "主板",
+   "list_date": "20170630",
+   "delist_date": null,
+   "close": 9.3,
+   "pe_ttm": 13.8147,
+   "total_mv": 403946.3984,
+   "industry_sw": "轻工制造",
+   "avg_amount": 39401.89725
+  },
+  {
+   "ts_code": "603366.SH",
+   "name": "日出东方",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20120521",
+   "delist_date": null,
+   "close": 10.11,
+   "pe_ttm": 45.2198,
+   "total_mv": 821991.6301,
+   "industry_sw": "家用电器",
+   "avg_amount": 140306.4815
+  },
+  {
+   "ts_code": "603219.SH",
+   "name": "富佳股份",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20211122",
+   "delist_date": null,
+   "close": 17.49,
+   "pe_ttm": 63.9765,
+   "total_mv": 981888.6,
+   "industry_sw": "家用电器",
+   "avg_amount": 117021.51035
+  },
+  {
+   "ts_code": "603055.SH",
+   "name": "台华新材",
+   "industry": "纺织",
+   "market": "主板",
+   "list_date": "20170921",
+   "delist_date": null,
+   "close": 8.84,
+   "pe_ttm": 14.9642,
+   "total_mv": 787018.7415,
+   "industry_sw": "纺织服饰",
+   "avg_amount": 39955.0738
+  },
+  {
+   "ts_code": "603043.SH",
+   "name": "广州酒家",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20170627",
+   "delist_date": null,
+   "close": 17.01,
+   "pe_ttm": 19.5349,
+   "total_mv": 967479.1393,
+   "industry_sw": "食品饮料",
+   "avg_amount": 62803.81155
+  },
+  {
+   "ts_code": "603008.SH",
+   "name": "喜临门",
+   "industry": "家居用品",
+   "market": "主板",
+   "list_date": "20120717",
+   "delist_date": null,
+   "close": 17.1,
+   "pe_ttm": 18.1732,
+   "total_mv": 629780.0639,
+   "industry_sw": "轻工制造",
+   "avg_amount": 112474.52024999999
+  },
+  {
+   "ts_code": "600917.SH",
+   "name": "重庆燃气",
+   "industry": "供气供热",
+   "market": "主板",
+   "list_date": "20140930",
+   "delist_date": null,
+   "close": 5.86,
+   "pe_ttm": 35.4603,
+   "total_mv": 914769.2994,
+   "industry_sw": "公用事业",
+   "avg_amount": 60774.6357
+  },
+  {
+   "ts_code": "600305.SH",
+   "name": "恒顺醋业",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20010206",
+   "delist_date": null,
+   "close": 8.14,
+   "pe_ttm": 60.473,
+   "total_mv": 900667.8238,
+   "industry_sw": "食品饮料",
+   "avg_amount": 74282.472
+  },
+  {
+   "ts_code": "600197.SH",
+   "name": "伊力特",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19990916",
+   "delist_date": null,
+   "close": 14.77,
+   "pe_ttm": 38.3978,
+   "total_mv": 698879.057,
+   "industry_sw": "食品饮料",
+   "avg_amount": 68184.42925
+  },
+  {
+   "ts_code": "600073.SH",
+   "name": "光明肉业",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "19970704",
+   "delist_date": null,
+   "close": 6.81,
+   "pe_ttm": 2343.9579,
+   "total_mv": 638593.7704,
+   "industry_sw": "食品饮料",
+   "avg_amount": 132555.60585
+  },
+  {
+   "ts_code": "600059.SH",
+   "name": "古越龙山",
+   "industry": "红黄酒",
+   "market": "主板",
+   "list_date": "19970516",
+   "delist_date": null,
+   "close": 9.5,
+   "pe_ttm": 42.0795,
+   "total_mv": 865965.2924,
+   "industry_sw": "食品饮料",
+   "avg_amount": 149048.2762
+  },
+  {
+   "ts_code": "300918.SZ",
+   "name": "南山智尚",
+   "industry": "纺织",
+   "market": "创业板",
+   "list_date": "20201222",
+   "delist_date": null,
+   "close": 19.66,
+   "pe_ttm": 54.1938,
+   "total_mv": 995060.2835,
+   "industry_sw": "纺织服饰",
+   "avg_amount": 215194.1186
+  },
+  {
+   "ts_code": "300783.SZ",
+   "name": "三只松鼠",
+   "industry": "食品",
+   "market": "创业板",
+   "list_date": "20190712",
+   "delist_date": null,
+   "close": 23.56,
+   "pe_ttm": 41.6524,
+   "total_mv": 946331.9284,
+   "industry_sw": "食品饮料",
+   "avg_amount": 162733.7449
+  },
+  {
+   "ts_code": "300403.SZ",
+   "name": "汉宇集团",
+   "industry": "家用电器",
+   "market": "创业板",
+   "list_date": "20141030",
+   "delist_date": null,
+   "close": 14.25,
+   "pe_ttm": 38.2771,
+   "total_mv": 859275.0,
+   "industry_sw": "家用电器",
+   "avg_amount": 234869.11099999998
+  },
+  {
+   "ts_code": "300342.SZ",
+   "name": "天银机电",
+   "industry": "家用电器",
+   "market": "创业板",
+   "list_date": "20120726",
+   "delist_date": null,
+   "close": 18.44,
+   "pe_ttm": 131.9551,
+   "total_mv": 783764.7484,
+   "industry_sw": "家用电器",
+   "avg_amount": 311108.71015
+  },
+  {
+   "ts_code": "002959.SZ",
+   "name": "小熊电器",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20190823",
+   "delist_date": null,
+   "close": 48.2,
+   "pe_ttm": 21.4446,
+   "total_mv": 758128.1745,
+   "industry_sw": "家用电器",
+   "avg_amount": 66395.51999999999
+  },
+  {
+   "ts_code": "002695.SZ",
+   "name": "煌上煌",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20120905",
+   "delist_date": null,
+   "close": 12.71,
+   "pe_ttm": 113.2663,
+   "total_mv": 711233.5531,
+   "industry_sw": "食品饮料",
+   "avg_amount": 106708.1648
+  },
+  {
+   "ts_code": "002677.SZ",
+   "name": "浙江美大",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20120525",
+   "delist_date": null,
+   "close": 7.45,
+   "pe_ttm": 221.3754,
+   "total_mv": 481308.477,
+   "industry_sw": "家用电器",
+   "avg_amount": 103431.89495
+  },
+  {
+   "ts_code": "002614.SZ",
+   "name": "奥佳华",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20110909",
+   "delist_date": null,
+   "close": 6.96,
+   "pe_ttm": 63.3425,
+   "total_mv": 433942.4927,
+   "industry_sw": "家用电器",
+   "avg_amount": 52841.43370000001
+  },
+  {
+   "ts_code": "002515.SZ",
+   "name": "金字火腿",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20101203",
+   "delist_date": null,
+   "close": 6.59,
+   "pe_ttm": 146.8178,
+   "total_mv": 797794.7341,
+   "industry_sw": "食品饮料",
+   "avg_amount": 647664.2229500001
+  },
+  {
+   "ts_code": "002290.SZ",
+   "name": "禾盛新材",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20090903",
+   "delist_date": null,
+   "close": 39.57,
+   "pe_ttm": 62.8625,
+   "total_mv": 981780.4898,
+   "industry_sw": "家用电器",
+   "avg_amount": 334183.31669999997
+  },
+  {
+   "ts_code": "002242.SZ",
+   "name": "九阳股份",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20080528",
+   "delist_date": null,
+   "close": 9.62,
+   "pe_ttm": 49.6386,
+   "total_mv": 734022.354,
+   "industry_sw": "家用电器",
+   "avg_amount": 38856.4873
+  },
+  {
+   "ts_code": "002216.SZ",
+   "name": "三全食品",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20080220",
+   "delist_date": null,
+   "close": 11.16,
+   "pe_ttm": 18.0463,
+   "total_mv": 981169.3976,
+   "industry_sw": "食品饮料",
+   "avg_amount": 52798.963950000005
+  },
+  {
+   "ts_code": "002035.SZ",
+   "name": "华帝股份",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20040901",
+   "delist_date": null,
+   "close": 6.39,
+   "pe_ttm": 12.4044,
+   "total_mv": 541650.6619,
+   "industry_sw": "家用电器",
+   "avg_amount": 46238.9121
+  },
+  {
+   "ts_code": "000848.SZ",
+   "name": "承德露露",
+   "industry": "软饮料",
+   "market": "主板",
+   "list_date": "19971113",
+   "delist_date": null,
+   "close": 9.23,
+   "pe_ttm": 15.4022,
+   "total_mv": 971507.4103,
+   "industry_sw": "食品饮料",
+   "avg_amount": 161445.14215
+  },
+  {
+   "ts_code": "000541.SZ",
+   "name": "佛山照明",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19931123",
+   "delist_date": null,
+   "close": 6.3,
+   "pe_ttm": 28.7728,
+   "total_mv": 967540.2849,
+   "industry_sw": "家用电器",
+   "avg_amount": 70442.59625
+  }
+ ],
+ "small_companies": [
+  {
+   "code": "605011.SH",
+   "name": "杭州热电",
+   "industry": "公用事业",
+   "pe": 46.443,
+   "total_mv_yi": 87.34,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    188044445.05,
+    163352316.63,
+    200994119.06,
+    196227293.92
+   ],
+   "roe_dt": [
+    8.3097,
+    9.5283,
+    8.6938
+   ],
+   "roe": 8.843933333333332,
+   "cash": 1.465473118578069,
+   "growth": 0.014299711691578842,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.934300821
+  },
+  {
+   "code": "603866.SH",
+   "name": "桃李面包",
+   "industry": "食品饮料",
+   "pe": 22.6392,
+   "total_mv_yi": 87.18,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    715794619.35,
+    629363887.98,
+    551747110.58,
+    497436278.36
+   ],
+   "roe_dt": [
+    12.6363,
+    10.9113,
+    9.7349
+   ],
+   "roe": 11.094166666666666,
+   "cash": 1.6558117942328314,
+   "growth": -0.11423943321206131,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.640114167
+  },
+  {
+   "code": "603801.SH",
+   "name": "志邦家居",
+   "industry": "轻工制造",
+   "pe": 13.8147,
+   "total_mv_yi": 40.39,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    460103849.1,
+    497582888.48,
+    548137238.03,
+    339514614.8
+   ],
+   "roe_dt": [
+    18.1945,
+    17.7769,
+    10.1536
+   ],
+   "roe": 15.375,
+   "cash": 1.3268056486488204,
+   "growth": -0.09634871793993394,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.3940189725
+  },
+  {
+   "code": "603366.SH",
+   "name": "日出东方",
+   "industry": "家用电器",
+   "pe": 45.2198,
+   "total_mv_yi": 82.2,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    174102000.08,
+    203899325.42,
+    165270627.85,
+    146121795.53
+   ],
+   "roe_dt": [
+    5.5424,
+    4.2669,
+    3.5872
+   ],
+   "roe": 4.4655,
+   "cash": 0.9945314425520723,
+   "growth": -0.05672770272221428,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.403064815
+  },
+  {
+   "code": "603219.SH",
+   "name": "富佳股份",
+   "industry": "家用电器",
+   "pe": 63.9765,
+   "total_mv_yi": 98.19,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    180869712.16,
+    339413145.57,
+    252071993.59,
+    165929874.83
+   ],
+   "roe_dt": [
+    24.2991,
+    16.3084,
+    10.3964
+   ],
+   "roe": 17.0013,
+   "cash": 1.6308915138287745,
+   "growth": -0.028328243351627536,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.1702151035
+  },
+  {
+   "code": "603055.SH",
+   "name": "台华新材",
+   "industry": "纺织服饰",
+   "pe": 14.9642,
+   "total_mv_yi": 78.7,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    445105185.56,
+    192524563.19,
+    363729670.76,
+    595763064.21
+   ],
+   "roe_dt": [
+    4.9397,
+    8.5206,
+    12.6059
+   ],
+   "roe": 8.688733333333333,
+   "cash": 1.1125249629657492,
+   "growth": 0.10205594124682849,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.39955073799999996
+  },
+  {
+   "code": "603043.SH",
+   "name": "广州酒家",
+   "industry": "食品饮料",
+   "pe": 19.5349,
+   "total_mv_yi": 96.75,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    526211243.92,
+    476575351.45,
+    506395937.58,
+    452034634.49
+   ],
+   "roe_dt": [
+    15.1069,
+    14.5101,
+    11.9981
+   ],
+   "roe": 13.871699999999999,
+   "cash": 1.6899402223581288,
+   "growth": -0.04938675179018526,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.6280381155
+  },
+  {
+   "code": "603008.SH",
+   "name": "喜临门",
+   "industry": "轻工制造",
+   "pe": 18.1732,
+   "total_mv_yi": 62.98,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    495733029.84,
+    204495922.91,
+    376644495.23,
+    292526327.47
+   ],
+   "roe_dt": [
+    6.108,
+    10.4687,
+    7.8353
+   ],
+   "roe": 8.137333333333332,
+   "cash": 2.752824712357915,
+   "growth": -0.16123744448211697,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.1247452024999998
+  },
+  {
+   "code": "600917.SH",
+   "name": "重庆燃气",
+   "industry": "公用事业",
+   "pe": 35.4603,
+   "total_mv_yi": 91.48,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    407185557.26,
+    357146547.75,
+    369217662.09,
+    339085581.3
+   ],
+   "roe_dt": [
+    7.3642,
+    7.148,
+    6.1207
+   ],
+   "roe": 6.877633333333333,
+   "cash": 0.9178857545446937,
+   "growth": -0.0591819248454053,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.607746357
+  },
+  {
+   "code": "600305.SH",
+   "name": "恒顺醋业",
+   "industry": "食品饮料",
+   "pe": 60.473,
+   "total_mv_yi": 90.07,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    108233327.49,
+    122402071.51,
+    76511046.81,
+    113464889.92
+   ],
+   "roe_dt": [
+    5.6076,
+    2.7838,
+    3.4281
+   ],
+   "roe": 3.939833333333333,
+   "cash": 2.911483497480461,
+   "growth": 0.0158591465233906,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.74282472
+  },
+  {
+   "code": "600197.SH",
+   "name": "伊力特",
+   "industry": "食品饮料",
+   "pe": 38.3978,
+   "total_mv_yi": 69.89,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    313859600.44,
+    147689236.83,
+    332854830.93,
+    278006031.06
+   ],
+   "roe_dt": [
+    4.0157,
+    8.8919,
+    7.2272
+   ],
+   "roe": 6.7116,
+   "cash": 0.2986404124560861,
+   "growth": -0.039627755715062385,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.6818442925
+  },
+  {
+   "code": "600073.SH",
+   "name": "光明肉业",
+   "industry": "食品饮料",
+   "pe": 2343.9579,
+   "total_mv_yi": 63.86,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    234852978.66,
+    429532594.66,
+    153250373.32,
+    86371382.46
+   ],
+   "roe_dt": [
+    9.2935,
+    3.1291,
+    1.7546
+   ],
+   "roe": 4.725733333333333,
+   "cash": 6.062499980240611,
+   "growth": -0.2835411261774087,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.3255560585
+  },
+  {
+   "code": "600059.SH",
+   "name": "古越龙山",
+   "industry": "食品饮料",
+   "pe": 42.0795,
+   "total_mv_yi": 86.6,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    181703737.7,
+    182101325.9,
+    191480890.03,
+    198219430.95
+   ],
+   "roe_dt": [
+    3.3553,
+    3.3859,
+    3.3848
+   ],
+   "roe": 3.3753333333333333,
+   "cash": 1.224343583188432,
+   "growth": 0.029423602200477905,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.4904827619999999
+  },
+  {
+   "code": "300918.SZ",
+   "name": "南山智尚",
+   "industry": "纺织服饰",
+   "pe": 54.1938,
+   "total_mv_yi": 99.51,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    140420029.08,
+    168395558.22,
+    197948730.3,
+    182517620.87
+   ],
+   "roe_dt": [
+    9.7152,
+    10.3406,
+    8.6556
+   ],
+   "roe": 9.570466666666666,
+   "cash": 1.194864784501641,
+   "growth": 0.09133624776085236,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 2.1519411859999997
+  },
+  {
+   "code": "300783.SZ",
+   "name": "三只松鼠",
+   "industry": "食品饮料",
+   "pe": 41.6524,
+   "total_mv_yi": 94.63,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    319626374.5,
+    40502111.75,
+    101589183.94,
+    319321793.62
+   ],
+   "roe_dt": [
+    1.7605,
+    4.183,
+    11.9579
+   ],
+   "roe": 5.967133333333333,
+   "cash": 1.3343234408597116,
+   "growth": -0.00031774357335978554,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.6273374489999999
+  },
+  {
+   "code": "300403.SZ",
+   "name": "汉宇集团",
+   "industry": "家用电器",
+   "pe": 38.2771,
+   "total_mv_yi": 85.93,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    181899101.94,
+    188578907.39,
+    225422041.45,
+    236852347.24
+   ],
+   "roe_dt": [
+    10.746,
+    11.89,
+    11.9499
+   ],
+   "roe": 11.528633333333334,
+   "cash": 1.0192333997597063,
+   "growth": 0.09198258608309051,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 2.34869111
+  },
+  {
+   "code": "300342.SZ",
+   "name": "天银机电",
+   "industry": "家用电器",
+   "pe": 131.9551,
+   "total_mv_yi": 78.38,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    92517583.95,
+    5236440.78,
+    31106654.02,
+    70570390.39
+   ],
+   "roe_dt": [
+    0.3461,
+    2.0642,
+    4.5609
+   ],
+   "roe": 2.3237333333333337,
+   "cash": 2.65563585981888,
+   "growth": -0.08630886264138138,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 3.1110871015
+  },
+  {
+   "code": "002959.SZ",
+   "name": "小熊电器",
+   "industry": "家用电器",
+   "pe": 21.4446,
+   "total_mv_yi": 75.81,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    258094532.66,
+    361818836.22,
+    382117295.59,
+    246412554.47
+   ],
+   "roe_dt": [
+    16.3166,
+    14.9764,
+    8.8653
+   ],
+   "roe": 13.386099999999999,
+   "cash": 1.3427162092257303,
+   "growth": -0.015321001241358267,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.6639551999999999
+  },
+  {
+   "code": "002695.SZ",
+   "name": "煌上煌",
+   "industry": "食品饮料",
+   "pe": 113.2663,
+   "total_mv_yi": 71.12,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    117450291.65,
+    4245802.58,
+    48448769.41,
+    40703198.84
+   ],
+   "roe_dt": [
+    0.1817,
+    1.8857,
+    1.4674
+   ],
+   "roe": 1.1782666666666668,
+   "cash": 6.664736783524686,
+   "growth": -0.2975887145339996,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.067081648
+  },
+  {
+   "code": "002677.SZ",
+   "name": "浙江美大",
+   "industry": "家用电器",
+   "pe": 221.3754,
+   "total_mv_yi": 48.13,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    635154984.15,
+    421447285.46,
+    435982516.1,
+    110227134.17
+   ],
+   "roe_dt": [
+    21.5202,
+    21.826,
+    5.9899
+   ],
+   "roe": 16.44536666666667,
+   "cash": 1.033630173750364,
+   "growth": -0.44221144115568334,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.0343189495
+  },
+  {
+   "code": "002614.SZ",
+   "name": "奥佳华",
+   "industry": "家用电器",
+   "pe": 63.3425,
+   "total_mv_yi": 43.39,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    142028842.16,
+    140471252.38,
+    30774523.87,
+    24348249.49
+   ],
+   "roe_dt": [
+    2.9616,
+    0.6664,
+    0.5403
+   ],
+   "roe": 1.389433333333333,
+   "cash": 5.914457354689729,
+   "growth": -0.44448336875786343,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.5284143370000001
+  },
+  {
+   "code": "002515.SZ",
+   "name": "金字火腿",
+   "industry": "食品饮料",
+   "pe": 146.8178,
+   "total_mv_yi": 79.78,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    21125332.55,
+    35303874.2,
+    32567255.8,
+    23546601.42
+   ],
+   "roe_dt": [
+    2.4656,
+    1.5853,
+    0.9038
+   ],
+   "roe": 1.6515666666666666,
+   "cash": 3.762752407058636,
+   "growth": 0.0368316027309632,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 6.476642229500001
+  },
+  {
+   "code": "002290.SZ",
+   "name": "禾盛新材",
+   "industry": "家用电器",
+   "pe": 62.8625,
+   "total_mv_yi": 98.18,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    74568732.88,
+    81011071.63,
+    78526784.83,
+    99260758.74
+   ],
+   "roe_dt": [
+    14.1818,
+    11.8934,
+    13.1411
+   ],
+   "roe": 13.0721,
+   "cash": 2.57369090554931,
+   "growth": 0.10003611198942264,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 3.341833167
+  },
+  {
+   "code": "002242.SZ",
+   "name": "九阳股份",
+   "industry": "家用电器",
+   "pe": 49.6386,
+   "total_mv_yi": 73.4,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    596777184.42,
+    547248312.25,
+    352837004.3,
+    118570698.62
+   ],
+   "roe_dt": [
+    14.4455,
+    10.4014,
+    3.4086
+   ],
+   "roe": 9.4185,
+   "cash": 1.5216680759159251,
+   "growth": -0.4164809272192942,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.38856487300000003
+  },
+  {
+   "code": "002216.SZ",
+   "name": "三全食品",
+   "industry": "食品饮料",
+   "pe": 18.0463,
+   "total_mv_yi": 98.12,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    550931739.48,
+    708358765.37,
+    645877762.04,
+    414669504.94
+   ],
+   "roe_dt": [
+    19.9171,
+    15.7153,
+    9.4763
+   ],
+   "roe": 15.036233333333334,
+   "cash": 1.3824588212961786,
+   "growth": -0.09036303241704247,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.5279896395
+  },
+  {
+   "code": "002035.SZ",
+   "name": "华帝股份",
+   "industry": "家用电器",
+   "pe": 12.4044,
+   "total_mv_yi": 54.17,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    185694205.17,
+    89021877.72,
+    411949633.43,
+    459973442.12
+   ],
+   "roe_dt": [
+    2.7208,
+    11.863,
+    12.3923
+   ],
+   "roe": 8.992033333333334,
+   "cash": 2.0072163554253133,
+   "growth": 0.35304259454831866,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.462389121
+  },
+  {
+   "code": "000848.SZ",
+   "name": "承德露露",
+   "industry": "食品饮料",
+   "pe": 15.4022,
+   "total_mv_yi": 97.15,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    567862267.16,
+    602917534.75,
+    634573428.81,
+    657724062.44
+   ],
+   "roe_dt": [
+    23.5732,
+    21.7048,
+    20.1521
+   ],
+   "roe": 21.810033333333333,
+   "cash": 0.98291333697124,
+   "growth": 0.05018764859671365,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 1.6144514215
+  },
+  {
+   "code": "000541.SZ",
+   "name": "佛山照明",
+   "industry": "家用电器",
+   "pe": 28.7728,
+   "total_mv_yi": 96.75,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    150010381.6,
+    221545061.1,
+    274838768.63,
+    97753307.23
+   ],
+   "roe_dt": [
+    4.0378,
+    4.7971,
+    1.5203
+   ],
+   "roe": 3.4517333333333333,
+   "cash": 2.253686437922986,
+   "growth": -0.13303137440376334,
+   "audit": "标准无保留意见",
+   "avg_amount_yi": 0.7044259625
+  }
+ ],
+ "large_market_rows": [
+  {
+   "ts_code": "688169.SH",
+   "name": "石头科技",
+   "industry": "家用电器",
+   "market": "科创板",
+   "list_date": "20200221",
+   "delist_date": null,
+   "close": 163.4,
+   "pe_ttm": 27.4543,
+   "total_mv": 4233798.0531,
+   "industry_sw": "家用电器",
+   "avg_amount": 751508.57325
+  },
+  {
+   "ts_code": "605499.SH",
+   "name": "东鹏饮料",
+   "industry": "软饮料",
+   "market": "主板",
+   "list_date": "20210527",
+   "delist_date": null,
+   "close": 280.0,
+   "pe_ttm": 33.241,
+   "total_mv": 14560364.0,
+   "industry_sw": "食品饮料",
+   "avg_amount": 609723.51175
+  },
+  {
+   "ts_code": "603589.SH",
+   "name": "口子窖",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "20150629",
+   "delist_date": null,
+   "close": 32.42,
+   "pe_ttm": 17.8447,
+   "total_mv": 1939103.3282,
+   "industry_sw": "食品饮料",
+   "avg_amount": 127857.33455
+  },
+  {
+   "ts_code": "603486.SH",
+   "name": "科沃斯",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20180528",
+   "delist_date": null,
+   "close": 89.4,
+   "pe_ttm": 32.1723,
+   "total_mv": 5176556.1196,
+   "industry_sw": "家用电器",
+   "avg_amount": 507623.0499
+  },
+  {
+   "ts_code": "603369.SH",
+   "name": "今世缘",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "20140703",
+   "delist_date": null,
+   "close": 38.82,
+   "pe_ttm": 16.8339,
+   "total_mv": 4840077.7436,
+   "industry_sw": "食品饮料",
+   "avg_amount": 283600.98615
+  },
+  {
+   "ts_code": "603355.SH",
+   "name": "莱克电气",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20150513",
+   "delist_date": null,
+   "close": 25.6,
+   "pe_ttm": 15.0892,
+   "total_mv": 1467892.4032,
+   "industry_sw": "家用电器",
+   "avg_amount": 143485.5551
+  },
+  {
+   "ts_code": "603345.SH",
+   "name": "安井食品",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20170222",
+   "delist_date": null,
+   "close": 73.89,
+   "pe_ttm": 17.7557,
+   "total_mv": 2462671.9185,
+   "industry_sw": "食品饮料",
+   "avg_amount": 351491.39255
+  },
+  {
+   "ts_code": "603288.SH",
+   "name": "海天味业",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20140211",
+   "delist_date": null,
+   "close": 38.11,
+   "pe_ttm": 32.5499,
+   "total_mv": 22301304.8616,
+   "industry_sw": "食品饮料",
+   "avg_amount": 535677.9059
+  },
+  {
+   "ts_code": "603198.SH",
+   "name": "迎驾贡酒",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "20150528",
+   "delist_date": null,
+   "close": 42.38,
+   "pe_ttm": 16.1889,
+   "total_mv": 3390400.0,
+   "industry_sw": "食品饮料",
+   "avg_amount": 255216.2216
+  },
+  {
+   "ts_code": "603156.SH",
+   "name": "养元饮品",
+   "industry": "软饮料",
+   "market": "主板",
+   "list_date": "20180212",
+   "delist_date": null,
+   "close": 28.13,
+   "pe_ttm": 21.9923,
+   "total_mv": 3545160.7932,
+   "industry_sw": "食品饮料",
+   "avg_amount": 667881.0123
+  },
+  {
+   "ts_code": "603027.SH",
+   "name": "千禾味业",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20160307",
+   "delist_date": null,
+   "close": 9.27,
+   "pe_ttm": 29.2656,
+   "total_mv": 1235807.2569,
+   "industry_sw": "食品饮料",
+   "avg_amount": 101536.5167
+  },
+  {
+   "ts_code": "601579.SH",
+   "name": "会稽山",
+   "industry": "红黄酒",
+   "market": "主板",
+   "list_date": "20140825",
+   "delist_date": null,
+   "close": 22.18,
+   "pe_ttm": 53.2192,
+   "total_mv": 1063449.8412,
+   "industry_sw": "食品饮料",
+   "avg_amount": 407267.52075
+  },
+  {
+   "ts_code": "600887.SH",
+   "name": "伊利股份",
+   "industry": "乳制品",
+   "market": "主板",
+   "list_date": "19960312",
+   "delist_date": null,
+   "close": 27.41,
+   "pe_ttm": 21.6439,
+   "total_mv": 17337813.5882,
+   "industry_sw": "食品饮料",
+   "avg_amount": 1247674.3832
+  },
+  {
+   "ts_code": "600882.SH",
+   "name": "妙可蓝多",
+   "industry": "乳制品",
+   "market": "主板",
+   "list_date": "19951206",
+   "delist_date": null,
+   "close": 25.6,
+   "pe_ttm": 63.8452,
+   "total_mv": 1305737.3363,
+   "industry_sw": "食品饮料",
+   "avg_amount": 201426.557
+  },
+  {
+   "ts_code": "600872.SH",
+   "name": "中炬高新",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "19950124",
+   "delist_date": null,
+   "close": 18.23,
+   "pe_ttm": 20.3818,
+   "total_mv": 1420100.9685,
+   "industry_sw": "食品饮料",
+   "avg_amount": 134442.16925
+  },
+  {
+   "ts_code": "600839.SH",
+   "name": "四川长虹",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19940311",
+   "delist_date": null,
+   "close": 10.18,
+   "pe_ttm": 34.3824,
+   "total_mv": 4699336.618,
+   "industry_sw": "家用电器",
+   "avg_amount": 1228550.7404
+  },
+  {
+   "ts_code": "600809.SH",
+   "name": "山西汾酒",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19940106",
+   "delist_date": null,
+   "close": 190.5,
+   "pe_ttm": 18.8985,
+   "total_mv": 23240318.4291,
+   "industry_sw": "食品饮料",
+   "avg_amount": 1083178.17755
+  },
+  {
+   "ts_code": "600779.SH",
+   "name": "水井坊",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19961206",
+   "delist_date": null,
+   "close": 42.29,
+   "pe_ttm": 38.0363,
+   "total_mv": 2061651.0243,
+   "industry_sw": "食品饮料",
+   "avg_amount": 109167.485
+  },
+  {
+   "ts_code": "600702.SH",
+   "name": "舍得酒业",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19960524",
+   "delist_date": null,
+   "close": 62.09,
+   "pe_ttm": 138.7618,
+   "total_mv": 2066099.8797,
+   "industry_sw": "食品饮料",
+   "avg_amount": 589634.1791000001
+  },
+  {
+   "ts_code": "600690.SH",
+   "name": "海尔智家",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19931119",
+   "delist_date": null,
+   "close": 26.81,
+   "pe_ttm": 11.9989,
+   "total_mv": 25149022.1985,
+   "industry_sw": "家用电器",
+   "avg_amount": 1190541.462
+  },
+  {
+   "ts_code": "600619.SH",
+   "name": "海立股份",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19921116",
+   "delist_date": null,
+   "close": 22.56,
+   "pe_ttm": 364.2901,
+   "total_mv": 2421464.9799,
+   "industry_sw": "家用电器",
+   "avg_amount": 1315922.6839
+  },
+  {
+   "ts_code": "600600.SH",
+   "name": "青岛啤酒",
+   "industry": "啤酒",
+   "market": "主板",
+   "list_date": "19930827",
+   "delist_date": null,
+   "close": 65.71,
+   "pe_ttm": 19.3633,
+   "total_mv": 8964137.0939,
+   "industry_sw": "食品饮料",
+   "avg_amount": 333815.97955
+  },
+  {
+   "ts_code": "600559.SH",
+   "name": "老白干酒",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "20021029",
+   "delist_date": null,
+   "close": 16.9,
+   "pe_ttm": 24.4941,
+   "total_mv": 1545923.1804,
+   "industry_sw": "食品饮料",
+   "avg_amount": 184232.57675
+  },
+  {
+   "ts_code": "600519.SH",
+   "name": "贵州茅台",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "20010827",
+   "delist_date": null,
+   "close": 1430.01,
+   "pe_ttm": 19.8913,
+   "total_mv": 179075893.0152,
+   "industry_sw": "食品饮料",
+   "avg_amount": 5688767.7104
+  },
+  {
+   "ts_code": "600298.SH",
+   "name": "安琪酵母",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20000818",
+   "delist_date": null,
+   "close": 38.82,
+   "pe_ttm": 22.649,
+   "total_mv": 3369802.9844,
+   "industry_sw": "食品饮料",
+   "avg_amount": 404295.23025
+  },
+  {
+   "ts_code": "600186.SH",
+   "name": "莲花控股",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "19980825",
+   "delist_date": null,
+   "close": 5.74,
+   "pe_ttm": 35.4608,
+   "total_mv": 1029243.4989,
+   "industry_sw": "食品饮料",
+   "avg_amount": 245842.9733
+  },
+  {
+   "ts_code": "600132.SH",
+   "name": "重庆啤酒",
+   "industry": "啤酒",
+   "market": "主板",
+   "list_date": "19971030",
+   "delist_date": null,
+   "close": 53.7,
+   "pe_ttm": 25.3912,
+   "total_mv": 2598925.3333,
+   "industry_sw": "食品饮料",
+   "avg_amount": 121463.63295
+  },
+  {
+   "ts_code": "600060.SH",
+   "name": "海信视像",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19970422",
+   "delist_date": null,
+   "close": 24.78,
+   "pe_ttm": 12.61,
+   "total_mv": 3233721.2454,
+   "industry_sw": "家用电器",
+   "avg_amount": 423331.32505
+  },
+  {
+   "ts_code": "300972.SZ",
+   "name": "万辰集团",
+   "industry": "食品",
+   "market": "创业板",
+   "list_date": "20210419",
+   "delist_date": null,
+   "close": 176.78,
+   "pe_ttm": 31.3708,
+   "total_mv": 3339222.5581,
+   "industry_sw": "食品饮料",
+   "avg_amount": 494568.75575
+  },
+  {
+   "ts_code": "300146.SZ",
+   "name": "汤臣倍健",
+   "industry": "食品",
+   "market": "创业板",
+   "list_date": "20101215",
+   "delist_date": null,
+   "close": 12.55,
+   "pe_ttm": 30.701,
+   "total_mv": 2123054.6739,
+   "industry_sw": "食品饮料",
+   "avg_amount": 310127.4342
+  },
+  {
+   "ts_code": "002946.SZ",
+   "name": "新乳业",
+   "industry": "乳制品",
+   "market": "主板",
+   "list_date": "20190125",
+   "delist_date": null,
+   "close": 17.42,
+   "pe_ttm": 21.8295,
+   "total_mv": 1499299.1929,
+   "industry_sw": "食品饮料",
+   "avg_amount": 130627.692
+  },
+  {
+   "ts_code": "002847.SZ",
+   "name": "盐津铺子",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20170208",
+   "delist_date": null,
+   "close": 73.36,
+   "pe_ttm": 26.6274,
+   "total_mv": 2001111.7251,
+   "industry_sw": "食品饮料",
+   "avg_amount": 265843.20435
+  },
+  {
+   "ts_code": "002705.SZ",
+   "name": "新宝股份",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20140121",
+   "delist_date": null,
+   "close": 15.13,
+   "pe_ttm": 11.0781,
+   "total_mv": 1228368.0551,
+   "industry_sw": "家用电器",
+   "avg_amount": 105428.07745
+  },
+  {
+   "ts_code": "002668.SZ",
+   "name": "TCL智家",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20120416",
+   "delist_date": null,
+   "close": 10.89,
+   "pe_ttm": 10.0774,
+   "total_mv": 1180597.3451,
+   "industry_sw": "家用电器",
+   "avg_amount": 173321.8284
+  },
+  {
+   "ts_code": "002626.SZ",
+   "name": "金达威",
+   "industry": "医疗保健",
+   "market": "主板",
+   "list_date": "20111028",
+   "delist_date": null,
+   "close": 20.19,
+   "pe_ttm": 25.5444,
+   "total_mv": 1231458.3026,
+   "industry_sw": "食品饮料",
+   "avg_amount": 231199.14175
+  },
+  {
+   "ts_code": "002568.SZ",
+   "name": "百润股份",
+   "industry": "红黄酒",
+   "market": "主板",
+   "list_date": "20110325",
+   "delist_date": null,
+   "close": 25.18,
+   "pe_ttm": 38.0354,
+   "total_mv": 2640245.2615,
+   "industry_sw": "食品饮料",
+   "avg_amount": 279850.2718
+  },
+  {
+   "ts_code": "002557.SZ",
+   "name": "洽洽食品",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20110302",
+   "delist_date": null,
+   "close": 22.07,
+   "pe_ttm": 28.5334,
+   "total_mv": 1116422.3227,
+   "industry_sw": "食品饮料",
+   "avg_amount": 118685.0967
+  },
+  {
+   "ts_code": "002508.SZ",
+   "name": "老板电器",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20101123",
+   "delist_date": null,
+   "close": 19.55,
+   "pe_ttm": 12.0542,
+   "total_mv": 1847355.5808,
+   "industry_sw": "家用电器",
+   "avg_amount": 135027.9419
+  },
+  {
+   "ts_code": "002507.SZ",
+   "name": "涪陵榨菜",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "20101123",
+   "delist_date": null,
+   "close": 13.12,
+   "pe_ttm": 18.8878,
+   "total_mv": 1513941.7647,
+   "industry_sw": "食品饮料",
+   "avg_amount": 122369.36645
+  },
+  {
+   "ts_code": "002429.SZ",
+   "name": "兆驰股份",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20100610",
+   "delist_date": null,
+   "close": 6.15,
+   "pe_ttm": 22.6326,
+   "total_mv": 2784068.4733,
+   "industry_sw": "家用电器",
+   "avg_amount": 498474.6083000001
+  },
+  {
+   "ts_code": "002304.SZ",
+   "name": "洋河股份",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "20091106",
+   "delist_date": null,
+   "close": 70.8,
+   "pe_ttm": 51.5328,
+   "total_mv": 10665631.1239,
+   "industry_sw": "食品饮料",
+   "avg_amount": 321089.42
+  },
+  {
+   "ts_code": "002052.SZ",
+   "name": "同洲电子",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20060627",
+   "delist_date": null,
+   "close": 14.26,
+   "pe_ttm": 33.9771,
+   "total_mv": 1072979.0036,
+   "industry_sw": "家用电器",
+   "avg_amount": 678126.2084
+  },
+  {
+   "ts_code": "002050.SZ",
+   "name": "三花智控",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20050607",
+   "delist_date": null,
+   "close": 49.93,
+   "pe_ttm": 52.0235,
+   "total_mv": 21015167.1935,
+   "industry_sw": "家用电器",
+   "avg_amount": 11710301.50035
+  },
+  {
+   "ts_code": "002011.SZ",
+   "name": "盾安环境",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20040705",
+   "delist_date": null,
+   "close": 13.79,
+   "pe_ttm": 12.6152,
+   "total_mv": 1469236.495,
+   "industry_sw": "家用电器",
+   "avg_amount": 358246.624
+  },
+  {
+   "ts_code": "000921.SZ",
+   "name": "海信家电",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19990713",
+   "delist_date": null,
+   "close": 25.59,
+   "pe_ttm": 10.5263,
+   "total_mv": 3543859.7366,
+   "industry_sw": "家用电器",
+   "avg_amount": 320548.5575
+  },
+  {
+   "ts_code": "000895.SZ",
+   "name": "双汇发展",
+   "industry": "食品",
+   "market": "主板",
+   "list_date": "19981210",
+   "delist_date": null,
+   "close": 25.74,
+   "pe_ttm": 17.3392,
+   "total_mv": 8918037.9623,
+   "industry_sw": "食品饮料",
+   "avg_amount": 220365.05155
+  },
+  {
+   "ts_code": "000860.SZ",
+   "name": "顺鑫农业",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19981104",
+   "delist_date": null,
+   "close": 15.67,
+   "pe_ttm": null,
+   "total_mv": 1162348.8718,
+   "industry_sw": "食品饮料",
+   "avg_amount": 109307.49715
+  },
+  {
+   "ts_code": "000858.SZ",
+   "name": "五粮液",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19980427",
+   "delist_date": null,
+   "close": 118.99,
+   "pe_ttm": 16.2439,
+   "total_mv": 46187253.6515,
+   "industry_sw": "食品饮料",
+   "avg_amount": 2411291.06365
+  },
+  {
+   "ts_code": "000810.SZ",
+   "name": "创维数字",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19980602",
+   "delist_date": null,
+   "close": 13.6,
+   "pe_ttm": 154.9776,
+   "total_mv": 1552569.9874,
+   "industry_sw": "家用电器",
+   "avg_amount": 331716.4902
+  },
+  {
+   "ts_code": "000801.SZ",
+   "name": "四川九洲",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19980506",
+   "delist_date": null,
+   "close": 15.32,
+   "pe_ttm": 90.306,
+   "total_mv": 1557009.5308,
+   "industry_sw": "家用电器",
+   "avg_amount": 317696.24835
+  },
+  {
+   "ts_code": "000799.SZ",
+   "name": "酒鬼酒",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19970718",
+   "delist_date": null,
+   "close": 63.6,
+   "pe_ttm": null,
+   "total_mv": 2066548.3128,
+   "industry_sw": "食品饮料",
+   "avg_amount": 828429.57005
+  },
+  {
+   "ts_code": "000729.SZ",
+   "name": "燕京啤酒",
+   "industry": "啤酒",
+   "market": "主板",
+   "list_date": "19970716",
+   "delist_date": null,
+   "close": 11.75,
+   "pe_ttm": 21.5324,
+   "total_mv": 3311783.7257,
+   "industry_sw": "食品饮料",
+   "avg_amount": 311714.9875
+  },
+  {
+   "ts_code": "000651.SZ",
+   "name": "格力电器",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19961118",
+   "delist_date": null,
+   "close": 39.75,
+   "pe_ttm": 7.0272,
+   "total_mv": 22265587.8205,
+   "industry_sw": "家用电器",
+   "avg_amount": 1855472.6842999998
+  },
+  {
+   "ts_code": "000596.SZ",
+   "name": "古井贡酒",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19960927",
+   "delist_date": null,
+   "close": 161.0,
+   "pe_ttm": 17.9889,
+   "total_mv": 8510460.0,
+   "industry_sw": "食品饮料",
+   "avg_amount": 458064.9163
+  },
+  {
+   "ts_code": "000568.SZ",
+   "name": "泸州老窖",
+   "industry": "白酒",
+   "market": "主板",
+   "list_date": "19940509",
+   "delist_date": null,
+   "close": 134.54,
+   "pe_ttm": 15.6645,
+   "total_mv": 19803635.5214,
+   "industry_sw": "食品饮料",
+   "avg_amount": 1387297.7976
+  },
+  {
+   "ts_code": "000333.SZ",
+   "name": "美的集团",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "20130918",
+   "delist_date": null,
+   "close": 76.4,
+   "pe_ttm": 13.1264,
+   "total_mv": 58703043.2848,
+   "industry_sw": "家用电器",
+   "avg_amount": 2915915.274
+  },
+  {
+   "ts_code": "000016.SZ",
+   "name": "深康佳A",
+   "industry": "家用电器",
+   "market": "主板",
+   "list_date": "19920327",
+   "delist_date": "20261023",
+   "close": 5.41,
+   "pe_ttm": null,
+   "total_mv": 1302698.4657,
+   "industry_sw": "家用电器",
+   "avg_amount": 352697.6425
+  }
+ ],
+ "large_companies": [
+  {
+   "code": "688169.SH",
+   "name": "石头科技",
+   "industry": "家用电器",
+   "pe": 27.4543,
+   "total_mv_yi": 423.38,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1190170336.0,
+    1197719439.0,
+    1826089668.0,
+    1620399657.0
+   ],
+   "roe_dt": [
+    13.2726,
+    17.4437,
+    13.3643
+   ],
+   "roe": 14.693533333333335,
+   "cash": 0.9671959027278092,
+   "growth": 0.10833489533644469,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "605499.SH",
+   "name": "东鹏饮料",
+   "industry": "食品饮料",
+   "pe": 33.241,
+   "total_mv_yi": 1456.04,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1084287083.0,
+    1351998554.6,
+    1869685287.53,
+    3262248937.81
+   ],
+   "roe_dt": [
+    29.0677,
+    32.8359,
+    46.5651
+   ],
+   "roe": 36.15623333333333,
+   "cash": 1.6302682381426739,
+   "growth": 0.44363567166678575,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603589.SH",
+   "name": "口子窖",
+   "industry": "食品饮料",
+   "pe": 17.8447,
+   "total_mv_yi": 193.91,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1483878748.21,
+    1532786602.55,
+    1697644288.48,
+    1610182325.61
+   ],
+   "roe_dt": [
+    17.8712,
+    18.2018,
+    15.8923
+   ],
+   "roe": 17.321766666666665,
+   "cash": 0.6493333417710723,
+   "growth": 0.027603433626720797,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603486.SH",
+   "name": "科沃斯",
+   "industry": "家用电器",
+   "pe": 32.1723,
+   "total_mv_yi": 517.66,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1866788794.84,
+    1626193528.44,
+    483642237.93,
+    716213238.52
+   ],
+   "roe_dt": [
+    28.2233,
+    7.454,
+    10.4222
+   ],
+   "roe": 15.3665,
+   "cash": 1.1775361057552587,
+   "growth": -0.2733659924722429,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603369.SH",
+   "name": "今世缘",
+   "industry": "食品饮料",
+   "pe": 16.8339,
+   "total_mv_yi": 484.01,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    2033044395.97,
+    2497105424.97,
+    3135563707.33,
+    3380091543.47
+   ],
+   "roe_dt": [
+    24.5273,
+    25.7525,
+    23.5215
+   ],
+   "roe": 24.60043333333333,
+   "cash": 0.9332679227510599,
+   "growth": 0.18466038705383858,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603355.SH",
+   "name": "莱克电气",
+   "industry": "家用电器",
+   "pe": 15.0892,
+   "total_mv_yi": 146.79,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    438896341.48,
+    945624187.17,
+    982728025.05,
+    1159651326.39
+   ],
+   "roe_dt": [
+    26.8421,
+    24.0344,
+    24.8614
+   ],
+   "roe": 25.245966666666664,
+   "cash": 0.9741993226839456,
+   "growth": 0.38246821852143986,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603345.SH",
+   "name": "安井食品",
+   "industry": "食品饮料",
+   "pe": 17.7557,
+   "total_mv_yi": 246.27,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    559753033.31,
+    997584674.48,
+    1364666141.34,
+    1359549222.09
+   ],
+   "roe_dt": [
+    11.9095,
+    11.2284,
+    10.6296
+   ],
+   "roe": 11.255833333333333,
+   "cash": 1.3229307354941964,
+   "growth": 0.3442070226889933,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603288.SH",
+   "name": "海天味业",
+   "industry": "食品饮料",
+   "pe": 32.5499,
+   "total_mv_yi": 2230.13,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    6429852856.56,
+    5965755875.29,
+    5394663934.17,
+    6069416506.67
+   ],
+   "roe_dt": [
+    23.9592,
+    19.6426,
+    20.4268
+   ],
+   "roe": 21.342866666666666,
+   "cash": 0.9905754592177551,
+   "growth": -0.01904601527447014,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603198.SH",
+   "name": "迎驾贡酒",
+   "industry": "食品饮料",
+   "pe": 16.1889,
+   "total_mv_yi": 339.04,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1291750899.25,
+    1641888632.67,
+    2232516006.05,
+    2565832712.6
+   ],
+   "roe_dt": [
+    25.4698,
+    29.2497,
+    28.2262
+   ],
+   "roe": 27.648566666666667,
+   "cash": 0.9013188388619917,
+   "growth": 0.25704219277951745,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603156.SH",
+   "name": "养元饮品",
+   "industry": "食品饮料",
+   "pe": 21.9923,
+   "total_mv_yi": 354.52,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1764841531.24,
+    1195962844.03,
+    1362803233.56,
+    1460830990.54
+   ],
+   "roe_dt": [
+    9.9761,
+    12.0777,
+    13.8695
+   ],
+   "roe": 11.974433333333332,
+   "cash": 1.067442796234156,
+   "growth": -0.06107388313029227,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "603027.SH",
+   "name": "千禾味业",
+   "industry": "食品饮料",
+   "pe": 29.2656,
+   "total_mv_yi": 123.58,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    217882310.38,
+    338355504.21,
+    530084097.36,
+    502939786.23
+   ],
+   "roe_dt": [
+    15.2848,
+    17.6536,
+    13.778
+   ],
+   "roe": 15.572133333333333,
+   "cash": 1.1391033686821184,
+   "growth": 0.3215938439690811,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "601579.SH",
+   "name": "会稽山",
+   "industry": "食品饮料",
+   "pe": 53.2192,
+   "total_mv_yi": 106.34,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    137955264.69,
+    127564566.74,
+    154636314.37,
+    177570954.95
+   ],
+   "roe_dt": [
+    3.4882,
+    4.2201,
+    4.8299
+   ],
+   "roe": 4.1794,
+   "cash": 1.9363435685748978,
+   "growth": 0.08778871867513516,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600887.SH",
+   "name": "伊利股份",
+   "industry": "食品饮料",
+   "pe": 21.6439,
+   "total_mv_yi": 1733.78,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    7943784753.5,
+    8585692731.44,
+    10026171076.03,
+    6011274945.92
+   ],
+   "roe_dt": [
+    17.5261,
+    19.3169,
+    11.2656
+   ],
+   "roe": 16.036199999999997,
+   "cash": 1.9044393585678316,
+   "growth": -0.08873146512126451,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600882.SH",
+   "name": "妙可蓝多",
+   "industry": "食品饮料",
+   "pe": 63.8452,
+   "total_mv_yi": 130.57,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    121995310.42,
+    66923967.41,
+    7171235.98,
+    46919280.55
+   ],
+   "roe_dt": [
+    1.4942,
+    0.1639,
+    1.0771
+   ],
+   "roe": 0.9117333333333333,
+   "cash": 1.6603564939850626,
+   "growth": -0.2727739915508238,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600872.SH",
+   "name": "中炬高新",
+   "industry": "食品饮料",
+   "pe": 20.3818,
+   "total_mv_yi": 142.01,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    717685790.4,
+    556230214.23,
+    524015533.5,
+    670585671.66
+   ],
+   "roe_dt": [
+    16.2605,
+    13.5863,
+    12.9974
+   ],
+   "roe": 14.2814,
+   "cash": 1.217529494897575,
+   "growth": -0.02237272991995365,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600839.SH",
+   "name": "四川长虹",
+   "industry": "家用电器",
+   "pe": 34.3824,
+   "total_mv_yi": 469.93,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    251861482.89,
+    326841103.13,
+    392968324.52,
+    418621884.62
+   ],
+   "roe_dt": [
+    2.4233,
+    2.8283,
+    2.9083
+   ],
+   "roe": 2.7199666666666666,
+   "cash": 1.8648279563628718,
+   "growth": 0.18454998300076553,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600809.SH",
+   "name": "山西汾酒",
+   "industry": "食品饮料",
+   "pe": 18.8985,
+   "total_mv_yi": 2324.03,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    5259285900.91,
+    8087297065.06,
+    10444776853.2,
+    12245617493.36
+   ],
+   "roe_dt": [
+    44.2611,
+    42.4949,
+    39.1292
+   ],
+   "roe": 41.961733333333335,
+   "cash": 0.9623892288506743,
+   "growth": 0.3254132355417563,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600779.SH",
+   "name": "水井坊",
+   "industry": "食品饮料",
+   "pe": 38.0363,
+   "total_mv_yi": 206.17,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1215925646.27,
+    1163413049.65,
+    1224702362.65,
+    1311262795.25
+   ],
+   "roe_dt": [
+    38.2064,
+    31.1915,
+    27.369
+   ],
+   "roe": 32.255633333333336,
+   "cash": 0.9908815242078386,
+   "growth": 0.025480894302909007,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600702.SH",
+   "name": "舍得酒业",
+   "industry": "食品饮料",
+   "pe": 138.7618,
+   "total_mv_yi": 206.61,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1210592342.33,
+    1625272272.76,
+    1716422242.79,
+    400507500.01
+   ],
+   "roe_dt": [
+    29.2221,
+    25.3114,
+    5.7047
+   ],
+   "roe": 20.0794,
+   "cash": 0.27511602204449803,
+   "growth": -0.30837463843677937,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600690.SH",
+   "name": "海尔智家",
+   "industry": "家用电器",
+   "pe": 11.9989,
+   "total_mv_yi": 2514.9,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    11831272558.29,
+    13962931853.78,
+    15824164161.43,
+    17804732809.63
+   ],
+   "roe_dt": [
+    16.1204,
+    16.0703,
+    16.5718
+   ],
+   "roe": 16.254166666666666,
+   "cash": 1.4098580684247413,
+   "growth": 0.1459561520582333,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600600.SH",
+   "name": "青岛啤酒",
+   "industry": "食品饮料",
+   "pe": 19.3633,
+   "total_mv_yi": 896.41,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    2206584195.0,
+    3209052175.0,
+    3720724776.0,
+    3951102172.0
+   ],
+   "roe_dt": [
+    13.2341,
+    14.0552,
+    13.9838
+   ],
+   "roe": 13.7577,
+   "cash": 1.013151956495488,
+   "growth": 0.2143184279231236,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600559.SH",
+   "name": "老白干酒",
+   "industry": "食品饮料",
+   "pe": 24.4941,
+   "total_mv_yi": 154.59,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    347397738.72,
+    477816701.67,
+    614462498.81,
+    738105885.54
+   ],
+   "roe_dt": [
+    11.8403,
+    13.4209,
+    14.5929
+   ],
+   "roe": 13.2847,
+   "cash": 0.9032708878665459,
+   "growth": 0.2855744338246684,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600519.SH",
+   "name": "贵州茅台",
+   "industry": "食品饮料",
+   "pe": 19.8913,
+   "total_mv_yi": 17907.59,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    52581102656.24,
+    62791872697.72,
+    74752564425.52,
+    86240905977.42
+   ],
+   "roe_dt": [
+    32.4467,
+    36.1844,
+    38.434
+   ],
+   "roe": 35.68836666666667,
+   "cash": 0.8429333216491453,
+   "growth": 0.17930970802426116,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600298.SH",
+   "name": "安琪酵母",
+   "industry": "食品饮料",
+   "pe": 22.649,
+   "total_mv_yi": 336.98,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1060024562.13,
+    1114147838.1,
+    1104445226.27,
+    1169737631.25
+   ],
+   "roe_dt": [
+    13.8305,
+    11.4265,
+    11.1923
+   ],
+   "roe": 12.149766666666666,
+   "cash": 1.006493565713923,
+   "growth": 0.03337395402501797,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600186.SH",
+   "name": "莲花控股",
+   "industry": "食品饮料",
+   "pe": 35.4608,
+   "total_mv_yi": 102.92,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    45251178.18,
+    62363036.92,
+    117939356.85,
+    203279286.76
+   ],
+   "roe_dt": [
+    4.4256,
+    7.9933,
+    12.5652
+   ],
+   "roe": 8.328033333333334,
+   "cash": 2.071167842010764,
+   "growth": 0.6500144428851373,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600132.SH",
+   "name": "重庆啤酒",
+   "industry": "食品饮料",
+   "pe": 25.3912,
+   "total_mv_yi": 259.89,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1142853438.97,
+    1234338183.95,
+    1313987214.02,
+    1221624723.92
+   ],
+   "roe_dt": [
+    64.7827,
+    62.6251,
+    73.4719
+   ],
+   "roe": 66.9599,
+   "cash": 1.2442808789161308,
+   "growth": 0.022466508615640146,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "600060.SH",
+   "name": "海信视像",
+   "industry": "家用电器",
+   "pe": 12.61,
+   "total_mv_yi": 323.37,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    795946105.09,
+    1429896835.2,
+    1732840329.67,
+    1817367025.6
+   ],
+   "roe_dt": [
+    8.5017,
+    9.509,
+    9.4475
+   ],
+   "roe": 9.152733333333332,
+   "cash": 1.5849693469219877,
+   "growth": 0.31679952339488704,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "300146.SZ",
+   "name": "汤臣倍健",
+   "industry": "食品饮料",
+   "pe": 30.701,
+   "total_mv_yi": 212.31,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1540263358.68,
+    1375593143.88,
+    1596944142.86,
+    626311803.35
+   ],
+   "roe_dt": [
+    12.9851,
+    13.9713,
+    5.3951
+   ],
+   "roe": 10.783833333333334,
+   "cash": 1.0725393132542107,
+   "growth": -0.2591472952556019,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002946.SZ",
+   "name": "新乳业",
+   "industry": "食品饮料",
+   "pe": 21.8295,
+   "total_mv_yi": 149.93,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    256592292.62,
+    294730991.24,
+    464820300.12,
+    578575054.63
+   ],
+   "roe_dt": [
+    11.4305,
+    18.3139,
+    20.6177
+   ],
+   "roe": 16.787366666666667,
+   "cash": 3.025408683682482,
+   "growth": 0.31130997835177965,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002847.SZ",
+   "name": "盐津铺子",
+   "industry": "食品饮料",
+   "pe": 26.6274,
+   "total_mv_yi": 200.11,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    91402465.54,
+    275551050.86,
+    476234230.93,
+    568012231.91
+   ],
+   "roe_dt": [
+    27.4461,
+    36.8903,
+    35.7033
+   ],
+   "roe": 33.34656666666667,
+   "cash": 1.5275734012666085,
+   "growth": 0.8385125232273005,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002705.SZ",
+   "name": "新宝股份",
+   "industry": "家用电器",
+   "pe": 11.0781,
+   "total_mv_yi": 122.84,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    682197145.58,
+    1001624661.04,
+    996480555.88,
+    1084342410.19
+   ],
+   "roe_dt": [
+    15.3393,
+    13.6829,
+    13.6868
+   ],
+   "roe": 14.236333333333334,
+   "cash": 1.4676931367989556,
+   "growth": 0.1670393919448372,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002626.SZ",
+   "name": "金达威",
+   "industry": "食品饮料",
+   "pe": 25.5444,
+   "total_mv_yi": 123.15,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    774088967.81,
+    246492881.32,
+    280426471.78,
+    338752494.04
+   ],
+   "roe_dt": [
+    6.4714,
+    7.4063,
+    8.2563
+   ],
+   "roe": 7.378,
+   "cash": 2.1118809972028023,
+   "growth": -0.24078658298756705,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002568.SZ",
+   "name": "百润股份",
+   "industry": "食品饮料",
+   "pe": 38.0354,
+   "total_mv_yi": 264.02,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    629555819.79,
+    486451174.54,
+    778704812.89,
+    672446445.23
+   ],
+   "roe_dt": [
+    12.8779,
+    19.9462,
+    15.4042
+   ],
+   "roe": 16.0761,
+   "cash": 1.0463095190288738,
+   "growth": 0.022212419169319597,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002557.SZ",
+   "name": "洽洽食品",
+   "industry": "食品饮料",
+   "pe": 28.5334,
+   "total_mv_yi": 111.64,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    798853816.07,
+    847312002.41,
+    709779276.24,
+    772667812.08
+   ],
+   "roe_dt": [
+    16.8399,
+    13.1465,
+    13.7298
+   ],
+   "roe": 14.572066666666666,
+   "cash": 1.1362912281604256,
+   "growth": -0.011048100721686493,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002508.SZ",
+   "name": "老板电器",
+   "industry": "家用电器",
+   "pe": 12.0542,
+   "total_mv_yi": 184.74,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1276853316.64,
+    1479102088.0,
+    1583568042.64,
+    1455592192.81
+   ],
+   "roe_dt": [
+    16.1127,
+    15.636,
+    13.4147
+   ],
+   "roe": 15.054466666666665,
+   "cash": 1.242001577402602,
+   "growth": 0.044639001657794,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002507.SZ",
+   "name": "涪陵榨菜",
+   "industry": "食品饮料",
+   "pe": 18.8878,
+   "total_mv_yi": 151.39,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    694323995.59,
+    817647030.32,
+    755749061.39,
+    732116635.19
+   ],
+   "roe_dt": [
+    10.9588,
+    9.4471,
+    8.6426
+   ],
+   "roe": 9.682833333333333,
+   "cash": 0.9234842371302302,
+   "growth": 0.017824030352232123,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002429.SZ",
+   "name": "兆驰股份",
+   "industry": "家用电器",
+   "pe": 22.6326,
+   "total_mv_yi": 278.41,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    82903320.76,
+    954882205.05,
+    1528658441.01,
+    1585310010.57
+   ],
+   "roe_dt": [
+    7.317,
+    10.7597,
+    10.3322
+   ],
+   "roe": 9.469633333333334,
+   "cash": 1.768412707029301,
+   "growth": 1.6741191762881926,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002304.SZ",
+   "name": "洋河股份",
+   "industry": "食品饮料",
+   "pe": 51.5328,
+   "total_mv_yi": 1066.56,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    7372758257.29,
+    9276644831.29,
+    9842844980.49,
+    6835235643.35
+   ],
+   "roe_dt": [
+    20.6237,
+    19.8018,
+    13.2048
+   ],
+   "roe": 17.876766666666665,
+   "cash": 0.552470168671408,
+   "growth": -0.02491794099796163,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002050.SZ",
+   "name": "三花智控",
+   "industry": "家用电器",
+   "pe": 52.0235,
+   "total_mv_yi": 2101.52,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    1487491274.21,
+    2291450453.44,
+    2917029188.01,
+    3117935212.81
+   ],
+   "roe_dt": [
+    19.0228,
+    18.9198,
+    16.7666
+   ],
+   "roe": 18.2364,
+   "cash": 1.2249692483683274,
+   "growth": 0.27978658455077143,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "002011.SZ",
+   "name": "盾安环境",
+   "industry": "家用电器",
+   "pe": 12.6152,
+   "total_mv_yi": 146.92,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    379426872.53,
+    460929621.59,
+    820828604.82,
+    928823989.76
+   ],
+   "roe_dt": [
+    17.1299,
+    20.3592,
+    18.7135
+   ],
+   "roe": 18.7342,
+   "cash": 1.2430732409110299,
+   "growth": 0.34772653531850195,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000921.SZ",
+   "name": "海信家电",
+   "industry": "家用电器",
+   "pe": 10.5263,
+   "total_mv_yi": 354.39,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    666126470.35,
+    905503359.78,
+    2355069261.87,
+    2605848900.08
+   ],
+   "roe_dt": [
+    8.2843,
+    18.7667,
+    17.9492
+   ],
+   "roe": 15.000066666666667,
+   "cash": 1.5227991138234593,
+   "growth": 0.5756660558814517,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000895.SZ",
+   "name": "双汇发展",
+   "industry": "食品饮料",
+   "pe": 17.3392,
+   "total_mv_yi": 891.8,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    4434109385.35,
+    5216721795.58,
+    4732071610.46,
+    4812760810.76
+   ],
+   "roe_dt": [
+    23.3611,
+    22.1666,
+    22.9391
+   ],
+   "roe": 22.822266666666668,
+   "cash": 1.2201937201963267,
+   "growth": 0.027691170407817545,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000858.SZ",
+   "name": "五粮液",
+   "industry": "食品饮料",
+   "pe": 16.2439,
+   "total_mv_yi": 4618.73,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    23327729257.82,
+    26662736708.98,
+    30116468910.79,
+    31741959276.27
+   ],
+   "roe_dt": [
+    25.0244,
+    24.7279,
+    24.1527
+   ],
+   "roe": 24.635,
+   "cash": 1.0801479396141462,
+   "growth": 0.10812075172109581,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000810.SZ",
+   "name": "创维数字",
+   "industry": "家用电器",
+   "pe": 154.9776,
+   "total_mv_yi": 155.26,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    249440236.91,
+    739128449.52,
+    558485720.7,
+    201886115.52
+   ],
+   "roe_dt": [
+    14.0437,
+    9.0315,
+    3.152
+   ],
+   "roe": 8.7424,
+   "cash": 1.4819952786721056,
+   "growth": -0.06807710686358992,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000801.SZ",
+   "name": "四川九洲",
+   "industry": "家用电器",
+   "pe": 90.306,
+   "total_mv_yi": 155.7,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    104703502.8,
+    135982760.1,
+    116057260.34,
+    125115717.82
+   ],
+   "roe_dt": [
+    4.8844,
+    3.9884,
+    4.1613
+   ],
+   "roe": 4.3447000000000005,
+   "cash": 0.4697079729189344,
+   "growth": 0.0611665546436122,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000729.SZ",
+   "name": "燕京啤酒",
+   "industry": "食品饮料",
+   "pe": 21.5324,
+   "total_mv_yi": 331.18,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    171517238.08,
+    271550965.78,
+    500225523.73,
+    1040637380.31
+   ],
+   "roe_dt": [
+    2.0239,
+    3.6686,
+    7.3119
+   ],
+   "roe": 4.3348,
+   "cash": 2.080181691144154,
+   "growth": 0.8238840094453352,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000651.SZ",
+   "name": "格力电器",
+   "industry": "家用电器",
+   "pe": 7.0272,
+   "total_mv_yi": 2226.56,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    21850050895.31,
+    23986248264.15,
+    27565461117.79,
+    30099760382.99
+   ],
+   "roe_dt": [
+    23.9371,
+    25.8161,
+    23.681
+   ],
+   "roe": 24.478066666666667,
+   "cash": 1.377065398522559,
+   "growth": 0.11267977783928362,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000596.SZ",
+   "name": "古井贡酒",
+   "industry": "食品饮料",
+   "pe": 17.9889,
+   "total_mv_yi": 851.05,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    2186239468.68,
+    3066543993.35,
+    4495219187.57,
+    5457155276.12
+   ],
+   "roe_dt": [
+    17.494,
+    22.4502,
+    23.6331
+   ],
+   "roe": 21.19243333333333,
+   "cash": 0.9011348047320499,
+   "growth": 0.3565095645633489,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000568.SZ",
+   "name": "泸州老窖",
+   "industry": "食品饮料",
+   "pe": 15.6645,
+   "total_mv_yi": 1980.36,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    7884384055.6,
+    10321481236.93,
+    13150392806.65,
+    13399514669.49
+   ],
+   "roe_dt": [
+    33.1624,
+    34.7897,
+    30.1859
+   ],
+   "roe": 32.71266666666667,
+   "cash": 1.0240813292276953,
+   "growth": 0.1933662900655,
+   "audit": "标准无保留意见"
+  },
+  {
+   "code": "000333.SZ",
+   "name": "美的集团",
+   "industry": "家用电器",
+   "pe": 13.1264,
+   "total_mv_yi": 5870.3,
+   "status": "ok",
+   "years": [
+    "2021",
+    "2022",
+    "2023",
+    "2024"
+   ],
+   "profit_dedt": [
+    25929086000.0,
+    28607973000.0,
+    32974908000.0,
+    35741418000.0
+   ],
+   "roe_dt": [
+    21.3649,
+    21.5653,
+    18.8297
+   ],
+   "roe": 20.586633333333335,
+   "cash": 1.4961179391860433,
+   "growth": 0.1129137893628851,
+   "audit": "标准无保留意见"
+  }
+ ],
+ "frozen_large_ranked": [
+  {
+   "code": "000921.SZ",
+   "score": 0.8133333333333334
+  },
+  {
+   "code": "000568.SZ",
+   "score": 0.7818181818181819
+  },
+  {
+   "code": "000651.SZ",
+   "score": 0.7466666666666667
+  },
+  {
+   "code": "000858.SZ",
+   "score": 0.7454545454545455
+  },
+  {
+   "code": "000895.SZ",
+   "score": 0.7151515151515152
+  },
+  {
+   "code": "603198.SH",
+   "score": 0.7151515151515152
+  },
+  {
+   "code": "600809.SH",
+   "score": 0.7030303030303031
+  },
+  {
+   "code": "603345.SH",
+   "score": 0.696969696969697
+  },
+  {
+   "code": "603369.SH",
+   "score": 0.6787878787878788
+  },
+  {
+   "code": "002847.SZ",
+   "score": 0.6727272727272728
+  },
+  {
+   "code": "002946.SZ",
+   "score": 0.6727272727272727
+  },
+  {
+   "code": "600690.SH",
+   "score": 0.6533333333333334
+  },
+  {
+   "code": "000596.SZ",
+   "score": 0.6424242424242425
+  },
+  {
+   "code": "002011.SZ",
+   "score": 0.6400000000000001
+  },
+  {
+   "code": "002705.SZ",
+   "score": 0.64
+  },
+  {
+   "code": "000729.SZ",
+   "score": 0.6363636363636365
+  },
+  {
+   "code": "600060.SH",
+   "score": 0.6266666666666667
+  },
+  {
+   "code": "000333.SZ",
+   "score": 0.6133333333333334
+  },
+  {
+   "code": "605499.SH",
+   "score": 0.6121212121212122
+  },
+  {
+   "code": "002429.SZ",
+   "score": 0.6000000000000001
+  },
+  {
+   "code": "603355.SH",
+   "score": 0.5866666666666667
+  },
+  {
+   "code": "600132.SH",
+   "score": 0.5818181818181819
+  },
+  {
+   "code": "600519.SH",
+   "score": 0.5818181818181818
+  },
+  {
+   "code": "600600.SH",
+   "score": 0.5575757575757576
+  },
+  {
+   "code": "603589.SH",
+   "score": 0.5333333333333334
+  },
+  {
+   "code": "600887.SH",
+   "score": 0.5151515151515152
+  },
+  {
+   "code": "600872.SH",
+   "score": 0.496969696969697
+  },
+  {
+   "code": "002508.SZ",
+   "score": 0.49333333333333335
+  },
+  {
+   "code": "603027.SH",
+   "score": 0.48484848484848486
+  },
+  {
+   "code": "600186.SH",
+   "score": 0.4666666666666667
+  },
+  {
+   "code": "002507.SZ",
+   "score": 0.4363636363636364
+  },
+  {
+   "code": "600559.SH",
+   "score": 0.42424242424242425
+  },
+  {
+   "code": "600298.SH",
+   "score": 0.4181818181818182
+  },
+  {
+   "code": "600839.SH",
+   "score": 0.4
+  },
+  {
+   "code": "002626.SZ",
+   "score": 0.38787878787878793
+  },
+  {
+   "code": "002050.SZ",
+   "score": 0.38666666666666666
+  },
+  {
+   "code": "002557.SZ",
+   "score": 0.38181818181818183
+  },
+  {
+   "code": "603156.SH",
+   "score": 0.38181818181818183
+  },
+  {
+   "code": "600779.SH",
+   "score": 0.3575757575757576
+  },
+  {
+   "code": "603288.SH",
+   "score": 0.3393939393939394
+  },
+  {
+   "code": "002568.SZ",
+   "score": 0.3151515151515152
+  },
+  {
+   "code": "601579.SH",
+   "score": 0.30909090909090914
+  },
+  {
+   "code": "688169.SH",
+   "score": 0.28
+  },
+  {
+   "code": "603486.SH",
+   "score": 0.26666666666666666
+  },
+  {
+   "code": "300146.SZ",
+   "score": 0.2606060606060606
+  },
+  {
+   "code": "002304.SZ",
+   "score": 0.19393939393939397
+  },
+  {
+   "code": "600882.SH",
+   "score": 0.18181818181818185
+  },
+  {
+   "code": "000810.SZ",
+   "score": 0.17333333333333334
+  },
+  {
+   "code": "600702.SH",
+   "score": 0.12121212121212122
+  },
+  {
+   "code": "000801.SZ",
+   "score": 0.08000000000000002
+  }
+ ],
+ "frozen_small_ranked": [
+  {
+   "code": "000848.SZ",
+   "score": 0.8200000000000001
+  },
+  {
+   "code": "002035.SZ",
+   "score": 0.8
+  },
+  {
+   "code": "603801.SH",
+   "score": 0.8
+  },
+  {
+   "code": "002959.SZ",
+   "score": 0.7200000000000001
+  },
+  {
+   "code": "603043.SH",
+   "score": 0.6800000000000002
+  },
+  {
+   "code": "002216.SZ",
+   "score": 0.68
+  },
+  {
+   "code": "002290.SZ",
+   "score": 0.6400000000000001
+  },
+  {
+   "code": "603055.SH",
+   "score": 0.6000000000000001
+  },
+  {
+   "code": "605011.SH",
+   "score": 0.6000000000000001
+  },
+  {
+   "code": "300403.SZ",
+   "score": 0.58
+  },
+  {
+   "code": "000541.SZ",
+   "score": 0.56
+  },
+  {
+   "code": "603866.SH",
+   "score": 0.5599999999999999
+  },
+  {
+   "code": "603219.SH",
+   "score": 0.5
+  },
+  {
+   "code": "300783.SZ",
+   "score": 0.48
+  },
+  {
+   "code": "600197.SH",
+   "score": 0.45999999999999996
+  },
+  {
+   "code": "600305.SH",
+   "score": 0.45999999999999996
+  },
+  {
+   "code": "002242.SZ",
+   "score": 0.42000000000000004
+  },
+  {
+   "code": "002515.SZ",
+   "score": 0.4000000000000001
+  },
+  {
+   "code": "600059.SH",
+   "score": 0.4000000000000001
+  },
+  {
+   "code": "300918.SZ",
+   "score": 0.4
+  },
+  {
+   "code": "600917.SH",
+   "score": 0.4
+  },
+  {
+   "code": "603366.SH",
+   "score": 0.4
+  },
+  {
+   "code": "300342.SZ",
+   "score": 0.32000000000000006
+  },
+  {
+   "code": "002614.SZ",
+   "score": 0.32
+  },
+  {
+   "code": "002695.SZ",
+   "score": 0.28
+  },
+  {
+   "code": "600073.SH",
+   "score": 0.28
+  },
+  {
+   "code": "002677.SZ",
+   "score": 0.24000000000000005
+  },
+  {
+   "code": "603008.SH",
+   "score": 0.2
+  }
+ ]
+}

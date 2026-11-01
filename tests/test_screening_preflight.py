@@ -186,10 +186,11 @@ def test_comparison_failure_still_retries_then_fails(connections, monkeypatch):
 
 
 def test_queued_batch_uses_saved_rule_through_screen(connections, monkeypatch):
+    from a_share_research.batches import NEW_RULE
     worker, _ = connections
     codes = [f'{i:06d}.SZ' for i in (1, 2, 3)]
-    monkeypatch.setitem(s.RULE, 'weights', {'roe': 1.0, 'cash': 0.0, 'growth': 0.0, 'pe': 0.0})
-    monkeypatch.setitem(s.RULE, 'momentum_days', 2)
+    monkeypatch.setitem(NEW_RULE, 'weights', {'roe': 1.0, 'cash': 0.0, 'growth': 0.0, 'pe': 0.0})
+    monkeypatch.setitem(NEW_RULE, 'momentum_days', 2)
     s.create(worker, 'synthetic-batch')
     saved = json.loads(snapshot(worker)['rule'])
     monkeypatch.setitem(s.RULE, 'min_total_mv_yi', 200)

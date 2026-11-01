@@ -5,7 +5,8 @@ import json
 
 def load(row) -> dict:
     batch = dict(row)
-    for key in ("rule", "universe", "q20", "q5", "selection", "l5", "entry", "marks"):
+    for key in ("rule", "universe", "q20", "q5", "selection", "l5", "entry", "marks",
+                "s10", "sq3", "sl3", "coverage", "small_selection"):
         batch[key] = json.loads(batch[key]) if batch.get(key) else None
     return batch
 
@@ -43,6 +44,10 @@ def returns(batch: dict) -> dict | None:
     if halves := ranking_halves(batch):
         groups |= {"TOP": (halves[0], len(halves[0])), "BOTTOM": (halves[1], len(halves[1]))}
     out = {name: group_return(entry, mark, codes, seats, rule["cost"]) for name, (codes, seats) in groups.items()}
+    if rule.get("version") == "screen-v1.2":
+        for name, codes in (("SQ3", batch.get("sq3") or []), ("SL3", (batch.get("sl3") or {}).get("codes", []))):
+            out[name] = (group_return(entry, mark, codes, rule["small"]["picks"], rule["cost"])
+                         if codes else -rule["cost"])
     for code, b in mark["benchmarks"].items():
         out[code] = b["value"] / entry["benchmarks"][code]["value"] - 1
     return {"date": mark["date"], "values": out}
@@ -70,3 +75,16 @@ RULE = {
     "benchmarks": {"H00906.CSI": "中证800全收益", "H00300.CSI": "沪深300全收益"},
     "horizons_months": [3, 6, 12],
 }
+
+# Keep RULE as the historical default for backtests and existing callers. Only creation opts in.
+NEW_RULE = RULE | {
+    "version": "screen-v1.2",
+    "small": {"min_total_mv_yi": 30, "max_total_mv_yi": 100, "min_avg_amount_yi": 0.3,
+              "q20": 10, "q20_per_industry": 2, "picks": 3, "picks_per_industry": 1,
+              "mechanical_per_industry": 2},
+    "benchmarks": RULE["benchmarks"] | {"H00852.CSI": "中证1000全收益"},
+}
+
+
+def small_rule(rule: dict) -> dict:
+    return rule | rule["small"]

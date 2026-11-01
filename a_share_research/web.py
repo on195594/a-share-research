@@ -279,7 +279,7 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     if batch and batch["status"] == "tracking":
         loaded = batches.load(batch)
         performance = charts.batch_returns(loaded, batches.returns(loaded),
-                                           {r["code"]: r["name"] for r in loaded["q20"] or []})
+                                           {r["code"]: r["name"] for r in (loaded["q20"] or []) + (loaded.get("s10") or [])})
     latest = reading.latest_reports(conn, include_checkpoint=False)
     companies = [r for r in latest if r["own"]]
     batch_only = sum(1 for r in latest if not r["own"])
@@ -724,15 +724,35 @@ def batch_page(request: Request, batch_id: int):
     if row is None:
         return not_found(request, session)
     batch = batches.load(row)
+    dual = batch["rule"]["version"] == "screen-v1.2"
     if batch["status"] == "researching":
         batch["q20"] = reading.research_state(conn, batch["q20"])[1]
+        if dual:
+            batch["s10"] = reading.research_state(conn, batch.get("s10") or [])[1]
     draft = ((batch["selection"] or {}).get("draft") or {})
-    results, names = batches.returns(batch), {r["code"]: r["name"] for r in batch["q20"] or []}
-    return render(request, "batch.html", session, batch=batch, draft=draft,
+    results = batches.returns(batch)
+    names = {r["code"]: r["name"] for r in (batch["q20"] or []) + (batch.get("s10") or [])}
+    pool_batches = [(batch, "", "codes", "大市值组 · Q20 / Q5 / L5", "总市值 ≥100 亿元，近 20 日日均成交额 ≥1 亿元。", "机械前五", "前五")]
+    if dual:
+        small = dict(batch, q20=batch.get("s10") or [], q5=batch.get("sq3") or [],
+                     l5=batch.get("sl3"), selection=batch.get("small_selection"),
+                     universe=(batch.get("universe") or {}).get("small"),
+                     rule=dict(batch["rule"], **batch["rule"]["small"]))
+        pool_batches.append((small, "small-", "small_codes", "小市值组 · S10 / SQ3 / SL3",
+                             "30 亿元 ≤ 总市值 <100 亿元，近 20 日日均成交额 ≥3000 万元；独立排名与比较，先只作模拟观察。", "机械前三", "前三"))
+    pools = []
+    for item, prefix, codes_field, label, description, mechanical_label, mechanical_short in pool_batches:
+        pool_draft = ((item.get("selection") or {}).get("draft") or {})
+        pools.append({"batch": item, "prefix": prefix, "codes_field": codes_field,
+                      "label": label, "description": description,
+                      "mechanical_label": mechanical_label, "mechanical_short": mechanical_short,
+                      "draft": pool_draft, "draft_codes": [p["code"] for p in pool_draft.get("picks", [])],
+                      "overview": charts.batch_overview(item), "sparks": charts.candidate_sparks(item.get("q20") or []),
+                      "market_strip": charts.market_strip(item)})
+    return render(request, "batch_v12.html" if dual else "batch.html", session, batch=batch, draft=draft, pools=pools,
                   draft_codes=[p["code"] for p in draft.get("picks", [])],
+                  overview=pools[0]["overview"], sparks=pools[0]["sparks"], market_strip=pools[0]["market_strip"],
                   results=results, names=names, performance=charts.batch_returns(batch, results, names),
-                  overview=charts.batch_overview(batch), sparks=charts.candidate_sparks(batch.get("q20") or []),
-                  market_strip=charts.market_strip(batch),
                   frozen_by=batches.FROZEN_BY)
 
 
@@ -745,7 +765,8 @@ async def freeze_batch(request: Request, batch_id: int):
         return message(request, session, "页面已过期", "请返回批次页面重新提交。", 403)
     try:
         with batch_writes:
-            service.freeze_batch(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")))
+            service.freeze_batch(conn, batch_id, [str(c) for c in form.getlist("codes")], str(form.get("note", "")),
+                                 small_codes=[str(c) for c in form.getlist("small_codes")])
     except service.RequestError as exc:
         return message(request, session, "无法冻结", str(exc), exc.status)
     return RedirectResponse(f"/batches/{batch_id}", status_code=303)

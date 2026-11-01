@@ -465,9 +465,13 @@ def since_prior(old: list[dict], new: list[dict]) -> dict:
 
 
 def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
-    """(all finished, rows with current status/report) for the linked runs."""
+    """Current linked-run state; candidates not linked yet remain pending."""
     done = True
     for row in q20:
+        if not row.get("run_id"):
+            row["research_status"] = "pending"
+            done = False
+            continue
         run = conn.execute("SELECT u.status, u.error, r.id AS report_id, r.passed, r.verdict, r.body"
                            " FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?",
                            (row["run_id"],)).fetchone()
@@ -568,7 +572,7 @@ def stock_reports(conn, code: str):
 
 
 def batch_list(conn):
-    return conn.execute("SELECT id, status, error, created_at, as_of, l5, frozen_at FROM batches ORDER BY id DESC").fetchall()
+    return conn.execute("SELECT id, status, error, created_at, as_of, l5, sl3, frozen_at FROM batches ORDER BY id DESC").fetchall()
 
 
 def batch(conn, batch_id: int):

@@ -320,7 +320,7 @@ def create_batch(conn, request_id: str) -> int:
         "INSERT INTO batches (request_id, status, created_at, rule) SELECT ?, 'queued', ?, ?"
         " WHERE NOT EXISTS (SELECT 1 FROM batches WHERE substr(created_at, 1, 7) = ? AND status != 'failed')"
         " ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, db.now(), json.dumps(batches.RULE, ensure_ascii=False), month),
+        (request_id, db.now(), json.dumps(batches.NEW_RULE, ensure_ascii=False), month),
     ).fetchone()
     if row:
         return row["id"]
@@ -330,7 +330,8 @@ def create_batch(conn, request_id: str) -> int:
     raise RequestError("本月已有批次；每月一个独立批次", 409)
 
 
-def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "owner") -> None:
+def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "owner", *,
+                 small_codes: list[str] | None = None) -> None:
     """Final picks; validated against the batch and frozen once. `by` is a FROZEN_BY key."""
     row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
     if row is None:
@@ -353,10 +354,30 @@ def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "ow
     draft = [p["code"] for p in ((batch["selection"] or {}).get("draft") or {}).get("picks", [])]
     l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
           "frozen_by": by}
+    small_fields = {}
+    if rule["version"] == "screen-v1.2":
+        small_draft = [p["code"] for p in ((batch.get("small_selection") or {}).get("draft") or {}).get("picks", [])]
+        chosen = list(dict.fromkeys(small_draft if small_codes is None else small_codes))
+        allowed_small = {r["code"]: r for r in (batch.get("s10") or [])
+                         if r.get("verdict") and r["verdict"] != "暂不值得"}
+        small_rule = batches.small_rule(rule)
+        if len(chosen) > small_rule["picks"] or any(c not in allowed_small for c in chosen):
+            raise RequestError(f"请从小市值研究通过的候选中选择至多 {small_rule['picks']} 家，可留空")
+        industries = [allowed_small[c]["industry"] for c in chosen]
+        if any(industries.count(i) > small_rule["picks_per_industry"] for i in industries):
+            raise RequestError(f"小市值组同一行业最多 {small_rule['picks_per_industry']} 家")
+        from a_share_research.sources import batch_coverage
+        small_fields = {
+            "sl3": {"codes": chosen, "note": "", "changed_from_draft": chosen != small_draft,
+                    "draft": small_draft, "frozen_by": by},
+            "coverage": batch_coverage(batch),
+        }
     # RETURNING, not rowcount: keeps the update and atomic id retrieval within one statement.
-    updated = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?"
+    extras = "".join(f", {key} = ?" for key in small_fields)
+    updated = conn.execute("UPDATE batches SET l5 = ?, frozen_at = ?, status = 'frozen', updated_at = ?" + extras +
                            " WHERE id = ? AND status = 'proposed' RETURNING id",
-                           (json.dumps(l5, ensure_ascii=False), db.now(), db.now(), batch_id)).fetchone()
+                           (json.dumps(l5, ensure_ascii=False), db.now(), db.now(),
+                            *(json.dumps(v, ensure_ascii=False) for v in small_fields.values()), batch_id)).fetchone()
     if updated is None:
         raise RequestError("批次已被冻结", 409)
 

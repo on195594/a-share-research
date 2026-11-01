@@ -761,16 +761,21 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
     entry and latest mark as a one-seat group, so it carries the same cost as the portfolios."""
     if not results:
         return None
-    labels = [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")] + list(batch["rule"]["benchmarks"].items())
+    labels = [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")]
+    if batch["rule"].get("version") == "screen-v1.2":
+        labels = [("L5", "大市值选定 L5"), ("Q5", "大市值机械 Q5"), ("Q20", "大市值候选 Q20"),
+                  ("SL3", "小市值选定 SL3"), ("SQ3", "小市值机械 SQ3")]
+    labels += list(batch["rule"]["benchmarks"].items())
     rows = []
     for key, label in labels:
         value = results["values"].get(key)
-        rows.append({"label": label, "value": value * 100 if value is not None else None, "emphasis": key == "L5",
+        rows.append({"label": label, "value": value * 100 if value is not None else None, "emphasis": key in ("L5", "SL3"),
                      "text": f"{value * 100:+.2f}%" if value is not None else "—",
                      "tip": f"{label}：{f'{value * 100:+.2f}%' if value is not None else '未计算'}"})
     mark = batch["marks"]["latest"]
     members = []
-    for code in batch["l5"]["codes"]:
+    selected = (batch.get("l5") or {}).get("codes", []) + (batch.get("sl3") or {}).get("codes", [])
+    for code in selected:
         value = batches.group_return(batch["entry"], mark, [code], 1, batch["rule"]["cost"])
         filled = batch["entry"]["prices"].get(code, {}).get("filled")
         members.append({"label": names.get(code, code), "value": value * 100 if filled else None,

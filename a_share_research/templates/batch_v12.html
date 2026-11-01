@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% import "_batch.html" as b with context %}
+{% from "_charts.html" import bars, data_list, spark_cols, verdict_pips %}
+{% set busy = batch.status in ("queued", "screening", "researching", "selecting") %}
+{% set refresh = 15 if busy else none %}
+{# updated_at moves with every batch write; research statuses come from the runs table #}
+{% set refresh_key = [batch.status, batch.updated_at, ((batch.q20 or []) + (batch.get("s10") or [])) | map(attribute="research_status") | join(",")] | join("|") %}
+{% block title %}{{ b.month(batch) }} · 候选初筛{% endblock %}
+{% block main %}
+{% set dual = batch.rule.version == "screen-v1.2" %}
+{% set coverage = batch.get("coverage") or {} %}
+{% set q5 = batch.q5 or [] %}
+{% set l5 = batch.l5.codes if batch.l5 else [] %}
+<section>
+  <h1>{{ b.month(batch) }}</h1>
+  <p class="meta">{% if batch.as_of %}<span class="date">基准日 {{ b.day(batch.as_of) }}</span> · {% endif %}规则 {{ batch.rule.version }}{% if batch.frozen_at %} · <span class="date">冻结于 {{ batch.frozen_at[:16].replace("T", " ") }}</span>{% endif %}</p>
+
+  {% if batch.status == "failed" %}
+    <p class="notice caution" role="alert">没有完成：{{ batch.error }}</p>
+    <p><a href="/batches">返回候选初筛，重新开始本月批次</a></p>
+  {% elif batch.status in ("queued", "screening") %}
+    <p class="notice" role="status">{{ b.batch_status[batch.status] }}：逐家取近 4 年财务和审计意见，约 40–60 分钟。页面每 15 秒自动刷新，可以离开。</p>
+  {% elif batch.status == "researching" %}
+    {% set all_candidates = (batch.q20 or []) + (batch.get("s10") or []) %}
+    {% set finished = all_candidates | rejectattr("research_status", "in", ["pending", "queued", "running"]) | list | length %}
+    <p class="notice" role="status">候选深挖中：{{ finished }} / {{ all_candidates | length }} 家已完成。全部完成后自动做跨公司比较。</p>
+  {% elif batch.status == "selecting" %}
+    <p class="notice" role="status">跨公司比较中，通常几分钟。</p>
+  {% elif batch.status == "proposed" %}
+    <p class="notice" role="status">待你选择：{{ "草案未能自动冻结" if batch.selection and batch.selection.freeze_error else "模型没有给出可自动冻结的名单" }}，请在下方按研究结论勾选后冻结。冻结后不再修改，下一交易日开盘价模拟买入。</p>
+  {% elif batch.status == "frozen" %}
+    <p class="notice" role="status">已冻结。冻结后的第一个交易日收盘后记录开盘入场价，之后每个交易日收盘后更新。</p>
+  {% elif batch.status == "tracking" and not (batch.marks or {}).get("latest") %}
+    <p class="notice" role="status">已于 <span class="date">{{ b.day(batch.entry.date) }}</span> 开盘入场。基准全收益指数的行情晚于个股发布，发布后自动计算首次收益。</p>
+  {% endif %}
+  {% if batch.error and batch.status in ("researching", "frozen", "tracking") %}<p class="notice caution" role="status">最近一次更新失败：{{ batch.error }}。约 30 分钟后自动重试。</p>{% endif %}
+</section>
+
+{% if results or batch.l5 or batch.selection or batch.q20 or batch.universe %}
+<nav id="batch-sections" aria-label="批次章节" tabindex="-1">
+  <ul class="toc">
+    {% if results %}<li><a href="#returns">模拟收益</a></li>{% endif %}
+    {% if dual %}<li><a href="#pool">大市值组</a></li><li><a href="#small-pool">小市值组</a></li>{% endif %}
+    {% if batch.l5 %}<li><a href="#selected">选定公司</a></li>{% endif %}
+    {% if batch.selection %}<li><a href="#comparison">跨公司比较</a></li>{% endif %}
+    {% if batch.q20 %}<li><a href="#candidates">候选名单</a></li>{% endif %}
+    {% if batch.universe %}<li><a href="#screening">初筛过程</a></li>{% endif %}
+  </ul>
+</nav>
+{% endif %}
+
+{% if results %}
+<section>
+  <h2 id="returns" tabindex="-1">模拟收益</h2>
+  <p class="muted small"><span class="date">{{ b.day(batch.entry.date) }}</span> 开盘入场 → <span class="date">{{ b.day(results.date) }}</span> 收盘；等权、复权、扣 {{ "%.1f" | format(batch.rule.cost * 1000) }}‰ 往返费用，买不进的席位按现金计。</p>
+  {% if performance %}
+  <div class="figures">
+    <figure class="figure" data-chart>
+      <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite">选定组合与对照组、全收益基准同期比较</span></figcaption>
+      {{ bars(performance.groups, "各组合累计模拟收益", emphasis=true) }}
+      {{ data_list(performance.groups) }}
+    </figure>
+    <figure class="figure" data-chart>
+      <figcaption><strong>选定公司各自表现</strong><span class="readout" aria-live="polite">单家等额持有，同样扣往返费用</span></figcaption>
+      {{ bars(performance.members, "选定公司各自累计收益") }}
+      {{ data_list(performance.members) }}
+    </figure>
+  </div>
+  {% endif %}
+  <details class="block">
+  <summary>收益数据表{% if batch.marks.horizons %} · 含各评价期限{% endif %}</summary>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="模拟收益">
+  <table>
+    <thead><tr><th scope="col">组合</th><th scope="col" class="num">累计</th>
+      {% for key in (batch.marks.horizons or {}) %}<th scope="col" class="num">{{ key[:-1] }} 个月</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% set ranked = [("TOP", "排序前一半"), ("BOTTOM", "排序后一半")] if "TOP" in results["values"] else [] %}
+    {% set small_groups = [("SL3", "小市值选定 SL3"), ("SQ3", "小市值机械 SQ3")] if dual else [] %}
+    {% for key, label in [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")] + small_groups + ranked + batch.rule.benchmarks.items() | list %}
+      <tr><th scope="row">{{ label }}</th><td class="num">{{ b.pct(results["values"].get(key)) }}</td>
+        {% for h in (batch.marks.horizons or {}).values() %}<td class="num">{{ b.pct(h["values"].get(key)) }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  </details>
+  {% set unfilled = batch.entry.prices.items() | rejectattr("1.filled") | list %}
+  {% if unfilled %}<p class="small">未成交：{% for code, p in unfilled %}{{ names.get(code, code) }}（{{ p.reason }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
+  <p class="hint">单个批次只是一次观察；6 个月为主评价期限。</p>
+</section>
+{% endif %}
+
+{% if dual and batch.status == "proposed" %}
+<form method="post" action="/batches/{{ batch.id }}/freeze" class="freeze">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+{% endif %}
+{% for pool in pools %}
+  {% with batch=pool.batch, draft=pool.draft, draft_codes=pool.draft_codes, q5=pool.batch.q5 or [], l5=(pool.batch.l5 or {}).get("codes", []), prefix=pool.prefix, codes_field=pool.codes_field, overview=pool.overview, sparks=pool.sparks, market_strip=pool.market_strip, mechanical_label=pool.mechanical_label, mechanical_short=pool.mechanical_short %}
+    {% if dual %}<section><h2 id="{{ prefix }}pool" tabindex="-1">{{ pool.label }}</h2><p class="muted small">{{ pool.description }}</p></section>{% endif %}
+    {% include "_batch_pool.html" %}
+  {% endwith %}
+{% endfor %}
+{% if dual and batch.status == "proposed" %}
+  <div class="search"><label for="note">说明<span class="muted">（选填）</span></label><textarea id="note" name="note" rows="3" maxlength="2000"></textarea></div>
+  <p class="hint">大市值组最多 5 家、同一行业最多 2 家；小市值组最多 3 家、同一行业最多 1 家。两组互不挤占，空位按现金计；小市值组可留空。</p>
+  <div class="actions"><button class="btn" type="submit">冻结两组所选</button></div>
+</form>
+{% endif %}
+<p>{% if results or batch.l5 or batch.selection or batch.q20 or batch.universe %}<a href="#batch-sections">返回批次章节</a> · {% endif %}<a href="/batches">全部批次</a></p>
+{% endblock %}

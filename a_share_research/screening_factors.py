@@ -94,8 +94,8 @@ def market_filters(frame: pd.DataFrame, suspended: set[str], as_of: str, rule: d
         ("st", lambda f: ~f["name"].str.contains("ST|退", na=False)),
         ("suspended", lambda f: ~f["ts_code"].isin(suspended)),
         ("listed_years", lambda f: f["list_date"].astype(str) <= listed_before),
-        ("market_cap", lambda f: f["total_mv"].fillna(0) >= rule["min_total_mv_yi"] * 1e4),  # 万元
-        ("liquidity", lambda f: f["avg_amount"] >= rule["min_avg_amount_yi"] * 1e5),  # 千元
+        ("market_cap", lambda f: market_cap_mask(f["total_mv"], rule)),
+        ("liquidity", lambda f: liquidity_mask(f["avg_amount"], rule)),
     ]
     for name, keep in steps:
         frame = frame[keep(frame)]
@@ -104,6 +104,19 @@ def market_filters(frame: pd.DataFrame, suspended: set[str], as_of: str, rule: d
     frame = frame[frame["industry_sw"].notna()]
     funnel["after_industry_mapping"] = len(frame)
     return frame, funnel, no_industry
+
+
+def market_cap_mask(total_mv: pd.Series, rule: dict = RULE) -> pd.Series:
+    """TuShare market cap is 万元; the optional upper bound is exclusive."""
+    keep = total_mv.fillna(0) >= rule["min_total_mv_yi"] * 1e4
+    if "max_total_mv_yi" in rule:
+        keep &= total_mv < rule["max_total_mv_yi"] * 1e4
+    return keep
+
+
+def liquidity_mask(avg_amount: pd.Series, rule: dict = RULE) -> pd.Series:
+    """TuShare daily amount is 千元; the threshold is inclusive."""
+    return avg_amount >= rule["min_avg_amount_yi"] * 1e5
 
 
 def windfall(row: dict, rule: dict = RULE) -> dict | None:
@@ -156,6 +169,14 @@ def pick(rows: list[dict], n: int, per_industry: int) -> list[dict]:
             if len(chosen) == n:
                 break
     return chosen
+
+
+def rank_candidates(companies: list[dict], rule: dict = RULE) -> tuple[list[dict], list[dict], list[str]]:
+    """Rank one eligible pool independently; preserve the source rows for other pools."""
+    ranked = score([dict(c) for c in companies if c["status"] == "ok"], rule)
+    candidates = pick(ranked, rule["q20"], rule["q20_per_industry"])
+    mechanical = pick(candidates, rule["picks"], rule.get("mechanical_per_industry", rule["picks_per_industry"]))
+    return ranked, candidates, [r["code"] for r in mechanical]
 
 
 def _months_after(day: str, months: int) -> str:

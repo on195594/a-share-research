@@ -30,7 +30,8 @@ def test_published_entry_and_benchmarks_keep_original_formula(market):
     assert s.entry_prices(market, DAY, [CODE])[CODE] == {"filled": True, "open": 24.42, "adj": 13.2697}
     entry = s.benchmark_prices(market, DAY, DAY, "open", s.RULE["benchmarks"])
     mark = s.benchmark_prices(market, DAY, DAY, "close", s.RULE["benchmarks"])
-    for code, price_code in s.PRICE_INDEX.items():
+    for code in s.RULE["benchmarks"]:
+        price_code = s.PRICE_INDEX[code]
         total, price = CAPTURE["index_daily"][code][0], CAPTURE["index_daily"][price_code][0]
         assert entry[code] == {"date": DAY, "value": total["pre_close"] * price["open"] / price["pre_close"]}
         assert mark[code] == {"date": DAY, "value": total["close"]}
@@ -141,7 +142,8 @@ class LaggedReplay:
 def test_entry_open_uses_previous_close_while_total_return_lags():
     day = LAGGED["trade_date"]
     entry = s.benchmark_prices(LaggedReplay(), day, day, "open", s.RULE["benchmarks"])
-    for code, price_code in s.PRICE_INDEX.items():
+    for code in s.RULE["benchmarks"]:
+        price_code = s.PRICE_INDEX[code]
         prev_close = next(r["close"] for r in LAGGED["index_daily"][code] if r["trade_date"] == "20261023")
         price = next(r for r in LAGGED["index_daily"][price_code] if r["trade_date"] == day)
         assert entry[code] == {"date": day, "value": prev_close * price["open"] / price["pre_close"]}

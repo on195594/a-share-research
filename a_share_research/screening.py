@@ -17,7 +17,7 @@ import tushare as ts
 
 from a_share_research import db, model, service, sources
 from a_share_research.db import SHANGHAI
-from a_share_research.batches import load, group_return, returns, FROZEN_BY
+from a_share_research.batches import load, group_return, returns, FROZEN_BY, small_rule
 from a_share_research.reading import research_state
 from a_share_research.service import create_batch as create, freeze_batch as freeze
 from a_share_research.material import METRICS
@@ -25,7 +25,7 @@ from a_share_research.prompts import parse_json
 # Keep the existing import surface for callers and frozen backtest experiments.
 from a_share_research.screening_factors import (
     RULE, FINANCIAL_INDUSTRIES, _months_after, announced_by, annual_rows,
-    indicator_check, factors, market_filters, windfall, percentiles, score, pick,
+    indicator_check, factors, market_filters, windfall, percentiles, score, pick, rank_candidates,
 )
 
 __all__ = [
@@ -132,10 +132,12 @@ def momentum(pro, as_of: str, codes: list[str], rule: dict = RULE) -> dict:
 
 def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dict:
     """Whole-market screen on the latest published session; returns universe, ranked rows and Q20/Q5."""
-    if rule.get("version") not in {"screen-v1", "screen-v1.1"} or rule.get("industry") != "SW2021 L1":
+    if rule.get("version") not in {"screen-v1", "screen-v1.1", "screen-v1.2"} or rule.get("industry") != "SW2021 L1":
         raise ScreenError("不支持的初筛规则版本或行业分类")
-    if rule["version"] == "screen-v1.1" and "windfall_flag" not in rule:
+    if rule["version"] in {"screen-v1.1", "screen-v1.2"} and "windfall_flag" not in rule:
         raise ScreenError("screen-v1.1 缺少利润跳升提示规则")
+    if rule["version"] == "screen-v1.2" and not isinstance(rule.get("small"), dict):
+        raise ScreenError("screen-v1.2 缺少小市值组规则")
     pro = _pro()
     as_of = as_of or latest_session(pro)
     start = _compact(datetime.strptime(as_of, "%Y%m%d").date() - timedelta(days=60))
@@ -151,7 +153,12 @@ def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dic
     frame = basic.merge(valuation, on="ts_code", how="left")
     frame["industry_sw"] = frame["ts_code"].map(sw)
     frame["avg_amount"] = frame["ts_code"].map(avg_amount).fillna(0)
-    frame, funnel, no_industry = market_filters(frame, suspended, as_of, rule)
+    # Both pools use the same market snapshot but have independent eligibility and ranks.
+    pools = [(rule, *market_filters(frame, suspended, as_of, rule))]
+    if rule["version"] == "screen-v1.2":
+        small = small_rule(rule)
+        pools.append((small, *market_filters(frame, suspended, as_of, small)))
+    eligible = pd.concat([pool[1] for pool in pools]).drop_duplicates("ts_code")
     since = f"{int(as_of[:4]) - 5}0101"
 
     def company(row) -> dict:
@@ -175,28 +182,36 @@ def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dic
 
     started = time.monotonic()
     with ThreadPoolExecutor(workers) as pool:
-        companies = list(pool.map(company, frame.itertuples(index=False)))
-    ok = [c for c in companies if c["status"] == "ok"]
-    ranked = score(ok, rule)
-    q20 = pick(ranked, rule["q20"], rule["q20_per_industry"])
+        companies = list(pool.map(company, eligible.itertuples(index=False)))
+    results = []
+    for pool_rule, pool_frame, funnel, no_industry in pools:
+        codes = set(pool_frame["ts_code"])
+        members = [c for c in companies if c["code"] in codes]
+        ranked, candidates, mechanical = rank_candidates(members, pool_rule)
+        counts = {s: sum(c["status"] == s for c in members) for s in ("ok", "excluded", "gap")}
+        results.append({
+            "universe": {"funnel": funnel | {f"factor_{k}": v for k, v in counts.items()},
+                         "no_industry": no_industry, "benchmark_days": days,
+                         "markets": pool_frame["market"].value_counts().to_dict(),
+                         "rows": ranked + [c for c in members if c["status"] != "ok"]},
+            "q20": candidates, "q5": mechanical,
+        })
+        log.info("screen %s %s–%s亿: %s companies in %.0fs, %s", as_of,
+                 pool_rule["min_total_mv_yi"], pool_rule.get("max_total_mv_yi", "∞"),
+                 len(members), time.monotonic() - started, counts)
+    candidates = [r for result in results for r in result["q20"]]
     try:
-        moves = momentum(pro, as_of, [r["code"] for r in q20], rule)
+        moves = momentum(pro, as_of, [r["code"] for r in candidates], rule)
     except ScreenError:  # a missing hint must not fail the screen
         log.exception("momentum for %s failed", as_of)
-        moves = {r["code"]: {"return_60d": None, "drawdown": False} for r in q20}
-    for row in q20:
+        moves = {r["code"]: {"return_60d": None, "drawdown": False} for r in candidates}
+    for row in candidates:
         row |= moves[row["code"]] | {"windfall": windfall(row, rule)}
-    q5 = pick(q20, rule["picks"], rule["picks_per_industry"])
-    counts = {s: sum(c["status"] == s for c in companies) for s in ("ok", "excluded", "gap")}
-    log.info("screen %s: %s companies in %.0fs, %s", as_of, len(companies), time.monotonic() - started, counts)
-    return {
-        "as_of": as_of,
-        "universe": {"funnel": funnel | {f"factor_{k}": v for k, v in counts.items()},
-                     "no_industry": no_industry, "benchmark_days": days,
-                     "markets": frame["market"].value_counts().to_dict(),
-                     "rows": ranked + [c for c in companies if c["status"] != "ok"]},
-        "q20": q20, "q5": [r["code"] for r in q5],
-    }
+    result = {"as_of": as_of} | results[0]
+    if len(results) > 1:
+        result["universe"]["small"] = results[1]["universe"]
+        result |= {"s10": results[1]["q20"], "sq3": results[1]["q5"]}
+    return result
 
 
 # ---------- research and selection ----------
@@ -405,6 +420,16 @@ def select(conn, batch: dict) -> dict:
     return selection
 
 
+def select_small(conn, batch: dict) -> dict:
+    """An independent S10 comparison; no forced ranking is required for this group."""
+    rule = small_rule(batch["rule"])
+    candidates = candidate_digests(conn, batch | {"q20": batch["s10"], "rule": rule})
+    if not any(selectable(c["report"]) for c in candidates):
+        return {"draft": {"picks": [], "rejected": [], "concentration": "",
+                          "gaps": ["小市值组没有研究通过且可选的候选，全部席位留现金"]}, "attempts": []}
+    return _select(candidates, rule)
+
+
 def _select(candidates: list[dict], rule: dict) -> dict:
     prompt = selection_prompt(candidates, rule)
     log.info("comparison: %s candidates, %s prompt characters", len(candidates), len(prompt))
@@ -425,6 +450,13 @@ def _select(candidates: list[dict], rule: dict) -> dict:
 
 def _positive(value) -> bool:
     return value is not None and pd.notna(value) and math.isfinite(float(value)) and float(value) > 0
+
+
+def entry_codes(batch: dict) -> list[str]:
+    codes = [r["code"] for r in batch["q20"]] + batch["l5"]["codes"]
+    if batch["rule"]["version"] == "screen-v1.2":
+        codes += (batch.get("sq3") or []) + (batch.get("sl3") or {}).get("codes", [])
+    return list(dict.fromkeys(codes))
 
 
 def entry_prices(pro, day: str, codes: list[str]) -> dict:
@@ -467,7 +499,17 @@ def entry_prices(pro, day: str, codes: list[str]) -> dict:
     return prices
 
 
-PRICE_INDEX = {"H00906.CSI": "000906.SH", "H00300.CSI": "000300.SH"}  # total-return index → its price index
+PRICE_INDEX = {"H00906.CSI": "000906.SH", "H00300.CSI": "000300.SH", "H00852.CSI": "000852.SH"}
+
+
+def benchmark_entry_point(previous_close: float, price_open: float, price_previous_close: float) -> float:
+    """Total-return entry point from the corresponding price index's opening ratio."""
+    if not all(_positive(v) for v in (previous_close, price_open, price_previous_close)):
+        raise ScreenError("指数开盘计算点位无效")
+    value = float(previous_close) * float(price_open) / float(price_previous_close)
+    if not _positive(value):
+        raise ScreenError("指数计算点位无效")
+    return value
 
 
 def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) -> dict:
@@ -501,7 +543,7 @@ def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) ->
             price = price.iloc[0]
             if not all(_positive(v) for v in (last["pre_close"], price["open"], price["pre_close"])):
                 raise ScreenError(f"{code} {end} 的开盘计算点位无效")
-            value = float(last["pre_close"]) * float(price["open"]) / float(price["pre_close"])
+            value = benchmark_entry_point(last["pre_close"], price["open"], price["pre_close"])
         if not _positive(value):
             raise ScreenError(f"{code} {end} 的计算点位无效")
         out[code] = {"date": str(last["trade_date"]), "value": value}
@@ -589,6 +631,13 @@ def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "s
     fails freeze validation stays proposed with the reason, for the owner to pick from.
     """
     picks = _draft_picks(selection)
+    row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+    if row is None or row["status"] != expected_status:
+        return False
+    batch = load(row)
+    # Prepare the shared calendar even for an empty large draft awaiting an owner decision.
+    # No report_rc backfill is performed; freeze records whatever is cached at that time.
+    coverage = sources.batch_coverage(batch) if batch["rule"]["version"] == "screen-v1.2" else None
     with db.transaction(conn):
         row = conn.execute("SELECT status, selection FROM batches WHERE id = ?", (batch_id,)).fetchone()
         if row is None or row["status"] != expected_status:
@@ -596,6 +645,8 @@ def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "s
         if expected_status == "proposed" and json.loads(row["selection"] or "null") != selection:
             return False
         _save(conn, batch_id, status="proposed", selection=selection, error=None, marks=None)
+        if coverage is not None:
+            _save(conn, batch_id, coverage=coverage)
         if picks:
             try:
                 freeze(conn, batch_id, picks, "", by="auto")
@@ -649,8 +700,9 @@ def tick(conn) -> bool:
                                     (batch["id"],)).fetchone() is None:
                         return False
                     q20 = link_research(conn, batch["id"], result["q20"])
+                    small = {key: result[key] for key in ("s10", "sq3") if key in result}
                     _save(conn, batch["id"], status="researching", step=None, as_of=result["as_of"],
-                          universe=result["universe"], q20=q20, q5=result["q5"])
+                          universe=result["universe"], q20=q20, q5=result["q5"], **small)
                 return True
             if batch["status"] in ("researching", "proposed") and any("return_60d" not in r for r in batch["q20"]):
                 # Batches screened before momentum was recorded get it once, as of their screen date.
@@ -674,6 +726,19 @@ def tick(conn) -> bool:
                 finished, q20 = research_state(conn, batch["q20"])
                 if not finished or _waiting(batch, now):
                     continue
+                small = batch["rule"]["version"] == "screen-v1.2"
+                s10 = batch.get("s10") or []
+                if small:
+                    if any(not c.get("run_id") for c in s10):
+                        # Queue small companies only after Q20 finishes, retaining researching
+                        # throughout so deployment's idle check still sees the batch as busy.
+                        with db.transaction(conn):
+                            s10 = link_research(conn, batch["id"], s10)
+                            _save(conn, batch["id"], q20=q20, s10=s10)
+                        return True
+                    small_finished, s10 = research_state(conn, s10)
+                    if not small_finished:
+                        continue
                 if not any(r["verdict"] and r["verdict"] != "暂不值得" for r in q20):
                     raise ScreenError("没有研究通过的候选，无法比较；可重新开始本月批次")
                 started = conn.execute("UPDATE batches SET status = 'selecting', q20 = ?, updated_at = ?"
@@ -681,16 +746,30 @@ def tick(conn) -> bool:
                                        (json.dumps(q20, ensure_ascii=False), db.now(), batch["id"], r["q20"])).fetchone()
                 if started is None:
                     return False
+                if small:
+                    _save(conn, batch["id"], s10=s10)
+                    batch = batch | {"s10": s10}
                 try:
-                    selection = select(conn, batch | {"q20": q20})
+                    selection = batch.get("selection") if small else None
+                    if not selection or "draft" not in selection:
+                        selection = select(conn, batch | {"q20": q20})
+                    if small:
+                        _save(conn, batch["id"], selection=selection)
+                        small_selection = batch.get("small_selection")
+                        if not small_selection or not small_selection.get("draft"):
+                            small_selection = select_small(conn, batch)
+                            _save(conn, batch["id"], small_selection=small_selection)
+                            if small_selection.get("draft") is None:
+                                raise ScreenError(small_selection.get("error") or "小市值比较没有有效草案")
                 except Exception as exc:  # the researched candidates stay; retry the comparison later
                     log.exception("batch %s comparison failed", batch["id"])
                     failures = ((batch["selection"] or {}).get("failures") or 0) + 1
                     if failures >= 3:
                         raise ScreenError(f"跨公司比较连续 {failures} 次失败：{exc}") from exc
+                    saved_selection = (selection or {}) if small else {}
                     updated = conn.execute("UPDATE batches SET status = 'researching', error = ?, selection = ?,"
                                            " marks = ?, updated_at = ? WHERE id = ? AND status = 'selecting' RETURNING id",
-                                           (f"跨公司比较失败，稍后重试：{exc}", json.dumps({"failures": failures}),
+                                           (f"跨公司比较失败，稍后重试：{exc}", json.dumps(saved_selection | {"failures": failures}),
                                             json.dumps({"attempted": db.now()}), db.now(), batch["id"])).fetchone()
                     return updated is not None
                 return _auto_freeze(conn, batch["id"], selection)
@@ -704,7 +783,7 @@ def tick(conn) -> bool:
                 if not days:
                     _save(conn, batch["id"], marks=(batch.get("marks") or {}) | {"checked": stamp, "attempted": None})
                     continue
-                codes = list(dict.fromkeys([r["code"] for r in batch["q20"]] + batch["l5"]["codes"]))
+                codes = entry_codes(batch)
                 entry = {"date": days[0], "prices": entry_prices(pro, days[0], codes),
                          "benchmarks": benchmark_prices(pro, days[0], days[0], "open", batch["rule"]["benchmarks"])}
                 batch = batch | {"entry": entry}
