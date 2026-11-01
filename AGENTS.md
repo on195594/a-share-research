@@ -16,7 +16,7 @@
 | `docs/project-contract.md` | `a-share-research`、`a-stock-agent-skills`、`a-stock-lib` 跨项目职责边界 | 单项目内部实现细节 |
 | `docs/roadmap.md` | 能力演进方向、阶段进入/停止条件与方法论借鉴 | 具体工作包状态与部署记录 |
 | `docs/implementation-plan.md` | 当前工作包状态、剩余验收项、当前生产部署与回退命令 | 产品长文与设计规范 |
-| `docs/screening-experiment.md`、`docs/investment-upgrade.md`、`docs/research-accumulation.md`、`docs/judgment-validation.md` | 各自专题（初筛实验 E、基本面升级 F、研究积累 K、判断验证 V）的设计、验收口径与实验结论 | 当前部署与工作包状态（归实施计划） |
+| `docs/screening-experiment.md`、`docs/investment-upgrade.md`、`docs/research-accumulation.md`、`docs/judgment-validation.md`、`docs/investment-advisor.md` | 各自专题（初筛实验 E、基本面升级 F、研究积累 K、判断验证 V、投资顾问闭环 A）的设计、验收口径与实验结论 | 当前部署与工作包状态（归实施计划） |
 
 ## 授权
 
