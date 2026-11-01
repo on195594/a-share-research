@@ -181,8 +181,9 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
             "implied": {"profit": implied, "cagr": cagr},
             "sensitivity": {"profit_factors": factors, "exit_pe": multiples,
                             "returns": [[annual(p3 * factor * multiple + dividends) for multiple in multiples] for factor in factors]},
-            "bridge": {"profit_change": p3 / base if base != 0 else None,
-                       "pe_change": pe / (cap / base) if base != 0 else None, "dividend_share": dividends / cap},
+            # Multiples of a non-positive base have no meaning; leave them empty as with cagr.
+            "bridge": {"profit_change": p3 / base if base > 0 else None,
+                       "pe_change": pe / (cap / base) if base > 0 else None, "dividend_share": dividends / cap},
             "pe_reference": pe_reference, "consensus": comparison, "assumptions": assumptions}
 
 

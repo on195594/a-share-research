@@ -534,6 +534,50 @@ def api_company_card(request: Request, code: str):
     return service.company_card(conn, code)
 
 
+class SubscriptionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    codes: list[str]
+
+
+@app.put('/api/subscriptions')
+def api_replace_subscriptions(request: Request, body: SubscriptionsRequest):
+    api_session(request)
+    from a_share_research import scans
+    try:
+        items = scans.replace_subscriptions(conn, body.codes)
+    except requests.RequestException as exc:
+        raise service.RequestError('暂时无法连接巨潮公司目录', 503) from exc
+    return {'version': service.VERSION, 'subscriptions': items}
+
+
+@app.get('/api/subscriptions')
+def api_subscriptions(request: Request):
+    api_session(request)
+    from a_share_research import scans
+    return {'version': service.VERSION, 'subscriptions': scans.subscriptions(conn)}
+
+
+@app.post('/api/scans', status_code=202)
+def api_submit_scan(request: Request):
+    api_session(request)
+    from a_share_research import scans
+    return {'version': service.VERSION, 'scan_id': scans.submit(conn)}
+
+
+@app.get('/api/scans/weekly')
+def api_weekly_scan(request: Request):
+    api_session(request)
+    from a_share_research import scans
+    return scans.weekly(conn)
+
+
+@app.get('/api/scans/{scan_id}')
+def api_scan(request: Request, scan_id: int):
+    api_session(request)
+    from a_share_research import scans
+    return scans.view(conn, scan_id)
+
+
 @app.get("/api/reports/{report_id}")
 def api_report(request: Request, report_id: int, compact: bool = False):
     api_session(request)

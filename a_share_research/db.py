@@ -190,7 +190,25 @@ def _migrate_v6(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS sessions_by_expires ON sessions(expires_at)")
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6)
+def _migrate_v7(conn: sqlite3.Connection) -> None:
+    for statement in (
+        "CREATE TABLE IF NOT EXISTS subscriptions (code TEXT PRIMARY KEY, origin TEXT NOT NULL DEFAULT 'external',"
+        " added_at TEXT NOT NULL, last_close REAL, last_close_date TEXT)",
+        "CREATE TABLE IF NOT EXISTS scans (id INTEGER PRIMARY KEY, status TEXT NOT NULL"
+        " CHECK(status IN ('queued','running','done','failed')), requested_at TEXT NOT NULL,"
+        " started_at TEXT, finished_at TEXT, error TEXT, summary TEXT)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS scans_one_active ON scans ((1)) WHERE status IN ('queued','running')",
+        "CREATE TABLE IF NOT EXISTS scan_events (id INTEGER PRIMARY KEY, scan_id INTEGER NOT NULL REFERENCES scans(id),"
+        " code TEXT NOT NULL, doc_key TEXT NOT NULL, title TEXT NOT NULL, announced TEXT NOT NULL, url TEXT NOT NULL,"
+        " kind TEXT NOT NULL CHECK(kind IN ('periodic','forecast','major_risk')), severity INTEGER NOT NULL,"
+        " detected_at TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('queued_review','deferred','no_card','covered','skipped')),"
+        " run_id INTEGER REFERENCES runs(id), UNIQUE(code, doc_key))",
+        "CREATE INDEX IF NOT EXISTS scan_events_scan ON scan_events(scan_id)",
+    ):
+        conn.execute(statement)
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7)
 
 
 def now() -> str:

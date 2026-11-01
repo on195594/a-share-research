@@ -55,9 +55,25 @@ def test_legacy_card_and_no_report(tmp_path):
     card = service.company_card(conn, '600519')
     assert card['valuation_calc'] is None
     assert card['summary'] and card['risks']
+    assert card['completed_at'] == card['created_at']
     with pytest.raises(service.RequestError) as error:
         service.company_card(conn, '603606.SH')
     assert error.value.status == 422
+    conn.close()
+
+
+def test_card_completion_uses_run_finished_at(tmp_path):
+    conn = db.connect(tmp_path / 'completed.db')
+    load(conn)
+    card = service.company_card(conn, '603606')
+    # Explicitly adjust the captured run's finish time to distinguish it from report creation.
+    finished_at = '2026-10-28T18:00:00+08:00'
+    conn.execute('UPDATE runs SET finished_at=? WHERE id=(SELECT run_id FROM reports WHERE id=?)',
+                 (finished_at, card['report_id']))
+    updated = service.company_card(conn, '603606')
+    assert updated['completed_at'] == finished_at
+    assert updated['created_at'] == card['created_at'] != finished_at
+    assert updated['report_id'] == card['report_id']
     conn.close()
 
 

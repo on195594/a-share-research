@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import db, model, price, research, screening, progress
+from a_share_research import db, model, price, research, screening, progress, scans
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ def main() -> None:
     conn = db.connect()
     recover(conn)
     screening.recover(conn)
+    scans.recover(conn)
     log.info("worker ready")
     while True:
         # A candidate batch queues 20 research runs; the owner's own submissions go ahead of them.
@@ -46,6 +47,10 @@ def main() -> None:
             comparison = conn.execute("SELECT id FROM research_progress WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if comparison:
                 progress.execute(conn, comparison["id"])
+                continue
+            scan = conn.execute("SELECT id FROM scans WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+            if scan:
+                scans.execute(conn, scan['id'])
                 continue
             # Batch steps run only when no single-company task is waiting.
             if not screening.tick(conn):

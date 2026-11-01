@@ -38,8 +38,11 @@ def idle(database: Path) -> None:
                             " AND (status != 'tracking' OR step IS NOT NULL)").fetchall()
         # Progress comparisons never restart once running, so a release must not interrupt them.
         progress = conn.execute("SELECT id FROM research_progress WHERE status IN ('queued','running')").fetchall()
-    if active or busy or progress:
-        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy} 或研究进展 {progress} 尚未空闲")
+        # The first v7 release also checks pre-migration databases, where scans does not exist yet.
+        scans = (conn.execute("SELECT id FROM scans WHERE status IN ('queued','running')").fetchall()
+                 if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scans'").fetchone() else [])
+    if active or busy or progress or scans:
+        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy}、研究进展 {progress} 或扫描 {scans} 尚未空闲")
 
 
 KEEP_BACKUPS = 3

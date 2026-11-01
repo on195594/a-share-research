@@ -40,7 +40,7 @@ def legacy_database(path, columns="present"):
 
 
 def assert_derived(conn):
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
     for index, table, column in (("calls_by_run", "calls", "run_id"),
                                  ("runs_by_status", "runs", "status"),
                                  ("sessions_by_expires", "sessions", "expires_at")):

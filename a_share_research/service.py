@@ -175,7 +175,7 @@ def company_card(conn: sqlite3.Connection, code: str) -> dict:
     if not re.fullmatch(r"\d{6}", code):
         raise RequestError("公司代码必须为六位数字")
     row = conn.execute(
-        "SELECT r.id, r.period, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
+        "SELECT r.id, r.name, r.created_at, COALESCE(u.finished_at,r.created_at) AS completed_at, r.period, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
         "WHERE substr(r.code, 1, 6) = ? AND r.passed = 1 AND u.status = 'done' AND u.kind = 'research' "
         "AND json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL "
         "AND u.replay_of IS NULL ORDER BY r.created_at DESC, r.id DESC LIMIT 1", (code,),
@@ -191,8 +191,15 @@ def company_card(conn: sqlite3.Connection, code: str) -> dict:
         if "scenarios" in calc:
             summary["scenarios"] = {name: {"annual_return": scenario["annual_return"]}
                                     for name, scenario in calc["scenarios"].items()}
-    return {"version": VERSION, "code": code, "report_id": row["id"], "period": row["period"],
-            "status": "有效", "verdict": body.get("verdict"), "summary": body.get("summary"),
+    from a_share_research import scans
+    pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
+    current = scans.latest_close(conn, code)
+    current['current_zone'] = scans.current_zone(calc, current['last_close'])
+    if pending:
+        current['note'] = '待复核，区间暂停解读'
+    return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],
+            "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
+            "status": "待复核" if pending else "有效", "verdict": body.get("verdict"), "summary": body.get("summary"),
             "risks": [item["text"] for item in body.get("risks", [])[:3]],
             "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
                             for item in body.get("checkpoints", [])],
