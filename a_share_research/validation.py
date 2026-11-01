@@ -90,6 +90,21 @@ def summarize(rows: list[dict], key: str) -> list[dict]:
     return out
 
 
+def summarize_relative(rows: list[dict]) -> list[dict]:
+    """V2 per (source, horizon): share of correct calls and Brier score of the implied outperform probability."""
+    groups: dict[tuple, list[tuple[float, bool]]] = {}
+    for row in rows:
+        if not row.get("relative"):
+            continue
+        p = forecasts.outperform_probability(row["relative"])
+        for horizon, result in row["returns"].items():
+            groups.setdefault((row["source"], horizon), []).append((p, result["excess"] > 0))
+    return [{"source": src, "horizon": horizon, "n": len(pairs),
+             "correct": sum((p > 0.5) == beat for p, beat in pairs) / len(pairs),
+             "brier": statistics.fmean((p - beat) ** 2 for p, beat in pairs)}
+            for (src, horizon), pairs in sorted(groups.items())]
+
+
 def summarize_forecasts(scored: list[dict]) -> dict:
     """Hit rate per confidence level (calibration) and share of midpoints beating the naive continuation."""
     done = [s for s in scored if s["result"]["status"] == "scored"]
@@ -145,16 +160,20 @@ def load_reports(database: str) -> list[dict]:
     """Passed, non-replay, non-feedback research reports from a read-only connection."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
-            "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request FROM reports r "
+            "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, json_extract(r.body, '$.relative') FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL"
         ).fetchall()
     reports = []
-    for report_id, code, name, verdict, created, request in rows:
+    for report_id, code, name, verdict, created, request, relative in rows:
         src = source(json.loads(request) if request else {})
         if src is None:
             continue
+        relative = json.loads(relative) if relative else None
+        if relative is not None and forecasts.relative_problems(relative):
+            relative = None
         reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
-                        "completed": datetime.fromisoformat(created)})
+                        "completed": datetime.fromisoformat(created), "relative": relative,
+                        "call": relative["call"] if relative else "无判断"})
     return first_per_month(reports)
 
 
@@ -227,17 +246,22 @@ def main() -> None:
                 json.dump({"forecasts": scored, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
         return
     rows = score(screening._pro(), load_reports(args.database), datetime.now(SHANGHAI).date())
-    summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size")}
+    summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size"), "call": summarize(rows, "call"),
+               "relative": summarize_relative(rows)}
     lines = [f"V0 事后超额（基准 {BENCHMARK}，起点为报告完成后首个完整交易日收盘）", ""]
     for row in rows:
         latest = row["returns"].get("latest")
         lines.append(f"#{row['id']} {row['source']} {row['code']} {row['name']} {row['verdict']} 入场 {row['entry'] or '待入场'} "
                      f"市值 {row['mv'] and round(row['mv'])}亿 至今超额 {_pct(latest['excess']) if latest else '—'}")
-    for key, groups in summary.items():
-        lines += ["", f"按{'结论' if key == 'verdict' else '市值三分位'}汇总"]
+    for key in ("verdict", "size", "call"):
+        groups = summary[key]
+        lines += ["", f"按{ {'verdict': '结论', 'size': '市值三分位', 'call': '6 个月相对判断'}[key] }汇总"]
         for g in groups:
             lines.append(f"{g['source']} {g[key]} {g['horizon']} n={g['n']} 均值 {_pct(g['mean'])} 中位 {_pct(g['median'])} "
                          f"跑赢 {g['beat']:.0%} 左尾≤{LEFT_TAIL:.0%} {g['left_tail']:.0%}")
+    lines += ["", "相对判断记分（120d 为 6 个月到期口径，其余仅作中途参考；Brier 越低越好，恒报 0.5 为 0.25）"]
+    lines += [f"{g['source']} {g['horizon']} n={g['n']} 判断正确 {g['correct']:.0%} Brier {g['brier']:.3f}"
+              for g in summary["relative"]]
     log.info("\n%s", "\n".join(lines))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:

@@ -153,7 +153,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
     result["report"] = ({key: body[key] for key in
-                         ("verdict", "summary", "answer", "risks", "business", "financial", "methods", "checkpoints")
+                         ("verdict", "summary", "relative", "answer", "risks", "business", "financial", "methods", "checkpoints")
                          if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],

@@ -142,3 +142,48 @@ def test_report_item_shows_forecast_with_row_label_and_unit():
     assert "预测 · 营业总收入" in html and "130–150</span>亿元，把握 75%" in html
     del entry["forecast"]
     assert "预测" not in str(ENV.get_template("_macros.html").module.item(entry, 0, rows, {}, "checkpoints", ""))
+
+
+# ---------- V2: 6-month relative call ----------
+
+def test_relative_call_must_pick_a_side():
+    assert forecasts.relative_problems({"call": "跑赢", "confidence": 55}) == []
+    assert forecasts.relative_problems({"call": "持平", "confidence": 60}) == ["relative.call 只能是“跑赢”或“跑输”，必须二选一"]
+    assert len(forecasts.relative_problems({"call": "跑输", "confidence": 50})) == 1  # a coin flip is not a call
+    assert len(forecasts.relative_problems({"call": "跑输", "confidence": 62})) == 1
+    assert len(forecasts.relative_problems({"call": "跑输", "confidence": 60, "reason": "x"})) == 1
+    assert len(forecasts.relative_problems(None)) == 1
+    assert forecasts.outperform_probability({"call": "跑输", "confidence": 70}) == pytest.approx(0.3)
+
+
+def test_check_requires_relative_call_except_for_feedback():
+    missing = report()
+    del missing["relative"]
+    assert [p["where"] for p in check(missing, MATERIAL)] == ["relative"]
+    feedback = MATERIAL.__class__(**{**MATERIAL.__dict__, "extra": {"feedback": {"location": "risks[0]", "text": "x"}}})
+    assert "relative" not in [p["where"] for p in check(missing, feedback)]
+
+
+def test_repair_patch_can_replace_relative_call():
+    from a_share_research.research import merge_repair_patch
+    merged = merge_repair_patch(report(), {"relative": {"call": "跑赢", "confidence": 55}}, [], MATERIAL)
+    assert merged["relative"] == {"call": "跑赢", "confidence": 55}
+    assert check(merged, MATERIAL) == []
+
+
+def test_relative_summary_scores_correctness_and_brier():
+    rows = [{"source": "batch", "relative": {"call": "跑输", "confidence": 80}, "returns": {"120d": {"excess": -0.4}}},
+            {"source": "batch", "relative": {"call": "跑赢", "confidence": 60}, "returns": {"120d": {"excess": -0.1}}},
+            {"source": "batch", "relative": None, "returns": {"120d": {"excess": 0.2}}}]
+    (g,) = validation.summarize_relative(rows)
+    assert g["n"] == 2 and g["correct"] == 0.5
+    assert g["brier"] == pytest.approx(((0.2 - 0) ** 2 + (0.6 - 0) ** 2) / 2)
+
+
+def test_report_header_shows_relative_call():
+    from support.templates import ENV
+    template = (Path(__file__).resolve().parents[1] / "a_share_research/templates/report.html").read_text()
+    line = next(l for l in template.splitlines() if 'class="relative-call"' in l)
+    html = ENV.from_string(line).render(body={"relative": {"call": "跑输", "confidence": 65}})
+    assert "6 个月相对判断：跑输中证800全收益，把握 65%" in html
+    assert ENV.from_string(line).render(body={}).strip() == ""
