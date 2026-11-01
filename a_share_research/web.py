@@ -528,6 +528,12 @@ def api_reports(request: Request, code: str):
     return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
 
 
+@app.get("/api/companies/{code}/card")
+def api_company_card(request: Request, code: str):
+    api_session(request)
+    return service.company_card(conn, code)
+
+
 @app.get("/api/reports/{report_id}")
 def api_report(request: Request, report_id: int, compact: bool = False):
     api_session(request)

@@ -3,7 +3,7 @@
 import re
 from decimal import Decimal
 
-from a_share_research import evidence, forecasts
+from a_share_research import evidence, forecasts, valuation
 from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.material import Material
 
@@ -131,14 +131,24 @@ def check(report: dict, material: Material) -> list[dict]:
     if "checkpoints" in sections and not material.extra.get("feedback"):
         if problem := forecasts.count_problem(report.get("checkpoints")):
             problems.append({"where": "checkpoints", "problem": problem})
-    for section in sections:
-        items = report.get(section)
+    item_sections = [(section, report.get(section)) for section in sections]
+    value = report.get("valuation")
+    if not material.extra.get("feedback") or value is not None:
+        problems += [{"where": "valuation", "problem": p} for p in valuation.problems(value, material.table)]
+    if isinstance(value, dict):
+        if "not_priced" in value:
+            item_sections.append(("valuation.not_priced", [value["not_priced"]]))
+        else:
+            item_sections.append(("valuation.rationale", value.get("rationale")))
+    for section, items in item_sections:
         if not isinstance(items, list) or (not items and section != "methods"):
-            problems.append({"where": section, "problem": "该段缺失或为空"})
+            problems.append({"where": "valuation" if section.startswith("valuation.") else section,
+                             "problem": f"{section} 该段缺失或为空"})
             continue
         for i, item in enumerate(items):
-            where = f"{section}[{i}]"
-            if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            where = "valuation" if section.startswith("valuation.") else f"{section}[{i}]"
+            if (not isinstance(item, dict) or not isinstance(item.get("text"), str)
+                    or section.startswith("valuation.") and not item["text"].strip()):
                 problems.append({"where": where, "problem": "条目必须包含 text 和 cites"})
                 continue
             cites = item.get("cites") or []

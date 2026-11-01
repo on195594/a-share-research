@@ -7,7 +7,7 @@ import re
 import time
 from copy import deepcopy
 
-from a_share_research import db, model, sources, evidence
+from a_share_research import db, model, sources, evidence, valuation
 from a_share_research.service import MAX_CALLS
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
@@ -79,6 +79,7 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
 3. verdict 与 summary 是否和报告内容一致。
 4. 有具体问题时，answer 是否回答了它；纠错是否核对了所指原文。
 5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。其中 forecast 是对下一期财务表数值的区间预测，不要求出处证明预测值，不评判区间宽窄；只核查所选行与 text 所述事项、本报告判断相关，且 text 中的基期事实正确。顶层 relative 是对未来 6 个月相对指数表现的独立判断，由程序事后记分，不复核其方向与把握。
+6. valuation 的 rationale 与 not_priced 照常核查事实和数字；检查情景假设间的经济关系与口径是否自洽（如周期高点用高利润配高倍数、保守利润高于基期却无证据），不评判贵贱与区间宽窄；相关问题统一定位 where="valuation"，修复时顶层替换整个 valuation。
 原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
 通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
 
@@ -118,13 +119,13 @@ REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods")
 def published(report: dict) -> dict:
     """Fields of a passed report that are saved; optional judgment fields only when the contract produced them."""
     return {k: report[k] for k in ("verdict", "summary", *SECTIONS)} | {
-        k: report[k] for k in ("checkpoints", "relative") if k in report}
+        k: report[k] for k in ("checkpoints", "relative", "valuation") if k in report}
 PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
 {"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
 ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
 add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods；不能整段替换。value 是完整条目 {"text": "论断", "cites": [出处]}；checkpoints 条目可再带 forecast（格式同原报告），替换带 forecast 的检查点时须保留或修正它。
 出处格式：原文 {"source": "实际文档标识", "page": 页码, "quote": "该页连续原文，逐字复制，20–200 字"}；表格/程序计算 {"ref": "实际行标识", "period": "实际期间键，跨期论断可省略"}。
-verdict、summary、gaps、relative 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组，relative 格式同原报告；未提到的字段与条目由程序逐字保留。
+verdict、summary、gaps、relative、valuation 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组，relative 与 valuation 格式同原报告；未提到的字段与条目由程序逐字保留。
 可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
 程序将 rebuttals 放入合并稿的 repair_rebuttals，供独立复核员作为待核查数据阅读；它不是解决声明，不接受 status/resolutions/risk_resolutions，也不能关闭问题或豁免旧风险去向复核。
 """
@@ -136,8 +137,8 @@ class RepairFormatError(ValueError):
 
 def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material: Material) -> dict:
     """Apply an atomic patch against original positions without mutating either input."""
-    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "relative", "rebuttals"}:
-        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、relative、rebuttals；不要输出完整报告")
+    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "relative", "valuation", "rebuttals"}:
+        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、relative、valuation、rebuttals；不要输出完整报告")
     if not isinstance(patch.get("ops", []), list):
         raise RepairFormatError("补丁 ops 必须是数组；无需改动条目时可省略或用 []")
     replacements, additions = {}, {}
@@ -203,7 +204,7 @@ def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material
         merged[section].extend(deepcopy(additions.get(section, [])))
         if not merged[section] and section not in required:
             merged.pop(section)
-    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps", "relative") if k in patch})
+    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps", "relative", "valuation") if k in patch})
     if patch.get("rebuttals"):
         merged["repair_rebuttals"] = deepcopy(patch["rebuttals"])
     return merged
@@ -393,6 +394,30 @@ def revise(runner, material, report, ledger, *, acquisition=None):
     return report, problems, reviewed
 
 
+def calculate_valuation(value: dict, material: Material, *, replay: bool = False) -> dict:
+    """Post-review enrichment only; provider/computation failures cannot fail a research."""
+    comparison = {"status": "none", "years": {}}
+    if "not_priced" not in value:
+        if replay:
+            comparison = {"status": "unavailable", "reason": "历史快照重放不获取新的卖方预测"}
+        else:
+            try:
+                response = sources.report_rc(material.code)
+                comparison = (response if response["status"] == "unavailable" else
+                              valuation.consensus(response["rows"], valuation.years(material.table), material.market_date))
+            except Exception as exc:
+                log.warning("report_rc %s unavailable (%s)", material.code, type(exc).__name__)
+                comparison = {"status": "unavailable", "reason": "卖方预测取数或解析失败"}
+    try:
+        refs = {key: next((row["values"].get(material.market_date) for row in material.table
+                          if row["id"] == f"M.pe_ttm_5y_{key}"), None) for key in ("p30", "p50", "p70")}
+        reference = {k: float(v) for k, v in refs.items()} if all(v is not None for v in refs.values()) else None
+        return valuation.compute(value, material.table, material.market_date, pe_reference=reference, consensus=comparison)
+    except Exception as exc:
+        log.warning("valuation %s failed: %s", material.code, exc)
+        return {"rule": valuation.RULE, "error": str(exc)}
+
+
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, request, request_id, started_at FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
@@ -469,6 +494,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             if material.extra.get("feedback"):
                 body["methods"] = report["methods"]
             body["answer"] = report.get("answer", [])
+            if "valuation" in report:
+                body["valuation_calc"] = calculate_valuation(report["valuation"], material, replay=replay_of is not None)
             publish(conn, run_id, material, period, True, report["verdict"], body)
     except Exception as exc:
         if not isinstance(exc, ScopeError | ResearchError | ModelStageError | sources.SourceError | evidence.EvidenceError):

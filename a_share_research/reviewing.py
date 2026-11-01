@@ -97,7 +97,7 @@ def binding_view(value):
 
 
 def target_exists(target, report):
-    if target in ("summary", "verdict", "gaps"):
+    if target in ("summary", "verdict", "gaps", "valuation"):
         return target in report
     match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|methods|gaps)\[(\d+)\]", target or "")
     return bool(match and int(match[2]) < len(report.get(match[1], [])))
@@ -222,7 +222,7 @@ def legacy_issue_view(issues):
 PROTOCOL = """输出一个 JSON 对象，version=1，逐字返回下方 draft_sha256 和 material_sha256。
 issues: 新发现的实质问题数组，每项 {type: omission/claim/question, where: 条目位置或 missing,
 problem: 具体问题, importance: 为什么会影响本次问题或结论, evidence: 已存出处数组}；
-where 是单个位置，如 risks[0]、business[1]、gaps[0]、summary、verdict，或 missing。
+where 是单个位置，如 risks[0]、business[1]、gaps[0]、summary、verdict、valuation，或 missing。
 omission/claim 必须给支持批评的已读原文/表格/程序计算出处，不能只凭经验列风险清单；question 可无出处。
 resolutions: 对下方每个 unresolved_issues 的 ID 恰好一项 {id, status: resolved/unresolved/dismissed,
 reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；omission 无论 where 指向何处都不能用空 targets 解决。

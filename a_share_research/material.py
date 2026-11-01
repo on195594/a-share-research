@@ -376,12 +376,23 @@ def gather(code: str) -> Material:
     table = financial_table(fin, market)
     for row in table:
         row["source"] = {"provider": "TuShare", "code": annual.code, "retrieved_at": retrieved_at}
+    gaps = {f"{p}：{reason}" for row in table for p, reason in row.get("unavailable", {}).items()}
+    market_date = str(market["trade_date"])
+    try:
+        reference = sources.pe_reference(code, market_date)
+        for p in (30, 50, 70):
+            value = reference[f"p{p}"]
+            table.append({"id": f"M.pe_ttm_5y_p{p}", "label": f"近 5 年 PE TTM {p}% 分位", "unit": "倍",
+                          "values": {market_date: f"{value:.2f}"}, "exact_values": {market_date: str(value)},
+                          "source": {**reference["source"], "retrieved_at": retrieved_at}})
+    except sources.SourceError as exc:
+        gaps.add(str(exc))
     return Material(
         code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=(pages := mdna_pages(annual)),
         raw_pages={n: annual.raw_pages[n - 1] for n in pages},
-        table=table, market_date=str(market["trade_date"]),
+        table=table, market_date=market_date,
         extra={"catalog": {"D0" if d.url == annual.url else f"D{i + 1}": d.info()
                            for i, d in enumerate(docs)}, "sources": {},
-               "gaps": sorted({f"{p}：{reason}" for row in table for p, reason in row.get("unavailable", {}).items()}),
+               "gaps": sorted(gaps),
                "series": financial_series(fin, annual.code, retrieved_at)},
     )

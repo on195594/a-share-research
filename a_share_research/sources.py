@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -30,7 +31,7 @@ PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.IGNORECASE)
 TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[一三]季度报告)")
 
 FINANCIAL_APIS = {"fina_indicator", "income", "cashflow", "fina_audit", "balancesheet"}
-HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal"}
+HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal", "report_rc"}
 
 
 def _tushare_cache_key(api: str, params: dict) -> str | None:
@@ -320,3 +321,88 @@ def valuation(code: str) -> dict:
     if frame.empty:
         raise SourceError(f"no valuation rows for {code}")
     return frame.sort_values("trade_date").iloc[-1].to_dict()
+
+
+def pe_quantiles(frame: pd.DataFrame, code: str, market_date: str) -> dict:
+    """Five-year positive daily PE observations, with linear sample quantiles."""
+    required = {"ts_code", "trade_date", "pe_ttm"}
+    if not isinstance(frame, pd.DataFrame) or not required <= set(frame.columns):
+        raise SourceError("TuShare daily_basic 估值历史缺少 ts_code、trade_date 或 pe_ttm")
+    if not frame["ts_code"].eq(to_tushare_stock_code(code)).all():
+        raise SourceError("TuShare daily_basic 估值历史含其他公司，无法作为本公司 PE 参照")
+    end = date.fromisoformat(market_date)
+    start = end.replace(year=end.year - 5, day=min(end.day, 28)) if end.month == 2 and end.day == 29 else end.replace(year=end.year - 5)
+    dates = pd.to_datetime(frame["trade_date"], errors="raise").dt.date
+    selected = frame.loc[(dates >= start) & (dates <= end)].copy()
+    # One observation per trading day; duplicated rows must not inflate coverage.
+    selected = selected.drop_duplicates("trade_date")
+    values = pd.to_numeric(selected["pe_ttm"], errors="raise")
+    values = values[values.notna() & (values > 0) & (values < float("inf"))]
+    if len(values) < 250:
+        raise SourceError(f"近 5 年正值 PE TTM 仅 {len(values)} 个交易日，少于 250 个，未提供历史 PE 分位参照")
+    return {**{f"p{p}": float(values.quantile(p / 100, interpolation="linear")) for p in (30, 50, 70)},
+            "n": len(values), "source": {"provider": "TuShare daily_basic.pe_ttm", "code": code,
+            "start_date": str(start), "end_date": market_date, "samples": len(values),
+            "method": "positive daily observations; linear quantile"}}
+
+
+def pe_reference(code: str, market_date: str) -> dict:
+    try:
+        end = date.fromisoformat(market_date)
+        start = end.replace(year=end.year - 5, day=28) if end.month == 2 and end.day == 29 else end.replace(year=end.year - 5)
+        frame = _frame(TushareValuationProvider().fetch_valuation_history(
+            code, start_date=str(start), end_date=market_date))
+        return pe_quantiles(frame, code, market_date)
+    except SourceError:
+        raise
+    except Exception as exc:
+        raise SourceError(f"TuShare daily_basic 历史 PE 分位不可用：{exc}") from exc
+
+
+def report_rc_rows(frame: pd.DataFrame, code: str) -> list[dict]:
+    """Validate the response before handing sell-side data to the pure consensus calculator."""
+    if not isinstance(frame, pd.DataFrame):
+        raise SourceError("TuShare report_rc 返回的不是数据表")
+    if frame.empty:
+        return []
+    required = {"ts_code", "report_date", "org_name", "quarter", "np"}
+    if not required <= set(frame.columns):
+        raise SourceError("TuShare report_rc 缺少 ts_code、report_date、org_name、quarter 或 np")
+    if not frame["ts_code"].eq(to_tushare_stock_code(code)).all():
+        raise SourceError("TuShare report_rc 返回了其他公司的预测")
+    selected = frame[sorted(required)].copy()
+    selected["report_date"] = pd.to_datetime(selected["report_date"], errors="raise").dt.strftime("%Y-%m-%d")
+    selected["np"] = pd.to_numeric(selected["np"], errors="raise")
+    # TuShare np is 万元, not 元. The captured 603606 response has 2028Q4 np=217800
+    # (21.78 亿元); np/eps implies ~8.25 亿 shares, matching current shares. Treat np
+    # as attributable net profit on this evidence (inference); tp is total profit.
+    return selected.astype(object).where(pd.notna(selected), None).to_dict(orient="records")
+
+
+def _report_rc_limited(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(part in message for part in ("频次", "限频", "每分钟", "rate limit", "over limit"))
+
+
+def report_rc(code: str) -> dict:
+    """Last 120 days; retry a one-call-per-minute limit once, then degrade to unavailable."""
+    try:
+        pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
+        end = datetime.now(SHANGHAI).date()
+        params = {"ts_code": to_tushare_stock_code(code),
+                  "start_date": (end - timedelta(days=120)).strftime("%Y%m%d"),
+                  "end_date": end.strftime("%Y%m%d")}
+        for attempt in range(2):
+            try:
+                rows = report_rc_rows(tushare_query(pro, "report_rc", **params), code)
+                return {"status": "ok" if rows else "none", "rows": rows}
+            except Exception as exc:
+                if attempt == 0 and _report_rc_limited(exc):
+                    log.warning("TuShare report_rc rate limited for %s; retrying in 61 seconds", code)
+                    time.sleep(61)
+                    continue
+                raise
+    except Exception as exc:
+        reason = str(exc).replace(os.environ.get("TUSHARE_TOKEN") or "\x00", "[REDACTED]")
+        log.warning("TuShare report_rc unavailable for %s: %s", code, reason)
+        return {"status": "unavailable", "reason": f"TuShare report_rc: {reason}"}

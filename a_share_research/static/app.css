@@ -166,6 +166,8 @@ form.inline { display: inline; margin: 0; }
    cell runs to the row end so a short last row leaves no empty box. */
 .snapshot div { margin: 0; padding: 8px 12px; box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line); }
 .snapshot div:last-child { grid-column: auto / -1; }
+.valuation-snapshot { grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+.valuation-snapshot div:last-child { grid-column: auto; }
 .snapshot dt { color: var(--muted); font-size: 13px; }
 .snapshot dd { margin: 0; font-size: 17px; font-weight: 650; white-space: nowrap; letter-spacing: -0.01em; }
 .snapshot small, th small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 2px; }

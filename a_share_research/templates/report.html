@@ -67,6 +67,7 @@
       {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点<small class="num">{{ content.checkpoints | length }}</small></a></li>{% endif %}
       <li><a href="#business">业务{% if content.business %}<small class="num">{{ content.business | length }}</small>{% endif %}</a></li>
       <li><a href="#financial">财务与走势</a></li>
+      {% if report.passed and body.valuation %}<li><a href="#valuation">情景测算</a></li>{% endif %}
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
     </ul>
@@ -148,6 +149,8 @@
       {% include "_comparison.html" %}
     </details>
   </section>
+
+  {% if report.passed and body.valuation %}{% include "_valuation.html" %}{% endif %}
 
   {% if report.passed and body.methods %}
   <section>

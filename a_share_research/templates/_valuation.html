@@ -1,0 +1,95 @@
+{% from "_macros.html" import items, cites %}
+{% set v = body.valuation %}
+{% set calc = body.valuation_calc or {} %}
+{% macro number(value, suffix='') -%}
+  {{ ('%.2f' | format(value)) ~ suffix if value is number else '—' }}
+{%- endmacro %}
+{% macro percent(value) -%}
+  {{ ('%.2f' | format(value * 100)) ~ '%' if value is number else '—' }}
+{%- endmacro %}
+<section id="valuation" tabindex="-1">
+  <h2>情景测算</h2>
+  {% if v.not_priced %}
+    <p>本次不足以定价：{{ v.not_priced.text }}</p>
+    {{ cites(v.not_priced, rows, documents) }}
+    <p>下一项关键证据：{{ v.next_evidence }}</p>
+    {% if calc.error %}<p class="notice caution">测算缺口：{{ calc.error }}</p>{% endif %}
+  {% elif calc.error %}
+    <p class="notice caution">测算缺口：{{ calc.error }}</p>
+    <p class="muted">本次未生成参考区间，需补齐上述数据后重新研究。</p>
+  {% elif calc.scenarios %}
+    <p class="window">行情日 {{ calc.as_of }} · 退出时点 {{ calc.exit_date }} · 实际跨度 {{ number(calc.horizon, ' 年') }}</p>
+    <p>按报告行情日收盘 {{ number(calc.close, ' 元') }}：<strong>{{ calc.zone or '区间倒置，暂不划分所处区域' }}</strong>。</p>
+    <dl class="snapshot valuation-snapshot" aria-label="情景测算参考边界">
+      <div><dt>测算支持区上界</dt><dd class="num">{{ number(calc.zones.support_below) }}<small>元</small></dd></div>
+      <div><dt>测算透支区下界</dt><dd class="num">{{ number(calc.zones.stretched_above) }}<small>元</small></dd></div>
+    </dl>
+    {% if calc.zones.inverted %}<p class="notice caution">支持区上界不低于透支区下界，区间倒置，不能据此划分区域。</p>
+    {% else %}<p class="muted small">不高于支持区上界为测算支持区；不低于透支区下界为测算透支区；两者之间为中性区。</p>{% endif %}
+    <p class="muted small">支持区按保守情景、年化门槛 {{ percent(calc.r) }} 计算；透支区按中性情景、年化门槛 {{ percent(calc.r_low) }} 计算。门槛是测算政策，尚未验证为安全边际；情景假设与研究结论、相对判断独立。</p>
+
+    <h3>三种情景</h3>
+    <p class="muted small">利润口径：{{ '扣非归母净利润' if calc.basis == 'core_profit' else '归母净利润' }}，单位亿元。退出倍数对应 {{ calc.years[-1] }} 年利润。</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="三种情景的利润、退出倍数与年化回报">
+      <table>
+        <thead><tr><th scope="col">情景</th>{% for year in calc.years %}<th scope="col" class="num">{{ year }} 利润</th>{% endfor %}<th scope="col" class="num">退出倍数</th><th scope="col" class="num">年化回报</th></tr></thead>
+        <tbody>{% for name in ['保守', '中性', '乐观'] %}{% set scenario = v.scenarios[name] %}
+          <tr><th scope="row">{{ name }}</th>{% for profit in scenario.profit %}<td class="num">{{ number(profit) }}</td>{% endfor %}<td class="num">{{ number(scenario.exit_pe, ' 倍') }}</td><td class="num">{{ percent(calc.scenarios[name].annual_return) }}</td></tr>
+        {% endfor %}</tbody>
+      </table>
+    </div>
+    <p class="muted small">假设派息率 {{ number(v.payout_pct, '%') }}；年化回报按退出市值与退出前累计分红计算。</p>
+    <h3>假设依据</h3>
+    {{ items(v.rationale, rows, '假设依据', documents) }}
+
+    <h3>隐含盈利要求</h3>
+    <p>在中性退出倍数与分红假设下，要达到年化 {{ percent(calc.r) }} 的门槛，{{ calc.years[-1] }} 年利润须为 <span class="num">{{ number(calc.implied.profit, ' 亿元') }}</span>；相对 {{ calc.base_year }} 年基期利润 <span class="num">{{ number(calc.base_profit, ' 亿元') }}</span>，年化增速为 <span class="num">{{ percent(calc.implied.cagr) }}</span>{% if calc.base_profit <= 0 %}（基期利润非正，不计算增速）{% endif %}。</p>
+    <p class="muted small">这是该组假设下的收益门槛，不代表市场一致预期。</p>
+
+    <details class="block">
+      <summary>敏感性矩阵与价格桥</summary>
+      <h3>利润与退出倍数的交叉敏感性</h3>
+      <p class="muted small">行是中性终点利润的倍数，列是三情景的退出市盈率，单元格为年化回报；分红保持中性情景假设。</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="利润与退出市盈率的年化回报敏感性矩阵">
+        <table>
+          <thead><tr><th scope="col">中性终点利润 ×</th>{% for pe in calc.sensitivity.exit_pe %}<th scope="col" class="num">{{ number(pe, ' 倍') }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for factor in calc.sensitivity.profit_factors %}{% set index = loop.index0 %}<tr><th scope="row" class="num">{{ number(factor) }}</th>{% for rate in calc.sensitivity.returns[index] %}<td class="num">{{ percent(rate) }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table>
+      </div>
+      <h3>价格桥 · 中性情景</h3>
+      <p>终点价格 = 报告行情日收盘 × 利润变化倍数 × 市盈率变化倍数；累计现金分红另列。</p>
+      <dl class="snapshot valuation-snapshot">
+        <div><dt>利润变化倍数</dt><dd class="num">{{ number(calc.bridge.profit_change) }}</dd></div>
+        <div><dt>市盈率变化倍数</dt><dd class="num">{{ number(calc.bridge.pe_change) }}</dd></div>
+        <div><dt>累计分红 / 当前市值</dt><dd class="num">{{ percent(calc.bridge.dividend_share) }}</dd></div>
+      </dl>
+      {% if calc.base_profit <= 0 %}<p class="muted small">基期利润非正，利润与市盈率变化倍数不具备解释意义。</p>{% endif %}
+      <p class="muted small">以上是倍数与现金分红比例，不是可相加的年化回报贡献率。</p>
+    </details>
+
+    <details class="block">
+      <summary>历史 PE 与卖方预测对照</summary>
+      <h3>近 5 年 PE 分位参照</h3>
+      {% if calc.pe_reference %}<p>30 分位 <span class="num">{{ number(calc.pe_reference.p30, ' 倍') }}</span> · 50 分位 <span class="num">{{ number(calc.pe_reference.p50, ' 倍') }}</span> · 70 分位 <span class="num">{{ number(calc.pe_reference.p70, ' 倍') }}</span>。</p>
+      <p class="muted small">来源：报告行情日对应的 TuShare 历史市盈率，剔除空值与非正值；只作参照，不自动决定退出倍数。</p>
+      {% else %}<p class="muted">未记录可用的近 5 年 PE 分位，资料缺口见报告记录。</p>{% endif %}
+      <h3>所采集卖方预测，不作测算输入</h3>
+      {% if calc.consensus and calc.consensus.status == 'ok' %}
+      <p class="muted small">截至 {{ calc.as_of }} 的近 90 天预测，同一机构同一年度只保留最新一条；归母净利润口径，单位亿元。</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="所采集卖方年度利润预测对照">
+        <table>
+          <thead><tr><th scope="col">年度</th><th scope="col" class="num">机构数</th><th scope="col" class="num">中位数</th><th scope="col" class="num">最低—最高</th><th scope="col" class="num">最旧预测天数</th><th scope="col" class="num">中性 / 中位数 − 1</th></tr></thead>
+          <tbody>{% for year, entry in calc.consensus.years.items() %}<tr><th scope="row">{{ year }}</th><td class="num">{{ entry.n_orgs }}</td><td class="num">{{ number(entry.median) }}</td><td class="num">{{ number(entry.min) }}—{{ number(entry.max) }}</td><td class="num">{{ entry.oldest_days }}</td><td class="num">{{ percent(calc.consensus.get('neutral_vs_median', {}).get(year)) }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+      {% elif calc.consensus and calc.consensus.status == 'unavailable' %}<p class="muted">卖方预测暂不可用：{{ calc.consensus.reason or '取数失败' }}。不影响本次情景测算。</p>
+      {% else %}<p class="muted">未采集到符合日期与目标年度要求的卖方预测，不影响本次情景测算。</p>{% endif %}
+    </details>
+    <details class="block">
+      <summary>测算假设与口径</summary>
+      <ul>{% for assumption in calc.assumptions %}<li>{{ assumption }}</li>{% endfor %}</ul>
+    </details>
+  {% else %}
+    <p class="muted">本报告尚未记录程序测算结果，无法展示参考区间。</p>
+  {% endif %}
+</section>

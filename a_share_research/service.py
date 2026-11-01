@@ -153,7 +153,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
     result["report"] = ({key: body[key] for key in
-                         ("verdict", "summary", "relative", "answer", "risks", "business", "financial", "methods", "checkpoints")
+                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "answer", "risks", "business", "financial", "methods", "checkpoints")
                          if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],
@@ -168,6 +168,35 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
                                         announcement_searches=extra.get("announcement_searches"))
     result["continuation"] = continuation(conn, row, body, extra)
     return result
+
+
+def company_card(conn: sqlite3.Connection, code: str) -> dict:
+    """A2 read-only projection of the latest reviewed, non-feedback company research."""
+    if not re.fullmatch(r"\d{6}", code):
+        raise RequestError("公司代码必须为六位数字")
+    row = conn.execute(
+        "SELECT r.id, r.period, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
+        "WHERE substr(r.code, 1, 6) = ? AND r.passed = 1 AND u.status = 'done' AND u.kind = 'research' "
+        "AND json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL "
+        "AND u.replay_of IS NULL ORDER BY r.created_at DESC, r.id DESC LIMIT 1", (code,),
+    ).fetchone()
+    if row is None:
+        raise RequestError("暂无通过复核的非纠错研究报告", 404)
+    body = json.loads(row["body"])
+    calc = body.get("valuation_calc")
+    summary = None
+    if isinstance(calc, dict):
+        summary = {k: calc[k] for k in ("rule", "zone", "zones", "implied", "consensus", "as_of", "not_priced", "error")
+                   if k in calc}
+        if "scenarios" in calc:
+            summary["scenarios"] = {name: {"annual_return": scenario["annual_return"]}
+                                    for name, scenario in calc["scenarios"].items()}
+    return {"version": VERSION, "code": code, "report_id": row["id"], "period": row["period"],
+            "status": "有效", "verdict": body.get("verdict"), "summary": body.get("summary"),
+            "risks": [item["text"] for item in body.get("risks", [])[:3]],
+            "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
+                            for item in body.get("checkpoints", [])],
+            "relative": body.get("relative"), "valuation_calc": summary}
 
 
 def run_budget(conn, run_id: int | None = None) -> dict:

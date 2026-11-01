@@ -30,6 +30,9 @@ def report(**changes):
     base = {
         "verdict": "需要谨慎",
         "summary": "需要谨慎：2025年营业总收入1720.54亿元，低于上年。",
+        "valuation": {"not_priced": {"text": "仅有收入与经营现金流，缺少利润基期，暂不足以定价。",
+                                      "cites": [{"ref": "T.op_cash"}]},
+                      "next_evidence": "补齐归母净利润与股本口径"},
         "relative": {"call": "跑输", "confidence": 60},
         "risks": [{"text": "经营现金流从924.64亿元降至615.22亿元。", "cites": [{"ref": "T.op_cash"}, CASH]}],
         "business": [{"text": "销售费用增加主要因为广告宣传。", "cites": [SALES]}],
