@@ -28,6 +28,7 @@ class CapturedSources:
     def __init__(self, items=ANNOUNCEMENTS):
         self.items = deepcopy(items)
         self.windows = []
+        self.calendar_windows = []
 
     def announcements(self, code, days):
         self.windows.append((code, days))
@@ -47,6 +48,7 @@ class CapturedSources:
         raise LookupError(f'无该公司真实行情夹具：{code}')
 
     def trade_days(self, start, end):
+        self.calendar_windows.append((start, end))
         return [d for d in DAYS if start <= d <= end]
 
 
@@ -90,7 +92,8 @@ def test_classify_captured_titles_and_adversarial_mutations():
     for excluded in ('摘要', '英文', 'English', '取消'):
         assert scans.classify(title + excluded) is None
     assert scans.classify(title + '更正公告') == ('periodic', 2)
-    for risk in scans.RISK.pattern.split('|'):
+    for risk in ('立案', '行政处罚', '监管函', '问询函', '关注函', '退市风险', '终止上市',
+                 '非标准', '保留意见', '无法表示意见', '否定意见', '重大诉讼', '债务逾期'):
         assert scans.classify(title + risk) == ('major_risk', 3)
     assert scans.classify(title + '问询函回复') == ('major_risk', 2)
     assert scans.classify(title + '延期回复问询函') == ('major_risk', 2)
@@ -104,6 +107,26 @@ def test_routine_risk_notice_is_not_major_risk(title):
     # Explicit title mutations exercise routine notices without claiming a new capture.
     assert scans.classify(title) is None
     assert scans.classify(title + '（收到问询函）') == ('major_risk', 3)
+
+
+@pytest.mark.parametrize(('title', 'expected'), [
+    ('关于会计师事务所出具标准无保留意见审计报告的专项说明', None),
+    ('关于会计师事务所出具保留意见审计报告的专项说明', ('major_risk', 3)),
+    ('关于会计师事务所出具非标准无保留意见审计报告的专项说明', ('major_risk', 3)),
+    ('关于收到上海证券交易所监管工作函的公告', ('major_risk', 3)),
+    ('2025年半年度业绩预亏公告', ('forecast', 2)),
+    ('2025年年度业绩预减公告', ('forecast', 2)),
+    ('2025年年度业绩预盈公告', ('forecast', 2)),
+    ('2025年年度业绩预增公告', ('forecast', 2)),
+    ('关于业绩预告事项收到中国证监会立案告知书的公告', ('major_risk', 3)),
+    ('关于业绩预告信息披露违法收到行政处罚决定书的公告', ('major_risk', 3)),
+    ('关于对上海证券交易所问询函的回复公告', ('major_risk', 2)),
+    ('关于对深圳证券交易所关注函的回复公告', ('major_risk', 2)),
+    ('关于收到深圳证券交易所关注函的公告', ('major_risk', 3)),
+])
+def test_disclosure_title_style_mutations(title, expected):
+    # Adversarial title variants, not claims of additional captured disclosures.
+    assert scans.classify(title) == expected
 
 
 @pytest.mark.parametrize(('completed_at', 'action', 'status', 'count'), [
@@ -180,6 +203,11 @@ def test_subscriptions_replace_atomic_validation_and_l5(conn):
     assert result['status'] == 'done' and not result['summary']['failures']
     assert result['summary']['closes']['600900']['last_close'] > 0
     assert scans.latest_close(conn, '600900')['last_close_date']
+    items = {r['code']: r for r in scans.subscriptions(conn)}
+    for code in ('600900', '600519'):
+        assert items[code]['last_close'] == result['summary']['closes'][code]['last_close']
+        assert items[code]['last_close_date'] == result['summary']['closes'][code]['last_close_date']
+    assert conn.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0] == 1
 
 
 def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
@@ -321,8 +349,60 @@ def test_notify_rules_cooldown_holidays_and_major_risk_exemption(conn):
     item = next(r for r in reasons if r['reason'] == 'current_zone_changed') | {'code': '603606'}
     history = [item | {'notified_at': AT}]
     reverse = item | {'from_zone': item['to_zone'], 'to_zone': item['from_zone']}
-    assert scans.allow_notification(reverse, history, AT, DAYS)
+    assert not scans.allow_notification(reverse, history, AT, DAYS)
     assert scans.notification_reasons(before, before, [], []) == []
+
+
+@pytest.mark.parametrize(('first', 'opposite'), [
+    ('测算支持区', '测算透支区'), ('测算透支区', '测算支持区'),
+])
+def test_zone_reversal_across_neutral_and_boundary_oscillation(conn, first, opposite):
+    card = service.company_card(conn, '603606')
+    history, notices = [], []
+    before = card | {'current': {'current_zone': '中性区'}}
+    for zone, allowed in [(first, True), ('中性区', False), (first, False),
+                          ('中性区', False), (opposite, True), (first, True)]:
+        # Mutate only the observed zone state of a captured card, not financial evidence.
+        after = card | {'current': {'current_zone': zone}}
+        memory = scans.last_extreme_zones(history)
+        reason, = scans.notification_reasons(before, after, [], [], last_extreme_zone=memory.get('603606'))
+        item = reason | {'code': '603606', 'notified_at': AT}
+        assert scans.allow_notification(item, notices, AT, DAYS) == allowed
+        assert reason['bypass_cooldown'] == (zone in scans.EXTREMES and memory.get('603606') in scans.EXTREMES
+                                             and zone != memory['603606'])
+        emitted = [item] if allowed else []
+        notices.extend(emitted)
+        history.append({'summary': {'cards': {'603606': after}, 'notify': emitted}})
+        before = after
+    assert scans.last_extreme_zones(history) == {'603606': first}
+
+
+@pytest.mark.parametrize(('notified_at', 'expected_start'), [
+    ('2026-01-01T18:00:00+08:00', '2026-09-30'),
+    ('2026-10-29T18:00:00+08:00', '2026-10-29'),
+])
+def test_calendar_window_and_extreme_memory_persist_between_scans(conn, notified_at, expected_start):
+    priced(conn)
+    complete_cards_at(conn, at=AT)
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    first = run_scan(conn)
+    summary = first['summary']
+    # Mutate a past observed state; the next scan still consumes the actual captured close.
+    summary['cards']['603606']['current']['current_zone'] = '测算支持区'
+    summary['notify'] = [{'code': '603606', 'reason': 'current_zone_changed',
+                          'from_zone': '中性区', 'to_zone': '测算支持区', 'notified_at': notified_at},
+                         {'code': '600519', 'reason': 'current_zone_changed', 'notified_at': '2025-01-01'}]
+    conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary), first['id']))
+    source = CapturedSources()
+    second = run_scan(conn, source)
+    assert second['status'] == 'done'
+    assert source.calendar_windows == [(expected_start, AT[:10])]
+    assert second['summary']['last_extreme_zones'] == {'603606': '测算支持区'}
+    assert second['summary']['cards']['603606']['current']['current_zone'] == '中性区'
+    # A scan outside this code's subscription scope must not erase its memory.
+    scans.replace_subscriptions(conn, [], catalog=CATALOG)
+    third = run_scan(conn)
+    assert third['summary']['last_extreme_zones'] == {'603606': '测算支持区'}
 
 
 def test_scan_failure_recovery_and_unknown_scan(conn):

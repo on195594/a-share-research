@@ -170,7 +170,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
     return result
 
 
-def company_card(conn: sqlite3.Connection, code: str) -> dict:
+def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = None) -> dict:
     """A2 read-only projection of the latest reviewed, non-feedback company research."""
     if not re.fullmatch(r"\d{6}", code):
         raise RequestError("公司代码必须为六位数字")
@@ -193,10 +193,13 @@ def company_card(conn: sqlite3.Connection, code: str) -> dict:
                                     for name, scenario in calc["scenarios"].items()}
     from a_share_research import scans
     pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
+    failure = scans.announcement_failure(conn, code, scan_id=scan_id)
+    if failure:
+        pending.append(failure)
     current = scans.latest_close(conn, code)
     current['current_zone'] = scans.current_zone(calc, current['last_close'])
     if pending:
-        current['note'] = '待复核，区间暂停解读'
+        current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'
     return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],
             "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
             "status": "待复核" if pending else "有效", "verdict": body.get("verdict"), "summary": body.get("summary"),

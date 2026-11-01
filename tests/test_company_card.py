@@ -4,10 +4,11 @@ import json
 
 import pytest
 
-from a_share_research import db, service, valuation
+from a_share_research import db, scans, service, valuation
 from support.continuation import load
 from support.valuation import BODY, RECORD, ROWS, assumptions
 from test_service_http import server  # Existing isolated real HTTP fixture.
+from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, run_scan
 
 
 def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
@@ -74,6 +75,87 @@ def test_card_completion_uses_run_finished_at(tmp_path):
     assert updated['completed_at'] == finished_at
     assert updated['created_at'] == card['created_at'] != finished_at
     assert updated['report_id'] == card['report_id']
+    conn.close()
+
+
+@pytest.mark.parametrize(('failed_at', 'pending'), [
+    ('2026-11-01T01:59:59+00:00', False),
+    ('2026-11-01T02:00:00+00:00', False),
+    ('2026-11-01T02:00:01+00:00', True),
+])
+def test_manual_passed_card_supersedes_old_failed_scan_review(tmp_path, failed_at, pending):
+    conn = db.connect(tmp_path / 'manual-card.db')
+    load(conn)
+    complete_cards_at(conn)
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    first = run_scan(conn)
+    failed_run, = first['summary']['queued_runs']
+    db.update_run(conn, failed_run, status='failed', error='复核未通过',
+                  finished_at='2026-10-31T10:00:00+08:00')
+    assert service.company_card(conn, '603606')['status'] == '待复核'
+    manual = service.submit(conn, '603606', 'manual-after-failure')
+    db.save_report(conn, manual, RECORD['code'], RECORD['name'], RECORD['period'],
+                   True, RECORD['verdict'], deepcopy(BODY))
+    report = conn.execute('SELECT id FROM reports WHERE run_id=?', (manual,)).fetchone()[0]
+    completed_at = '2026-11-01T10:00:00+08:00'
+    conn.execute('UPDATE reports SET created_at=? WHERE id=?', (completed_at, report))
+    db.update_run(conn, manual, status='done', finished_at=completed_at)
+    db.update_run(conn, failed_run, finished_at=failed_at)
+    total = conn.total_changes
+    card = service.company_card(conn, '603606')
+    assert conn.total_changes == total
+    assert card['report_id'] == report and card['completed_at'] == completed_at
+    assert card['status'] == ('待复核' if pending else '有效')
+    assert bool(card['pending_events']) == pending
+    assert ('note' in card['current']) == pending
+    if pending:
+        assert card['pending_events'][0]['run_id'] == failed_run
+    conn.close()
+
+
+@pytest.mark.parametrize('valuation_fails', [False, True])
+def test_announcement_failure_pauses_card_until_same_code_recovers(tmp_path, valuation_fails):
+    conn = db.connect(tmp_path / 'scan-failure.db')
+    load(conn)
+    complete_cards_at(conn, at=AT)
+    priced(conn)
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    source = CapturedSources()
+    next(i for i in source.items if i['code'] == '603606')['raw']['announcementTime'] = None
+    first = run_scan(conn, source)
+    assert first['status'] == 'done' and not first['events']
+    changes = conn.total_changes
+    card = service.company_card(conn, '603606')
+    assert conn.total_changes == changes
+    assert card['status'] == '待复核'
+    assert card['current']['note'] == '公告扫描未完成，区间暂停解读'
+    assert card['current']['last_close'] == first['summary']['closes']['603606']['last_close']
+    failure, = card['pending_events']
+    assert failure == {'kind': 'scan_failure', 'scan_id': first['id'], **first['summary']['failures'][0]}
+    assert 'run_id' not in failure and 'doc_key' not in failure
+    assert first['summary']['cards']['603606'] == card
+    assert any(n['reason'] == 'pending_review' for n in first['notify'])
+    scans.replace_subscriptions(conn, ['600519'], catalog=CATALOG)
+    assert run_scan(conn)['status'] == 'done'
+    assert service.company_card(conn, '603606')['pending_events'] == [failure]
+    # A later interrupted scan with only a scope is not evidence of successful collection.
+    partial = scans.submit(conn)
+    conn.execute("UPDATE scans SET status='failed',summary=? WHERE id=?",
+                 (json.dumps({'scope': [{'code': '603606'}]}), partial))
+    assert service.company_card(conn, '603606')['pending_events'] == [failure]
+
+    class InvalidCloseCapture(CapturedSources):
+        def valuation(self, code):
+            return super().valuation(code) | {'trade_date': None}
+
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    recovered = run_scan(conn, InvalidCloseCapture() if valuation_fails else CapturedSources())
+    assert recovered['status'] == 'done'
+    assert [f['stage'] for f in recovered['summary']['failures']] == (['valuation'] if valuation_fails else [])
+    card = service.company_card(conn, '603606')
+    assert card['status'] == '有效' and card['pending_events'] == []
+    assert 'note' not in card['current']
+    assert recovered['summary']['cards']['603606'] == card
     conn.close()
 
 

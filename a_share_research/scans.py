@@ -11,15 +11,16 @@ from a_share_research import companies, db, service
 
 log = logging.getLogger(__name__)
 # Generic 风险提示 titles (trading-volatility or redemption notices) are routine and stay out of scope.
-RISK = re.compile('立案|行政处罚|监管函|问询函|关注函|退市风险|终止上市|非标准|保留意见|无法表示意见|否定意见|重大诉讼|债务逾期')
+RISK = re.compile(r'立案|行政处罚|监管工作函|监管函|问询函|关注函|退市风险|终止上市|非标准|(?<!无)保留意见|无法表示意见|否定意见|重大诉讼|债务逾期')
+FORECAST = re.compile('业绩预告|业绩快报|业绩修正|业绩预亏|业绩预减|业绩预盈|业绩预增')
 PERIODIC = re.compile('年度报告|季度报告|年报|半年报|季报')
 EXTREMES = {'测算支持区', '测算透支区'}
 
 
 def classify(title: str) -> tuple[str, int] | None:
     if RISK.search(title):
-        return 'major_risk', 2 if '问询函' in title and '回复' in title else 3
-    if any(word in title for word in ('业绩预告', '业绩快报', '业绩修正')):
+        return 'major_risk', 2 if any(word in title for word in ('问询函', '关注函')) and '回复' in title else 3
+    if FORECAST.search(title):
         return 'forecast', 2
     # Corrections have their own announcement identity and must remain discoverable.
     if PERIODIC.search(title) and not any(word in title for word in ('摘要', '英文', 'English', '取消')):
@@ -51,7 +52,8 @@ def pending_events(events: list[dict], completed_at: str) -> list[dict]:
     triggered = [e for e in events if e['run_id'] is not None]
     if triggered:
         latest = max(triggered, key=lambda e: e['run_id'])
-        if latest['run_status'] == 'failed' and latest not in pending:
+        if (latest['run_status'] == 'failed' and latest.get('judgment_completed_at')
+                and instant(latest['judgment_completed_at']) > instant(completed_at) and latest not in pending):
             pending.append(latest)
     return pending
 
@@ -71,7 +73,7 @@ def review_order(events: list[dict], scan_id: int) -> list[str]:
 
 
 def notification_reasons(before: dict | None, after: dict | None, events: list[dict],
-                         completions: list[dict]) -> list[dict]:
+                         completions: list[dict], *, last_extreme_zone: str | None = None) -> list[dict]:
     reasons = []
     for event in events:
         if event['kind'] == 'major_risk':
@@ -88,10 +90,12 @@ def notification_reasons(before: dict | None, after: dict | None, events: list[d
                             'detail': '接续研究的参考区间或结论变化', 'change': completion['change']})
     old = ((before or {}).get('current') or {}).get('current_zone')
     new = ((after or {}).get('current') or {}).get('current_zone')
+    last_extreme_zone = last_extreme_zone or (old if old in EXTREMES else None)
     if old is not None and new is not None and old != new and (old in EXTREMES or new in EXTREMES):
         reasons.append({'kind': 'current_zone', 'reason': 'current_zone_changed',
                         'detail': f'{old} → {new}', 'from_zone': old, 'to_zone': new,
-                        'bypass_cooldown': old in EXTREMES and new in EXTREMES})
+                        'bypass_cooldown': new in EXTREMES and last_extreme_zone in EXTREMES
+                                           and new != last_extreme_zone})
     return reasons
 
 
@@ -101,10 +105,6 @@ def allow_notification(item: dict, history: list[dict], at: str, trade_days: lis
     previous = next((old for old in reversed(history)
                      if (old['code'], old['reason']) == (item['code'], item['reason'])), None)
     if previous is None:
-        return True
-    # Also exempt a return across the same boundary, not only a jump between extremes.
-    if item['reason'] == 'current_zone_changed' and (item['from_zone'], item['to_zone']) == (
-            previous.get('to_zone'), previous.get('from_zone')):
         return True
     start, end = instant(previous['notified_at']).date(), instant(at).date()
     return sum(start < date.fromisoformat(day) <= end for day in trade_days) >= 5
@@ -117,7 +117,8 @@ def subscriptions(conn) -> list[dict]:
     if batch:
         for code in json.loads(batch['l5'])['codes']:
             code = code[:6]
-            items.setdefault(code, {'code': code, 'origin': 'l5', 'last_close': None, 'last_close_date': None})
+            if code not in items:
+                items[code] = {'code': code, 'origin': 'l5', **latest_close(conn, code)}
     return list(items.values())
 
 
@@ -176,9 +177,9 @@ def latency(event: dict, at: str) -> dict:
             'announcement_precision': 'date'}
 
 
-def card_or_none(conn, code: str) -> dict | None:
+def card_or_none(conn, code: str, *, scan_id: int | None = None) -> dict | None:
     try:
-        return service.company_card(conn, code)
+        return service.company_card(conn, code, scan_id=scan_id)
     except service.RequestError as exc:
         if exc.status != 404:
             raise
@@ -194,6 +195,38 @@ def latest_close(conn, code: str) -> dict:
             candidates.append(close)
             break
     return max(candidates, key=lambda x: x['last_close_date']) if candidates else {'last_close': None, 'last_close_date': None}
+
+
+def announcement_failure(conn, code: str, *, scan_id: int | None = None) -> dict | None:
+    # During execute, the fully collected current summary is projected before the scan is finalized.
+    for row in conn.execute("SELECT id,status,summary FROM scans WHERE summary IS NOT NULL "
+                            "AND (status IN ('done','failed') OR id=?) ORDER BY id DESC", (scan_id,)):
+        summary = json.loads(row['summary'])
+        failure = next((f for f in summary.get('failures', [])
+                        if f['code'] == code and f['stage'] == 'announcements'), None)
+        if failure:
+            return {'kind': 'scan_failure', 'scan_id': row['id'], **failure}
+        if (code in summary.get('announcements_succeeded', [])
+                or row['status'] == 'done' and any(s['code'] == code for s in summary.get('scope', []))):
+            return None
+    return None
+
+
+def last_extreme_zones(history: list[dict]) -> dict[str, str]:
+    zones = {}
+    for scan in history:
+        summary = scan['summary']
+        # Older v7 summaries can seed the memory from their notices and card snapshots.
+        for notice in summary.get('notify', []):
+            zone = notice.get('to_zone') if notice.get('to_zone') in EXTREMES else notice.get('from_zone')
+            if zone in EXTREMES:
+                zones[notice['code']] = zone
+        for code, card in summary.get('cards', {}).items():
+            zone = ((card or {}).get('current') or {}).get('current_zone')
+            if zone in EXTREMES:
+                zones[code] = zone
+        zones.update(summary.get('last_extreme_zones', {}))
+    return zones
 
 
 class MarketSources:
@@ -304,13 +337,15 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                            (at, scan_id)).fetchone()
     if not claimed:
         return
-    summary = {'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {}}
+    summary = {'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
+               'announcements_succeeded': []}
     try:
         scope = subscriptions(conn)
         history = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute(
             "SELECT * FROM scans WHERE id<? AND status='done' ORDER BY id", (scan_id,))]
         previous = history[-1] if history else None
         notices = [n for scan in history for n in scan['summary'].get('notify', [])]
+        summary['last_extreme_zones'] = last_extreme_zones(history)
         summary['scope'] = scope
         summary['before'] = {s['code']: card_or_none(conn, s['code']) for s in scope}
         for subscription in scope:
@@ -331,6 +366,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                                      "VALUES (?,?,?,?,?,?,?,?,?,'deferred') ON CONFLICT(code,doc_key) DO NOTHING",
                                      (scan_id, *[event[k] for k in ('code','doc_key','title','announced','url','kind','severity')],
                                       fixed_at or db.now()))
+                summary['announcements_succeeded'].append(code)
             except Exception as exc:
                 log.exception('scan %s announcements %s failed', scan_id, code)
                 summary['failures'].append({'code': code, 'stage': 'announcements', 'reason': str(exc)})
@@ -349,7 +385,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)]
         candidates = []
         for code in {s['code'] for s in scope} | {r['code'][:6] for r in completed}:
-            card = card_or_none(conn, code)
+            card = card_or_none(conn, code, scan_id=scan_id)
             summary['cards'][code] = card
             before = (previous['summary'].get('cards', {}).get(code) if previous else None) or summary['before'].get(code)
             if before and summary['before'].get(code) and before['report_id'] != summary['before'][code]['report_id']:
@@ -359,16 +395,26 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
             related = [e for e in events(conn, code=code)
                        if e['scan_id'] == scan_id or e['run_id'] in {r['id'] for r in completed}]
             for reason in notification_reasons(before, card, [e for e in new_events if e['code'] == code],
-                                               [r for r in completed if r['code'][:6] == code]):
+                                               [r for r in completed if r['code'][:6] == code],
+                                               last_extreme_zone=summary['last_extreme_zones'].get(code)):
                 candidates.append({'code': code, 'name': (card or {}).get('name') or summary['names'].get(code), **reason,
                                    'card': card, 'path': f'/stock/{code}', 'card_path': f'/api/companies/{code}/card',
                                    'latencies': [latency(e, at) for e in related], 'notified_at': at})
+            zone = ((card or {}).get('current') or {}).get('current_zone')
+            old_zone = ((before or {}).get('current') or {}).get('current_zone')
+            if zone in EXTREMES:
+                summary['last_extreme_zones'][code] = zone
+            elif old_zone in EXTREMES:
+                summary['last_extreme_zones'][code] = old_zone
         trade_days = []
         # Emergency notices survive even a calendar failure later in this scan.
         summary['notify'] = [item for item in candidates if item.get('bypass_cooldown')
                              and allow_notification(item, notices, at, [])]
-        if any(not c.get('bypass_cooldown') for c in candidates) and notices:
-            start = min(n['notified_at'][:10] for n in notices)
+        cooling = {(c['code'], c['reason']) for c in candidates if not c.get('bypass_cooldown')}
+        relevant = [n for n in notices if (n['code'], n['reason']) in cooling]
+        if relevant:
+            start = max(min(instant(n['notified_at']).date().isoformat() for n in relevant),
+                        (instant(at) - timedelta(days=30)).date().isoformat())
             trade_days = [date.fromisoformat(str(d)).isoformat() for d in source.trade_days(start, at[:10])]
         for candidate in candidates:
             if not candidate.get('bypass_cooldown') and allow_notification(candidate, notices, at, trade_days):
