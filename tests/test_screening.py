@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from a_share_research import screening
+from a_share_research import batches, screening
 
 DATA = Path(__file__).parent / "data"
 FIN = json.loads((DATA / "screen-financials.json").read_text())
@@ -188,3 +188,33 @@ def test_comparison_keeps_real_calculations_and_marks_legacy_gaps(tmp_path):
     assert next(r for r in digest['metrics'] if r['id'] == calculation['id']) == calculation
     assert digest['missing_metrics']['T.capex'] == ['2024-12-31', '2025-12-31']
     conn.close()
+
+
+def test_forced_ranking_must_cover_every_reviewed_candidate_once():
+    candidates = [{"code": r["code"], "report": {"verdict": "需要谨慎"}} for r in ROWS["rows"][:5]]
+    candidates[4]["report"] = {"verdict": "暂不值得"}  # still ranked: spotting losers is the point
+    candidates.append({"code": ROWS["rows"][5]["code"], "report": None})  # failed review: nothing to judge
+    codes = [c["code"] for c in candidates[:5]]
+    assert screening.rankable(candidates) == codes
+    assert screening.ranking_problems({"order": codes[::-1], "basis": "估值与现金流"}, candidates) == []
+    assert screening.ranking_problems({"order": codes[:4], "basis": "x"}, candidates) == [f"order 缺少：{codes[4]}"]
+    assert screening.ranking_problems({"order": codes + [codes[0]], "basis": "x"}, candidates) == ["order 中代码不能重复"]
+    assert screening.ranking_problems({"order": codes + [candidates[5]["code"]], "basis": "x"}, candidates)
+    assert screening.ranking_problems({"order": codes, "basis": ""}, candidates) == ["basis 必须是非空字符串"]
+    assert screening.ranking_problems(None, candidates) == ["order 必须是候选代码字符串数组"]
+    prompt = screening.ranking_prompt(candidates, screening.RULE)
+    assert candidates[5]["code"] not in prompt and "中证800全收益" in prompt
+
+
+def test_returns_add_ranking_halves_and_skip_the_middle_of_an_odd_count():
+    codes = list(PRICES["entry"]["prices"])
+    batch = {"entry": PRICES["entry"], "marks": {"latest": PRICES["mark"]}, "rule": screening.RULE,
+             "l5": {"codes": codes}, "q5": codes, "q20": [{"code": c} for c in codes],
+             "selection": {"ranking": {"order": codes}}}
+    half = len(codes) // 2
+    assert batches.ranking_halves(batch) == (codes[:half], codes[-half:])
+    out = screening.returns(batch)["values"]
+    assert out["TOP"] == pytest.approx(screening.group_return(PRICES["entry"], PRICES["mark"], codes[:half], half, 0.002))
+    assert out["BOTTOM"] == pytest.approx(screening.group_return(PRICES["entry"], PRICES["mark"], codes[-half:], half, 0.002))
+    unranked = screening.returns(batch | {"selection": {"ranking": {"order": None, "error": "x"}}})["values"]
+    assert "TOP" not in unranked and "BOTTOM" not in unranked

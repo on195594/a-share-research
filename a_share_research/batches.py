@@ -25,12 +25,23 @@ def group_return(entry: dict, mark: dict, codes: list[str], seats: int, cost: fl
     return (total / seats) * (1 - cost) - 1
 
 
+def ranking_halves(batch: dict) -> tuple[list[str], list[str]] | None:
+    """Top and bottom half of the forced ranking; the middle code of an odd count belongs to neither."""
+    order = (((batch.get("selection") or {}).get("ranking") or {}).get("order")) or []
+    if len(order) < 2:
+        return None
+    half = len(order) // 2
+    return order[:half], order[-half:]
+
+
 def returns(batch: dict) -> dict | None:
     entry, mark, rule = batch.get("entry"), (batch.get("marks") or {}).get("latest"), batch["rule"]
     if not entry or not mark:
         return None
     q20 = [r["code"] for r in batch["q20"]]
     groups = {"L5": (batch["l5"]["codes"], rule["picks"]), "Q5": (batch["q5"], rule["picks"]), "Q20": (q20, len(q20))}
+    if halves := ranking_halves(batch):
+        groups |= {"TOP": (halves[0], len(halves[0])), "BOTTOM": (halves[1], len(halves[1]))}
     out = {name: group_return(entry, mark, codes, seats, rule["cost"]) for name, (codes, seats) in groups.items()}
     for code, b in mark["benchmarks"].items():
         out[code] = b["value"] / entry["benchmarks"][code]["value"] - 1

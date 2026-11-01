@@ -70,9 +70,10 @@
     <thead><tr><th scope="col">组合</th><th scope="col" class="num">累计</th>
       {% for key in (batch.marks.horizons or {}) %}<th scope="col" class="num">{{ key[:-1] }} 个月</th>{% endfor %}</tr></thead>
     <tbody>
-    {% for key, label in [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")] + batch.rule.benchmarks.items() | list %}
+    {% set ranked = [("TOP", "排序前一半"), ("BOTTOM", "排序后一半")] if "TOP" in results["values"] else [] %}
+    {% for key, label in [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")] + ranked + batch.rule.benchmarks.items() | list %}
       <tr><th scope="row">{{ label }}</th><td class="num">{{ b.pct(results["values"][key]) }}</td>
-        {% for h in (batch.marks.horizons or {}).values() %}<td class="num">{{ b.pct(h["values"][key]) }}</td>{% endfor %}</tr>
+        {% for h in (batch.marks.horizons or {}).values() %}<td class="num">{{ b.pct(h["values"].get(key)) }}</td>{% endfor %}</tr>
     {% endfor %}
     </tbody>
   </table>
@@ -118,6 +119,17 @@
   {% if draft.gaps %}<p class="small muted">证据缺口：{{ draft.gaps | join("；") }}</p>{% endif %}
   {% else %}
   <p class="notice caution" role="status">模型没有给出合格草案（{{ batch.selection.error or "无可选候选" }}）。可以直接在下方按研究结论自行勾选。</p>
+  {% endif %}
+  {% set ranking = batch.selection.ranking %}
+  {% if ranking and ranking.order %}
+  <details>
+    <summary>6 个月相对表现强制排序（{{ ranking.order | length }} 家）</summary>
+    <p class="small muted">与入选无关的独立判断：前一半与后一半分别模拟等权持有，到期比较收益差与大幅回撤，用来检验研究能否识别将会落后的公司。</p>
+    <ol class="small">{% for code in ranking.order %}<li>{{ names.get(code, code) }} <span class="code">{{ code }}</span></li>{% endfor %}</ol>
+    <p class="small">{{ ranking.basis }}</p>
+  </details>
+  {% elif ranking %}
+  <p class="small muted">强制排序未生成（{{ ranking.error or "输出不合格" }}），本批不计排序收益。</p>
   {% endif %}
 </section>
 {% endif %}
