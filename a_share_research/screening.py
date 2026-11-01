@@ -624,8 +624,16 @@ def _draft_picks(selection: dict | None) -> list[str]:
     return [p["code"] for p in ((selection or {}).get("draft") or {}).get("picks", [])]
 
 
+def _cash_large_draft(batch: dict, selection: dict | None) -> bool:
+    """Only completed dual-pool drafts without selectable large candidates freeze empty L5."""
+    return (batch["rule"]["version"] == "screen-v1.2"
+            and not any(r.get("verdict") and r["verdict"] != "暂不值得" for r in batch["q20"])
+            and isinstance((selection or {}).get("draft"), dict)
+            and isinstance((batch.get("small_selection") or {}).get("draft"), dict))
+
+
 def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "selecting") -> bool:
-    """Save the draft and, when it has picks, freeze it in the same transaction.
+    """Save and freeze a draft with picks or no selectable large candidates atomically.
 
     The owner chose (2026-10-25) to freeze the model's draft as soon as it exists. A draft that
     fails freeze validation stays proposed with the reason, for the owner to pick from.
@@ -647,7 +655,7 @@ def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "s
         _save(conn, batch_id, status="proposed", selection=selection, error=None, marks=None)
         if coverage is not None:
             _save(conn, batch_id, coverage=coverage)
-        if picks:
+        if picks or _cash_large_draft(batch, selection):
             try:
                 freeze(conn, batch_id, picks, "", by="auto")
                 log.info("batch %s frozen with the model draft", batch_id)
@@ -718,8 +726,11 @@ def tick(conn) -> bool:
                 return updated is not None
             if batch["status"] == "proposed":
                 # A draft with picks normally freezes in the same transaction that saved it; this
-                # catches one left behind by an older version. Empty or unfreezable drafts wait.
-                if not _draft_picks(batch["selection"]) or (batch["selection"] or {}).get("freeze_error"):
+                # catches one left behind by an older version, including an all-cash L5.
+                # Empty drafts with selectable large candidates still wait for the owner.
+                if (batch["selection"] or {}).get("freeze_error"):
+                    continue
+                if not _draft_picks(batch["selection"]) and not _cash_large_draft(batch, batch["selection"]):
                     continue
                 return _auto_freeze(conn, batch["id"], batch["selection"], expected_status="proposed")
             if batch["status"] == "researching":
@@ -739,7 +750,8 @@ def tick(conn) -> bool:
                     small_finished, s10 = research_state(conn, s10)
                     if not small_finished:
                         continue
-                if not any(r["verdict"] and r["verdict"] != "暂不值得" for r in q20):
+                large_selectable = any(r["verdict"] and r["verdict"] != "暂不值得" for r in q20)
+                if not large_selectable and not (small and any(r["verdict"] and r["verdict"] != "暂不值得" for r in s10)):
                     raise ScreenError("没有研究通过的候选，无法比较；可重新开始本月批次")
                 started = conn.execute("UPDATE batches SET status = 'selecting', q20 = ?, updated_at = ?"
                                        " WHERE id = ? AND status = 'researching' AND q20 = ? RETURNING id",
@@ -751,7 +763,11 @@ def tick(conn) -> bool:
                     batch = batch | {"s10": s10}
                 try:
                     selection = batch.get("selection") if small else None
-                    if not selection or "draft" not in selection:
+                    if not large_selectable:
+                        selection = {"draft": {"picks": [], "rejected": [], "concentration": "",
+                                               "gaps": ["大市值组没有研究通过的候选，全部席位留现金"]},
+                                     "attempts": []}
+                    elif not selection or "draft" not in selection:
                         selection = select(conn, batch | {"q20": q20})
                     if small:
                         _save(conn, batch["id"], selection=selection)

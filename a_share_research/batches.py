@@ -13,7 +13,7 @@ def load(row) -> dict:
 
 def group_return(entry: dict, mark: dict, codes: list[str], seats: int, cost: float) -> float | None:
     """Equal-weight unit NAV return: unfilled or empty seats are cash; cost applied once on the whole group."""
-    if not codes:
+    if seats <= 0:
         return None
     total = 0.0
     for code in codes:
@@ -43,11 +43,10 @@ def returns(batch: dict) -> dict | None:
     groups = {"L5": (batch["l5"]["codes"], rule["picks"]), "Q5": (batch["q5"], rule["picks"]), "Q20": (q20, len(q20))}
     if halves := ranking_halves(batch):
         groups |= {"TOP": (halves[0], len(halves[0])), "BOTTOM": (halves[1], len(halves[1]))}
-    out = {name: group_return(entry, mark, codes, seats, rule["cost"]) for name, (codes, seats) in groups.items()}
     if rule.get("version") == "screen-v1.2":
         for name, codes in (("SQ3", batch.get("sq3") or []), ("SL3", (batch.get("sl3") or {}).get("codes", []))):
-            out[name] = (group_return(entry, mark, codes, rule["small"]["picks"], rule["cost"])
-                         if codes else -rule["cost"])
+            groups[name] = (codes, rule["small"]["picks"])
+    out = {name: group_return(entry, mark, codes, seats, rule["cost"]) for name, (codes, seats) in groups.items()}
     for code, b in mark["benchmarks"].items():
         out[code] = b["value"] / entry["benchmarks"][code]["value"] - 1
     return {"date": mark["date"], "values": out}

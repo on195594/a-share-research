@@ -342,12 +342,12 @@ def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "ow
     rule = batch["rule"]
     allowed = {r["code"]: r for r in batch["q20"] if r.get("verdict") and r["verdict"] != "暂不值得"}
     codes = list(dict.fromkeys(codes))
-    if not codes or len(codes) > rule["picks"] or any(c not in allowed for c in codes):
+    if (allowed and not codes) or len(codes) > rule["picks"] or any(c not in allowed for c in codes):
         raise RequestError(f"请从研究通过的候选中选择 1–{rule['picks']} 家")
     counts: dict[str, int] = {}
     for code in codes:
         counts[allowed[code]["industry"]] = counts.get(allowed[code]["industry"], 0) + 1
-    if max(counts.values()) > rule["picks_per_industry"]:
+    if max(counts.values(), default=0) > rule["picks_per_industry"]:
         raise RequestError(f"同一行业最多 {rule['picks_per_industry']} 家")
     if len(note) > 2000:
         raise RequestError("说明不超过 2000 字")

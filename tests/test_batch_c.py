@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import batches, db, screening, service, sources
+from a_share_research import batches, charts, db, screening, service, sources
+from support.templates import ENV
 from test_advisor_sources import DailyReports, budget_calls
 
 DATA = Path(__file__).parent / 'data'
@@ -102,6 +103,122 @@ def test_empty_small_draft_auto_freezes_with_large_and_partial_coverage(tmp_path
     conn.close()
 
 
+@pytest.mark.parametrize('rule', [batches.RULE, batches.NEW_RULE], ids=['v11', 'v12'])
+def test_empty_large_draft_with_candidates_requires_owner_picks(tmp_path, monkeypatch, rule):
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    q20, s10 = proposed(conn, status='selecting')
+    # Existing captured rows; only workflow state changes, no financial inputs change.
+    q20 = [r | {'return_60d': None} for r in q20]
+    selection = {'draft': {'picks': []}}
+    db.update_batch(conn, 1, rule=json.dumps(rule), q20=json.dumps(q20),
+                    small_selection=json.dumps({'draft': {'picks': [{'code': s10[0]['code']}]}}))
+    assert screening._auto_freeze(conn, 1, selection)
+    assert not screening.tick(conn)
+    with pytest.raises(service.RequestError, match='选择 1–5 家'):
+        service.freeze_batch(conn, 1, [], '')
+    assert conn.execute('SELECT status FROM batches').fetchone()[0] == 'proposed'
+    with pytest.raises(service.RequestError, match='选择 1–5 家'):
+        service.freeze_batch(conn, 1, [r['code'] for r in q20], '')
+    service.freeze_batch(conn, 1, [q20[0]['code']], '')
+    frozen = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert frozen['l5']['codes'] == [q20[0]['code']]
+    assert frozen['l5']['frozen_by'] == 'owner'
+    conn.close()
+
+
+@pytest.mark.parametrize('verdict', [None, '暂不值得'])
+@pytest.mark.parametrize('by', ['owner', 'auto'])
+def test_empty_large_freezes_only_without_selectable_candidates(tmp_path, monkeypatch, verdict, by):
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    q20, s10 = proposed(conn)
+    selection = {'draft': {'picks': []}}
+    db.update_batch(conn, 1, q20=json.dumps([r | {'verdict': verdict, 'return_60d': None} for r in q20]),
+                    selection=json.dumps(selection),
+                    small_selection=json.dumps({'draft': {'picks': [{'code': s10[0]['code']}]}}))
+    with pytest.raises(service.RequestError):
+        service.freeze_batch(conn, 1, [q20[0]['code']], '')
+    if by == 'auto':
+        # A complete draft left in proposed by an older worker must be recovered.
+        assert screening.tick(conn)
+    else:
+        service.freeze_batch(conn, 1, [], '')
+    frozen = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert frozen['status'] == 'frozen'
+    assert frozen['l5']['codes'] == [] and frozen['l5']['frozen_by'] == by
+    assert frozen['sl3']['codes'] == [s10[0]['code']] and frozen['sl3']['frozen_by'] == by
+    conn.close()
+
+
+def completed_pools(conn, *, large_passed, small_passed, rule=batches.NEW_RULE, small_draft=True):
+    """Replay observed candidate verdicts; mutate review outcomes to exercise sequencing.
+
+    Pool membership is only a workflow fixture, not a claim about market-cap eligibility.
+    Saved small picks exercise restart/resume without a live model completion.
+    """
+    captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
+    large, small = copy.deepcopy(captured['rows'][1:2]), copy.deepcopy(captured['rows'][:1])
+    for rows, passed in ((large, large_passed), (small, small_passed)):
+        for row in rows:
+            row['run_id'] = db.create_run(conn, row['code'], None, name=row['name'])
+            db.update_run(conn, row['run_id'], status='done')
+            db.save_report(conn, row['run_id'], row['code'], row['name'], '', passed,
+                           row['verdict'], {'verdict': row['verdict']})
+    conn.execute('INSERT INTO batches (status,created_at,as_of,rule,q20,q5,s10,sq3,small_selection) '
+                 'VALUES (?,?,?,?,?,?,?,?,?)',
+                 ('researching', db.now(), '20260918', json.dumps(rule), json.dumps(large), '[]',
+                  json.dumps(small), '[]',
+                  json.dumps({'draft': {'picks': [{'code': small[0]['code']}]}}) if small_draft else None))
+    return large, small
+
+
+@pytest.mark.parametrize('small_picks', [True, False], ids=['small-selected', 'both-drafts-empty'])
+def test_zero_passed_large_resumes_small_comparison_and_auto_freezes(tmp_path, monkeypatch, small_picks):
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    _, small = completed_pools(conn, large_passed=False, small_passed=True)
+    if not small_picks:
+        db.update_batch(conn, 1, small_selection=json.dumps({'draft': {'picks': []}}))
+    assert screening.tick(conn)
+    frozen = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert frozen['status'] == 'frozen' and frozen['error'] is None
+    assert frozen['selection']['draft'] == {
+        'picks': [], 'rejected': [], 'concentration': '',
+        'gaps': ['大市值组没有研究通过的候选，全部席位留现金']}
+    assert frozen['l5']['codes'] == [] and frozen['l5']['frozen_by'] == 'auto'
+    assert frozen['sl3']['codes'] == ([small[0]['code']] if small_picks else [])
+    assert frozen['sl3']['frozen_by'] == 'auto'
+    assert frozen['q20'][0]['verdict'] is None
+    assert frozen['s10'][0]['verdict'] == small[0]['verdict']
+    conn.close()
+
+
+@pytest.mark.parametrize('rule,small_passed', [(batches.NEW_RULE, False), (batches.RULE, True)],
+                         ids=['neither-pool-selectable', 'legacy-large-required'])
+def test_no_selectable_candidates_keeps_existing_failure(tmp_path, rule, small_passed):
+    conn = db.connect(tmp_path / 'c.db')
+    completed_pools(conn, large_passed=False, small_passed=small_passed, rule=rule, small_draft=False)
+    assert screening.tick(conn)
+    failed = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert failed['status'] == 'failed' and '没有研究通过的候选' in failed['error']
+    assert failed['l5'] is None and failed['sl3'] is None
+    conn.close()
+
+
+def test_small_comparison_still_runs_when_large_selection_is_saved(tmp_path, monkeypatch):
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    large, _ = completed_pools(conn, large_passed=True, small_passed=False, small_draft=False)
+    db.update_batch(conn, 1, selection=json.dumps({'draft': {'picks': [{'code': large[0]['code']}]}}))
+    assert screening.tick(conn)
+    frozen = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert frozen['status'] == 'frozen'
+    assert frozen['small_selection']['draft']['gaps'] == ['小市值组没有研究通过且可选的候选，全部席位留现金']
+    assert frozen['sl3']['codes'] == [] and frozen['l5']['codes'] == [large[0]['code']]
+    conn.close()
+
+
 def test_cached_coverage_counts_distinct_organizations_and_never_backfills(monkeypatch):
     replay = cache_partial_window(monkeypatch)
     # No token and an exhausted budget: cache-only must still read the one captured day.
@@ -161,6 +278,38 @@ def test_small_simulation_shares_entry_prices_fees_and_cash_accounting():
     legacy = batches.returns(batch | {'rule': batches.RULE})['values']
     assert 'SQ3' not in legacy and 'SL3' not in legacy
     assert all(result[g] == legacy[g] for g in ('Q20', 'Q5', 'L5'))
+
+
+@pytest.mark.parametrize('seats', [3, 5])
+def test_empty_group_with_seats_is_cash(seats):
+    assert batches.group_return(PRICES['entry'], PRICES['mark'], [], seats, batches.RULE['cost']) == pytest.approx(-0.002)
+    assert batches.group_return(PRICES['entry'], PRICES['mark'], [], seats, 0) == 0
+    assert batches.group_return(PRICES['entry'], PRICES['mark'], [], 0, batches.RULE['cost']) is None
+
+
+@pytest.mark.parametrize('rule', [batches.RULE, batches.NEW_RULE], ids=['v11', 'v12'])
+def test_cash_returns_render_while_missing_marks_and_zero_seats_stay_uncomputed(rule):
+    batch = {'id': 1, 'status': 'tracking', 'created_at': '2026-09-18', 'rule': rule,
+             'entry': PRICES['entry'], 'marks': {'latest': PRICES['mark']},
+             'q20': [], 'q5': [], 'l5': {'codes': []}, 'sq3': [], 'sl3': {'codes': []}}
+    results = batches.returns(batch)
+    groups = ['L5', 'Q5'] + (['SQ3', 'SL3'] if rule == batches.NEW_RULE else [])
+    assert all(results['values'][g] == pytest.approx(-rule['cost']) for g in groups)
+    assert results['values']['Q20'] is None
+    performance = charts.batch_returns(batch, results, {})
+    assert performance['groups']['rows'][0]['text'] == '-0.20%'
+    assert performance['groups']['rows'][2]['text'] == '—'
+    assert '未计算' in performance['groups']['rows'][2]['tip']
+    # Both legacy and dual-pool pages consume the same saved horizon result and pct macro.
+    batch['marks']['horizons'] = {'6m': results}
+    template = 'batch_v12.html' if rule == batches.NEW_RULE else 'batch.html'
+    html = ENV.get_template(template).render(batch=batch, results=results, performance=performance,
+                                             pools=[], names={}, frozen_by={})
+    assert '<td class="num">-0.20%</td>' in html
+    assert '<td class="num">—</td>' in html
+    for missing in ({'entry': None}, {'marks': {}}, {'marks': {'latest': None}}):
+        assert batches.returns(batch | missing) is None
+        assert charts.batch_returns(batch | missing, None, {}) is None
 
 
 def test_csi1000_mapping_and_shared_total_return_entry_derivation():
