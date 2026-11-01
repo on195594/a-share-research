@@ -1,5 +1,6 @@
 """Scenario arithmetic on production report 37 and captured 603606 sell-side estimates."""
 from copy import deepcopy
+from datetime import date, timedelta
 from decimal import Decimal
 import json
 
@@ -9,12 +10,86 @@ from a_share_research import checking, prompts, research, reviewing, valuation
 from a_share_research.material import Material
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
-from support.valuation import BODY, ROWS, assumptions
+from support.valuation import BODY, ROWS, STORED, assumptions
 
 
 def material():
     return Material(BODY['code'], BODY['name'], Document(**BODY['document']), {}, {},
                     deepcopy(BODY['table']), BODY['market_date'])
+
+
+@pytest.mark.parametrize('record', [r for r in STORED if not r['valuation_calc'].get('not_priced')])
+def test_at_reproduces_real_stored_compute_exactly(record):
+    calc = record['valuation_calc']
+    original = deepcopy(calc)
+    computed = valuation.compute(record['valuation'], record['table'], record['market_date'])
+    rolled = valuation.at(calc, calc['close'], calc['as_of'])
+    assert rolled['annual_returns'] == {n: calc['scenarios'][n]['annual_return'] for n in valuation.SCENARIOS}
+    assert rolled['annual_returns'] == {n: computed['scenarios'][n]['annual_return'] for n in valuation.SCENARIOS}
+    assert {k: rolled[k] for k in calc['zones']} == computed['zones'] == calc['zones']
+    assert rolled['zone'] == computed['zone'] == calc['zone']
+    assert rolled['horizon'] == calc['horizon']
+    assert (rolled['as_of'], rolled['close']) == (calc['as_of'], calc['close'])
+    assert calc == original
+    json.dumps(rolled, allow_nan=False)
+
+
+def test_at_rolls_lines_and_returns_without_changing_terminal_totals():
+    calc = STORED[2]['valuation_calc']  # Captured 600900 report, initially stretched.
+    rolled = valuation.at(calc, calc['close'], '2027-10-30')
+    assert rolled['support_below'] > calc['zones']['support_below']
+    assert rolled['stretched_above'] > calc['zones']['stretched_above']
+    assert calc['zone'] == '测算透支区' and rolled['zone'] == '中性区'
+    assert rolled['horizon'] < calc['horizon']
+    assert rolled['annual_returns']['中性'] > calc['scenarios']['中性']['annual_return']
+    # Price mutation isolates cap scaling from the date roll; zone lines do not move with price.
+    lower = valuation.at(calc, calc['close'] / 2, '2027-10-30')
+    assert lower['support_below'] == rolled['support_below']
+    assert lower['stretched_above'] == rolled['stretched_above']
+    assert lower['zone'] == '测算支持区'
+    for name, scenario in calc['scenarios'].items():
+        expected = ((scenario['exit_cap'] + scenario['dividends']) / (calc['market_cap'] / 2)) ** (1 / rolled['horizon']) - 1
+        assert lower['annual_returns'][name] == pytest.approx(expected, abs=1e-14)
+    for offset in (0, 1):
+        day = (date.fromisoformat(calc['exit_date']) + timedelta(days=offset)).isoformat()
+        expired = valuation.at(calc, calc['close'], day)
+        assert expired['zone'] is None and expired['annual_returns'] is None
+        assert '退出日' in expired['reason']
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'error', 'not_priced', 'negative_total', 'bad_rate', 'bad_close', 'bad_date'])
+def test_at_uncomputable_real_record_mutations(mutation):
+    calc = deepcopy(STORED[0]['valuation_calc'])
+    close, day = calc['close'], calc['as_of']
+    if mutation == 'missing':
+        del calc['scenarios']['中性']['exit_cap']
+    elif mutation == 'error':
+        calc['error'] = '缺少行情'
+    elif mutation == 'not_priced':
+        calc = STORED[1]['valuation_calc']
+    elif mutation == 'negative_total':
+        calc['scenarios']['保守']['exit_cap'] *= -1
+    elif mutation == 'bad_rate':
+        calc['r'] = -1
+    elif mutation == 'bad_close':
+        close = float('nan')
+    else:
+        day = 'invalid'
+    result = valuation.at(calc, close, day)
+    assert all(result[k] is None for k in ('annual_returns', 'support_below', 'stretched_above', 'inverted', 'zone', 'horizon'))
+    assert result['reason']
+    json.dumps(result, allow_nan=False)
+
+
+def test_at_inverted_and_zero_total_mutations():
+    calc = deepcopy(STORED[0]['valuation_calc'])
+    calc['scenarios']['保守']['exit_cap'] = calc['scenarios']['乐观']['exit_cap']
+    result = valuation.at(calc, calc['close'], calc['as_of'])
+    assert result['inverted'] is True and result['zone'] is None
+    assert result['annual_returns'] is not None and 'reason' not in result
+    calc['scenarios']['保守']['exit_cap'] = -calc['scenarios']['保守']['dividends']
+    result = valuation.at(calc, calc['close'], calc['as_of'])
+    assert result['annual_returns']['保守'] == -1 and result['support_below'] == 0
 
 
 def test_complete_hand_calculation():

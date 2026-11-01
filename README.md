@@ -92,12 +92,17 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `GET /api/request?request_id=...` | 只读找回原请求的任务、诊断与调用计数；404 不证明原提交失败，不自动重提或重启失败任务 |
 | `GET /api/research/budget` | 模型调用上限（循环保护而非金额预算）；费用未知，不按调用次数推算实付 |
 | `GET /api/reports?code=600519` | 最近 100 份报告的身份、时间、状态 |
+| `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡；`current.valuation` 按最新收盘日滚动测算 |
+| `GET /api/cards` | `research-v1` 信封：`cards` 为扫描范围（订阅＋最近冻结批次 L5）的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |
 | `GET /api/reports/{report_id}` | `research-v1` 信封、核验结果、回答、来源页、表格及计算输入；GET 不刷新数据 |
 | `GET /api/reports/{report_id}?compact=true` | 精简正文与来源目录（不含整页原文）、失败 `diagnostics`、`budget`、`continuation`；完整读取保持原合同 |
 | `POST /api/research`（追问） | 上述输入加 `parent_report_id`，必须同公司，创建关联新任务 |
 | `POST /api/reports/{id}/feedback` | `{"request_id":"新编号","location":"financial[0]","text":"具体问题与依据"}` → 核查任务 |
 
 request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。
+单家与批量卡片共用数据库读取路径，沿用 Bearer 鉴权，不联网取数、不触发研究。订阅与 L5 重叠时 `origin` 为 `external`。
+卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，测算结果为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径。
+滚动测算冻结退出市值与累计分红，假设股本不变；报告日后已发放的分红仍计入，存在约一年派息量级的已知高估。`待复核` 卡片仍保留数值并提示区间暂停解读。
 精简视图中的 `continuation` 区分生成日、财务覆盖期、行情日、披露与公告检索范围；
 `historical_not_live_checked` 不承诺当前最新。旧检查点是待核查议程，不是当期事实；
 `baseline_status` 明确区分可用、失败、未就绪、缺失等基线，并携带基线财报期、生成日、行情日和公告范围。

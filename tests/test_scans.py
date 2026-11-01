@@ -13,7 +13,7 @@ import pytest
 
 from a_share_research import db, scans, service, valuation
 from support.continuation import BODY as CAPTURED_BODIES, load
-from support.valuation import BODY, RECORD, assumptions
+from support.valuation import BODY, RECORD, STORED, assumptions
 from test_service_http import server
 
 DATA = Path(__file__).parent / 'data'
@@ -272,7 +272,8 @@ def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
     assert json.loads(request['request']) == {'question': '', 'feedback': None, 'parent_report_id': None}
     card = service.company_card(conn, '603606')
     assert card['status'] == '待复核' and len(card['pending_events']) == 4
-    assert card['current']['current_zone'] == scans.current_zone(priced(conn)['valuation_calc'], 36.03)
+    assert card['current']['current_zone'] == scans.current_zone(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
+    assert card['current']['valuation'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
     assert card['current']['note'] == '待复核，区间暂停解读'
     assert any(n['reason'] == 'pending_review' for n in first['notify'])
     second = run_scan(conn, source, '2026-10-31T18:00:00+08:00')
@@ -396,6 +397,15 @@ def test_notify_rules_cooldown_holidays_and_major_risk_exemption(conn):
     reverse = item | {'from_zone': item['to_zone'], 'to_zone': item['from_zone']}
     assert not scans.allow_notification(reverse, history, AT, DAYS)
     assert scans.notification_reasons(before, before, [], []) == []
+
+
+def test_zone_notification_uses_rolled_close_date():
+    calc = STORED[2]['valuation_calc']
+    before = {'current': {'current_zone': scans.current_zone(calc, calc['close'], calc['as_of'])}, 'status': '有效'}
+    after = {'current': {'current_zone': scans.current_zone(calc, calc['close'], '2027-10-30')}, 'status': '有效'}
+    reason, = scans.notification_reasons(before, after, [], [])
+    assert (reason['from_zone'], reason['to_zone']) == ('测算透支区', '中性区')
+    assert scans.current_zone(calc, calc['close'], '2029-05-01') is None
 
 
 @pytest.mark.parametrize(('first', 'opposite'), [

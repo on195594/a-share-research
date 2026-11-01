@@ -1,7 +1,7 @@
 """A1: validated scenario assumptions and reproducible Decimal valuation (no providers)."""
 from copy import deepcopy
 from datetime import date
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import Decimal, DecimalException, InvalidOperation, localcontext
 import re
 from statistics import median
 
@@ -110,6 +110,61 @@ def compute(valuation, table, market_date, *, r=Decimal("0.10"), r_low=Decimal("
         return _json_numbers(_compute(valuation, table, market_date, r, r_low, pe_reference, consensus))
 
 
+def _zone(close, support, stretched):
+    return (None if support >= stretched else "测算支持区" if close <= support else
+            "测算透支区" if close >= stretched else "中性区")
+
+
+def at(calc: dict, close, day: str) -> dict:
+    """Roll frozen terminal totals to a closing date, assuming unchanged share count."""
+    empty = dict.fromkeys(('annual_returns', 'support_below', 'stretched_above', 'inverted', 'zone', 'horizon'))
+    empty.update(as_of=day, close=None)
+
+    def number(value, field):
+        result = _number(value)
+        if result is None:
+            raise ValueError(f'{field} 缺少有限数值，无法滚动测算')
+        return result
+
+    try:
+        p = number(close, '收盘价')
+        empty['close'] = _json_numbers(p)
+        if not isinstance(calc, dict):
+            raise ValueError('缺少估值测算，无法滚动测算')
+        if calc.get('not_priced'):
+            raise ValueError('报告未定价（not_priced），无法滚动测算')
+        if 'error' in calc:
+            raise ValueError(f"报告测算失败：{calc['error']}")
+        with localcontext() as context:
+            context.prec = 40
+            base_close = number(calc['close'], '报告收盘价')
+            cap = number(calc['market_cap'], '报告市值')
+            r, r_low = (number(calc[key], key) for key in ('r', 'r_low'))
+            if min(p, base_close, cap) <= 0:
+                raise ValueError('收盘价与报告市值须为正数')
+            if min(r, r_low) <= -1:
+                raise ValueError('r 与 r_low 须大于 -1')
+            horizon = Decimal((date.fromisoformat(calc['exit_date']) - date.fromisoformat(day)).days) / Decimal('365.25')
+            if horizon <= 0:
+                raise ValueError(f"收盘日须早于退出日 {calc['exit_date']}")
+            totals = {name: sum(number(calc['scenarios'][name][key], f'{name}.{key}')
+                                for key in ('exit_cap', 'dividends')) for name in SCENARIOS}
+            if min(totals.values()) < 0:
+                raise ValueError('退出市值加分红为负，无法计算实数年化回报')
+            current_cap = cap * p / base_close
+            support = base_close * totals['保守'] / (cap * (1 + r) ** horizon)
+            stretched = base_close * totals['中性'] / (cap * (1 + r_low) ** horizon)
+            return _json_numbers({
+                'annual_returns': {name: (total / current_cap) ** (1 / horizon) - 1 for name, total in totals.items()},
+                'support_below': support, 'stretched_above': stretched, 'inverted': support >= stretched,
+                'zone': _zone(p, support, stretched), 'horizon': horizon, 'as_of': day, 'close': p,
+            })
+    except KeyError as exc:
+        return empty | {'reason': f'缺少测算字段 {exc.args[0]}，无法滚动测算'}
+    except (TypeError, ValueError, DecimalException, OverflowError) as exc:
+        return empty | {'reason': f'无法滚动测算：{exc}'}
+
+
 def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     errors = problems(value, table)
     if errors:
@@ -177,7 +232,7 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
             "basis": value["basis"], "base_year": base_year, "base_profit": base, "years": target_years,
             "exit_date": exit_date.isoformat(), "horizon": horizon, "scenarios": scenarios,
             "zones": {"support_below": support, "stretched_above": stretched, "inverted": inverted},
-            "zone": None if inverted else "测算支持区" if close <= support else "测算透支区" if close >= stretched else "中性区",
+            "zone": _zone(close, support, stretched),
             "implied": {"profit": implied, "cagr": cagr},
             "sensitivity": {"profit_factors": factors, "exit_pe": multiples,
                             "returns": [[annual(p3 * factor * multiple + dividends) for multiple in multiples] for factor in factors]},

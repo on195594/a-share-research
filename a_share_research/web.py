@@ -534,6 +534,12 @@ def api_company_card(request: Request, code: str):
     return service.company_card(conn, code)
 
 
+@app.get('/api/cards')
+def api_cards(request: Request):
+    api_session(request)
+    return service.company_cards(conn)
+
+
 class SubscriptionsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     codes: list[str]

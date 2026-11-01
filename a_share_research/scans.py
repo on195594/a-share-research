@@ -7,7 +7,7 @@ import logging
 import math
 import re
 
-from a_share_research import companies, db, service
+from a_share_research import companies, db, service, valuation
 
 log = logging.getLogger(__name__)
 # Generic 风险提示 titles (trading-volatility or redemption notices) are routine and stay out of scope.
@@ -33,12 +33,8 @@ def instant(value: str) -> datetime:
     return parsed.replace(tzinfo=db.SHANGHAI) if parsed.tzinfo is None else parsed.astimezone(db.SHANGHAI)
 
 
-def current_zone(calc: dict | None, close: float | None) -> str | None:
-    zones = (calc or {}).get('zones')
-    if close is None or not zones or zones.get('inverted'):
-        return None
-    return ('测算支持区' if close <= zones['support_below'] else
-            '测算透支区' if close >= zones['stretched_above'] else '中性区')
+def current_zone(calc: dict | None, close: float | None, day: str) -> str | None:
+    return valuation.at(calc, close, day)['zone']
 
 
 def after_card(event: dict, completed_at: str) -> bool:

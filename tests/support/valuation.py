@@ -11,6 +11,7 @@ RECORD = next(r['report'] for r in json.loads((DATA / 'continuation-records.json
               if r['report']['id'] == 37)
 BODY = RECORD['body']
 ROWS = json.loads((DATA / 'report_rc_603606_20261031.json').read_text())
+STORED = json.loads((DATA / 'valuation-stored-20261101.json').read_text())['records']
 
 
 def assumptions():

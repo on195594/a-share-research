@@ -191,13 +191,15 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         if "scenarios" in calc:
             summary["scenarios"] = {name: {"annual_return": scenario["annual_return"]}
                                     for name, scenario in calc["scenarios"].items()}
-    from a_share_research import scans
+    from a_share_research import scans, valuation
     pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
     failure = scans.announcement_failure(conn, code, scan_id=scan_id)
     if failure:
         pending.append(failure)
     current = scans.latest_close(conn, code)
-    current['current_zone'] = scans.current_zone(calc, current['last_close'])
+    current['valuation'] = (valuation.at(calc, current['last_close'], current['last_close_date'])
+                            if current['last_close'] is not None else None)
+    current['current_zone'] = current['valuation']['zone'] if current['valuation'] is not None else None
     if pending:
         current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'
     return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],
@@ -207,6 +209,19 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
                             for item in body.get("checkpoints", [])],
             "relative": body.get("relative"), "valuation_calc": summary}
+
+
+def company_cards(conn: sqlite3.Connection) -> dict:
+    """Use the single-card read path for the subscription and frozen L5 scope."""
+    from a_share_research import scans
+    cards, missing = [], []
+    for item in scans.subscriptions(conn):
+        card = scans.card_or_none(conn, item['code'])
+        if card is None:
+            missing.append({'code': item['code'], 'origin': item['origin']})
+        else:
+            cards.append(card | {'origin': item['origin']})
+    return {'version': VERSION, 'cards': cards, 'missing': missing}
 
 
 def run_budget(conn, run_id: int | None = None) -> dict:

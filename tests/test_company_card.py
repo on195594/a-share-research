@@ -6,7 +6,7 @@ import pytest
 
 from a_share_research import db, scans, service, valuation
 from support.continuation import load
-from support.valuation import BODY, RECORD, ROWS, assumptions
+from support.valuation import BODY, RECORD, ROWS, STORED, assumptions
 from test_service_http import server  # Existing isolated real HTTP fixture.
 from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, run_scan
 from test_advisor_sources import CALENDAR
@@ -36,6 +36,7 @@ def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
     assert card['valuation_calc']['zone'] == body['valuation_calc']['zone']
     assert card['valuation_calc']['consensus']['status'] == 'partial'
     assert card['valuation_calc']['consensus']['coverage'] == coverage
+    assert card['current']['valuation'] is None and card['current']['current_zone'] is None
     assert card['valuation_calc']['scenarios']['中性'] == {'annual_return': body['valuation_calc']['scenarios']['中性']['annual_return']}
     compact = service.report_view(conn, report_id, compact=True)['report']
     assert compact['valuation'] == body['valuation'] and compact['valuation_calc'] == body['valuation_calc']
@@ -80,6 +81,55 @@ def test_card_completion_uses_run_finished_at(tmp_path):
     assert updated['completed_at'] == finished_at
     assert updated['created_at'] == card['created_at'] != finished_at
     assert updated['report_id'] == card['report_id']
+    conn.close()
+
+
+def test_cards_scope_origins_missing_and_rolled_valuation_read_only(tmp_path):
+    conn = db.connect(tmp_path / 'cards.db')
+    assert service.company_cards(conn) == {'version': 'research-v1', 'cards': [], 'missing': []}
+    for record in STORED:
+        code = record['code'][:6]
+        run = service.submit(conn, code, 'batch-b-' + code)
+        db.save_report(conn, run, record['code'], record['name'], record['period'], True, record['verdict'], record)
+        db.update_run(conn, run, status='done')
+    record = STORED[2]
+    calc = record['valuation_calc']
+    scans.replace_subscriptions(conn, ['600900', '603606'], catalog=CATALOG)
+    conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=? WHERE code=?',
+                 (calc['close'], '2027-10-30', '600900'))
+    # Frozen scopes use actual captured company identities; explicit subscriptions win overlaps.
+    conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
+                 (AT, json.dumps({'codes': ['600900.SH', '600519.SH']}), AT))
+    conn.execute('PRAGMA query_only=ON')
+    total = conn.total_changes
+    result = service.company_cards(conn)
+    assert result['version'] == 'research-v1'
+    assert result['missing'] == [{'code': '603606', 'origin': 'external'}]
+    cards = {c['code']: c for c in result['cards']}
+    assert len(result['cards']) == 2 and set(cards) == {'600900', '600519'}
+    assert '000858' not in cards  # A saved report alone does not put a company in scope.
+    assert cards['600900']['origin'] == 'external' and cards['600519']['origin'] == 'l5'
+    for code, card in cards.items():
+        assert card == service.company_card(conn, code) | {'origin': card['origin']}
+    current = cards['600900']['current']
+    assert current['valuation'] == valuation.at(calc, calc['close'], '2027-10-30')
+    assert current['current_zone'] == current['valuation']['zone'] == '中性区'
+    assert cards['600900']['valuation_calc']['zone'] == '测算透支区'
+    assert cards['600519']['current']['valuation'] is None
+    assert conn.total_changes == total
+    conn.close()
+
+
+def test_card_close_without_valuation_returns_reason(tmp_path):
+    conn = db.connect(tmp_path / 'legacy-close.db')
+    load(conn)
+    scans.replace_subscriptions(conn, ['600519'], catalog=CATALOG)
+    calc = STORED[0]['valuation_calc']
+    conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=? WHERE code=?',
+                 (calc['close'], calc['as_of'], '600519'))
+    card = service.company_card(conn, '600519')
+    assert card['current']['valuation']['reason']
+    assert card['current']['current_zone'] is None
     conn.close()
 
 
@@ -175,3 +225,17 @@ def test_card_http_authentication_read_only_and_404(server):
     assert response.status_code == 200
     assert response.json()['report_id'] == report and response.json()['version'] == 'research-v1'
     assert conn.total_changes == before
+
+
+def test_cards_http_authentication_version_and_payload(server):
+    conn, client, url, *_ = server
+    scans.replace_subscriptions(conn, ['600519', '603606'], catalog=CATALOG)
+    route = url + '/api/cards'
+    assert client.get(route, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
+    assert client.get(route, headers={'X-Research-Version': 'unsupported'}, timeout=3).status_code == 400
+    before = list(conn.iterdump())
+    response = client.get(route, timeout=3)
+    assert response.status_code == 200
+    assert response.json() == service.company_cards(conn)
+    assert response.json()['missing'] == [{'code': '603606', 'origin': 'external'}]
+    assert list(conn.iterdump()) == before
