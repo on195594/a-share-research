@@ -101,7 +101,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 
 request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。
 单家与批量卡片共用数据库读取路径，沿用 Bearer 鉴权，不联网取数、不触发研究。订阅与 L5 重叠时 `origin` 为 `external`。
-卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，测算结果为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径。
+卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，`valuation` 仍是对象，其中各测算字段为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径。
 滚动测算冻结退出市值与累计分红，假设股本不变；报告日后已发放的分红仍计入，存在约一年派息量级的已知高估。`待复核` 卡片仍保留数值并提示区间暂停解读。
 精简视图中的 `continuation` 区分生成日、财务覆盖期、行情日、披露与公告检索范围；
 `historical_not_live_checked` 不承诺当前最新。旧检查点是待核查议程，不是当期事实；
