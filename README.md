@@ -124,7 +124,7 @@ Skills 通过 `a-stock-cache research` 接入本 API，先复用旧报告，再�
 
 `--replay` 复用该快照重新执行成文、检查、复核和修复（包括修正阶段都不开放取证工具、不重新探索、不取数），保存为新任务；快照缺失、版本不支持、哈希或公司不一致时失败。重放报告在网页上标明来源，首页最新报告和“今日已研究”判断排除重放。
 
-报告（纠错除外）带 1–3 条下期检查点，其中至少 2 条带对下一期财务表数值的区间预测（`forecast`），披露后由判断记分命令兑现。主动研究同一家公司且未指定原报告时，自动带入最近一份通过复核、非重放、非纠错报告的风险与检查点（不带结论与摘要），要求在回答末尾说明各自本期状态；批次深挖不接续。规则与验收见[积累方案](docs/research-accumulation.md)。
+报告（纠错除外）带 1–3 条下期检查点，其中至少 2 条带对下一期财务表数值的区间预测（`forecast`），披露后由判断记分命令兑现；另给 6 个月相对中证800全收益的跑赢/跑输判断（`relative`），与三档结论独立。主动研究同一家公司且未指定原报告时，自动带入最近一份通过复核、非重放、非纠错报告的风险与检查点（不带结论与摘要），要求在回答末尾说明各自本期状态；批次深挖不接续。规则与验收见[积累方案](docs/research-accumulation.md)。
 
 ```bash
 DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research          # 建基线（评估集）
@@ -173,7 +173,7 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 只读打开数据库，不调用模型、不写库；口径见[判断验证方案](docs/judgment-validation.md)。`DATA_DIR` 只用于 TuShare 缓存，指向临时目录即可，不要指向生产数据目录：
 
 ```bash
-DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额
+DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额与 V2 相对判断记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --forecasts [--json OUT]  # V1 预测记分
 ```
 

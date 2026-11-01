@@ -11,7 +11,7 @@
 | F 基本面深度与信号升级 | F1/F3a、步骤 0、1a/1c、1b 历史快照阅读及 `peers` 同业发现已上线；步骤 2 第一阶段已上线；F2 保留原规则 | [升级方案](investment-upgrade.md)；逐值公告映射、F3b、步骤 2 后续及 3–4 待确认 |
 | W 阅读界面图表化（10-30） | 报告页“财务与走势”、判断刻度、批次收益与因子分位、首页批次对比与公司判断轨迹已上线；图表由 `charts.py` 纯函数从已存值计算几何，服务端 SVG | 真实使用后观察 2 分钟读懂报告的目标；旧报告按表回退，不回填经营序列 |
 | K 研究积累与降噪 | K2 工程交付已收尾；双组有限对照、真实跨期回应与 K3 个案完成；K4 保留规则已写入 | 真实关闭及关闭后不再继承保留为 K3 非阻塞观察，见[积累方案](research-accumulation.md) |
-| V 判断验证（优先，10-31 立项） | V0 只读超额 CLI 完成（抽 3 份与 TuShare 后复权独立复算一致）；V1 检查点预测已上线（`eb667f1`，评估集 10/10） | 评估集通过后例行发布；20/60/120 个交易日后重跑 V0；2026 年报及 2027 一季报披露后首次 V1 记分 |
+| V 判断验证（优先，10-31 立项） | V0、V1、V2 已上线（`cd6c388`）。V2 相对判断在评估集中与三档结论一一对应（“需要谨慎”→跑输 60），暂无独立信息；11 月批次（批次 2）11-01 10:0x 由 Claude 受托发起，是首个带 V1/V2 的批次 | 看批次 2 的 20 家相对判断分布；若仍随结论一边倒，改为批次内横向强制排序（待所有者确认）；20/60/120 个交易日后重跑 V0；2026 年报披露后首次 V1 记分 |
 | 公司研究进展 | 已上线。生产验收首对万华 41→44 于 10-30 12:56 生成、复核各一次，复核未通过（第 4 条把同一半年报的补充引文标为新披露），按停止标准未提交五粮液 40→42 | 分类边界已修复，随 `b36b15d` 部署，尚未重验真实样本；验收边界见[积累方案](research-accumulation.md#公司研究进展) |
 
 已完成且已部署的近期工作包（详情见上述历史版本对应小节）：
@@ -27,18 +27,18 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `eb667f1`**（代码 `0cd016b`）于 2026-11-01 00:34（北京时间）例行发布 web、worker，无配置、凭据、依赖或迁移变更；内容为批次 V 的 V0 超额 CLI 与 V1 检查点预测（[判断验证方案](judgment-validation.md)）。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `cd6c388`** 于 2026-11-01 10:00（北京时间）例行发布 web、worker，无配置、凭据、依赖或迁移变更；在 `eb667f1`（V0/V1）之上加入 V2 相对判断（[判断验证方案](judgment-validation.md#v2-相对判断慢反馈6-个月)）。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:eb667f1` | `1b2be7b2efa3090bde5d632ec5580ef9b7dcf0e696bc4c7d67e3ac054df9facf` |
-| `a-share-research-worker:eb667f1` | `916f83f218de8b02f3fb04002ab4ef7c26cc259f120eb29e8b35f71e71591898` |
+| `a-share-research-web:cd6c388` | `3455488c042e098717b5ca13fc040f152d9da8fb0fdac2cdf97387a83bb46688` |
+| `a-share-research-worker:cd6c388` | `a389050c6f62bcc33586e49f83fb1847e4cae442f9a64f4b6b5964c6ac05655c` |
 
-**验证**：离线全集 690 通过、31 环境跳过；评估集非金融 10/10（中国神华首跑因巨潮 PDF 下载中断、未调用模型即失败，重跑通过），平均 302 秒 / 11.5 次调用（上次 3d53928 为 200 秒 / 10.5 次），5 家进入修正（上次 3 家），无一由预测格式或预测内容引起；共 21 条预测，把握 60% 13 条、75% 8 条。开发实例 390px 报告页显示预测且无横向溢出；生产首页、旧报告 49、公司页均 200 且无溢出，旧报告检查点照常显示。发布工具通过、完整性巡检 0 问题。证据 `eval-v1-forecasts-20261031/`、`deploy-eb667f1-20261101-003359/`，备份 `~/a-share-research-data/backup-pre-eb667f1-20261101-003401.db`。
+**验证**：离线全集 696 通过、31 环境跳过。评估集两轮：`167b3c6` 10/10，但入库正文漏存 `relative`（保存字段是手写列表），且 10 家中 9 家为“跑输 60”；修复保存并在提示中写明基准频率后，`cd6c388` 10/10，平均约 206 秒 / 10.2 次调用，相对判断已入库，但分布不变（9 家“跑输 60”、万华“跑赢 60”，与三档结论一一对应）。V1 预测每家 2–3 条。生产首页、旧报告 49、公司页、批次页均 200 且无溢出；发布工具通过、完整性巡检 0 问题。证据 `eval-v2-relative-20261101/`、`eval-v2b-relative-20261101/`、`deploy-cd6c388-*/`，备份 `~/a-share-research-data/backup-pre-cd6c388-20261101-100038.db`。
 
-**直接回退**：`a-share-research-web:rollback-eb667f1`、`a-share-research-worker:rollback-eb667f1` 即原运行的 `e4f30e4`（`92f89554…a64e`、`a0cc7265…c6`）；再退到 `74f187e` 用 `rollback-e4f30e4`，分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。新报告检查点多出的 `forecast` 字段旧镜像会忽略。
+**直接回退**：`a-share-research-web:rollback-cd6c388`、`a-share-research-worker:rollback-cd6c388` 即 `eb667f1`（`1b2be7b2…facf`、`916f83f2…1898`）；再退到 `e4f30e4` 用 `rollback-eb667f1`，分别标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。旧镜像忽略新增的 `forecast`、`relative` 字段。
 
-**更早发布**：`e4f30e4` 的完整记录见 `git show 1b41f2a:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
+**更早发布**：`eb667f1` 的完整记录见 `git show 27f3830:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
 ## 尚待完成与未采用项
 
