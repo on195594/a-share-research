@@ -187,3 +187,12 @@ def test_report_header_shows_relative_call():
     html = ENV.from_string(line).render(body={"relative": {"call": "跑输", "confidence": 65}})
     assert "6 个月相对判断：跑输中证800全收益，把握 65%" in html
     assert ENV.from_string(line).render(body={}).strip() == ""
+
+
+def test_passed_report_saves_relative_call_and_checkpoints():
+    from a_share_research.research import published
+    saved = published(report())
+    assert saved["relative"] == {"call": "跑输", "confidence": 60} and saved["checkpoints"][0]["forecast"]
+    legacy = report()
+    del legacy["relative"], legacy["checkpoints"]
+    assert "relative" not in published(legacy) and "checkpoints" not in published(legacy)
