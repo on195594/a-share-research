@@ -111,15 +111,24 @@ def baseline(metric: str, unit: str, period: str, base: str, values: dict[str, D
     return values[prior_period] * values[base] / values[prior_base]
 
 
-def score(forecast: dict, base: str, row: dict) -> dict:
-    """Score against a later table row; 'pending' until the forecast period is disclosed."""
-    values = {p: Decimal(v) for p, v in (row.get("exact_values") or row.get("values") or {}).items()}
+def _values(row: dict) -> dict[str, Decimal]:
+    return {p: Decimal(str(v)) for p, v in (row.get("exact_values") or row.get("values") or {}).items()}
+
+
+def score(forecast: dict, base: str, row: dict, written: dict) -> dict:
+    """Score against a later table row; 'pending' until the forecast period is disclosed.
+
+    `written` is the same row as frozen in the report's own table: the naive forecast is built from it, so a
+    later restatement of the base data cannot move the yardstick. `restated` flags that the base value changed.
+    """
+    values, frozen = _values(row), _values(written)
     period = forecast["period"]
     if period not in values:
         return {"status": "pending"}
     actual, low, high = values[period], Decimal(str(forecast["low"])), Decimal(str(forecast["high"]))
-    naive = baseline(forecast["metric"], row.get("unit", ""), period, base, values)
+    naive = baseline(forecast["metric"], written.get("unit", ""), period, base, frozen)
     mid = (low + high) / 2
     return {"status": "scored", "actual": float(actual), "hit": low <= actual <= high,
             "baseline": float(naive) if naive is not None else None,
-            "beat_baseline": abs(mid - actual) < abs(naive - actual) if naive is not None else None}
+            "beat_baseline": abs(mid - actual) < abs(naive - actual) if naive is not None else None,
+            "restated": base in frozen and base in values and frozen[base] != values[base]}

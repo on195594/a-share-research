@@ -106,18 +106,34 @@ def summarize_relative(rows: list[dict]) -> list[dict]:
 
 
 def summarize_forecasts(scored: list[dict]) -> dict:
-    """Hit rate per confidence level (calibration) and share of midpoints beating the naive continuation."""
-    done = [s for s in scored if s["result"]["status"] == "scored"]
+    """Calibration and naive-baseline share over first forecasts only; updates are counted, not scored twice.
+
+    Record counts are not independent judgments: companies, target periods and updates are reported alongside.
+    """
+    first = [s for s in scored if s["first"]]
+    done = [s for s in first if s["result"]["status"] == "scored"]
     by_confidence = {}
     for level in forecasts.CONFIDENCE:
         group = [s for s in done if s["forecast"]["confidence"] == level]
         if group:
             by_confidence[level] = {"n": len(group), "hit": sum(s["result"]["hit"] for s in group) / len(group)}
     compared = [s for s in done if s["result"]["beat_baseline"] is not None]
-    return {"total": len(scored), "scored": len(done), "pending": len(scored) - len(done),
+    return {"total": len(first), "updates": len(scored) - len(first), "scored": len(done), "pending": len(first) - len(done),
+            "companies": len({s["code"] for s in first}), "periods": len({s["forecast"]["period"] for s in first}),
+            "restated": sum(bool(s["result"].get("restated")) for s in done),
             "by_confidence": by_confidence,
             "beat_baseline": sum(s["result"]["beat_baseline"] for s in compared) / len(compared) if compared else None,
             "compared": len(compared)}
+
+
+def mark_first(items: list[dict]) -> list[dict]:
+    """A forecast's identity is company × metric × target period; the earliest report holds the first one."""
+    seen = set()
+    for item in sorted(items, key=lambda i: (i["created"], i["report"], i["index"])):
+        key = (item["code"], item["forecast"]["metric"], item["forecast"]["period"])
+        item["first"] = key not in seen
+        seen.add(key)
+    return items
 
 
 def size_bucket(mv: float | None, cuts: tuple[float, float]) -> str:
@@ -129,20 +145,24 @@ def size_bucket(mv: float | None, cuts: tuple[float, float]) -> str:
 # ---------- data ----------
 
 def load_forecasts(database: str) -> list[dict]:
-    """Every checkpoint forecast in passed, non-replay reports, with the period it was written on."""
+    """Every checkpoint forecast in passed, non-replay research reports (corrections excluded, as in V0)."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
-            "SELECT r.id, r.code, r.name, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
-            "WHERE r.passed = 1 AND u.replay_of IS NULL AND r.body LIKE '%\"forecast\"%'").fetchall()
+            "SELECT r.id, r.code, r.name, r.created_at, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
+            "WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL "
+            "AND r.body LIKE '%\"forecast\"%'").fetchall()
     out = []
-    for report_id, code, name, body in rows:
+    for report_id, code, name, created, body in rows:
         body = json.loads(body)
-        base = forecasts.base_period(body.get("table") or [])
+        table = body.get("table") or []
+        base = forecasts.base_period(table)
+        written = {r["id"]: r for r in table}
         for i, item in enumerate(body.get("checkpoints") or []):
             forecast = item.get("forecast") if isinstance(item, dict) else None
-            if base and forecast and not forecasts.problems(forecast, body["table"]):
-                out.append({"report": report_id, "code": code, "name": name, "index": i, "base": base, "forecast": forecast})
-    return out
+            if base and forecast and not forecasts.problems(forecast, table):
+                out.append({"report": report_id, "code": code, "name": name, "created": created, "index": i,
+                            "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
+    return mark_first(out)
 
 
 def score_forecasts(items: list[dict]) -> list[dict]:
@@ -152,7 +172,7 @@ def score_forecasts(items: list[dict]) -> list[dict]:
         if item["code"] not in tables:
             tables[item["code"]] = {r["id"]: r for r in material.financial_table(sources.financials(item["code"]), {})}
         row = tables[item["code"]].get(item["forecast"]["metric"], {})
-        item["result"] = forecasts.score(item["forecast"], item["base"], row)
+        item["result"] = forecasts.score(item["forecast"], item["base"], row, item["written"])
     return items
 
 
@@ -229,10 +249,13 @@ def main() -> None:
     if args.forecasts:
         scored = score_forecasts(load_forecasts(args.database))
         summary = summarize_forecasts(scored)
-        lines = [f"V1 预测记分：共 {summary['total']} 条，已兑现 {summary['scored']}，待披露 {summary['pending']}"]
+        lines = [f"V1 预测记分：首份 {summary['total']} 条（{summary['companies']} 家公司、{summary['periods']} 个目标期，"
+                 f"另有更新 {summary['updates']} 条不重复记分），已兑现 {summary['scored']}，待披露 {summary['pending']}，"
+                 f"基期数据已更正 {summary['restated']}"]
         for s in scored:
             r = s["result"]
-            lines.append(f"#{s['report']}[{s['index']}] {s['code']} {s['name']} {forecasts.describe(s['forecast'], [])} → "
+            lines.append(f"#{s['report']}[{s['index']}]{'' if s['first'] else '（更新）'} {s['code']} {s['name']} "
+                         f"{forecasts.describe(s['forecast'], [])} → "
                          + (f"实际 {r['actual']:g} {'命中' if r['hit'] else '未中'}，朴素 {r['baseline']}"
                             f"{'，胜过朴素' if r['beat_baseline'] else '，不如朴素' if r['beat_baseline'] is False else ''}"
                             if r["status"] == "scored" else "待披露"))

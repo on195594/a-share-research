@@ -112,26 +112,52 @@ def test_check_requires_forecasts_and_validates_them():
 def test_score_on_real_disclosed_quarter():
     rows = {r["id"]: r for r in TABLE}
     # As if written on the half-year report: forecast the Q3 cumulative figures that were later disclosed.
-    revenue = forecasts.score(_forecast(period="2026-09-30", low=95, high=105), "2026-06-30", rows["T.revenue"])
+    revenue = forecasts.score(_forecast(period="2026-09-30", low=95, high=105), "2026-06-30", rows["T.revenue"],
+                              rows["T.revenue"])
     assert revenue["status"] == "scored" and revenue["hit"] is True
     # Naive: 2025-09-30 × (2026-06-30 / 2025-06-30)
     v = {p: float(x) for p, x in rows["T.revenue"]["exact_values"].items()}
     assert revenue["baseline"] == pytest.approx(v["2025-09-30"] * v["2026-06-30"] / v["2025-06-30"])
     assert revenue["beat_baseline"] == (abs(100 - v["2026-09-30"]) < abs(revenue["baseline"] - v["2026-09-30"]))
     margin = forecasts.score(_forecast(metric="T.gross_margin", period="2026-09-30", low=0, high=1), "2026-06-30",
-                             rows["T.gross_margin"])
+                             rows["T.gross_margin"], rows["T.gross_margin"])
     assert margin["hit"] is False and margin["baseline"] == pytest.approx(float(rows["T.gross_margin"]["exact_values"]["2026-06-30"]))
-    assert forecasts.score(_forecast(), "2026-09-30", rows["T.revenue"]) == {"status": "pending"}
+    assert forecasts.score(_forecast(), "2026-09-30", rows["T.revenue"], rows["T.revenue"]) == {"status": "pending"}
+
+
+def test_naive_baseline_stays_on_the_table_the_report_was_written_on():
+    rows = {r["id"]: r for r in TABLE}
+    later = rows["T.revenue"]
+    # The report was written before the half-year figure was restated: its frozen copy carries the old value.
+    written = later | {"exact_values": later["exact_values"] | {"2026-06-30": str(float(later["exact_values"]["2026-06-30"]) * 0.9)}}
+    v = {p: float(x) for p, x in written["exact_values"].items()}
+    result = forecasts.score(_forecast(period="2026-09-30", low=95, high=105), "2026-06-30", later, written)
+    assert result["baseline"] == pytest.approx(v["2025-09-30"] * v["2026-06-30"] / v["2025-06-30"])
+    assert result["restated"] is True
+    assert forecasts.score(_forecast(period="2026-09-30", low=95, high=105), "2026-06-30", later, later)["restated"] is False
 
 
 def test_forecast_summary_reports_calibration_and_baseline_share():
-    scored = [{"forecast": {"confidence": 75}, "result": {"status": "scored", "hit": h, "beat_baseline": b}}
-              for h, b in ((True, True), (False, None), (True, False))] + [
-             {"forecast": {"confidence": 90}, "result": {"status": "pending"}}]
+    scored = [{"code": c, "first": True, "forecast": {"confidence": 75, "period": "2026-12-31"},
+               "result": {"status": "scored", "hit": h, "beat_baseline": b, "restated": False}}
+              for c, h, b in (("A", True, True), ("A", False, None), ("B", True, False))] + [
+             {"code": "C", "first": True, "forecast": {"confidence": 90, "period": "2026-12-31"}, "result": {"status": "pending"}},
+             {"code": "B", "first": False, "forecast": {"confidence": 90, "period": "2026-12-31"},
+              "result": {"status": "scored", "hit": False, "beat_baseline": False}}]
     s = validation.summarize_forecasts(scored)
-    assert s["scored"] == 3 and s["pending"] == 1
+    assert s["scored"] == 3 and s["pending"] == 1 and s["updates"] == 1
+    assert s["companies"] == 3 and s["periods"] == 1
     assert s["by_confidence"] == {75: {"n": 3, "hit": pytest.approx(2 / 3)}}
     assert s["beat_baseline"] == 0.5 and s["compared"] == 2
+
+
+def test_first_forecast_per_company_metric_and_period():
+    def item(report, created, metric="T.revenue", period="2026-12-31", code="300750.SZ"):
+        return {"report": report, "created": created, "index": 0, "code": code,
+                "forecast": {"metric": metric, "period": period}}
+    items = validation.mark_first([item(9, "2026-11-20"), item(3, "2026-11-01"), item(5, "2026-11-05", metric="T.op_cash"),
+                                   item(7, "2026-11-10", period="2027-03-31"), item(8, "2026-11-12", code="600900.SH")])
+    assert {i["report"]: i["first"] for i in items} == {3: True, 9: False, 5: True, 7: True, 8: True}
 
 
 def test_report_item_shows_forecast_with_row_label_and_unit():
