@@ -167,10 +167,19 @@ def load_forecasts(database: str) -> list[dict]:
     return mark_first(out)
 
 
-def score_forecasts(items: list[dict]) -> list[dict]:
+def period_ended(period: str, today: date) -> bool:
+    """A period cannot be disclosed before the day after it ends; skips the financials fetch (~2.5 s/company)."""
+    return date.fromisoformat(period) < today
+
+
+def score_forecasts(items: list[dict], today: date | None = None) -> list[dict]:
     from a_share_research import material, sources  # provider imports only when scoring
+    today = today or datetime.now(SHANGHAI).date()
     tables = {}
     for item in items:
+        if not period_ended(item["forecast"]["period"], today):
+            item["result"] = {"status": "pending"}
+            continue
         if item["code"] not in tables:
             tables[item["code"]] = {r["id"]: r for r in material.financial_table(sources.financials(item["code"]), {})}
         row = tables[item["code"]].get(item["forecast"]["metric"], {})

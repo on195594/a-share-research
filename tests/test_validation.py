@@ -233,3 +233,10 @@ def test_passed_report_saves_relative_call_and_checkpoints():
     legacy = report()
     del legacy["relative"], legacy["checkpoints"]
     assert "relative" not in published(legacy) and "checkpoints" not in published(legacy)
+
+
+
+@pytest.mark.parametrize("today,ended", [("2026-12-31", False), ("2027-01-01", True)])
+def test_forecast_period_must_end_before_fetch(today, ended):
+    # Every production forecast targets 2026-12-31 (reports 70-78); none can be disclosed before 2027.
+    assert validation.period_ended("2026-12-31", datetime.fromisoformat(today).date()) is ended
