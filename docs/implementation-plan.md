@@ -11,7 +11,7 @@
 | F 基本面深度与信号升级 | F1/F3a、步骤 0、1a/1c、1b 历史快照阅读及 `peers` 同业发现已上线；步骤 2 第一阶段已上线；F2 保留原规则 | [升级方案](investment-upgrade.md)；逐值公告映射、F3b、步骤 2 后续及 3–4 待确认 |
 | W 阅读界面图表化（10-30） | 报告页“财务与走势”、判断刻度、批次收益与因子分位、首页批次对比与公司判断轨迹已上线；图表由 `charts.py` 纯函数从已存值计算几何，服务端 SVG | 真实使用后观察 2 分钟读懂报告的目标；旧报告按表回退，不回填经营序列 |
 | K 研究积累与降噪 | K2 工程交付已收尾；双组有限对照、真实跨期回应与 K3 个案完成；K4 保留规则已写入 | 真实关闭及关闭后不再继承保留为 K3 非阻塞观察，见[积累方案](research-accumulation.md) |
-| V 判断验证（优先，10-31 立项） | V0、V1、V2 已上线（`cd6c388`）；单只 relative 依契约简化删去，批次内强制排序已实现（`b02cb19`），已随 `d15af17` 于 11-02 发布。批次 2 排序经所有者授权于 11-01 11:33 在宿主用 `b02cb19` 补跑写入（19 家，宇通客车研究因模型供应商异常失败；备份与脚本在 `ranking-batch2-20261101/`，巡检 0 问题） | 基准发布后核对批次 2 TOP/BOTTOM 收益；新报告不再产出单只 relative 判断（依据见 [判断验证方案](judgment-validation.md#v2-相对判断6-个月反馈)）；20/60/120 个交易日后重跑 V0；2026 年报披露后首次 V1 记分 |
+| V 判断验证（优先，10-31 立项） | V0、V1、V2 已上线（`cd6c388`）；单只 relative 依契约简化删去，批次内强制排序已实现（`b02cb19`），已随 `d15af17` 于 11-02 发布。V3 记分 CLI `validation --hypotheses`（H1 逐只 TOP/BOTTOM 超额、H3 同价同日中性年化方向，`3873ab9`）11-02 发布；H1 冻结判据写入方案第 4 节；Hermes 周日 19:07 任务 `2c0e2f798501` 自动跑 V0/V1/H1/H3/A3，仅成熟样本数变化时推送。批次 2 排序经所有者授权于 11-01 11:33 在宿主用 `b02cb19` 补跑写入（19 家，宇通客车研究因模型供应商异常失败；备份与脚本在 `ranking-batch2-20261101/`，巡检 0 问题） | 基准发布后核对批次 2 TOP/BOTTOM 收益；新报告不再产出单只 relative 判断（依据见 [判断验证方案](judgment-validation.md#v2-相对判断6-个月反馈)）；20/60/120 个交易日后重跑 V0；2026 年报披露后首次 V1 记分；H1 第 12 个排序批次 6 个月到期时正式检验一次（约 2028-04）；H3 首批样本待 11-02 卡片之后的新披露（约 2027-01） |
 | A 投资顾问闭环（11-01 立项） | A0 `bbce62e`；A1+A2 `40918bb`、A3 `9e13100`、A4 `15b12d5`（Codex 按规格实现，agy 审查，Claude 验收与修正；A4 迁移 v7 与通知已获所有者授权 msg 4023）。4 只持仓真实冒烟全部通过并带情景测算；A4 开发实例端到端通过（三季报正确标为已覆盖、静默、幂等）。证据 `advisor-*-20261101/`、`smoke-40918bb-20261101/`、`a4-e2e-20261101/` | 已随 `d15af17` 发布，Hermes Key 与扫描/周报任务已建（见当前部署）；上线一个月后按真实通知量评估冷却/日预算机制；A3 首次诊断与 V1 记分为非阻塞观察 |
 | B 账户侧接入（11-01，A5） | Research `ce5503b`（区间按日滚动、`GET /api/cards`）；Skills 0.1.29 `ebecd3e`..`094735e`（快照读卡、只提醒的透支/换仓提示、待复核升级）；隔离实例端到端通过，agy 审查 3 项次要已修，证据 `batch-b-20261101/` | Research 随 `d15af17` 发布；Skills 0.1.29 于 11-02 激活；11-02 为 4 持仓与 11 月 L5 补跑 9 家带测算的接续研究（run 88–96），完成后快照推首批提醒 |
 | C 小市值组（11-01） | `screen-v1.2` 已随 `d15af17` 部署（v8 已执行）；2026-12 批次起增加独立 S10/SQ3/SL3、冻结时缓存卖方覆盖快照、双组展示与模拟；大市值组与旧批次不变 | 真实全市场 dry-run（基准日 2026-10-30：小池 2208 家、因子齐全 1030 家，双组约 35 分钟）与手机尺寸批次页已验证；首次真实双组批次待 12 月；H2 至少 6 个到期批次后观察，见[实验方案第 9 节](screening-experiment.md#9-小市值组批次-cscreen-v122026-12-批次起) |
@@ -30,18 +30,20 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `d15af17`** 于 2026-11-02 17:35（北京时间）例行发布 web、worker，含加法迁移 v7（批次 A，所有者 msg 4023 授权）与 v8（批次 C，msg 4061 授权），无配置、凭据或依赖变更。在 `cd6c388` 之上加入：批次内强制排序 `b02cb19`、投资顾问闭环批次 A（A0–A4）、论点卡按日滚动估值与 `GET /api/cards`（批次 B）、小市值组 screen-v1.2（批次 C，仅新批次）、V2 去掉单家相对判断（`01f6655`/`d15af17`，另一会话提交，随本次发布）。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `3873ab9`** 于 2026-11-02 21:33（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。在 `d15af17` 之上只加入只读 V3 记分 CLI `validation --hypotheses`（所有者 msg 4089 授权）。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:d15af17` | `0ec764b57af6a6d582ab86656747e283c88aa3abae11fac1ecc85032ea543d19` |
-| `a-share-research-worker:d15af17` | `a717923aa3bed111655dd1b9f1c1707c0f9f914e98a09a67008aca4903833552` |
+| `a-share-research-web:3873ab9` | `c599e41f9369d43d3732960bb48b8536a7be8bb2b8e422ce49b698b30b00a9f9` |
+| `a-share-research-worker:3873ab9` | `43cf52ef4d38a4f98228bfefa857229b62ffd5d0df6dd3d7a8339a4bb77699fb` |
 
-**验证**：离线全集 863 通过、31 环境跳过（`d15af17`）。发布工具通过，`user_version=8`，完整性巡检 0 问题；真实浏览器（桌面 1280、手机 390）首页、批次 2 页（强制排序 19 家）、报告 69 均 200、无横向溢出、无脚本错误。批次 2 于 11-02 开盘入场后发布（`frozen` 状态被发布工具拒绝）。上线前 report_rc 实测：2026-10-30 按日全市场 2512 行 / 537 只 / 51 家机构，未截断；额度为滚动 24 小时 10 次。证据 `deploy-d15af17-20261102-173541/`，备份 `~/a-share-research-data/backup-pre-d15af17-20261102-173544.db`。
+**验证**：离线全集 880 通过、31 环境跳过；agy 审查无发现（`v3-hypotheses-20261102/agy-review.md`）。发布工具通过，无页面改动未做浏览器验收；生产 CLI 实跑：H1 批次 2 仅中途参考，H3 当前无可记分样本（先前卡无 `valuation_calc`）。证据 `deploy-3873ab9-20261102-213326/`，备份 `~/a-share-research-data/backup-pre-3873ab9-20261102-213327.db`。
 
-**上线后接入**：Hermes 具名 Key `hermes-advisor`（编号 3，凭据在 `~/.config/a-share-advisor/runtime.env`，0600）；Hermes no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 `cron/a-share-advisor.sh` 扫描）与 `7845e96f4184`（周日 18:07 周报），送达所有者 Telegram。脚本走 `http://127.0.0.1:8620` 并发送公共 Host 头（服务拒绝其他 Host）。首次手动扫描 #1 用时 19 秒，发现长江电力三季报、论点卡转待复核并自动排队接续复核 run 88。
+**上线后接入**：Hermes no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`，脚本在 `~/.hermes/scripts/cron/`）在 worker 容器内并行跑 V0/V1/H1-H3/A3（Hermes 脚本超时 240 秒；实测 158–184 秒，V1 最慢），状态 `~/.local/state/a-share-scoring/state.json`，11-02 已建基线。
 
-**直接回退**：`a-share-research-web:rollback-d15af17`、`a-share-research-worker:rollback-d15af17` 即 `cd6c388`（`3455488c…6688`、`a389050c…655c`），标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。v7/v8 只加表与可空列，旧镜像照常运行；回退前先暂停两项 Hermes 任务（旧镜像无扫描接口）。
+上一版 `d15af17`（11-02 17:35）：含迁移 v7/v8、批次 A/B/C 与 V2 简化，证据 `deploy-d15af17-20261102-173541/`。其上线后接入：Hermes 具名 Key `hermes-advisor`（编号 3，凭据在 `~/.config/a-share-advisor/runtime.env`，0600）；Hermes no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
+
+**直接回退**：`a-share-research-web:rollback-3873ab9`、`a-share-research-worker:rollback-3873ab9` 即 `d15af17`（`0ec764b5…3d19`、`a717923a…3833552`），标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`；回退后记分任务会报“生产镜像尚无 --hypotheses”，可暂停 `2c0e2f798501`。再往前回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`），先暂停两项顾问 Hermes 任务（旧镜像无扫描接口）。
 
 **更早发布**：`cd6c388` 的完整记录见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
