@@ -1,20 +1,12 @@
 // One native completion; the Python worker owns tool execution and conversation state.
 // Ported from a-stock-tracker scripts/automation_model_pi.mjs.
-import { readFile, chmod, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const preflight = process.argv[2] === "--check";
-const serving = process.argv[2] === "--serve";
-// Watch the parent pipe even while the runtime is still loading.
-let close = () => process.exit(0);
-if (serving) {
-  process.stdin.on("end", () => close());
-  process.stdin.resume();
-}
-const request = preflight || serving
+const request = preflight
   ? { provider: process.env.MODEL_PROVIDER, model: process.env.MODEL_ID, timeout: 20 }
   : JSON.parse(await readFile(process.argv[2], "utf8"));
 const result = { pi_version: null, parameters: null, node_version: process.version,
@@ -92,14 +84,7 @@ try {
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
-  const models = new Map();
   async function resolveModel(request, result) {
-    const key = JSON.stringify([request.provider, request.model]);
-    if (models.has(key)) {
-      const cached = models.get(key);
-      Object.assign(result, cached.identity);
-      return cached.model;
-    }
     const refreshed = await runtime.refresh({ providers: [request.provider], allowNetwork: false,
       signal: AbortSignal.timeout(request.timeout * 1000) });
     if (refreshed.aborted) throw new Error("Model catalog refresh timed out");
@@ -127,35 +112,19 @@ try {
       if (model) result.model_source = "extension";
     }
     if (!model) throw new Error("Configured pi model not found; check MODEL_PROVIDER, MODEL_ID, models-store.json and PI_EXTENSION");
-    models.set(key, { model, identity: { model_source: result.model_source, extension: result.extension } });
     return model;
   }
-  async function infer(request) {
-    const output = { ...result };
-    try {
-      request = { provider: process.env.MODEL_PROVIDER, model: process.env.MODEL_ID, ...request };
-      const model = await resolveModel(request, output);
-      await complete(request, output, model);
-      if (output.stop_reason === "aborted") {
-        output.error = output.message.errorMessage || "pi model request aborted";
-      }
-    } catch (error) {
-      output.error = `${error.name}: ${error.message}`;
+  const model = await resolveModel(request, result);
+  if (preflight) {
+    await runtime.refreshProviderAvailability(request.provider, AbortSignal.timeout(request.timeout * 1000));
+    if (!runtime.hasConfiguredAuth(request.provider)) {
+      throw new Error(`Provider ${request.provider} has no configured credentials; check auth.json or the provider's environment credentials`);
     }
-    return output;
-  }
-  if (serving) {
-    await serve(process.argv[3], infer);
+    Object.assign(result, { ready: true, provider: model.provider, model: model.id });
   } else {
-    const model = await resolveModel(request, result);
-    if (preflight) {
-      await runtime.refreshProviderAvailability(request.provider, AbortSignal.timeout(request.timeout * 1000));
-      if (!runtime.hasConfiguredAuth(request.provider)) {
-        throw new Error(`Provider ${request.provider} has no configured credentials; check auth.json or the provider's environment credentials`);
-      }
-      Object.assign(result, { ready: true, provider: model.provider, model: model.id });
-    } else {
-      await complete(request, result, model);
+    await complete(request, result, model);
+    if (result.stop_reason === "aborted") {
+      result.error = result.message.errorMessage || "pi model request aborted";
     }
   }
   async function complete(request, result, model) {
@@ -191,51 +160,4 @@ try {
   result.error = `${error.name}: ${error.message}`;
   process.exitCode = 1;
 }
-if (!serving || result.error) console.log(JSON.stringify(result));
-if (serving && result.error) process.stdin.destroy();
-
-async function serve(socket, infer) {
-  if (!socket) throw new Error("--serve requires a Unix socket path");
-  const server = createServer(async (request, response) => {
-    response.setHeader("Content-Type", "application/json");
-    try {
-      if (request.method !== "POST" || !["/", "/complete"].includes(request.url)) {
-        response.writeHead(404).end(JSON.stringify({ error: "Use POST /complete or /" }));
-        return;
-      }
-      const chunks = [];
-      for await (const chunk of request) chunks.push(chunk);
-      const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      const output = await infer(input);
-      response.writeHead(output.error ? 500 : 200).end(JSON.stringify(output));
-    } catch (error) {
-      response.writeHead(400).end(JSON.stringify({ error: `${error.name}: ${error.message}` }));
-    }
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socket, resolve);
-  });
-  try {
-    await chmod(socket, 0o600);
-  } catch (error) {
-    server.close();
-    throw error;
-  }
-  let closing = false;
-  close = () => {
-    if (closing) return;
-    closing = true;
-    process.stdin.destroy();
-    server.close(() => {
-      rm(socket, { force: true }).catch(error => {
-        console.error(`Pi socket cleanup failed: ${error.message}`);
-        process.exitCode = 1;
-      }).finally(() => process.exit(process.exitCode || 0));
-    });
-    server.closeAllConnections();
-  };
-  process.on("SIGTERM", close);
-  process.on("SIGINT", close);
-  process.stdout.write(JSON.stringify({ ready: true, socket }) + "\n");
-}
+console.log(JSON.stringify(result));

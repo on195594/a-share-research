@@ -32,7 +32,7 @@
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
 | 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、历史压缩、巡检互变） |
 | TuShare 缓存与任务恢复 | `test_tushare_cache.py`、`test_worker_recovery.py`、`test_material_cache.py`（真实财报响应、SQLite 恢复事务和材料快照；`test_integrity.py` 核对 PDF 文本缓存复用与重建） |
-| 模型运行时与推理守护 | `test_model_preflight.py`、`test_model_daemon.py`（在 worker 环境下运行，验证 Node 预检、Unix socket 守护进程管理、请求隔离与单次回退） |
+| 模型运行时 | `test_model_preflight.py`、`test_model_complete.py`（在 worker 环境下运行，验证 Node 预检、单次推理的错误与运行身份；付费实测需 `PI_LIVE_TEST=1`） |
 | API、会话与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py`、`test_web_connection.py` |
 
 完整离线回归：`uv run pytest -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。
