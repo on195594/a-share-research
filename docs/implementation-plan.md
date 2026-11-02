@@ -30,20 +30,20 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `3873ab9`** 于 2026-11-02 21:33（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。在 `d15af17` 之上只加入只读 V3 记分 CLI `validation --hypotheses`（所有者 msg 4089 授权）。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `3ff0e86`** 于 2026-11-02 22:06（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。在 `d15af17` 之上加入只读 V3 记分 CLI `validation --hypotheses`（`3873ab9`，21:33 已发布，所有者 msg 4089 授权）与 V1 记分跳过未结束预测期的财报拉取（162 秒 → 3 秒）。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:3873ab9` | `c599e41f9369d43d3732960bb48b8536a7be8bb2b8e422ce49b698b30b00a9f9` |
-| `a-share-research-worker:3873ab9` | `43cf52ef4d38a4f98228bfefa857229b62ffd5d0df6dd3d7a8339a4bb77699fb` |
+| `a-share-research-web:3ff0e86` | `450e53af3b4314366eb4af650a61505f2511d749742955686a48b4f2a8c6ed93` |
+| `a-share-research-worker:3ff0e86` | `7428cd0022c37f1143db8b9fe85dcb7f6971f7c0596ed1e4c96737be20a1e8f9` |
 
-**验证**：离线全集 880 通过、31 环境跳过；agy 审查无发现（`v3-hypotheses-20261102/agy-review.md`）。发布工具通过，无页面改动未做浏览器验收；生产 CLI 实跑：H1 批次 2 仅中途参考，H3 当前无可记分样本（先前卡无 `valuation_calc`）。证据 `deploy-3873ab9-20261102-213326/`，备份 `~/a-share-research-data/backup-pre-3873ab9-20261102-213327.db`。
+**验证**：`3873ab9` 离线全集 880 通过、31 环境跳过，agy 审查无发现；`3ff0e86` 只跑 `test_validation.py`（24 过；边界改成 <= 时测试失败）与生产 V1 实跑。无页面改动未做浏览器验收。生产读数：H1 批次 2 仅中途参考；H3 暂无可记分样本（先前卡无 `valuation_calc`）。证据 `deploy-3ff0e86-20261102-220559/`，备份 `~/a-share-research-data/backup-pre-3ff0e86-20261102-220601.db`。
 
-**上线后接入**：Hermes no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`，脚本在 `~/.hermes/scripts/cron/`）在 worker 容器内并行跑 V0/V1/H1-H3/A3（Hermes 脚本超时 240 秒；实测 158–184 秒，V1 最慢），状态 `~/.local/state/a-share-scoring/state.json`，11-02 已建基线。
+**上线后接入**：
+- 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
+- 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 240 秒，实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-上一版 `d15af17`（11-02 17:35）：含迁移 v7/v8、批次 A/B/C 与 V2 简化，证据 `deploy-d15af17-20261102-173541/`。其上线后接入：Hermes 具名 Key `hermes-advisor`（编号 3，凭据在 `~/.config/a-share-advisor/runtime.env`，0600）；Hermes no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
-
-**直接回退**：`a-share-research-web:rollback-3873ab9`、`a-share-research-worker:rollback-3873ab9` 即 `d15af17`（`0ec764b5…3d19`、`a717923a…3833552`），标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`；回退后记分任务会报“生产镜像尚无 --hypotheses”，可暂停 `2c0e2f798501`。再往前回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`），先暂停两项顾问 Hermes 任务（旧镜像无扫描接口）。
+**直接回退**：`a-share-research-web:rollback-3ff0e86`、`a-share-research-worker:rollback-3ff0e86` 即 `3873ab9`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`cd6c388` 的完整记录见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
