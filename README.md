@@ -184,6 +184,7 @@ uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --ca
 ```bash
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额与 V2 相对判断记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --forecasts [--json OUT]  # V1 预测记分
+DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --hypotheses [--json OUT] # V3 H1 避坑 / H3 读得快
 ```
 
 `BASELINE_DIR` 必须是可信私有目录，包含既有 `cache/` 与 `batches/`；`CALENDAR_JSON` 为已采集的交易日历，包含 `end`（缓存财务查询截止日）和 `days`（自 2015 年起的 SSE 开市日升序列表）。输出目录须与基线分离，不能相同或互为祖先目录。程序逐批核对基线名单、分数与收益，缺缓存立即失败；保存来源与代码哈希，同一输入可续跑。`--limit 1` 可先做一个真实批次的检查。结果与限制见[实验方案](docs/screening-experiment.md#5-历史回测)。

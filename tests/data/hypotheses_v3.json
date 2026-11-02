@@ -1,0 +1,762 @@
+{
+  "source": "Read-only production /home/lin/a-share-research-data/app.db captured 2026-11-02. Report bodies retain only valuation_calc; request and metadata copied verbatim. Batch 2 entry/marks are real saved TuShare prices. Tests alter metadata/status only for exclusion branches, never market prices. Prior 600900 card = report 48; event 3 -> run 88 -> report 70.",
+  "reports": [
+    {
+      "id": 1,
+      "run_id": 2,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2025-12-31",
+      "passed": 0,
+      "verdict": null,
+      "created_at": "2026-10-21T12:50:59+08:00",
+      "body": "{\"valuation_calc\": null}"
+    },
+    {
+      "id": 2,
+      "run_id": 3,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2025-12-31",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-10-21T12:52:00+08:00",
+      "body": "{\"valuation_calc\": null}"
+    },
+    {
+      "id": 3,
+      "run_id": 5,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2025-12-31",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-10-22T15:39:18+08:00",
+      "body": "{\"valuation_calc\": null}"
+    },
+    {
+      "id": 4,
+      "run_id": 6,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2025-12-31",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-10-22T16:49:04+08:00",
+      "body": "{\"valuation_calc\": null}"
+    },
+    {
+      "id": 10,
+      "run_id": 16,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2026-06-30",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-10-23T16:19:32+08:00",
+      "body": "{\"valuation_calc\": null}"
+    },
+    {
+      "id": 48,
+      "run_id": 65,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "需要谨慎",
+      "created_at": "2026-10-30T19:09:30+08:00",
+      "body": "{\"valuation_calc\": null}"
+    },
+    {
+      "id": 70,
+      "run_id": 88,
+      "code": "600900.SH",
+      "name": "长江电力",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "需要谨慎",
+      "created_at": "2026-11-02T17:44:50+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 29.5, \"market_cap\": 7218.1242215, \"basis\": \"net_profit\", \"base_year\": 2025, \"base_profit\": 345.0280917639, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 5760.0, \"dividends\": 430.5, \"annual_return\": -0.05978119862133791, \"price_at_r\": 19.952431387372698}, \"中性\": {\"exit_cap\": 6900.0, \"dividends\": 458.5, \"annual_return\": 0.007760814249692967, \"price_at_r\": 23.716980270411437}, \"乐观\": {\"exit_cap\": 7770.0, \"dividends\": 483.0, \"annual_return\": 0.055248941462973974, \"price_at_r\": 26.600018777156432}}, \"zones\": {\"support_below\": 19.952431387372698, \"stretched_above\": 27.938541408583703, \"inverted\": false}, \"zone\": \"测算透支区\", \"implied\": {\"profit\": 434.71283484446565, \"cagr\": 0.0800636141555043}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [18.0, 20.0, 21.0], \"returns\": [[-0.10819894117197462, -0.07283987377386382, -0.05589170188776534], [-0.06855964712912962, -0.03128890490430742, -0.013431054689575889], [-0.03128890490430742, 0.007760814249692967, 0.026465407179825824], [0.003957261841023746, 0.04467499145789184, 0.06417368472643821], [0.03744832894787307, 0.07973963496792355, 0.09998761734277115]]}, \"bridge\": {\"profit_change\": 0.9999185812269477, \"pe_change\": 0.9560048599224568, \"dividend_share\": 0.06352065798955162}, \"pe_reference\": {\"p30\": 19.78, \"p50\": 20.8, \"p70\": 22.81}, \"consensus\": {\"status\": \"partial\", \"years\": {}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 2, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 抱歉，您访问接口(report_rc)频率超限(1次/分钟)，具体频次详情：https://tushare.pro/document/1?doc_id=108。\", \"neutral_vs_median\": {}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\"]}}"
+    },
+    {
+      "id": 71,
+      "run_id": 89,
+      "code": "000963.SZ",
+      "name": "华东医药",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "需要谨慎",
+      "created_at": "2026-11-02T17:49:48+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 26.52, \"market_cap\": 465.09102588, \"basis\": \"net_profit\", \"base_year\": 2025, \"base_profit\": 34.1433532641, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 372.0, \"dividends\": 24.8, \"annual_return\": -0.06174962300423961, \"price_at_r\": 17.84348407005272}, \"中性\": {\"exit_cap\": 570.0, \"dividends\": 27.6, \"annual_return\": 0.10585605942868073, \"price_at_r\": 26.873150403889884}, \"乐观\": {\"exit_cap\": 828.0, \"dividends\": 30.4, \"annual_return\": 0.2788696850582552, \"price_at_r\": 38.60092420799711}}, \"zones\": {\"support_below\": 17.84348407005272, \"stretched_above\": 31.656501661589935, \"inverted\": false}, \"zone\": \"中性区\", \"implied\": {\"profit\": 37.476447238990765, \"cagr\": 0.03153526687364445}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [12.0, 15.0, 18.0], \"returns\": [[-0.06593945085048414, 0.015786913985590442, 0.08872416978594609], [-0.023800325908760227, 0.06224570255978786, 0.13898144237761828], [0.015786913985590442, 0.10585605942868073, 0.18613165926995037], [0.053197418343104895, 0.1470414575855974, 0.23064024677561218], [0.08872416978594609, 0.18613165926995037, 0.27286892100100235]]}, \"bridge\": {\"profit_change\": 1.1129545392354614, \"pe_change\": 1.1011829307874927, \"dividend_share\": 0.059343222002140254}, \"pe_reference\": {\"p30\": 19.02, \"p50\": 21.2, \"p70\": 27.44}, \"consensus\": {\"status\": \"partial\", \"years\": {\"2026\": {\"median\": 36.38, \"n_orgs\": 2, \"min\": 34.57, \"max\": 38.19, \"oldest_days\": 5}, \"2027\": {\"median\": 39.585, \"n_orgs\": 2, \"min\": 35.01, \"max\": 44.16, \"oldest_days\": 5}, \"2028\": {\"median\": 42.04, \"n_orgs\": 1, \"min\": 42.04, \"max\": 42.04, \"oldest_days\": 3}}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 3, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 抱歉，您访问接口(report_rc)频率超限(1次/分钟)，具体频次详情：https://tushare.pro/document/1?doc_id=108。\", \"neutral_vs_median\": {\"2026\": -0.06542056074766354, \"2027\": -0.11582670203359859, \"2028\": -0.0960989533777355}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\"]}}"
+    },
+    {
+      "id": 72,
+      "run_id": 90,
+      "code": "002050.SZ",
+      "name": "三花智控",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "需要谨慎",
+      "created_at": "2026-11-02T17:58:19+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 33.53, \"market_cap\": 1410.94706067, \"basis\": \"core_profit\", \"base_year\": 2025, \"base_profit\": 39.5831694301, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 880.0, \"dividends\": 23.1, \"annual_return\": -0.16396612474920555, \"price_at_r\": 16.92509482385446}, \"中性\": {\"exit_cap\": 1400.0, \"dividends\": 25.8, \"annual_return\": 0.004211992718393905, \"price_at_r\": 26.721072084876194}, \"乐观\": {\"exit_cap\": 1920.0, \"dividends\": 27.9, \"annual_return\": 0.13818998500554963, \"price_at_r\": 36.505804680972325}}, \"zones\": {\"support_below\": 16.92509482385446, \"stretched_above\": 31.4773537951808, \"inverted\": false}, \"zone\": \"测算透支区\", \"implied\": {\"profit\": 62.97553988016156, \"cagr\": 0.16740203137224524}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [22.0, 28.0, 32.0], \"returns\": [[-0.16296379079575038, -0.08015413358371185, -0.030606334670742873], [-0.1235584145518848, -0.03659327726071168, 0.01542616998037407], [-0.08663255781101814, 0.004211992718393905, 0.05853961436278864], [-0.051808802409371024, 0.04268313936151613, 0.09918145401851472], [-0.018795071161234342, 0.0791459050132879, 0.13769731465414428]]}, \"bridge\": {\"profit_change\": 1.2631631251331479, \"pe_change\": 0.7855211403300283, \"dividend_share\": 0.018285590380512685}, \"pe_reference\": {\"p30\": 33.43, \"p50\": 37.47, \"p70\": 43.6}, \"consensus\": {\"status\": \"partial\", \"years\": {\"2026\": {\"median\": 43.93, \"n_orgs\": 3, \"min\": 41.8211, \"max\": 45.65, \"oldest_days\": 4}, \"2027\": {\"median\": 52.72, \"n_orgs\": 3, \"min\": 51.4431, \"max\": 54.2, \"oldest_days\": 4}, \"2028\": {\"median\": 59.441, \"n_orgs\": 2, \"min\": 58.07, \"max\": 60.812, \"oldest_days\": 4}}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 4, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 抱歉，您访问接口(report_rc)频率超限(1次/分钟)，具体频次详情：https://tushare.pro/document/1?doc_id=108。\", \"neutral_vs_median\": {\"2026\": -0.06669701798315501, \"2027\": -0.1464339908952959, \"2028\": -0.15882976396763177}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\", \"测算采用扣非归母净利润；卖方 np 按归母净利润处理，两者口径不同，对照差异包含口径影响。\"]}}"
+    },
+    {
+      "id": 73,
+      "run_id": 91,
+      "code": "603606.SH",
+      "name": "东方电缆",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "需要谨慎",
+      "created_at": "2026-11-02T18:01:27+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 37.9, \"market_cap\": 312.6024215, \"basis\": \"core_profit\", \"base_year\": 2025, \"base_profit\": 12.5417519193, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 234.0, \"dividends\": 7.65, \"annual_return\": -0.09817098159242378, \"price_at_r\": 23.105007059771438}, \"中性\": {\"exit_cap\": 396.0, \"dividends\": 9.09, \"annual_return\": 0.10963025102329749, \"price_at_r\": 38.732080735952046}, \"乐观\": {\"exit_cap\": 440.0, \"dividends\": 10.35, \"annual_return\": 0.15781968988287862, \"price_at_r\": 43.05954864211905}}, \"zones\": {\"support_below\": 23.105007059771438, \"stretched_above\": 45.626290916639995, \"inverted\": false}, \"zone\": \"中性区\", \"implied\": {\"profit\": 17.60442987860784, \"cagr\": 0.11966452818211577}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [18.0, 22.0, 20.0], \"returns\": [[-0.05951111574263423, 0.016848639586103723, -0.020221477148342208], [-0.015473339292833862, 0.06474720946626081, 0.025806797363066642], [0.025806797363066642, 0.10963025102329749, 0.06894428491065611], [0.06474720946626081, 0.1519569899353699, 0.10963025102329749], [0.10167169253455847, 0.19208276737994098, 0.14820479103423653]]}, \"bridge\": {\"profit_change\": 1.4352061909549112, \"pe_change\": 0.882650047624791, \"dividend_share\": 0.029078469566493743}, \"pe_reference\": {\"p30\": 30.72, \"p50\": 33.08, \"p70\": 39.29}, \"consensus\": {\"status\": \"partial\", \"years\": {\"2026\": {\"median\": 14.88, \"n_orgs\": 5, \"min\": 13.72, \"max\": 16.9, \"oldest_days\": 4}, \"2027\": {\"median\": 18.72, \"n_orgs\": 5, \"min\": 15.58, \"max\": 20.99, \"oldest_days\": 4}, \"2028\": {\"median\": 22.735, \"n_orgs\": 4, \"min\": 21.78, \"max\": 23.22, \"oldest_days\": 4}}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 4, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 卖方预测每日上游调用预算已用尽（8 次）\", \"neutral_vs_median\": {\"2026\": -0.038978494623655914, \"2027\": -0.1452991452991453, \"2028\": -0.2082691884759182}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\", \"测算采用扣非归母净利润；卖方 np 按归母净利润处理，两者口径不同，对照差异包含口径影响。\"]}}"
+    },
+    {
+      "id": 74,
+      "run_id": 92,
+      "code": "002648.SZ",
+      "name": "卫星化学",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-11-02T18:06:20+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"not_priced\": true, \"as_of\": \"2026-11-02\", \"close\": 25.12}}"
+    },
+    {
+      "id": 75,
+      "run_id": 93,
+      "code": "300750.SZ",
+      "name": "宁德时代",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-11-02T18:10:13+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 240.19, \"market_cap\": 11114.19105443, \"basis\": \"net_profit\", \"base_year\": 2025, \"base_profit\": 722.01282, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 9840.0, \"dividends\": 825.0, \"annual_return\": -0.0164224909075611, \"price_at_r\": 181.7650406073478}, \"中性\": {\"exit_cap\": 16500.0, \"dividends\": 940.0, \"annual_return\": 0.19821906269128858, \"price_at_r\": 297.23228393737884}, \"乐观\": {\"exit_cap\": 24300.0, \"dividends\": 1040.0, \"annual_return\": 0.39207668995078604, \"price_at_r\": 431.87305475763645}}, \"zones\": {\"support_below\": 181.7650406073478, \"stretched_above\": 350.1388616118416, \"inverted\": false}, \"zone\": \"中性区\", \"implied\": {\"profit\": 876.8709332445919, \"cagr\": 0.06691606637243636}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [12.0, 15.0, 18.0], \"returns\": [[0.013790809978588489, 0.10146895945584773, 0.1798081732981928], [0.05898362730814257, 0.15136014667601666, 0.23382706089702376], [0.10146895945584773, 0.19821906269128858, 0.28453078026274387], [0.1416409458649511, 0.24249294519641448, 0.3324126290312363], [0.1798081732981928, 0.28453078026274387, 0.3778566541344031]]}, \"bridge\": {\"profit_change\": 1.5235186544194603, \"pe_change\": 0.9744471952084357, \"dividend_share\": 0.0845765558101798}, \"pe_reference\": {\"p30\": 21.33, \"p50\": 24.29, \"p70\": 29.73}, \"consensus\": {\"status\": \"partial\", \"years\": {\"2026\": {\"median\": 884.13, \"n_orgs\": 1, \"min\": 884.13, \"max\": 884.13, \"oldest_days\": 6}, \"2027\": {\"median\": 1010.69, \"n_orgs\": 1, \"min\": 1010.69, \"max\": 1010.69, \"oldest_days\": 6}, \"2028\": {\"median\": 1195.66, \"n_orgs\": 1, \"min\": 1195.66, \"max\": 1195.66, \"oldest_days\": 6}}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 4, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 卖方预测每日上游调用预算已用尽（8 次）\", \"neutral_vs_median\": {\"2026\": 0.006639295126282334, \"2027\": -0.020471163264700352, \"2028\": -0.08000602177876653}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\"]}}"
+    },
+    {
+      "id": 76,
+      "run_id": 94,
+      "code": "601600.SH",
+      "name": "中国铝业",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-11-02T18:14:00+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"not_priced\": true, \"as_of\": \"2026-11-02\", \"close\": 8.54}}"
+    },
+    {
+      "id": 77,
+      "run_id": 95,
+      "code": "002946.SZ",
+      "name": "新乳业",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-11-02T18:18:26+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 15.8, \"market_cap\": 135.9880246, \"basis\": \"net_profit\", \"base_year\": 2025, \"base_profit\": 7.3114691429, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 114.8, \"dividends\": 6.4, \"annual_return\": -0.04515670399951494, \"price_at_r\": 11.105330185958104}, \"中性\": {\"exit_cap\": 171.7, \"dividends\": 7.08, \"annual_return\": 0.11606764752901373, \"price_at_r\": 16.381278305656682}, \"乐观\": {\"exit_cap\": 236.0, \"dividends\": 7.6, \"annual_return\": 0.2636256053613528, \"price_at_r\": 22.320614136133617}}, \"zones\": {\"support_below\": 11.105330185958104, \"stretched_above\": 19.297103469748915, \"inverted\": false}, \"zone\": \"中性区\", \"implied\": {\"profit\": 9.726830330884077, \"cagr\": 0.09982156165933175}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [14.0, 17.0, 20.0], \"returns\": [[-0.04832666740052132, 0.024497013529730716, 0.09031927911650985], [-0.00488196385735891, 0.07174139061561233, 0.1409592138797443], [0.035903606562054415, 0.11606764752901373, 0.1884511635168828], [0.07442476661125706, 0.15791254582903969, 0.2332690471176358], [0.11098901347599432, 0.19761559818753818, 0.2757806969366816]]}, \"bridge\": {\"profit_change\": 1.3813913185707525, \"pe_change\": 0.9140141258386953, \"dividend_share\": 0.05206340794217258}, \"pe_reference\": {\"p30\": 21.61, \"p50\": 25.02, \"p70\": 29.92}, \"consensus\": {\"status\": \"partial\", \"years\": {\"2026\": {\"median\": 8.2795, \"n_orgs\": 3, \"min\": 8.2248, \"max\": 8.36, \"oldest_days\": 4}, \"2027\": {\"median\": 9.0976, \"n_orgs\": 3, \"min\": 9.07, \"max\": 9.4199, \"oldest_days\": 4}, \"2028\": {\"median\": 9.9043, \"n_orgs\": 3, \"min\": 9.66, \"max\": 10.5418, \"oldest_days\": 4}}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 4, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 卖方预测每日上游调用预算已用尽（8 次）\", \"neutral_vs_median\": {\"2026\": 0.026632042997765566, \"2027\": 0.011255715793176222, \"2028\": 0.019759094534697052}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\"]}}"
+    },
+    {
+      "id": 78,
+      "run_id": 96,
+      "code": "688578.SH",
+      "name": "艾力斯",
+      "period": "2026-09-30",
+      "passed": 1,
+      "verdict": "值得继续研究",
+      "created_at": "2026-11-02T18:23:15+08:00",
+      "body": "{\"valuation_calc\": {\"rule\": \"valuation-v1\", \"r\": 0.1, \"r_low\": 0.03, \"as_of\": \"2026-11-02\", \"close\": 82.44, \"market_cap\": 370.98, \"basis\": \"core_profit\", \"base_year\": 2025, \"base_profit\": 20.2151568162, \"years\": [2026, 2027, 2028], \"exit_date\": \"2029-04-30\", \"horizon\": 2.4914442162902124, \"scenarios\": {\"保守\": {\"exit_cap\": 240.0, \"dividends\": 9.72, \"annual_return\": -0.14689004605086894, \"price_at_r\": 43.76362081177593}, \"中性\": {\"exit_cap\": 532.0, \"dividends\": 11.34, \"annual_return\": 0.16551028852023725, \"price_at_r\": 95.22075016766912}, \"乐观\": {\"exit_cap\": 816.0, \"dividends\": 12.42, \"annual_return\": 0.3805091506551774, \"price_at_r\": 145.18123799812355}}, \"zones\": {\"support_below\": 43.76362081177593, \"stretched_above\": 112.16979738498878, \"inverted\": false}, \"zone\": \"中性区\", \"implied\": {\"profit\": 32.79083169231683, \"cagr\": 0.1749654756671524}, \"sensitivity\": {\"profit_factors\": [0.8, 0.9, 1.0, 1.1, 1.2], \"exit_pe\": [10.0, 14.0, 17.0], \"returns\": [[-0.06314045087666131, 0.06788908706453144, 0.15231214173926938], [-0.019363937151855772, 0.11828893285598797, 0.20693823984470747], [0.021676421614241728, 0.16551028852023725, 0.2581055800501828], [0.06039458132262106, 0.2100379559978039, 0.3063436188454867], [0.09711141455802032, 0.25224690962339297, 0.3520614727444548]]}, \"bridge\": {\"profit_change\": 1.8797776512694475, \"pe_change\": 0.7628772317289342, \"dividend_share\": 0.03056768558951965}, \"pe_reference\": {\"p30\": 23.97, \"p50\": 29.2, \"p70\": 61.64}, \"consensus\": {\"status\": \"partial\", \"years\": {\"2026\": {\"median\": 28.27, \"n_orgs\": 3, \"min\": 22.57, \"max\": 28.8779, \"oldest_days\": 5}, \"2027\": {\"median\": 32.84, \"n_orgs\": 3, \"min\": 26.49, \"max\": 33.4991, \"oldest_days\": 5}, \"2028\": {\"median\": 38.0419, \"n_orgs\": 2, \"min\": 37.67, \"max\": 38.4138, \"oldest_days\": 5}}, \"coverage\": {\"trading_days\": 58, \"covered_days\": 4, \"truncated_days\": []}, \"reason\": \"TuShare report_rc: 卖方预测每日上游调用预算已用尽（8 次）\", \"neutral_vs_median\": {\"2026\": 0.025822426600636716, \"2027\": 0.03532277710109622, \"2028\": -0.0011014171216474466}}, \"assumptions\": [\"假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。\", \"退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。\", \"累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。\", \"回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。\", \"测算采用扣非归母净利润；卖方 np 按归母净利润处理，两者口径不同，对照差异包含口径影响。\"]}}"
+    }
+  ],
+  "runs": [
+    {
+      "id": 2,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "failed",
+      "created_at": "2026-10-21T12:48:41+08:00",
+      "finished_at": "2026-10-21T12:50:59+08:00",
+      "request": null,
+      "replay_of": null
+    },
+    {
+      "id": 3,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "done",
+      "created_at": "2026-10-21T12:51:18+08:00",
+      "finished_at": "2026-10-21T12:52:00+08:00",
+      "request": null,
+      "replay_of": null
+    },
+    {
+      "id": 5,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "done",
+      "created_at": "2026-10-22T15:37:03+08:00",
+      "finished_at": "2026-10-22T15:39:18+08:00",
+      "request": null,
+      "replay_of": null
+    },
+    {
+      "id": 6,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "done",
+      "created_at": "2026-10-22T16:47:08+08:00",
+      "finished_at": "2026-10-22T16:49:04+08:00",
+      "request": null,
+      "replay_of": null
+    },
+    {
+      "id": 16,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "done",
+      "created_at": "2026-10-23T16:15:46+08:00",
+      "finished_at": "2026-10-23T16:19:32+08:00",
+      "request": "{\"feedback\": {\"location\": \"risks[0]\", \"text\": \"请核查这条关于现金和偿债安排的论断在最新定期报告中是否仍然成立；如只适用历史期间，请明确期间与限制。\"}, \"parent_report_id\": 1, \"question\": \"核查原报告 risks[0]：请核查这条关于现金和偿债安排的论断在最新定期报告中是否仍然成立；如只适用历史期间，请明确期间与限制。。判断反馈是否成立，说明证据、根因与最小改进建议。\"}",
+      "replay_of": null
+    },
+    {
+      "id": 65,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "done",
+      "created_at": "2026-10-30T18:55:11+08:00",
+      "finished_at": "2026-10-30T19:09:30+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 10, \"question\": \"长江电力是否已披露2026年三季报或前三季度发电量公告？相对报告10只回答会改变持仓判断的增量：1）若三季报已披露：前三季度及第三季度单季营收、归母净利同比，财务费用变化；2）前三季度及第三季度发电量同比（分电站/来水情况）；3）市场化电价、消纳或电价政策相关公告；4）资产负债率、分红政策有无变化。若三季报未披露，明确截至日并只用已披露的发电量公告和报告10之后的公告作答。给出最重要的支持与反证及下一期最该核查的三个指标。只做公司公开证据研究，不做交易建议，不评分。关键结论给正式披露URL和页码；找不到就列缺口。\"}",
+      "replay_of": null
+    },
+    {
+      "id": 88,
+      "kind": "research",
+      "code": "600900.SH",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:01+08:00",
+      "finished_at": "2026-11-02T17:44:50+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": null, \"question\": \"\"}",
+      "replay_of": null
+    },
+    {
+      "id": 89,
+      "kind": "research",
+      "code": "000963.SZ",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T17:49:48+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 46, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 90,
+      "kind": "research",
+      "code": "002050.SZ",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T17:58:19+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 47, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 91,
+      "kind": "research",
+      "code": "603606.SH",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T18:01:27+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 49, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 92,
+      "kind": "research",
+      "code": "002648.SZ",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T18:06:20+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 50, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 93,
+      "kind": "research",
+      "code": "300750.SZ",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T18:10:13+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 54, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 94,
+      "kind": "research",
+      "code": "601600.SH",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T18:14:00+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 55, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 95,
+      "kind": "research",
+      "code": "002946.SZ",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T18:18:26+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 60, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    },
+    {
+      "id": 96,
+      "kind": "research",
+      "code": "688578.SH",
+      "status": "done",
+      "created_at": "2026-11-02T17:40:59+08:00",
+      "finished_at": "2026-11-02T18:23:15+08:00",
+      "request": "{\"feedback\": null, \"parent_report_id\": 67, \"question\": \"相对上次研究，最新披露改变了哪些判断、风险与检查点？\"}",
+      "replay_of": null
+    }
+  ],
+  "scan_events": [
+    {
+      "id": 1,
+      "scan_id": 1,
+      "code": "000963",
+      "doc_key": "1225637393",
+      "title": "2026年三季度报告",
+      "announced": "2026-10-29",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-29/1225637393.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:49+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 2,
+      "scan_id": 1,
+      "code": "002050",
+      "doc_key": "1225636998",
+      "title": "2026年三季度报告",
+      "announced": "2026-10-29",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-29/1225636998.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:50+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 3,
+      "scan_id": 1,
+      "code": "600900",
+      "doc_key": "1225648852",
+      "title": "长江电力2026年第三季度报告",
+      "announced": "2026-10-31",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-31/1225648852.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:52+08:00",
+      "action": "queued_review",
+      "run_id": 88
+    },
+    {
+      "id": 4,
+      "scan_id": 1,
+      "code": "603606",
+      "doc_key": "1225633509",
+      "title": "东方电缆2026年第三季度报告",
+      "announced": "2026-10-29",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-29/1225633509.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:53+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 5,
+      "scan_id": 1,
+      "code": "002648",
+      "doc_key": "1225609433",
+      "title": "2026年三季度报告",
+      "announced": "2026-10-17",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-17/1225609433.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:54+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 6,
+      "scan_id": 1,
+      "code": "002648",
+      "doc_key": "1225605190",
+      "title": "2026年前三季度业绩预告",
+      "announced": "2026-10-15",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-15/1225605190.PDF",
+      "kind": "forecast",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:54+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 7,
+      "scan_id": 1,
+      "code": "300750",
+      "doc_key": "1225613175",
+      "title": "2026年三季度报告",
+      "announced": "2026-10-21",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-21/1225613175.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:55+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 8,
+      "scan_id": 1,
+      "code": "601600",
+      "doc_key": "1225645035",
+      "title": "中国铝业2026年第三季度报告",
+      "announced": "2026-10-30",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-30/1225645035.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:56+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 9,
+      "scan_id": 1,
+      "code": "002946",
+      "doc_key": "1225640183",
+      "title": "2026年三季度报告",
+      "announced": "2026-10-30",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-30/1225640183.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:39:57+08:00",
+      "action": "covered",
+      "run_id": null
+    },
+    {
+      "id": 10,
+      "scan_id": 1,
+      "code": "688578",
+      "doc_key": "1225630181",
+      "title": "上海艾力斯医药科技股份有限公司2026年第三季度报告",
+      "announced": "2026-10-28",
+      "url": "https://static.cninfo.com.cn/finalpage/2026-10-28/1225630181.PDF",
+      "kind": "periodic",
+      "severity": 2,
+      "detected_at": "2026-11-02T17:40:00+08:00",
+      "action": "covered",
+      "run_id": null
+    }
+  ],
+  "batch": {
+    "id": 2,
+    "status": "tracking",
+    "rule": {
+      "version": "screen-v1.1",
+      "min_list_years": 3,
+      "min_total_mv_yi": 100,
+      "min_avg_amount_yi": 1,
+      "amount_days": 20,
+      "momentum_days": 60,
+      "drawdown_flag": -0.3,
+      "windfall_flag": {
+        "min_growth": 0.5,
+        "max_pe": 10
+      },
+      "weights": {
+        "roe": 0.2,
+        "cash": 0.2,
+        "growth": 0.2,
+        "pe": 0.4
+      },
+      "industry": "SW2021 L1",
+      "min_group": 10,
+      "q20": 20,
+      "q20_per_industry": 3,
+      "picks": 5,
+      "picks_per_industry": 2,
+      "cost": 0.002,
+      "benchmarks": {
+        "H00906.CSI": "中证800全收益",
+        "H00300.CSI": "沪深300全收益"
+      },
+      "horizons_months": [
+        3,
+        6,
+        12
+      ]
+    },
+    "entry": {
+      "date": "20261102",
+      "prices": {
+        "002648.SZ": {
+          "filled": true,
+          "open": 25.01,
+          "adj": 13.2697
+        },
+        "600961.SH": {
+          "filled": true,
+          "open": 16.92,
+          "adj": 1.504
+        },
+        "605499.SH": {
+          "filled": true,
+          "open": 107.0,
+          "adj": 1.8824
+        },
+        "002847.SZ": {
+          "filled": true,
+          "open": 38.6,
+          "adj": 2.4071
+        },
+        "300750.SZ": {
+          "filled": true,
+          "open": 235.0,
+          "adj": 1.9566
+        },
+        "601600.SH": {
+          "filled": true,
+          "open": 8.65,
+          "adj": 1.1447
+        },
+        "000651.SZ": {
+          "filled": true,
+          "open": 38.49,
+          "adj": 242.035
+        },
+        "600346.SH": {
+          "filled": true,
+          "open": 15.92,
+          "adj": 11.682
+        },
+        "600862.SH": {
+          "filled": true,
+          "open": 17.89,
+          "adj": 7.6116
+        },
+        "002468.SZ": {
+          "filled": true,
+          "open": 14.25,
+          "adj": 2.2776
+        },
+        "002946.SZ": {
+          "filled": true,
+          "open": 15.8,
+          "adj": 1.0867
+        },
+        "300475.SZ": {
+          "filled": true,
+          "open": 95.61,
+          "adj": 2.285
+        },
+        "000719.SZ": {
+          "filled": true,
+          "open": 12.87,
+          "adj": 5.9257
+        },
+        "603699.SH": {
+          "filled": true,
+          "open": 32.01,
+          "adj": 1.4635
+        },
+        "600066.SH": {
+          "filled": true,
+          "open": 29.12,
+          "adj": 64.0472
+        },
+        "300274.SZ": {
+          "filled": true,
+          "open": 62.0,
+          "adj": 9.943
+        },
+        "000708.SZ": {
+          "filled": true,
+          "open": 12.14,
+          "adj": 4.6082
+        },
+        "601918.SH": {
+          "filled": true,
+          "open": 9.68,
+          "adj": 1.6946
+        },
+        "688578.SH": {
+          "filled": true,
+          "open": 81.8,
+          "adj": 1.0326
+        },
+        "600989.SH": {
+          "filled": true,
+          "open": 22.14,
+          "adj": 1.234
+        }
+      },
+      "benchmarks": {
+        "H00906.CSI": {
+          "date": "20261102",
+          "value": 6411.571345105019
+        },
+        "H00300.CSI": {
+          "date": "20261102",
+          "value": 6031.916534294007
+        }
+      }
+    },
+    "marks": {
+      "checked": "20261102",
+      "attempted": null,
+      "latest": {
+        "date": "20261102",
+        "prices": {
+          "002648.SZ": {
+            "close": 25.12,
+            "adj": 13.2697,
+            "date": "20261102"
+          },
+          "600961.SH": {
+            "close": 16.81,
+            "adj": 1.504,
+            "date": "20261102"
+          },
+          "605499.SH": {
+            "close": 110.4,
+            "adj": 1.8824,
+            "date": "20261102"
+          },
+          "002847.SZ": {
+            "close": 40.06,
+            "adj": 2.4071,
+            "date": "20261102"
+          },
+          "300750.SZ": {
+            "close": 240.19,
+            "adj": 1.9566,
+            "date": "20261102"
+          },
+          "601600.SH": {
+            "close": 8.54,
+            "adj": 1.1447,
+            "date": "20261102"
+          },
+          "000651.SZ": {
+            "close": 38.52,
+            "adj": 242.035,
+            "date": "20261102"
+          },
+          "600346.SH": {
+            "close": 15.81,
+            "adj": 11.682,
+            "date": "20261102"
+          },
+          "600862.SH": {
+            "close": 18.36,
+            "adj": 7.6116,
+            "date": "20261102"
+          },
+          "002468.SZ": {
+            "close": 14.4,
+            "adj": 2.2776,
+            "date": "20261102"
+          },
+          "002946.SZ": {
+            "close": 15.8,
+            "adj": 1.0867,
+            "date": "20261102"
+          },
+          "300475.SZ": {
+            "close": 94.29,
+            "adj": 2.285,
+            "date": "20261102"
+          },
+          "000719.SZ": {
+            "close": 13.32,
+            "adj": 5.9257,
+            "date": "20261102"
+          },
+          "603699.SH": {
+            "close": 33.03,
+            "adj": 1.4635,
+            "date": "20261102"
+          },
+          "600066.SH": {
+            "close": 28.95,
+            "adj": 64.0472,
+            "date": "20261102"
+          },
+          "300274.SZ": {
+            "close": 71.54,
+            "adj": 9.943,
+            "date": "20261102"
+          },
+          "000708.SZ": {
+            "close": 12.16,
+            "adj": 4.6082,
+            "date": "20261102"
+          },
+          "601918.SH": {
+            "close": 9.24,
+            "adj": 1.6946,
+            "date": "20261102"
+          },
+          "688578.SH": {
+            "close": 82.44,
+            "adj": 1.0326,
+            "date": "20261102"
+          },
+          "600989.SH": {
+            "close": 22.52,
+            "adj": 1.234,
+            "date": "20261102"
+          }
+        },
+        "benchmarks": {
+          "H00906.CSI": {
+            "date": "20261102",
+            "value": 6453.756
+          },
+          "H00300.CSI": {
+            "date": "20261102",
+            "value": 6048.4473
+          }
+        }
+      }
+    },
+    "selection": {
+      "ranking": {
+        "order": [
+          "300750.SZ",
+          "688578.SH",
+          "601600.SH",
+          "002468.SZ",
+          "002648.SZ",
+          "600989.SH",
+          "002946.SZ",
+          "605499.SH",
+          "601918.SH",
+          "600961.SH",
+          "000708.SZ",
+          "600862.SH",
+          "600346.SH",
+          "002847.SZ",
+          "300475.SZ",
+          "603699.SH",
+          "000651.SZ",
+          "000719.SZ",
+          "300274.SZ"
+        ]
+      }
+    }
+  }
+}

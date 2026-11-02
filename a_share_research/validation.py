@@ -57,9 +57,11 @@ def value_on(series: dict[str, float], day: str) -> float | None:
     return series[max(days)] if days else None
 
 
-def excess(stock: dict[str, float], bench: dict[str, float], start: str, end: str) -> dict | None:
+def excess(stock: dict[str, float], bench: dict[str, float], start: str, end: str, *,
+           stock_start: float | None = None, benchmark_start: float | None = None) -> dict | None:
     """Simple stock and benchmark returns from the `start` close to the `end` close, and their difference."""
-    s0, s1, b0, b1 = stock.get(start), value_on(stock, end), bench.get(start), bench.get(end)
+    s0, s1 = stock.get(start) if stock_start is None else stock_start, value_on(stock, end)
+    b0, b1 = bench.get(start) if benchmark_start is None else benchmark_start, bench.get(end)
     if s0 is None or s1 is None or b0 is None or b1 is None:
         return None
     stock_ret, bench_ret = s1 / s0 - 1, b1 / b0 - 1
@@ -243,9 +245,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="V0：已有报告的事后超额（只读，不调用模型）")
     parser.add_argument("--database", required=True, help="生产或隔离库 app.db，只读打开")
     parser.add_argument("--json", help="另存逐份结果与汇总的 JSON 路径")
-    parser.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
+    modes.add_argument("--hypotheses", action="store_true", help="V3：H1 避坑与 H3 读得快假设记分")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if args.hypotheses:
+        from a_share_research import hypotheses
+        hypotheses.run(args.database, args.json)
+        return
     if args.forecasts:
         scored = score_forecasts(load_forecasts(args.database))
         summary = summarize_forecasts(scored)
