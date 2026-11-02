@@ -30,20 +30,20 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `ef07ecf`** 于 2026-11-02 23:24（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。在 `3ff0e86` 之上删除 Node 长驻推理守护，只保留单次 Pi 调用（11-01 起 299/299 次调用走守护、零回退；单次冷启动约 1.2 秒，约占每份研究 5%；单次路径即 10-31 前的生产路径），共删约 260 行；调用身份不再记录 `request_parameters.transport`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `598183c`** 于 2026-11-02 23:45（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。含两项：`ef07ecf`（23:24 已发布）删除 Node 长驻推理守护，只保留单次 Pi 调用（11-01 起 299/299 次走守护、零回退；单次冷启动约 1.2 秒，约占每份研究 5%），调用身份不再记录 `request_parameters.transport`；`598183c` 让 `T.interest_debt` 按已有项求和、空白项按无余额计（原四项全齐才出数，10-30 后 25 家中 16 家整行为空），四项全空的期间仍缺失；旧报告不回填。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:ef07ecf` | `ea22969197e14485315bf58d30217dd974914baa46799b99116478f2b5b23c14` |
-| `a-share-research-worker:ef07ecf` | `a7910fe62974e4dc780b90907524724d11319b675a47ecf57c73734cb6e7bd4e` |
+| `a-share-research-web:598183c` | `c862f65685036fbb5fcc46a4bebae542431775d394130180909c3f97e79bee1b` |
+| `a-share-research-worker:598183c` | `64fcdb763d9e9b5925a9709606c4f570e9ff5e31d426cbf6f6cdb8ec0953d57f` |
 
-**验证**：`ef07ecf` 离线全集 881 通过、11 环境跳过；`test_model_complete.py` 真实付费调用（原生工具调用 + 普通补全 + 超时）通过；纯删除包未派审查。无页面改动未做浏览器验收。证据 `deploy-ef07ecf-20261102-232354/`，备份 `~/a-share-research-data/backup-pre-ef07ecf-20261102-232356.db`。`3ff0e86` 的验证与生产读数见 `git show 65762b6:docs/implementation-plan.md`。
+**验证**：两项各跑离线全集（881 通过、11 环境跳过）。`ef07ecf` 另跑 `test_model_complete.py` 真实付费调用（工具调用、普通补全、超时）；`598183c` 用 TuShare 实取阳光电源/格力/603606 核对债务行（阳光电源三季末 74.81 亿与三项手算一致），恢复旧规则时 2 项测试失败。两项均为小改动未派审查；无页面模板改动未做浏览器验收。证据 `deploy-ef07ecf-20261102-232354/`、`deploy-598183c-20261102-234534/`，备份 `~/a-share-research-data/backup-pre-598183c-20261102-234535.db`。
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：`a-share-research-web:rollback-ef07ecf`、`a-share-research-worker:rollback-ef07ecf` 即 `3ff0e86`（`450e53af…c6ed93`、`7428cd00…e1e8f9`，恢复守护）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-598183c`、`a-share-research-worker:rollback-598183c` 即 `ef07ecf`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`cd6c388` 的完整记录见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
@@ -57,6 +57,7 @@
 - **三档结论校准未采用**：11 份材料的两组重放结论一致，不足以解释原结论偏谨慎；证据在 `calibration-20261027/` 和 `codex-review-20261027/`。
 - **放开“外部知识”用于提出假设未采用**（10-29）：评估集非金融 9/10，比亚迪两次因现金压力风险遗漏或数字无出处未通过，推断类表述占比未见增益；保留原规则。证据在 `external-knowledge-20261029/`。
 - **Pi 全面接管研究循环未采用**（11-02，所有者 msg 4113 提问）：pi 只做单次补全，循环、工具、快照、哈希绑定、重放与预算由 Python 持有；改由 pi 会话持有循环需 Node 反向调用 Python 工具（多一跳、状态分属两进程），且换生成路径影响批次可比。追问链改用 pi 会话分支的原型只改善追问体验，说不清服务哪个赚钱环节，不做。
+- **研究前风险信号块未采用**（11-02，所有者 msg 4124）：质押/审计意见/担保/处罚/问询在 10-25 后报告缺口中几乎为 0（无对应工具，属盲区），但所有者判断更适合买卖决策时参考，全量研究补做不划算；留作账户侧（a-stock-agent-skills）候选。现金流/应收缺口多为三季报不披露附注，代码不可补。
 - **经营序列压缩暂缓**：删除同比基期输入会丢失展示窗口外的原始出处，删除已发布的 `report.series` 会改变 API 契约；保留溯源和兼容。
 
 ## 验证与交付规则
