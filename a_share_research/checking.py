@@ -126,7 +126,7 @@ def check(report: dict, material: Material) -> list[dict]:
         sections.append("methods")
     if not material.extra.get("feedback") or "checkpoints" in report:
         sections.append("checkpoints")
-    if not material.extra.get("feedback"):
+    if report.get("relative") is not None:
         problems += [{"where": "relative", "problem": p} for p in forecasts.relative_problems(report.get("relative"))]
     if "checkpoints" in sections and not material.extra.get("feedback"):
         if problem := forecasts.count_problem(report.get("checkpoints")):

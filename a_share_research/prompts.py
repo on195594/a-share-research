@@ -32,7 +32,7 @@ RELATIVE = ('\n另加 "relative": {"call": "跑赢 | 跑输", "confidence": 55�
             '单只股票半年跑赢指数的频率接近一半；对所有公司默认同一方向没有信息量。'
             '方向要来自本报告的估值、盈利趋势与反证之间的权衡，而不是谨慎态度本身；把握 55 表示接近掷硬币，只有证据明显偏向一方时才给 70 以上。')
 VALUATION = '''''''''
-另加 "valuation"，与 relative 同级且独立于 verdict、relative。三情景须基于本报告证据，预测年固定为 {years}（财务表最新年报年之后三年）：
+另加 "valuation"，独立于 verdict。三情景须基于本报告证据，预测年固定为 {years}（财务表最新年报年之后三年）：
 {"basis": "net_profit 或 core_profit", "years": {years}, "scenarios": {"保守": {"profit": [三年利润数字], "exit_pe": 退出倍数}, "中性": {同前}, "乐观": {同前}}, "payout_pct": 派息率数字, "rationale": [{"text": "支撑假设的事实与推理", "cites": [出处]}]}
 利润单位亿元，basis 为归母净利润 net_profit 或扣非归母净利润 core_profit；exit_pe 对应第三年利润，须大于零且不超过200倍；派息率为0–100。第三年利润满足保守≤中性≤乐观，退出倍数不要求单调。rationale 至少一条，事实、数字与出处照常核查；假设数字只放结构字段，不写进 text。
 周期股先正常化，不默认盈利与估值同向；历史 PE 分位只作参照，不机械当作退出倍数。价格区间与回报全部由程序计算，模型不写任何价格或回报数字。
@@ -46,7 +46,6 @@ PRIOR = ('\n上下文中的 prior 是同一公司此前一份报告当时列出�
 def output_schema(material: "Material") -> str:
     schema = SCHEMA
     if not material.extra.get("feedback"):
-        schema += RELATIVE
         schema += VALUATION.replace("{years}", str(valuation.years(material.table)))
         base = forecasts.base_period(material.table)
         schema += CHECKPOINTS.replace("{next_period}", forecasts.next_period(base) if base else "下一期")

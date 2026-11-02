@@ -182,12 +182,15 @@ def test_relative_call_must_pick_a_side():
     assert forecasts.outperform_probability({"call": "跑输", "confidence": 70}) == pytest.approx(0.3)
 
 
-def test_check_requires_relative_call_except_for_feedback():
-    missing = report()
-    del missing["relative"]
-    assert [p["where"] for p in check(missing, MATERIAL)] == ["relative"]
+def test_check_allows_missing_relative_call_and_validates_when_present():
+    without_rel = report()
+    del without_rel["relative"]
+    assert check(without_rel, MATERIAL) == []
+    invalid_rel = report()
+    invalid_rel["relative"] = {"call": "持平", "confidence": 60}
+    assert [p["where"] for p in check(invalid_rel, MATERIAL)] == ["relative"]
     feedback = MATERIAL.__class__(**{**MATERIAL.__dict__, "extra": {"feedback": {"location": "risks[0]", "text": "x"}}})
-    assert "relative" not in [p["where"] for p in check(missing, feedback)]
+    assert "relative" not in [p["where"] for p in check(without_rel, feedback)]
 
 
 def test_repair_patch_can_replace_relative_call():
