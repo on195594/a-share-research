@@ -14,7 +14,7 @@
     {% if report.passed %}
       {{ verdict_scale(body.verdict) }}
       <p class="conclusion" id="claim-summary-0" tabindex="-1">{% if body.verdict not in ["暂不值得", "需要谨慎", "值得继续研究"] %}研究判断：{% endif %}{{ body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
-      {% if body.relative is mapping and body.relative.call %}<p class="relative-call">6 个月相对判断：{{ body.relative.call }}中证800全收益，把握 {{ body.relative.confidence }}%<span class="muted"> · 与上方结论独立，到期由程序按行情记分</span></p>{% endif %}
+      {% if body.relative is mapping and body.relative.call %}<p class="relative-call">6 个月相对判断：{{ body.relative.call }}中证800全收益，把握 {{ body.relative.confidence }}%<span class="muted"> · 历史相对判断，到期由程序按行情记分</span></p>{% endif %}
       <p class="small muted">研究流程：已完成并通过复核。以下判断针对本次研究范围，不是买卖建议。</p>
     {% else %}
       {% if body.facts_reviewed and body.facts and body.facts.values() | select | list %}

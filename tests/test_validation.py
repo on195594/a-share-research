@@ -182,6 +182,14 @@ def test_relative_call_must_pick_a_side():
     assert forecasts.outperform_probability({"call": "跑输", "confidence": 70}) == pytest.approx(0.3)
 
 
+def test_output_schema_does_not_contain_relative():
+    from a_share_research.prompts import output_schema
+    schema = output_schema(MATERIAL)
+    assert '"relative"' not in schema
+    feedback = MATERIAL.__class__(**{**MATERIAL.__dict__, "extra": {"feedback": {"location": "risks[0]", "text": "x"}}})
+    assert '"relative"' not in output_schema(feedback)
+
+
 def test_check_allows_missing_relative_call_and_validates_when_present():
     without_rel = report()
     del without_rel["relative"]
@@ -191,13 +199,13 @@ def test_check_allows_missing_relative_call_and_validates_when_present():
     assert [p["where"] for p in check(invalid_rel, MATERIAL)] == ["relative"]
     feedback = MATERIAL.__class__(**{**MATERIAL.__dict__, "extra": {"feedback": {"location": "risks[0]", "text": "x"}}})
     assert "relative" not in [p["where"] for p in check(without_rel, feedback)]
+    assert "relative" in [p["where"] for p in check(invalid_rel, feedback)]
 
 
-def test_repair_patch_can_replace_relative_call():
-    from a_share_research.research import merge_repair_patch
-    merged = merge_repair_patch(report(), {"relative": {"call": "跑赢", "confidence": 55}}, [], MATERIAL)
-    assert merged["relative"] == {"call": "跑赢", "confidence": 55}
-    assert check(merged, MATERIAL) == []
+def test_repair_patch_rejects_relative_call():
+    from a_share_research.research import merge_repair_patch, RepairFormatError
+    with pytest.raises(RepairFormatError, match="只允许 ops、verdict、summary、gaps、valuation、rebuttals"):
+        merge_repair_patch(report(), {"relative": {"call": "跑赢", "confidence": 55}}, [], MATERIAL)
 
 
 def test_relative_summary_scores_correctness_and_brier():

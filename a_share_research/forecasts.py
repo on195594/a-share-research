@@ -20,7 +20,7 @@ RELATIVE_BENCHMARK = "中证800全收益"
 
 
 def relative_problems(relative) -> list[str]:
-    """V2: a committed 6-month call against the benchmark; two outcomes, no neutral escape."""
+    """V2: 结构核查（保留用于历史报告读取校验与向后兼容）。"""
     if not isinstance(relative, dict) or set(relative) != {"call", "confidence"}:
         return ['relative 须为 {"call": "跑赢" 或 "跑输", "confidence": 55–90 中 5 的倍数} 两个字段']
     out = []
@@ -32,7 +32,7 @@ def relative_problems(relative) -> list[str]:
 
 
 def outperform_probability(relative: dict) -> float:
-    """Probability the stock beats the benchmark, for Brier scoring."""
+    """Probability the stock beats the benchmark, for Brier scoring（保留用于历史报告记分向后兼容）。"""
     p = relative["confidence"] / 100
     return p if relative["call"] == "跑赢" else 1 - p
 

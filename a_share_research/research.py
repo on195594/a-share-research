@@ -125,7 +125,7 @@ PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示
 ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
 add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods；不能整段替换。value 是完整条目 {"text": "论断", "cites": [出处]}；checkpoints 条目可再带 forecast（格式同原报告），替换带 forecast 的检查点时须保留或修正它。
 出处格式：原文 {"source": "实际文档标识", "page": 页码, "quote": "该页连续原文，逐字复制，20–200 字"}；表格/程序计算 {"ref": "实际行标识", "period": "实际期间键，跨期论断可省略"}。
-verdict、summary、gaps、relative、valuation 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组，relative 与 valuation 格式同原报告；未提到的字段与条目由程序逐字保留。
+verdict、summary、gaps、valuation 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组，valuation 格式同原报告；未提到的字段与条目由程序逐字保留。
 可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
 程序将 rebuttals 放入合并稿的 repair_rebuttals，供独立复核员作为待核查数据阅读；它不是解决声明，不接受 status/resolutions/risk_resolutions，也不能关闭问题或豁免旧风险去向复核。
 """
@@ -137,8 +137,8 @@ class RepairFormatError(ValueError):
 
 def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material: Material) -> dict:
     """Apply an atomic patch against original positions without mutating either input."""
-    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "relative", "valuation", "rebuttals"}:
-        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、relative、valuation、rebuttals；不要输出完整报告")
+    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "valuation", "rebuttals"}:
+        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、valuation、rebuttals；不要输出完整报告")
     if not isinstance(patch.get("ops", []), list):
         raise RepairFormatError("补丁 ops 必须是数组；无需改动条目时可省略或用 []")
     replacements, additions = {}, {}
@@ -204,7 +204,7 @@ def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material
         merged[section].extend(deepcopy(additions.get(section, [])))
         if not merged[section] and section not in required:
             merged.pop(section)
-    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps", "relative", "valuation") if k in patch})
+    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps", "valuation") if k in patch})
     if patch.get("rebuttals"):
         merged["repair_rebuttals"] = deepcopy(patch["rebuttals"])
     return merged
