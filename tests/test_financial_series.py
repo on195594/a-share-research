@@ -109,7 +109,10 @@ def test_missing_periods_and_nonpositive_bases_remain_missing():
     assert missing["value"] is None and missing["missing"] == ["2021-09-30"]
     negative = cell(series, "quarterly", "op_cash", "2023-03-31")
     assert negative["yoy"]["base"]["value"] == "-6876059093.79" and negative["yoy"]["value"] is None
-    assert cell(build(), "balance", "interest_debt", "2025-12-31")["value"] is None
+    # Wuliangye FY2025 reports only the current portion of non-current liabilities; blank items have no balance.
+    debt = cell(build(), "balance", "interest_debt", "2025-12-31")
+    assert debt["value"] == "364149470.84"
+    assert [i["value"] is None for i in debt["inputs"]] == [True, False, True, True]
     assert cell(build(), "balance", "contract_liab", "2025-03-31")["value"] is None
 
 

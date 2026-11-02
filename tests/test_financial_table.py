@@ -58,8 +58,8 @@ def test_three_statement_rows_and_missing_components_from_real_disclosures():
         table = {r['id']: r for r in financial_table(frames, captured['market'])}
         for key, value in values.items():
             assert table[f'T.{key}']['values']['2025-12-31'] == value
-        # Real absent bond/loan components must not become zero or an incomplete total.
-        assert '2025-12-31' not in table['T.interest_debt']['values']
+        # Blank balance-sheet debt items have no balance; the total uses the items present.
+        assert table['T.interest_debt']['values']['2025-12-31'] == {'002648': '76.45', '600519': '0.44'}[code]
         if code == '600519':
             assert '2025-12-31' not in table['T.goodwill']['values']
         else:

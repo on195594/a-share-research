@@ -27,7 +27,7 @@ METRICS = [
     ("capex", "购建长期资产支付的现金", "亿元", "cashflow", "c_pay_acq_const_fiolta", 1e8),
     ("fcf", "经营现金流减购建长期资产现金", "亿元", "cashflow", "fcf", 1e8),
     ("cash", "货币资金", "亿元", "balance", "money_cap", 1e8),
-    ("interest_debt", "四项债务合计（短借、一年内到期非流动负债、长借、债券）", "亿元", "balance", "interest_debt", 1e8),
+    ("interest_debt", "四项债务合计（短借、一年内到期非流动负债、长借、债券；数据源空白项按无余额计）", "亿元", "balance", "interest_debt", 1e8),
     ("receivables", "应收票据及应收账款", "亿元", "balance", "accounts_receiv_bill", 1e8),
     ("inventory", "存货", "亿元", "balance", "inventories", 1e8),
     ("contract_liab", "合同负债", "亿元", "balance", "contract_liab", 1e8),
@@ -157,6 +157,11 @@ def _financial_metric(row, key: str, column: str) -> tuple[Decimal | None, list[
     elif key == "receivables" and _financial_value(row, column) is None:
         columns = [("notes_receiv", 1), ("accounts_receiv", 1)]
     values = [_financial_value(row, c) for c, _ in columns]
+    if key == "interest_debt":
+        # A balance-sheet item left blank has no balance (e.g. no bonds issued). Requiring all four
+        # emptied this row for 16 of 25 companies in production; a period with no item stays missing.
+        present = [(v, weight) for v, (_, weight) in zip(values, columns) if v is not None]
+        return (sum(v * weight for v, weight in present) if present else None), columns
     value = sum(v * weight for v, (_, weight) in zip(values, columns)) if all(v is not None for v in values) else None
     return value, columns
 

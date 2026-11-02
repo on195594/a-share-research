@@ -16,6 +16,7 @@ from support.templates import ENV
 from test_financial_series import CAPTURES, build, frames
 
 from a_share_research import charts, reading, screening
+from a_share_research.material import financial_series
 from a_share_research.price import compute
 from a_share_research.material import financial_table
 
@@ -195,9 +196,19 @@ def test_vitals_reuse_saved_latest_values_and_sit_on_zero():
     assert panel["flow_period"] == charts._period_label(periods[-1], "quarterly")
 
 
+def sparse_debt_series():
+    """卫星化学 with debt items blanked wherever bonds are blank: only the first period end keeps a total."""
+    captured = CAPTURES["002648"]
+    data = frames(captured)
+    balance = data["balance"].astype(object)
+    blank = balance["bond_payable"].isna()
+    balance.loc[blank, ["st_borr", "non_cur_liab_due_1y", "lt_borr"]] = None
+    data["balance"] = balance
+    return financial_series(data, captured["code"], captured["retrieved_at"])
+
+
 def test_vitals_keep_a_balance_row_with_too_few_values():
-    # 卫星化学: 四项债务合计 has a complete input only at its first period end, before the last eight.
-    series = build("002648")
+    series = sparse_debt_series()
     debt = vital(charts.vitals({"series": series}), "四项债务合计")
     assert debt["spark"] is None and debt["latest"] is None
     assert len(debt["data"]) == 8 and all(t.endswith("缺失") for t in debt["data"])
@@ -290,8 +301,7 @@ def test_reports_without_series_fall_back_to_the_saved_financial_table():
 
 
 def test_line_positions_follow_calendar_and_legend_never_carries_an_older_value():
-    # 卫星化学: 四项债务合计 has a complete input only at its first period end, cash at every one.
-    figures = charts.financial_charts({"series": build("002648")}, [])
+    figures = charts.financial_charts({"series": sparse_debt_series()}, [])
     balance = figure(figures, "货币资金与四项债务合计")
     periods = build("002648")["balance"]["periods"]
     chart = balance["chart"]
