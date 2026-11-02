@@ -30,32 +30,33 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `3ff0e86`** 于 2026-11-02 22:06（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。在 `d15af17` 之上加入只读 V3 记分 CLI `validation --hypotheses`（`3873ab9`，21:33 已发布，所有者 msg 4089 授权）与 V1 记分跳过未结束预测期的财报拉取（162 秒 → 3 秒）。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `ef07ecf`** 于 2026-11-02 23:24（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。在 `3ff0e86` 之上删除 Node 长驻推理守护，只保留单次 Pi 调用（11-01 起 299/299 次调用走守护、零回退；单次冷启动约 1.2 秒，约占每份研究 5%；单次路径即 10-31 前的生产路径），共删约 260 行；调用身份不再记录 `request_parameters.transport`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:3ff0e86` | `450e53af3b4314366eb4af650a61505f2511d749742955686a48b4f2a8c6ed93` |
-| `a-share-research-worker:3ff0e86` | `7428cd0022c37f1143db8b9fe85dcb7f6971f7c0596ed1e4c96737be20a1e8f9` |
+| `a-share-research-web:ef07ecf` | `ea22969197e14485315bf58d30217dd974914baa46799b99116478f2b5b23c14` |
+| `a-share-research-worker:ef07ecf` | `a7910fe62974e4dc780b90907524724d11319b675a47ecf57c73734cb6e7bd4e` |
 
-**验证**：`3873ab9` 离线全集 880 通过、31 环境跳过，agy 审查无发现；`3ff0e86` 只跑 `test_validation.py`（24 过；边界改成 <= 时测试失败）与生产 V1 实跑。无页面改动未做浏览器验收。生产读数：H1 批次 2 仅中途参考；H3 暂无可记分样本（先前卡无 `valuation_calc`）。证据 `deploy-3ff0e86-20261102-220559/`，备份 `~/a-share-research-data/backup-pre-3ff0e86-20261102-220601.db`。
+**验证**：`ef07ecf` 离线全集 881 通过、11 环境跳过；`test_model_complete.py` 真实付费调用（原生工具调用 + 普通补全 + 超时）通过；纯删除包未派审查。无页面改动未做浏览器验收。证据 `deploy-ef07ecf-20261102-232354/`，备份 `~/a-share-research-data/backup-pre-ef07ecf-20261102-232356.db`。`3ff0e86` 的验证与生产读数见 `git show 65762b6:docs/implementation-plan.md`。
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：`a-share-research-web:rollback-3ff0e86`、`a-share-research-worker:rollback-3ff0e86` 即 `3873ab9`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-ef07ecf`、`a-share-research-worker:rollback-ef07ecf` 即 `3ff0e86`（`450e53af…c6ed93`、`7428cd00…e1e8f9`，恢复守护）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`cd6c388` 的完整记录见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
 ## 尚待完成与未采用项
 
-- **按北极星暂停（11-01）**：修正轮次与 Node 长驻推理（非阻塞观察）、修正阶段首次实际补证（非阻塞观察）、报告 43/45 的最小重核（待批准）、K3 后续观察（不阻塞）、三档结论诊断（K2 对照后）。这些项说不清服务哪个赚钱环节（三档结论是否有用改由 V0/V2 记分直接回答），原文见 `git show 72c4e13:docs/implementation-plan.md`；生产故障照修。
+- **按北极星暂停（11-01）**：修正轮次（非阻塞观察；Node 长驻推理已于 11-02 按数据删除，见当前部署）、修正阶段首次实际补证（非阻塞观察）、报告 43/45 的最小重核（待批准）、K3 后续观察（不阻塞）、三档结论诊断（K2 对照后）。这些项说不清服务哪个赚钱环节（三档结论是否有用改由 V0/V2 记分直接回答），原文见 `git show 72c4e13:docs/implementation-plan.md`；生产故障照修。
 - **研究成本（11-01 评估集实测）**：每家约 0.5–0.7 美元、10–12 次调用、约 3–5 分钟；探索 53%、复核 38%、修正 9%。批次每月约 11 美元，相对赚钱目标可忽略，不为成本单独立项。
 - **复核/修正阶段提示缓存未采用**（10-31）：这两个阶段的缓存命中为 0，但每次研究的首次复核/修正没有可复用前缀，复核（无工具）与修正（带补证工具）之间也不能共享；能命中的只有同一研究内的第二次复核或修正。评估集 10 家中仅 3 家进入修正，收益约每 10 家 0.1 美元，不值得为调整提示词顺序再跑评估集。
 - **部署备份**：发布工具成功后自动只留最近 3 份发布前备份（K4，`d5e0016`）；证据目录只留文字与评估库，重复 PDF 用硬链接；版本镜像只留当前与两级回退。
 - **跨公司比较输入精简未采用**：约 83k→50k tokens 的表示改变了入选频数，单批实验不足以证明质量未降；证据在 `upgrade-20261026/digest-size/`。
 - **三档结论校准未采用**：11 份材料的两组重放结论一致，不足以解释原结论偏谨慎；证据在 `calibration-20261027/` 和 `codex-review-20261027/`。
 - **放开“外部知识”用于提出假设未采用**（10-29）：评估集非金融 9/10，比亚迪两次因现金压力风险遗漏或数字无出处未通过，推断类表述占比未见增益；保留原规则。证据在 `external-knowledge-20261029/`。
+- **Pi 全面接管研究循环未采用**（11-02，所有者 msg 4113 提问）：pi 只做单次补全，循环、工具、快照、哈希绑定、重放与预算由 Python 持有；改由 pi 会话持有循环需 Node 反向调用 Python 工具（多一跳、状态分属两进程），且换生成路径影响批次可比。追问链改用 pi 会话分支的原型只改善追问体验，说不清服务哪个赚钱环节，不做。
 - **经营序列压缩暂缓**：删除同比基期输入会丢失展示窗口外的原始出处，删除已发布的 `report.series` 会改变 API 契约；保留溯源和兼容。
 
 ## 验证与交付规则
