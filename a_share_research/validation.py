@@ -120,7 +120,8 @@ def summarize_forecasts(scored: list[dict]) -> dict:
         if group:
             by_confidence[level] = {"n": len(group), "hit": sum(s["result"]["hit"] for s in group) / len(group)}
     compared = [s for s in done if s["result"]["beat_baseline"] is not None]
-    return {"total": len(first), "updates": len(scored) - len(first), "scored": len(done), "pending": len(first) - len(done),
+    return {"total": len(first), "updates": len(scored) - len(first), "scored": len(done), "pending": sum(s["result"]["status"] == "pending" for s in first),
+            "unavailable": sum(s["result"]["status"] == "unavailable" for s in first),
             "companies": len({s["code"] for s in first}), "periods": len({s["forecast"]["period"] for s in first}),
             "restated": sum(bool(s["result"].get("restated")) for s in done),
             "by_confidence": by_confidence,
@@ -268,14 +269,14 @@ def main() -> None:
         summary = summarize_forecasts(scored)
         lines = [f"V1 预测记分：首份 {summary['total']} 条（{summary['companies']} 家公司、{summary['periods']} 个目标期，"
                  f"另有更新 {summary['updates']} 条不重复记分），已兑现 {summary['scored']}，待披露 {summary['pending']}，"
-                 f"基期数据已更正 {summary['restated']}"]
+                 f"缺失/不可比 {summary['unavailable']}，基期数据已更正 {summary['restated']}"]
         for s in scored:
             r = s["result"]
             lines.append(f"#{s['report']}[{s['index']}]{'' if s['first'] else '（更新）'} {s['code']} {s['name']} "
                          f"{forecasts.describe(s['forecast'], [])} → "
                          + (f"实际 {r['actual']:g} {'命中' if r['hit'] else '未中'}，朴素 {r['baseline']}"
-                            f"{'，胜过朴素' if r['beat_baseline'] else '，不如朴素' if r['beat_baseline'] is False else ''}"
-                            if r["status"] == "scored" else "待披露"))
+                            f"{'，胜过朴素' if r['beat_baseline'] else '，未胜过朴素（含持平）' if r['beat_baseline'] is False else ''}"
+                            if r["status"] == "scored" else r.get("reason", "待披露")))
         for level, g in summary["by_confidence"].items():
             lines.append(f"把握 {level}%：n={g['n']} 命中 {g['hit']:.0%}")
         if summary["beat_baseline"] is not None:

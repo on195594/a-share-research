@@ -240,3 +240,21 @@ def test_passed_report_saves_relative_call_and_checkpoints():
 def test_forecast_period_must_end_before_fetch(today, ended):
     # Every production forecast targets 2026-12-31 (reports 70-78); none can be disclosed before 2027.
     assert validation.period_ended("2026-12-31", datetime.fromisoformat(today).date()) is ended
+
+
+def test_forecast_missing_disclosed_period_is_not_pending():
+    # Real corrected row from the saved evaluation, not a new forecast outcome.
+    from support.valuation import STORED
+    row = next(r for r in STORED[1]['table'] if r['id'] == 'T.net_profit')
+    f = _forecast(metric='T.net_profit', period='2025-03-31')
+    result = forecasts.score(f, '2024-12-31', row, row)
+    assert result['status'] == 'unavailable' and '更正' in result['reason']
+    # Remove only explanatory metadata: later saved periods still prove this is not pending.
+    without_reason = {k: v for k, v in row.items() if k != 'unavailable'}
+    assert forecasts.score(f, '2024-12-31', without_reason, row)['status'] == 'unavailable'
+    summary = validation.summarize_forecasts([{'first': True, 'code': '000858', 'forecast': f, 'result': result}])
+    assert summary['pending'] == 0 and summary['unavailable'] == 1 and summary['compared'] == 0
+    # Unknown future values remain pending; a missing baseline must not hide a known actual.
+    assert forecasts.score(_forecast(), '2026-09-30', row, row)['status'] == 'pending'
+    known = forecasts.score(_forecast(metric='T.net_profit', period='2026-09-30'), '2026-06-30', row, {})
+    assert known['status'] == 'scored' and known['baseline'] is None

@@ -123,7 +123,11 @@ def score(forecast: dict, base: str, row: dict, written: dict) -> dict:
     """
     values, frozen = _values(row), _values(written)
     period = forecast["period"]
+    if reason := row.get("unavailable", {}).get(period):
+        return {"status": "unavailable", "reason": reason}
     if period not in values:
+        if values and max(values) > period:
+            return {"status": "unavailable", "reason": "当前表缺少已过目标期间数值，不能当作尚未披露"}
         return {"status": "pending"}
     actual, low, high = values[period], Decimal(str(forecast["low"])), Decimal(str(forecast["high"]))
     naive = baseline(forecast["metric"], written.get("unit", ""), period, base, frozen)
