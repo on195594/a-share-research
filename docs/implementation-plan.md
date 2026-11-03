@@ -35,14 +35,16 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `cb569ad`** 于 2026-11-03 13:43（北京时间）按所有者授权发布 web、worker，锁定 a-stock-lib 0.9.0 及其 wheel SHA256；沿用 832 passed / 11 skipped 与候选 wheel 验证，不重复测试。本次固定发布入口的空闲检查、备份、完整性巡检（81 份报告、674 次调用、0 问题）及 worker 离线预检通过；无应用代码、页面、凭据、schema 或 cron 修改，不新增研究/浏览器验收。证据 `deploy-cb569ad-20261103-134226/`，备份 `~/a-share-research-data/backup-pre-cb569ad-20261103-134228.db`。Skills 同时激活 `0.1.32-729d470ee38e`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `b8d4e54`** 于 2026-11-03 17:20（北京时间）按所有者授权发布 web、worker，只把 a-stock-lib 锁定升至 0.10.0（wheel SHA256 `e69dd873…4470`）；应用源码未改。离线全集 832 passed / 11 skipped 与 0.9.0 一致。固定发布入口的空闲检查、备份、完整性巡检（81 份报告、674 次调用、0 问题）及 worker 离线预检通过；容器内 Lib 版本核对为 0.10.0。无页面、凭据、schema 或 cron 修改。证据 `deploy-b8d4e54-20261103-172030/`，备份 `~/a-share-research-data/backup-pre-b8d4e54-20261103-172031.db`。Skills 同时激活 `0.1.33-5add5f365ee7`。
+
+前版 `cb569ad` 于同日 13:43 发布（锁定 a-stock-lib 0.9.0）。
 
 前版 `cfcbc3d` 于同日 11:19 发布（在 `7a8bbdd` 之上只删去报告页历史相对判断的“到期记分”说明，`user_version=8`）。随附 `deb25f3`、`b70a48e`（中性不计分红敏感性端点、V1 `unavailable`/`tie`）、`83a155d`、`0de494d`、`ef77f06`（月批 HTTP 发起/查询，调度未安装）与 `7a8bbdd` 模块退役及页面/API 限定语精简（所有者决定，见 PRODUCT 原则；研究进展、`monthly.py` CLI、`backtest_experiment.py`、`db compact-calls`；发布空闲检查不再查 `research_progress`，发布前生产该表无排队/运行中记录）。前一版 `c2d212f` 的滚动区间通知过滤说明见 `git show 850e4b7:docs/implementation-plan.md`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:cb569ad` | `9c654a90c71d0a64668f1991060ec8b4f8b767ad417a3ac33493fab74cd33238` |
-| `a-share-research-worker:cb569ad` | `45396428a8c76164c1d852ea1a058236e7317650c68040e59e8a9c249f3794de` |
+| `a-share-research-web:b8d4e54` | `6a1bee7f667d96ed356c2cca4593a24575ea6789061ae37149ab3eb5b60c2279` |
+| `a-share-research-worker:b8d4e54` | `5e7e17875b92bfcc634e67cd4618e3b8483e1e71280aaf418a675b086cd17d03` |
 
 **前版验证记录**：离线全集 832 通过、11 环境跳过（较上版减少的为随模块删除的测试）。发布工具空闲检查、备份、完整性巡检通过（80 份报告、665 次调用、0 问题），worker Pi 离线预检通过。生产需登录，报告页撤下研究进展区块后未做登录态浏览器验收（仅登录页渲染无控制台错误）。证据 `deploy-7a8bbdd-20261103-110058/`。`cfcbc3d`：相关测试 41 项通过，发布工具检查与完整性巡检通过；未做浏览器验收（仅删一个 span）。证据 `deploy-cfcbc3d-20261103-111902/`，备份 `~/a-share-research-data/backup-pre-cfcbc3d-20261103-111903.db`。
 
@@ -51,7 +53,7 @@
 - 月批（11-03 安装）：no-agent 任务 `3d8b860808e4`（每月 1 日 20:00 `cron/a-share-monthly-submit.sh` 调 `POST /api/batches/monthly`，发一次确认）与 `112633a18054`（1–3 日每小时 :30 `cron/a-share-monthly-status.sh`，只在冻结/待确认/失败/带缺口完成或创建超 48 小时未完成时推送一次）；沿用 `hermes-advisor` 凭据与 Host 头，去重回执在宿主 `~/.local/state/a-share-monthly/<月>.receipt`（11 月手动批次已预置为已通知）。已对生产实测：11 月状态推送与去重、已有批次不新建、旧月 409。回退或停用先 `hermes cron pause` 这两项。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：回到 `cb569ad`（Lib 0.9.0）用 `rollback-cb569ad`（`9c654a90…3238`、`45396428…94de`）；`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`598183c`（含 `ef07ecf`）的完整记录见 `git show b17a067:docs/implementation-plan.md`；`cd6c388` 见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
