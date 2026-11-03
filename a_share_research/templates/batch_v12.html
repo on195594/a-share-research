@@ -7,7 +7,7 @@
 {% set refresh_key = [batch.status, batch.updated_at, ((batch.q20 or []) + (batch.get("s10") or [])) | map(attribute="research_status") | join(",")] | join("|") %}
 {% block title %}{{ b.month(batch) }} · 候选初筛{% endblock %}
 {% block main %}
-{% set dual = batch.rule.version == "screen-v1.2" %}
+{% set dual = batch.rule.version in ("screen-v1.2", "screen-v1.3") %}
 {% set coverage = batch.get("coverage") or {} %}
 {% set q5 = batch.q5 or [] %}
 {% set l5 = batch.l5.codes if batch.l5 else [] %}

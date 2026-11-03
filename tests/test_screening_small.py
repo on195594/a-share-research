@@ -90,17 +90,29 @@ def test_small_ranks_are_local_and_do_not_change_large_ranks():
 def test_s10_and_sq3_have_their_own_seats_and_industry_limits():
     _, s10, sq3 = rank_candidates(CAPTURED["small_companies"], SMALL)
     assert len(s10) == 10 and max(Counter(r["industry"] for r in s10).values()) == 2
-    assert len(sq3) == 3 and sq3 == codes(pick(s10, 3, 2))
+    assert len(sq3) == 3 and sq3 == codes(pick(s10, 3, 1))
     industry = {r["code"]: r["industry"] for r in s10}
-    assert max(Counter(industry[c] for c in sq3).values()) <= 2
-    assert SMALL["picks_per_industry"] == 1  # SL3's comparison limit is separate.
+    assert max(Counter(industry[c] for c in sq3).values()) == 1
+    assert SMALL["mechanical_per_industry"] == SMALL["picks_per_industry"] == 1
 
 
-def test_sq3_can_fill_a_second_seat_from_one_industry():
-    # The same captured rows restricted to two industries can fill three SQ3
-    # seats, while the comparison's one-per-industry limit could fill only two.
+def test_sq3_and_sl3_share_industry_constraints_and_leave_the_same_cash_seat():
+    # With only two captured industries, both three-seat groups can fill at most two.
     rows = [r for r in CAPTURED["small_companies"] if r["industry"] in {"食品饮料", "家用电器"}]
     _, s10, sq3 = rank_candidates(rows, SMALL)
-    assert len(sq3) == 3
-    assert len(pick(s10, 3, SMALL["picks_per_industry"])) == 2
+    assert len(sq3) == 2
+    assert sq3 == codes(pick(s10, 3, SMALL["picks_per_industry"]))
+
+
+def test_saved_v12_rule_retains_its_original_sq3_and_s10():
+    legacy = NEW_RULE | {"version": "screen-v1.2", "small": NEW_RULE["small"] | {"mechanical_per_industry": 2}}
+    rows = CAPTURED["small_companies"]
+    old_ranked, old_s10, old_sq3 = rank_candidates(rows, small_rule(legacy))
+    ranked, s10, _ = rank_candidates(rows, SMALL)
+    assert NEW_RULE["version"] == "screen-v1.3"
+    assert ranked == old_ranked and s10 == old_s10
+    assert old_sq3 == codes(pick(old_s10, 3, 2))
+    two_industries = [r for r in rows if r["industry"] in {"食品饮料", "家用电器"}]
+    assert len(rank_candidates(two_industries, small_rule(legacy))[2]) == 3
+    assert len(rank_candidates(two_industries, SMALL)[2]) == 2
 

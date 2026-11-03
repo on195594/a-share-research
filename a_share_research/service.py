@@ -352,9 +352,12 @@ def monthly_batch(conn, month: str, *, submit: bool = False) -> dict:
     batch = batches.load(row)
     summary = {key: batch.get(key) for key in
                ("id", "status", "error", "created_at", "frozen_at", "as_of", "l5", "sl3")}
+    # Gather failures keep a six-digit run code; the frozen run links do not change.
     summary["failed_research"] = [dict(r) for r in conn.execute(
-        "SELECT code, error FROM runs WHERE status='failed' AND request_id = 'batch-' || ? || '-' || code",
-        (batch["id"],))]
+        "SELECT code, error FROM runs WHERE status='failed' AND id IN ("
+        "SELECT json_extract(value, '$.run_id') FROM json_each(?) "
+        "UNION SELECT json_extract(value, '$.run_id') FROM json_each(?)) ORDER BY id",
+        (json.dumps(batch.get("q20") or []), json.dumps(batch.get("s10") or [])))]
     summary["ranking_error"] = ((batch.get("selection") or {}).get("ranking") or {}).get("error")
     return {"version": VERSION, "month": month, "created": created, "batch": summary}
 
@@ -384,7 +387,7 @@ def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "ow
     l5 = {"codes": codes, "note": note.strip(), "changed_from_draft": codes != draft, "draft": draft,
           "frozen_by": by}
     small_fields = {}
-    if rule["version"] == "screen-v1.2":
+    if rule["version"] in {"screen-v1.2", "screen-v1.3"}:
         small_draft = [p["code"] for p in ((batch.get("small_selection") or {}).get("draft") or {}).get("picks", [])]
         chosen = list(dict.fromkeys(small_draft if small_codes is None else small_codes))
         allowed_small = {r["code"]: r for r in (batch.get("s10") or [])

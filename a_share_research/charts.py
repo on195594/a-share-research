@@ -762,7 +762,7 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
     if not results:
         return None
     labels = [("L5", "选定组合"), ("Q5", "机械前五"), ("Q20", "全部候选")]
-    if batch["rule"].get("version") == "screen-v1.2":
+    if batch["rule"].get("version") in {"screen-v1.2", "screen-v1.3"}:
         labels = [("L5", "大市值选定 L5"), ("Q5", "大市值机械 Q5"), ("Q20", "大市值候选 Q20"),
                   ("SL3", "小市值选定 SL3"), ("SQ3", "小市值机械 SQ3")]
     labels += list(batch["rule"]["benchmarks"].items())

@@ -1,6 +1,8 @@
-"""Isolated workflow metadata, no companies, providers, worker or paid model calls."""
+"""Isolated workflow metadata and captured run states; no providers or paid model calls."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import json
+from pathlib import Path
 from threading import Barrier
 
 import pytest
@@ -73,6 +75,7 @@ def test_restart_does_not_restart_monthly_paid_work(tmp_path):
     month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
     batch = service.monthly_batch(conn, month, submit=True)['batch']['id']
     run = db.create_run(conn, MATERIAL.code, request_id=f'batch-{batch}-{MATERIAL.code}', status='running')
+    db.update_batch(conn, batch, q20=json.dumps([{'code': MATERIAL.code, 'run_id': run}]))
     conn.execute("UPDATE batches SET status='selecting' WHERE id=?", (batch,))
     worker.recover(conn)
     screening.recover(conn)
@@ -96,4 +99,40 @@ def test_queued_monthly_batch_cannot_start_in_a_later_month(tmp_path):
     assert row['status'] == 'failed' and '不使用后来数据补跑' in row['error']
     assert not screening.tick(conn)
     assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 0
+    conn.close()
+
+
+@pytest.mark.parametrize('pool', ['q20', 's10'])
+def test_monthly_status_uses_candidate_run_links_for_captured_failures(tmp_path, pool):
+    captured = json.loads((Path(__file__).parent / 'data/monthly-research-status.json').read_text())
+    conn = db.connect(tmp_path / 'captured.db')
+    for run in captured['runs']:
+        conn.execute('INSERT INTO runs(id,request_id,code,status,error,created_at) VALUES (?,?,?,?,?,?)',
+                     tuple(run[k] for k in ('id', 'request_id', 'code', 'status', 'error', 'created_at')))
+    for batch in captured['batches']:
+        # Moving observed links between pool fields exercises the projection only,
+        # not a claim that these production large-cap candidates qualified as small caps.
+        conn.execute('INSERT INTO batches(id,status,created_at,rule,q20,s10) VALUES (?,?,?,?,?,?)',
+                     (batch['id'], batch['status'], batch['created_at'], json.dumps(batch['rule']),
+                      json.dumps(batch['q20'] if pool == 'q20' else []),
+                      json.dumps(batch['q20'] if pool == 's10' else [])))
+    before = conn.total_changes
+    for batch in captured['batches']:
+        linked = {r['run_id'] for r in batch['q20']}
+        expected = [{'code': r['code'], 'error': r['error']} for r in captured['runs']
+                    if r['id'] in linked and r['status'] == 'failed']
+        result = service.monthly_batch(conn, batch['created_at'][:7])
+        assert result['batch']['failed_research'] == expected
+        assert not result['created'] and len(expected) == 1
+    assert conn.total_changes == before
+    # The union covers simultaneous large/small failures and de-duplicates a shared run link.
+    first, second = captured['batches']
+    db.update_batch(conn, first['id'], q20=json.dumps(first['q20']),
+                    s10=json.dumps(first['q20'] + second['q20']))
+    expected = [{'code': r['code'], 'error': r['error']} for r in captured['runs'] if r['status'] == 'failed']
+    assert service.monthly_batch(conn, first['created_at'][:7])['batch']['failed_research'] == expected
+    # A queued batch with no linked candidates has no research failures.
+    ident = service.create_batch(conn, 'unlinked', created_at='2026-12-01T20:00:00+08:00')
+    result = service.monthly_batch(conn, '2026-12')
+    assert result['batch']['id'] == ident and result['batch']['failed_research'] == []
     conn.close()

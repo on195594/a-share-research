@@ -1,0 +1,133 @@
+{
+  "source": "Production app.db read-only capture; failed and first done candidate per batch, workflow fields only. No financial values or model output fabricated.",
+  "batches": [
+    {
+      "id": 1,
+      "status": "tracking",
+      "created_at": "2026-10-24T18:02:53+08:00",
+      "rule": {
+        "version": "screen-v1",
+        "min_list_years": 3,
+        "min_total_mv_yi": 100,
+        "min_avg_amount_yi": 1,
+        "amount_days": 20,
+        "weights": {
+          "roe": 0.2,
+          "cash": 0.2,
+          "growth": 0.2,
+          "pe": 0.4
+        },
+        "industry": "SW2021 L1",
+        "min_group": 10,
+        "q20": 20,
+        "q20_per_industry": 3,
+        "picks": 5,
+        "picks_per_industry": 2,
+        "cost": 0.002,
+        "benchmarks": {
+          "H00906.CSI": "中证800全收益",
+          "H00300.CSI": "沪深300全收益"
+        },
+        "horizons_months": [
+          3,
+          6,
+          12
+        ]
+      },
+      "q20": [
+        {
+          "code": "002648.SZ",
+          "run_id": 22
+        },
+        {
+          "code": "002468.SZ",
+          "run_id": 34
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "status": "tracking",
+      "created_at": "2026-11-01T10:01:38+08:00",
+      "rule": {
+        "version": "screen-v1.1",
+        "min_list_years": 3,
+        "min_total_mv_yi": 100,
+        "min_avg_amount_yi": 1,
+        "amount_days": 20,
+        "momentum_days": 60,
+        "drawdown_flag": -0.3,
+        "windfall_flag": {
+          "min_growth": 0.5,
+          "max_pe": 10
+        },
+        "weights": {
+          "roe": 0.2,
+          "cash": 0.2,
+          "growth": 0.2,
+          "pe": 0.4
+        },
+        "industry": "SW2021 L1",
+        "min_group": 10,
+        "q20": 20,
+        "q20_per_industry": 3,
+        "picks": 5,
+        "picks_per_industry": 2,
+        "cost": 0.002,
+        "benchmarks": {
+          "H00906.CSI": "中证800全收益",
+          "H00300.CSI": "沪深300全收益"
+        },
+        "horizons_months": [
+          3,
+          6,
+          12
+        ]
+      },
+      "q20": [
+        {
+          "code": "002648.SZ",
+          "run_id": 67
+        },
+        {
+          "code": "600066.SH",
+          "run_id": 81
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "id": 22,
+      "request_id": "batch-1-002648.SZ",
+      "code": "002648.SZ",
+      "status": "done",
+      "error": null,
+      "created_at": "2026-10-24T18:18:28+08:00"
+    },
+    {
+      "id": 34,
+      "request_id": "batch-1-002468.SZ",
+      "code": "002468",
+      "status": "failed",
+      "error": "年报中找不到“管理层讨论与分析”一节",
+      "created_at": "2026-10-24T18:18:28+08:00"
+    },
+    {
+      "id": 67,
+      "request_id": "batch-2-002648.SZ",
+      "code": "002648.SZ",
+      "status": "done",
+      "error": null,
+      "created_at": "2026-11-01T10:12:12+08:00"
+    },
+    {
+      "id": 81,
+      "request_id": "batch-2-600066.SH",
+      "code": "600066.SH",
+      "status": "failed",
+      "error": "研究阶段未能完成；请核对阶段记录，不自动重试。",
+      "created_at": "2026-11-01T10:12:12+08:00"
+    }
+  ]
+}

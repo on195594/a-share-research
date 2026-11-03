@@ -127,12 +127,12 @@ def momentum(pro, as_of: str, codes: list[str], rule: dict = RULE) -> dict:
 
 def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dict:
     """Whole-market screen on the latest published session; returns universe, ranked rows and Q20/Q5."""
-    if rule.get("version") not in {"screen-v1", "screen-v1.1", "screen-v1.2"} or rule.get("industry") != "SW2021 L1":
+    if rule.get("version") not in {"screen-v1", "screen-v1.1", "screen-v1.2", "screen-v1.3"} or rule.get("industry") != "SW2021 L1":
         raise ScreenError("不支持的初筛规则版本或行业分类")
-    if rule["version"] in {"screen-v1.1", "screen-v1.2"} and "windfall_flag" not in rule:
+    if rule["version"] in {"screen-v1.1", "screen-v1.2", "screen-v1.3"} and "windfall_flag" not in rule:
         raise ScreenError("screen-v1.1 缺少利润跳升提示规则")
-    if rule["version"] == "screen-v1.2" and not isinstance(rule.get("small"), dict):
-        raise ScreenError("screen-v1.2 缺少小市值组规则")
+    if rule["version"] in {"screen-v1.2", "screen-v1.3"} and not isinstance(rule.get("small"), dict):
+        raise ScreenError(f"{rule['version']} 缺少小市值组规则")
     pro = _pro()
     as_of = as_of or latest_session(pro)
     start = _compact(datetime.strptime(as_of, "%Y%m%d").date() - timedelta(days=60))
@@ -150,7 +150,7 @@ def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dic
     frame["avg_amount"] = frame["ts_code"].map(avg_amount).fillna(0)
     # Both pools use the same market snapshot but have independent eligibility and ranks.
     pools = [(rule, *market_filters(frame, suspended, as_of, rule))]
-    if rule["version"] == "screen-v1.2":
+    if rule["version"] in {"screen-v1.2", "screen-v1.3"}:
         small = small_rule(rule)
         pools.append((small, *market_filters(frame, suspended, as_of, small)))
     eligible = pd.concat([pool[1] for pool in pools]).drop_duplicates("ts_code")
@@ -449,7 +449,7 @@ def _positive(value) -> bool:
 
 def entry_codes(batch: dict) -> list[str]:
     codes = [r["code"] for r in batch["q20"]] + batch["l5"]["codes"]
-    if batch["rule"]["version"] == "screen-v1.2":
+    if batch["rule"]["version"] in {"screen-v1.2", "screen-v1.3"}:
         codes += (batch.get("sq3") or []) + (batch.get("sl3") or {}).get("codes", [])
     return list(dict.fromkeys(codes))
 
@@ -621,7 +621,7 @@ def _draft_picks(selection: dict | None) -> list[str]:
 
 def _cash_large_draft(batch: dict, selection: dict | None) -> bool:
     """Only completed dual-pool drafts without selectable large candidates freeze empty L5."""
-    return (batch["rule"]["version"] == "screen-v1.2"
+    return (batch["rule"]["version"] in {"screen-v1.2", "screen-v1.3"}
             and not any(r.get("verdict") and r["verdict"] != "暂不值得" for r in batch["q20"])
             and isinstance((selection or {}).get("draft"), dict)
             and isinstance((batch.get("small_selection") or {}).get("draft"), dict))
@@ -640,7 +640,7 @@ def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "s
     batch = load(row)
     # Prepare the shared calendar even for an empty large draft awaiting an owner decision.
     # No report_rc backfill is performed; freeze records whatever is cached at that time.
-    coverage = sources.batch_coverage(batch) if batch["rule"]["version"] == "screen-v1.2" else None
+    coverage = sources.batch_coverage(batch) if batch["rule"]["version"] in {"screen-v1.2", "screen-v1.3"} else None
     with db.transaction(conn):
         row = conn.execute("SELECT status, selection FROM batches WHERE id = ?", (batch_id,)).fetchone()
         if row is None or row["status"] != expected_status:
@@ -725,7 +725,7 @@ def tick(conn) -> bool:
                 finished, q20 = research_state(conn, batch["q20"])
                 if not finished or _waiting(batch, now):
                     continue
-                small = batch["rule"]["version"] == "screen-v1.2"
+                small = batch["rule"]["version"] in {"screen-v1.2", "screen-v1.3"}
                 s10 = batch.get("s10") or []
                 if small:
                     if any(not c.get("run_id") for c in s10):

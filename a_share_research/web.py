@@ -711,7 +711,7 @@ def batch_page(request: Request, batch_id: int):
     if row is None:
         return not_found(request, session)
     batch = batches.load(row)
-    dual = batch["rule"]["version"] == "screen-v1.2"
+    dual = batch["rule"]["version"] in {"screen-v1.2", "screen-v1.3"}
     if batch["status"] == "researching":
         batch["q20"] = reading.research_state(conn, batch["q20"])[1]
         if dual:

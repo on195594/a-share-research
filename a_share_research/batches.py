@@ -43,7 +43,7 @@ def returns(batch: dict) -> dict | None:
     groups = {"L5": (batch["l5"]["codes"], rule["picks"]), "Q5": (batch["q5"], rule["picks"]), "Q20": (q20, len(q20))}
     if halves := ranking_halves(batch):
         groups |= {"TOP": (halves[0], len(halves[0])), "BOTTOM": (halves[1], len(halves[1]))}
-    if rule.get("version") == "screen-v1.2":
+    if rule.get("version") in {"screen-v1.2", "screen-v1.3"}:
         for name, codes in (("SQ3", batch.get("sq3") or []), ("SL3", (batch.get("sl3") or {}).get("codes", []))):
             groups[name] = (codes, rule["small"]["picks"])
     out = {name: group_return(entry, mark, codes, seats, rule["cost"]) for name, (codes, seats) in groups.items()}
@@ -77,10 +77,10 @@ RULE = {
 
 # Keep RULE as the historical default for backtests and existing callers. Only creation opts in.
 NEW_RULE = RULE | {
-    "version": "screen-v1.2",
+    "version": "screen-v1.3",  # SQ3 now shares SL3's one-per-industry constraint
     "small": {"min_total_mv_yi": 30, "max_total_mv_yi": 100, "min_avg_amount_yi": 0.3,
               "q20": 10, "q20_per_industry": 2, "picks": 3, "picks_per_industry": 1,
-              "mechanical_per_industry": 2},
+              "mechanical_per_industry": 1},
     "benchmarks": RULE["benchmarks"] | {"H00852.CSI": "中证1000全收益"},
 }
 

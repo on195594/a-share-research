@@ -15,6 +15,8 @@ ROWS = json.loads((DATA / 'screen-rows.json').read_text())['rows']
 SMALL = json.loads((DATA / 'screen-small-rows.json').read_text())['small_companies']
 PRICES = json.loads((DATA / 'screen-prices.json').read_text())
 MARKET = json.loads((DATA / 'screen-entry-market.json').read_text())
+V12_RULE = batches.NEW_RULE | {'version': 'screen-v1.2',
+                              'small': batches.NEW_RULE['small'] | {'mechanical_per_industry': 2}}
 
 
 def cache_partial_window(monkeypatch):
@@ -38,7 +40,7 @@ def proposed(conn, *, status='proposed'):
     return q20, s10
 
 
-def test_only_new_batches_receive_v12_and_existing_rows_survive_v8(tmp_path):
+def test_only_new_batches_receive_v13_and_existing_rows_survive_v8(tmp_path):
     path = tmp_path / 'v7.db'
     old = sqlite3.connect(path, isolation_level=None)
     old.row_factory = sqlite3.Row
@@ -103,7 +105,7 @@ def test_empty_small_draft_auto_freezes_with_large_and_partial_coverage(tmp_path
     conn.close()
 
 
-@pytest.mark.parametrize('rule', [batches.RULE, batches.NEW_RULE], ids=['v11', 'v12'])
+@pytest.mark.parametrize('rule', [batches.RULE, V12_RULE, batches.NEW_RULE], ids=['v11', 'v12', 'v13'])
 def test_empty_large_draft_with_candidates_requires_owner_picks(tmp_path, monkeypatch, rule):
     cache_partial_window(monkeypatch)
     conn = db.connect(tmp_path / 'c.db')
@@ -264,9 +266,10 @@ def test_small_research_is_queued_only_after_q20_finishes(tmp_path):
     conn.close()
 
 
-def test_small_simulation_shares_entry_prices_fees_and_cash_accounting():
+@pytest.mark.parametrize('rule', [V12_RULE, batches.NEW_RULE], ids=['v12', 'v13'])
+def test_small_simulation_shares_entry_prices_fees_and_cash_accounting(rule):
     codes = list(PRICES['entry']['prices'])
-    batch = {'rule': batches.NEW_RULE, 'entry': PRICES['entry'], 'marks': {'latest': PRICES['mark']},
+    batch = {'rule': rule, 'entry': PRICES['entry'], 'marks': {'latest': PRICES['mark']},
              'q20': [{'code': c} for c in codes[:2]], 'q5': codes[:2], 'l5': {'codes': codes[:2]},
              'sq3': codes[2:3], 'sl3': {'codes': codes[2:3]}}
     assert screening.entry_codes(batch) == codes[:3]
@@ -287,13 +290,13 @@ def test_empty_group_with_seats_is_cash(seats):
     assert batches.group_return(PRICES['entry'], PRICES['mark'], [], 0, batches.RULE['cost']) is None
 
 
-@pytest.mark.parametrize('rule', [batches.RULE, batches.NEW_RULE], ids=['v11', 'v12'])
+@pytest.mark.parametrize('rule', [batches.RULE, V12_RULE, batches.NEW_RULE], ids=['v11', 'v12', 'v13'])
 def test_cash_returns_render_while_missing_marks_and_zero_seats_stay_uncomputed(rule):
     batch = {'id': 1, 'status': 'tracking', 'created_at': '2026-09-18', 'rule': rule,
              'entry': PRICES['entry'], 'marks': {'latest': PRICES['mark']},
              'q20': [], 'q5': [], 'l5': {'codes': []}, 'sq3': [], 'sl3': {'codes': []}}
     results = batches.returns(batch)
-    groups = ['L5', 'Q5'] + (['SQ3', 'SL3'] if rule == batches.NEW_RULE else [])
+    groups = ['L5', 'Q5'] + (['SQ3', 'SL3'] if 'small' in rule else [])
     assert all(results['values'][g] == pytest.approx(-rule['cost']) for g in groups)
     assert results['values']['Q20'] is None
     performance = charts.batch_returns(batch, results, {})
@@ -302,7 +305,7 @@ def test_cash_returns_render_while_missing_marks_and_zero_seats_stay_uncomputed(
     assert '未计算' in performance['groups']['rows'][2]['tip']
     # Both legacy and dual-pool pages consume the same saved horizon result and pct macro.
     batch['marks']['horizons'] = {'6m': results}
-    template = 'batch_v12.html' if rule == batches.NEW_RULE else 'batch.html'
+    template = 'batch_v12.html' if 'small' in rule else 'batch.html'
     html = ENV.get_template(template).render(batch=batch, results=results, performance=performance,
                                              pools=[], names={}, frozen_by={})
     assert '<td class="num">-0.20%</td>' in html
