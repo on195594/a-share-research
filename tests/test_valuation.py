@@ -266,3 +266,18 @@ def test_zone_boundaries_use_report_close():
         row = next(r for r in table if r['id'] == 'M.total_mv')
         row['values'][BODY['market_date']] = str(Decimal('297.18') * factor)
         assert valuation.compute(assumptions(), table, BODY['market_date'])['zone'] == zone
+
+
+def test_neutral_dividend_sensitivity_preserves_real_roll_and_rejects_negative_cash():
+    calc = deepcopy(STORED[2]['valuation_calc'])
+    result = valuation.at(calc, calc['close'], calc['as_of'])
+    expected = (calc['scenarios']['中性']['exit_cap'] / calc['market_cap']) ** (1 / result['horizon']) - 1
+    assert result['neutral_return_without_dividends'] == pytest.approx(expected)
+    assert expected < result['annual_returns']['中性']
+    calc['scenarios']['中性']['dividends'] = 0  # Zero-payout boundary of the captured calc.
+    zero = valuation.at(calc, calc['close'], calc['as_of'])
+    assert zero['neutral_return_without_dividends'] == zero['annual_returns']['中性']
+    calc['scenarios']['中性']['dividends'] = -1
+    negative = valuation.at(calc, calc['close'], calc['as_of'])
+    assert negative['neutral_return_without_dividends'] is None
+    assert negative['annual_returns'] is not None

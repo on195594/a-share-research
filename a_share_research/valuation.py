@@ -152,10 +152,15 @@ def at(calc: dict, close, day: str) -> dict:
             if min(totals.values()) < 0:
                 raise ValueError('退出市值加分红为负，无法计算实数年化回报')
             current_cap = cap * p / base_close
+            neutral_exit = number(calc['scenarios']['中性']['exit_cap'], '中性.exit_cap')
+            neutral_dividends = number(calc['scenarios']['中性']['dividends'], '中性.dividends')
             support = base_close * totals['保守'] / (cap * (1 + r) ** horizon)
             stretched = base_close * totals['中性'] / (cap * (1 + r_low) ** horizon)
             return _json_numbers({
                 'annual_returns': {name: (total / current_cap) ** (1 / horizon) - 1 for name, total in totals.items()},
+                # Sensitivity endpoint within the frozen nonnegative dividend assumption, not a realized-return bound.
+                'neutral_return_without_dividends': ((neutral_exit / current_cap) ** (1 / horizon) - 1
+                                                     if neutral_exit >= 0 and neutral_dividends >= 0 else None),
                 'support_below': support, 'stretched_above': stretched, 'inverted': support >= stretched,
                 'zone': price_zone(p, support, stretched), 'horizon': horizon, 'as_of': day, 'close': p,
                 'assumption': '按冻结累计分红尚未支付测算，未核对实际剩余现金流；不代表已核实的换仓回报差。',
