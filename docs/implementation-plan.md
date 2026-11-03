@@ -28,27 +28,27 @@
 - **公司研究进展分类边界**（`1a6ab92`、`54676a4`，随 `b36b15d`）：新披露须逐引用满足新发布条件，生成与独立复核共用来源分类；旧资料补读、同 URL 换哈希、更正稿换 URL 均拒绝。万华原失败候选不可访问，语义修复未经真实重放。
 - **性能整改与校验误伤**（10-31 晚，`b36b15d`、`74f187e`、`e4f30e4`）：发布空闲检查纳入研究进展；撤下首页卡片 LRU、PDF 并发与研究取数的 TuShare 包装（初筛/回测保留缓存，Node 长驻推理保留）；机械校验不再把页码、产品代号当数字，阈值后置写法同样豁免，PDF 跨行金额按引文两段拼回。依据 `plan-review-perf-20261031/`（Codex 审查）、`repair-trigger-diagnosis-20261031/`。
 
-待部署候选（2026-11-03，未部署/未在宿主启用，生产仍以下方 `c2d212f` 为准）：
+随 `7a8bbdd` 于 2026-11-03 发布（月批调度尚未在 Hermes 宿主安装，未创建真实月批）：
 
 - **机会成本分红口径与验证边界**（`deb25f3`、`b70a48e`）：滚动估值新增中性不计累计分红的敏感性端点 `neutral_ex_dividend_return`（供 Skills 换仓比较检验分红已付比例敏感性）；V1 预测记分区分目标期数值缺失（`unavailable`）与区间未命中，并单列与延续基线打平样本（`tie`）。
 - **月批自动发起**（`83a155d`、`0de494d`、`ef77f06`）：新增 `POST /api/batches/monthly` 与 `GET /api/batches/monthly/{month}`（纯只读查询），同月任意状态原子防重、跨月滞留队列拒绝补跑、中断不自动重跑付费阶段。所有者已于 2026-11-03 批准自 2026-12-01 20:00 Asia/Shanghai（12:00 UTC）起每月 1 日执行，接受最多 `30×21+6=636` 次应用层调用上限；待部署后在 Hermes no-agent 宿主安装调度。
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `c2d212f`** 于 2026-11-03 08:22（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。含滚动估值维护两项：`cf05eab` 让区间迁移通知排除纯时间缩短引起的变化（同一报告用上次扫描已保存的区间线核对本次价格，价格跨界与新报告变化照常提醒，展示仍按日滚动），滚动结果带 `assumption` 说明累计分红按尚未支付测算；其前一提交 `45b7a9e`（跨日含分红一律置空）已被它撤销，未上线。`c2d212f` 修正 `cf05eab` 把这句说明写进每张卡 `current.note` 的问题——`note` 仍只表示区间暂停解读（原有测试因此失败），并把 `valuation._zone` 改为公开的 `price_zone`。真实分红现金流、Skills 换仓净 3 个百分点比较与提醒送达仍未验证。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `7a8bbdd`** 于 2026-11-03 11:01（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。随附 `deb25f3`、`b70a48e`（中性不计分红敏感性端点、V1 `unavailable`/`tie`）、`83a155d`、`0de494d`、`ef77f06`（月批 HTTP 发起/查询，调度未安装）与 `7a8bbdd` 模块退役（研究进展、`monthly.py` CLI、`backtest_experiment.py`、`db compact-calls`；发布空闲检查不再查 `research_progress`，发布前生产该表无排队/运行中记录）。前一版 `c2d212f` 的滚动区间通知过滤说明见 `git show 850e4b7:docs/implementation-plan.md`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:c2d212f` | `93e345959573441da95e87a7f9c2e7d5d03abde4d0691a6feb2880bf81a05599` |
-| `a-share-research-worker:c2d212f` | `548a63463a7ab0595290d5912f736d3faa2270395941df3c8c96155309a44028` |
+| `a-share-research-web:7a8bbdd` | `6fa9534cfd49ebb7facb00a3f9c1c269388d75ba2a43366c76b6c65f0ef105a6` |
+| `a-share-research-worker:7a8bbdd` | `427aacab66c5e93c86c14aace5930c54fc5f195657ce3b59bd4afa80daf5dd30` |
 
-**验证**：离线全集 881 通过、11 环境跳过。生产库只读回放：当前 7 张有效卡均不带 `note`、带 `assumption`；同日价格跨越区间线 7/7 仍产生通知；按原价推到 2026-11-10、2027-03-31、2027-09-30 均无纯时间引起的区间切换。上线后 worker 内 `company_card('600900')` 复核同上。生产只有 1 次扫描，尚无前后两次扫描的真实通知对照，首个工作日扫描后观察。无模板改动未做浏览器验收。证据 `deploy-c2d212f-20261103-082233/`，备份 `~/a-share-research-data/backup-pre-c2d212f-20261103-082236.db`。
+**验证**：离线全集 832 通过、11 环境跳过（较上版减少的为随模块删除的测试）。发布工具空闲检查、备份、完整性巡检通过（80 份报告、665 次调用、0 问题），worker Pi 离线预检通过。生产需登录，报告页撤下研究进展区块后未做登录态浏览器验收（仅登录页渲染无控制台错误）。证据 `deploy-7a8bbdd-20261103-110058/`，备份 `~/a-share-research-data/backup-pre-7a8bbdd-20261103-110100.db`。
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：`a-share-research-web:rollback-c2d212f`、`a-share-research-worker:rollback-c2d212f` 即 `598183c`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-7a8bbdd`、`a-share-research-worker:rollback-7a8bbdd` 即 `c2d212f`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`598183c`（含 `ef07ecf`）的完整记录见 `git show b17a067:docs/implementation-plan.md`；`cd6c388` 见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
