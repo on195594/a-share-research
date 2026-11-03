@@ -109,6 +109,9 @@ class DailyReports:
 def daily_reports(monkeypatch):
     monkeypatch.delenv("TUSHARE_CACHE", raising=False)
     monkeypatch.delenv("REPORT_RC_DAILY_BUDGET", raising=False)
+    # These are daily-budget/cache replays. Dedicated tests below exercise the
+    # real minute pacing with controlled wall time and independent processes.
+    monkeypatch.setattr(sources, "REPORT_RC_MIN_INTERVAL", 0)
     monkeypatch.setenv("TUSHARE_TOKEN", "captured-response-only")
     pro = DailyReports()
     monkeypatch.setattr(sources.ts, "pro_api", lambda token: pro)
@@ -127,16 +130,19 @@ def test_window_budget_accumulates_across_calls_and_recent_days_first(daily_repo
     assert first["covered_days"] == 2 and budget_calls() == 2
     second = sources.report_rc_window("2026-09-18", code="603606")
     expected = sorted([d for d in CALENDAR if "20260620" <= d <= "20260918"], reverse=True)
-    # The nonempty 18th is cached; the empty 17th is deliberately fetched again.
-    assert daily_reports.calls[2:] == expected[1:7]
+    # Both populated and successfully queried empty days are shared coverage.
+    assert daily_reports.calls[2:] == expected[2:8]
     assert budget_calls() == sources.REPORT_RC_DAILY_BUDGET == 8
-    assert second["covered_days"] == 7
-    assert second["missing_days"] == expected[7:]
+    assert second["covered_days"] == 8
+    assert second["missing_days"] == expected[8:]
+    assert "20260917" in second["empty_days"]
     assert "预算" in second["reason"]
     third = sources.report_rc_window("2026-09-18", code="603606")
     assert budget_calls() == 8 and len(daily_reports.calls) == 8
-    assert third["covered_days"] == 1  # Empty responses are not persistent coverage.
-    assert third["rows"] == sources.report_rc_rows(pd.DataFrame(ROWS).query('report_date == "20260918"'), "603606")
+    assert third["covered_days"] == 8  # Empty days no longer starve older missing days.
+    captured = pd.DataFrame(ROWS)
+    expected_rows = sources.report_rc_rows(captured.loc[captured["report_date"].isin(expected[:8])], "603606")
+    assert third["rows"] == sorted(expected_rows, key=lambda row: row["report_date"], reverse=True)
 
 
 def test_budget_override_and_older_cache_remain_visible_after_stop(daily_reports, monkeypatch):
@@ -211,6 +217,7 @@ def test_consensus_coverage_states_from_daily_responses(daily_reports, monkeypat
 def test_budget_is_atomic_across_independent_processes(daily_reports):
     script = """
 from a_share_research import sources
+sources.REPORT_RC_MIN_INTERVAL = 0  # Isolate the daily-cap race from minute pacing.
 accepted = 0
 for _ in range(4):
     try:
@@ -247,3 +254,180 @@ def test_research_passes_market_date_and_company_and_replay_never_fetches(daily_
     assert result["consensus"]["coverage"]["covered_days"] == 8
     research.calculate_valuation(assumptions(), mat, replay=True)
     assert len(calls) == 1 and budget_calls() == 8
+
+
+def test_minute_slot_survives_repeated_calls_without_burning_budget(daily_reports, monkeypatch):
+    monkeypatch.setattr(sources, "REPORT_RC_MIN_INTERVAL", 61)
+    sources.tushare_query(daily_reports, "report_rc", start_date="20260918", end_date="20260918")
+    result = sources.report_rc_window("2026-09-18")
+    assert result["covered_days"] == 1
+    assert "冷却" in result["reason"] and budget_calls() == 1
+    assert result["upstream_attempts"] == 0
+    assert daily_reports.calls == ["20260918"]
+    # Cached reads remain usable in the cooldown, including cache-only freeze.
+    assert sources.report_rc_window("2026-09-18", days=0, cache_only=True)["covered_days"] == 1
+    assert budget_calls() == 1
+
+
+def test_minute_slot_is_atomic_across_processes_and_restart(daily_reports):
+    script = """
+from a_share_research import sources
+try:
+    sources._reserve_report_rc_call()
+    print(1)
+except sources.ReportRCCoolingDown:
+    print(0)
+"""
+    env = {**os.environ, "DATA_DIR": str(db.DATA)}
+    children = [subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, env=env) for _ in range(4)]
+    outputs = [child.communicate(timeout=30) for child in children]
+    assert all(child.returncode == 0 for child in children), outputs
+    assert sum(int(out) for out, _ in outputs) == 1 and budget_calls() == 1
+    restarted = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=30)
+    assert restarted.returncode == 0 and restarted.stdout.strip() == "0"
+    assert budget_calls() == 1
+
+
+def test_empty_response_cache_expires_and_can_be_refreshed(daily_reports):
+    params = dict(start_date="20260917", end_date="20260917")
+    assert sources.tushare_query(daily_reports, "report_rc", **params).empty
+    assert sources.tushare_query(daily_reports, "report_rc", **params).empty
+    assert budget_calls() == 1
+    key = sources._tushare_cache_key("report_rc", params)
+    with closing(sources._report_rc_connect()) as conn:
+        conn.execute("UPDATE tushare_cache SET created_at=? WHERE key=?",
+                     ((datetime.now(db.SHANGHAI) - timedelta(days=8)).isoformat(), key))
+    assert sources._tushare_cached("report_rc", params) is None
+    assert sources.tushare_query(daily_reports, "report_rc", **params).empty
+    assert budget_calls() == 2
+
+
+def test_recent_empty_day_retries_daily(daily_reports, monkeypatch):
+    class Clock(datetime):
+        current = datetime(2026, 9, 18, 9, tzinfo=db.SHANGHAI)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    monkeypatch.setattr(sources, "datetime", Clock)
+    params = dict(start_date="20260917", end_date="20260917")
+    sources.tushare_query(daily_reports, "report_rc", **params)
+    with closing(sources._report_rc_connect()) as conn:
+        conn.execute("UPDATE tushare_cache SET created_at=? WHERE key=?",
+                     (Clock.current.isoformat(), sources._tushare_cache_key("report_rc", params)))
+    Clock.current += timedelta(hours=23)
+    assert sources._tushare_cached("report_rc", params).empty
+    Clock.current += timedelta(hours=2)
+    assert sources._tushare_cached("report_rc", params) is None
+
+
+@pytest.mark.parametrize("message,seconds", [
+    ("抱歉，您访问接口(report_rc)频率超限(1次/分钟)", 61),
+    ("每小时最多访问10次", 3601),
+    ("连接超时", 300),
+])
+def test_upstream_failure_sets_durable_cooldown(daily_reports, monkeypatch, message, seconds):
+    monkeypatch.setattr(sources, "REPORT_RC_MIN_INTERVAL", 61)
+    daily_reports.error = message
+    before = datetime.now(db.SHANGHAI)
+    result = sources.report_rc_window("2026-09-18")
+    assert daily_reports.calls == ["20260918"] and result["covered_days"] == 0
+    assert (datetime.fromisoformat(sources.report_rc_status()["retry_at"]) - before).total_seconds() >= seconds
+    sources.report_rc_window("2026-09-18")
+    assert daily_reports.calls == ["20260918"] and budget_calls() == 1
+    assert sources._tushare_cached("report_rc", dict(start_date="20260918", end_date="20260918")) is None
+
+
+def test_provider_daily_limit_defers_to_next_shanghai_day(daily_reports):
+    daily_reports.error = "每天最多访问10次"
+    sources.report_rc_window("2026-09-18")
+    retry = datetime.fromisoformat(sources.report_rc_status()["retry_at"])
+    assert retry.date() == datetime.now(db.SHANGHAI).date() + timedelta(days=1)
+    assert retry.hour == retry.minute == retry.second == 0
+
+
+def test_wrong_day_response_is_not_cached_or_counted_as_coverage(daily_reports, monkeypatch):
+    original = daily_reports.query
+
+    def wrong_day(api, **params):
+        if api == "report_rc":
+            return pd.DataFrame(ROWS)  # Real rows from multiple dates, not this day.
+        return original(api, **params)
+
+    monkeypatch.setattr(daily_reports, "query", wrong_day)
+    result = sources.report_rc_window("2026-09-18", days=0)
+    assert result["covered_days"] == 0 and result["missing_days"] == ["20260918"]
+    assert "其他日期" in result["reason"]
+    assert sources._tushare_cached("report_rc", dict(start_date="20260918", end_date="20260918")) is None
+
+
+def test_truncated_window_cannot_claim_complete_consensus(daily_reports, monkeypatch):
+    count = sum(r["report_date"] == "20260918" for r in ROWS)
+    monkeypatch.setattr(sources, "REPORT_RC_ROW_CAP", count)
+    window = sources.report_rc_window("2026-09-18", days=0)
+    result = valuation.consensus(window["rows"], [2026, 2027, 2028], "2026-09-18", coverage=window)
+    assert result["status"] == "partial"
+
+
+def test_idle_backfill_resumes_one_day_per_tick_and_across_budget_days(daily_reports, monkeypatch):
+    from a_share_research import consensus_backfill
+
+    class Clock(datetime):
+        current = datetime(2026, 9, 19, 9, tzinfo=db.SHANGHAI)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    monkeypatch.setattr(sources, "datetime", Clock)
+    monkeypatch.setattr(consensus_backfill, "datetime", Clock)
+    monkeypatch.setattr(sources, "REPORT_RC_MIN_INTERVAL", 61)
+    monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+    expected = sorted([d for d in CALENDAR if "20260620" <= d <= "20260918"], reverse=True)
+    for n in range(1, 9):
+        monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+        assert consensus_backfill.tick()
+        assert len(daily_reports.calls) == n and daily_reports.calls == expected[:n]
+        state = consensus_backfill.status()
+        assert state["backfill"]["covered_days"] == n
+        assert state["pacing"]["used"] == n
+        # Even with a reset in-memory timer, persisted scheduling prevents a call.
+        monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+        assert not consensus_backfill.tick()
+        Clock.current += timedelta(seconds=62)
+    assert "20260917" in state["backfill"]["empty_days"]
+    monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+    assert not consensus_backfill.tick() and len(daily_reports.calls) == 8
+    Clock.current += timedelta(days=1)
+    monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+    assert consensus_backfill.tick()
+    assert daily_reports.calls == expected[:9] and sources.report_rc_status()["used"] == 1
+    assert consensus_backfill.status()["backfill"]["covered_days"] == 9
+
+
+def test_idle_backfill_complete_window_waits_without_new_upstream_calls(daily_reports, monkeypatch):
+    from a_share_research import consensus_backfill
+
+    class Clock(datetime):
+        current = datetime(2026, 9, 19, 9, tzinfo=db.SHANGHAI)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    monkeypatch.setattr(sources, "datetime", Clock)
+    monkeypatch.setattr(consensus_backfill, "datetime", Clock)
+    monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+    monkeypatch.setenv("REPORT_RC_DAILY_BUDGET", "100")
+    window = sources.report_rc_window("2026-09-18")
+    assert not window["missing_days"]
+    calls = list(daily_reports.calls)
+    assert consensus_backfill.tick()
+    assert consensus_backfill.status()["backfill"]["status"] == "complete"
+    assert daily_reports.calls == calls
+    Clock.current += timedelta(seconds=62)
+    monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
+    assert not consensus_backfill.tick()
+    assert daily_reports.calls == calls

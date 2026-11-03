@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import db, model, price, research, screening, scans
+from a_share_research import consensus_backfill, db, model, price, research, screening, scans
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +55,10 @@ def main() -> None:
                 continue
             # Batch steps run only when no single-company task is waiting.
             if not screening.tick(conn):
+                try:
+                    consensus_backfill.tick()
+                except Exception:
+                    log.exception("report_rc 空闲续补失败；不影响研究队列，下轮冷却后重试")
                 time.sleep(2)
             continue
         log.info("run %s started", row["id"])

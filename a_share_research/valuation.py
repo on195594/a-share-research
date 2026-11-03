@@ -281,7 +281,7 @@ def consensus(rows: list[dict], years: list[int], as_of: str, *, coverage=None) 
     if coverage is not None:
         if coverage["covered_days"] == 0:
             status = "unavailable"
-        elif coverage["covered_days"] < coverage["trading_days"]:
+        elif coverage["covered_days"] < coverage["trading_days"] or coverage["truncated_days"]:
             status = "partial"
     return _json_numbers({"status": status, "years": result, "coverage":
                           {key: coverage[key] for key in ("trading_days", "covered_days", "truncated_days")}

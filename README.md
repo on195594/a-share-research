@@ -173,7 +173,8 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --dat
 
 设计与验收见[顾问闭环方案](docs/investment-advisor.md)。
 
-- **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，限频 1 次/分钟，失败只标 `unavailable`）。
+- **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，共享 61 秒间隔与默认每日 8 次预算，按覆盖情况标 `partial` / `unavailable`）。
+- **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
 - **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码（Research 不存持仓标签），扫描范围另含最近冻结批次的 L5；`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回事件、失败与 `notify`，`GET /api/scans/weekly` 返回周报数据。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
 - **区间条件收益诊断**（只读，不调模型）：

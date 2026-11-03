@@ -32,6 +32,8 @@ FINANCIAL_APIS = {"fina_indicator", "income", "cashflow", "fina_audit", "balance
 HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal", "report_rc"}
 REPORT_RC_DAILY_BUDGET = 8
 REPORT_RC_ROW_CAP = 3000  # 上限未经官方文档核实，达到即视为可能截断
+REPORT_RC_MIN_INTERVAL = 61  # Leave margin around TuShare's one-request-per-minute quota.
+REPORT_RC_CONTROL_KEY = "report_rc:cooldown-v1"
 
 
 def _tushare_cache_key(api: str, params: dict) -> str | None:
@@ -59,12 +61,19 @@ def _tushare_cached(api: str, params: dict) -> pd.DataFrame | None:
         with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
-            row = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (key,)).fetchone()
+            row = conn.execute("SELECT data,created_at FROM tushare_cache WHERE key=?", (key,)).fetchone()
             if row:
                 saved = json.loads(row[0])
                 if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
                     raise ValueError("TuShare cache is not a split DataFrame")
-                return pd.DataFrame(**saved)
+                frame = pd.DataFrame(**saved)
+                if api == "report_rc" and frame.empty:
+                    # A recent empty response can be publication lag, not no coverage.
+                    age = datetime.now(SHANGHAI).date() - date.fromisoformat(str(params["end_date"]))
+                    ttl = timedelta(days=1 if age.days <= 7 else 7)
+                    if datetime.now(SHANGHAI) - datetime.fromisoformat(row[1]) >= ttl:
+                        return None
+                return frame
     except (OSError, sqlite3.Error, ValueError, TypeError):
         log.warning("TuShare %s cache read failed; fetching upstream", api, exc_info=True)
     return None
@@ -74,19 +83,75 @@ class ReportRCBudgetExhausted(SourceError):
     pass
 
 
-def _reserve_report_rc_call() -> None:
-    """Count upstream attempts atomically across worker/CLI processes, including errors."""
-    budget = int(os.environ.get("REPORT_RC_DAILY_BUDGET", REPORT_RC_DAILY_BUDGET))
-    day = datetime.now(SHANGHAI).date().isoformat()
+class ReportRCCoolingDown(SourceError):
+    pass
+
+
+def _report_rc_connect():
     path = db.DATA / "tushare_cache.db"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
-        conn.execute("INSERT OR IGNORE INTO report_rc_budget VALUES (?, 0)", (day,))
-        reserved = conn.execute("UPDATE report_rc_budget SET calls=calls+1 WHERE day=? AND calls<? RETURNING calls",
-                                (day, budget)).fetchone()
-    if reserved is None:
-        raise ReportRCBudgetExhausted(f"卖方预测每日上游调用预算已用尽（{budget} 次）")
+    conn = sqlite3.connect(path, timeout=30, isolation_level=None)
+    conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
+    return conn
+
+
+def _report_rc_control(conn) -> dict:
+    row = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (REPORT_RC_CONTROL_KEY,)).fetchone()
+    return json.loads(row[0]) if row else {}
+
+
+def _save_report_rc_control(conn, value: dict, at: datetime) -> None:
+    conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?,?,?)",
+                 (REPORT_RC_CONTROL_KEY, json.dumps(value, ensure_ascii=False), at.isoformat()))
+
+
+def report_rc_status() -> dict:
+    """Read shared pacing state without an upstream request or quota reservation."""
+    at = datetime.now(SHANGHAI)
+    budget = int(os.environ.get("REPORT_RC_DAILY_BUDGET", REPORT_RC_DAILY_BUDGET))
+    with closing(_report_rc_connect()) as conn:
+        state = _report_rc_control(conn)
+        row = conn.execute("SELECT calls FROM report_rc_budget WHERE day=?", (at.date().isoformat(),)).fetchone()
+    used = row[0] if row else 0
+    retry = datetime.fromisoformat(state["retry_at"]) if state.get("retry_at") else at
+    if used >= budget:
+        retry = max(retry, datetime.combine(at.date() + timedelta(days=1), datetime.min.time(), SHANGHAI))
+    return {"used": used, "limit": budget, "retry_at": max(at, retry).isoformat(), "reason": state.get("reason")}
+
+
+def _defer_report_rc(exc: Exception) -> None:
+    at = datetime.now(SHANGHAI)
+    reason = str(exc).replace(os.environ.get("TUSHARE_TOKEN") or "\x00", "[REDACTED]")
+    if any(part in reason for part in ("每天", "每日", "次/天", "次/日")):
+        retry = datetime.combine(at.date() + timedelta(days=1), datetime.min.time(), SHANGHAI)
+    elif "小时" in reason:
+        retry = at + timedelta(hours=1, seconds=1)
+    else:
+        retry = at + timedelta(seconds=REPORT_RC_MIN_INTERVAL if _report_rc_limited(exc) else 300)
+    with closing(_report_rc_connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        state = _report_rc_control(conn)
+        if state.get("retry_at"):
+            retry = max(retry, datetime.fromisoformat(state["retry_at"]))
+        _save_report_rc_control(conn, {"retry_at": retry.isoformat(), "reason": reason}, at)
+
+
+def _reserve_report_rc_call() -> None:
+    """Atomically reserve the daily budget AND minute slot across processes/restarts."""
+    budget = int(os.environ.get("REPORT_RC_DAILY_BUDGET", REPORT_RC_DAILY_BUDGET))
+    with closing(_report_rc_connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        at = datetime.now(SHANGHAI)
+        day = at.date().isoformat()
+        row = conn.execute("SELECT calls FROM report_rc_budget WHERE day=?", (day,)).fetchone()
+        if (row and row[0] >= budget) or budget <= 0:
+            raise ReportRCBudgetExhausted(f"卖方预测每日上游调用预算已用尽（{budget} 次）")
+        state = _report_rc_control(conn)
+        if state.get("retry_at") and datetime.fromisoformat(state["retry_at"]) > at:
+            raise ReportRCCoolingDown(f"卖方预测冷却至 {state['retry_at']}：{state.get('reason') or '每分钟一次'}")
+        conn.execute("INSERT INTO report_rc_budget VALUES (?,1) ON CONFLICT(day) DO UPDATE SET calls=calls+1", (day,))
+        _save_report_rc_control(conn, {"retry_at": (at + timedelta(seconds=REPORT_RC_MIN_INTERVAL)).isoformat()}, at)
 
 
 def tushare_query(pro, api: str, **params) -> pd.DataFrame:
@@ -96,13 +161,26 @@ def tushare_query(pro, api: str, **params) -> pd.DataFrame:
         return cached
     if api == "report_rc":
         _reserve_report_rc_call()
-    frame = pro.query(api, **params)
+    try:
+        frame = pro.query(api, **params)
+        if api == "report_rc":
+            if not isinstance(frame, pd.DataFrame):
+                raise SourceError("report_rc 返回值不是数据表")
+            report_rc_rows(frame)
+            if params.get("start_date") == params.get("end_date") and not frame.empty:
+                if not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(
+                        date.fromisoformat(str(params["end_date"]))).all():
+                    raise SourceError(f"report_rc {params['end_date']} 返回了其他日期的预测")
+    except Exception as exc:
+        if api == "report_rc":
+            _defer_report_rc(exc)
+        raise
     key = _tushare_cache_key(api, params)
     if key is None:
         return frame
     path = db.DATA / "tushare_cache.db"
-    # Empty results may mean the provider has not published the data yet.
-    if isinstance(frame, pd.DataFrame) and not frame.empty:
+    # Only report_rc caches empty historical days, with a bounded retry TTL.
+    if isinstance(frame, pd.DataFrame) and (not frame.empty or api == "report_rc"):
         try:
             # Python's JSON float encoding preserves precision and leaves date/code strings intact.
             data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
@@ -416,7 +494,8 @@ def _report_rc_limited(exc: Exception) -> bool:
     return any(part in message for part in ("频次", "限频", "超限", "每分钟", "每小时", "每天", "每日", "rate limit", "over limit"))
 
 
-def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None, cache_only: bool = False) -> dict:
+def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None,
+                     cache_only: bool = False, max_calls: int | None = None) -> dict:
     """Read daily market-wide reports; optionally backfill within the shared daily budget.
 
     Batch freeze uses cache_only: missing report days remain missing, never trigger upstream calls.
@@ -426,7 +505,8 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None, cac
     cutoff = date.fromisoformat(as_of)
     end = min(cutoff, datetime.now(SHANGHAI).date() - timedelta(days=1))
     start = cutoff - timedelta(days=days)
-    result = {"rows": [], "trading_days": 0, "covered_days": 0, "missing_days": [], "truncated_days": []}
+    result = {"rows": [], "trading_days": 0, "covered_days": 0, "missing_days": [], "empty_days": [], "truncated_days": []}
+    used_before = report_rc_status()["used"] if not cache_only else 0
 
     def failure(exc):
         reason = str(exc).replace(os.environ.get("TUSHARE_TOKEN") or "\x00", "[REDACTED]")
@@ -451,14 +531,16 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None, cac
         return result
     result["trading_days"] = len(trading_days)
     stopped = False
+    calls = 0
     for day in trading_days:
         params = {"start_date": day, "end_date": day}
         try:
             frame = _tushare_cached("report_rc", params)
             if frame is None:
-                if stopped or cache_only:
+                if stopped or cache_only or (max_calls is not None and calls >= max_calls):
                     result["missing_days"].append(day)
                     continue
+                calls += 1
                 frame = tushare_query(pro, "report_rc", **params)
             rows = report_rc_rows(frame, code)
             # A daily query must never silently lend coverage to a different date.
@@ -466,13 +548,22 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None, cac
                 raise SourceError(f"report_rc {day} 返回了其他日期的预测")
             result["rows"].extend(rows)
             result["covered_days"] += 1
+            if frame.empty:
+                result["empty_days"].append(day)
             if len(frame) >= REPORT_RC_ROW_CAP:
                 result["truncated_days"].append(day)
         except Exception as exc:
-            failure(exc)
+            if isinstance(exc, (ReportRCBudgetExhausted, ReportRCCoolingDown)):
+                result["reason"] = str(exc)
+            else:
+                failure(exc)
             result["missing_days"].append(day)
-            if isinstance(exc, ReportRCBudgetExhausted) or _report_rc_limited(exc):
-                stopped = True
+            # Never retry the next missing day after an upstream failure.
+            stopped = True
+    if not cache_only:
+        pacing = report_rc_status()
+        result["upstream_attempts"] = max(0, pacing["used"] - used_before)
+        result["retry_at"] = pacing["retry_at"]
     return result
 
 

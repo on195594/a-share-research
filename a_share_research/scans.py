@@ -353,10 +353,11 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         prefetch = source.report_rc_window((instant(at).date() - timedelta(days=1)).isoformat())
         summary['consensus_prefetch'] = {
             'covered': prefetch['covered_days'], 'missing': prefetch['missing_days'],
-            'trading_days': prefetch['trading_days'], 'truncated_days': prefetch['truncated_days']}
+            'trading_days': prefetch['trading_days'], 'truncated_days': prefetch['truncated_days'],
+            'empty_days': prefetch.get('empty_days', []), 'retry_at': prefetch.get('retry_at')}
         if prefetch.get('reason'):
             summary['consensus_prefetch']['reason'] = prefetch['reason']
-            log.warning('scan %s consensus prefetch: %s', scan_id, prefetch['reason'])
+            log.info('scan %s consensus prefetch: %s', scan_id, prefetch['reason'])
     except Exception as exc:
         log.exception('scan %s consensus prefetch failed', scan_id)
         summary['consensus_prefetch'] = {'covered': 0, 'missing': [], 'reason': str(exc)}
