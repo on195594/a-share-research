@@ -14,7 +14,7 @@
 | V 判断验证（优先，10-31 立项） | V0、V1、V2 已上线（`cd6c388`）；单只 relative 依契约简化删去，批次内强制排序已实现（`b02cb19`），已随 `d15af17` 于 11-02 发布。V3 记分 CLI `validation --hypotheses`（H1 逐只 TOP/BOTTOM 超额、H3 同价同日中性年化方向，`3873ab9`）11-02 发布；H1 冻结判据写入方案第 4 节；Hermes 周日 19:07 任务 `2c0e2f798501` 自动跑 V0/V1/H1/H3/A3，仅成熟样本数变化时推送。批次 2 排序经所有者授权于 11-01 11:33 在宿主用 `b02cb19` 补跑写入（19 家，宇通客车研究因模型供应商异常失败；备份与脚本在 `ranking-batch2-20261101/`，巡检 0 问题） | 基准发布后核对批次 2 TOP/BOTTOM 收益；新报告不再产出单只 relative 判断（依据见 [判断验证方案](judgment-validation.md#v2-相对判断6-个月反馈)）；20/60/120 个交易日后重跑 V0；2026 年报披露后首次 V1 记分；H1 第 12 个排序批次 6 个月到期时正式检验一次（约 2028-04）；H3 首批样本待 11-02 卡片之后的新披露（约 2027-01） |
 | A 投资顾问闭环（11-01 立项） | A0 `bbce62e`；A1+A2 `40918bb`、A3 `9e13100`、A4 `15b12d5`（Codex 按规格实现，agy 审查，Claude 验收与修正；A4 迁移 v7 与通知已获所有者授权 msg 4023）。4 只持仓真实冒烟全部通过并带情景测算；A4 开发实例端到端通过（三季报正确标为已覆盖、静默、幂等）。证据 `advisor-*-20261101/`、`smoke-40918bb-20261101/`、`a4-e2e-20261101/` | 已随 `d15af17` 发布，Hermes Key 与扫描/周报任务已建（见当前部署）；上线一个月后按真实通知量评估冷却/日预算机制；A3 首次诊断与 V1 记分为非阻塞观察 |
 | B 账户侧接入（11-01，A5） | Research `ce5503b`（区间按日滚动、`GET /api/cards`）；Skills 0.1.29 `ebecd3e`..`094735e`（快照读卡、只提醒的透支/换仓提示、待复核升级）；隔离实例端到端通过，agy 审查 3 项次要已修，证据 `batch-b-20261101/` | Research 随 `d15af17` 发布；Skills 0.1.29 于 11-02 激活；11-03 浏览器验收确认 run 88–96 均已完成并通过复核，对应报告 70–78，华东另有后续 79；不重复研究。账户快照提醒是否已送达仍缺直接记录 |
-| C 小市值组（11-01） | `screen-v1.2` 已随 `d15af17` 部署（v8 已执行）；2026-12 批次起增加独立 S10/SQ3/SL3、冻结时缓存卖方覆盖快照、双组展示与模拟；大市值组与旧批次不变 | 真实全市场 dry-run（基准日 2026-10-30：小池 2208 家、因子齐全 1030 家，双组约 35 分钟）与手机尺寸批次页已验证；首次真实双组批次待 12 月；H2 至少 6 个到期批次后观察，见[实验方案第 9 节](screening-experiment.md#9-小市值组批次-cscreen-v132026-12-批次起) |
+| C 小市值组（11-01） | `screen-v1.3` 已部署（v8 结构不变），对齐 SQ3/SL3 行业约束；2026-12 批次起增加独立 S10/SQ3/SL3、冻结时缓存卖方覆盖快照、双组展示与模拟；大市值组与旧批次不变 | 真实全市场 dry-run（基准日 2026-10-30：小池 2208 家、因子齐全 1030 家，双组约 35 分钟）与手机尺寸批次页已有验证；规则修复和月批失败汇总定向验证见当前部署；首次真实双组批次待 12 月；H2 至少 6 个到期批次后观察，见[实验方案第 9 节](screening-experiment.md#9-小市值组批次-cscreen-v132026-12-批次起) |
 | 公司研究进展 | 已退役（11-03）：生产首对万华 41→44 复核未通过且未重验，跨期对比已由 K2 接续回答与 `reading.comparison()` 程序对照承担 | 已从 web/worker/deploy 移除 `progress.py` 与 `progress_import.py`；数据库 `research_progress` / `progress_calls` 表保留只读兼容，不删历史数据 |
 
 已完成且已部署的近期工作包（详情见上述历史版本对应小节）：
@@ -35,7 +35,13 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `b8d4e54`** 于 2026-11-03 17:20（北京时间）按所有者授权发布 web、worker，只把 a-stock-lib 锁定升至 0.10.0（wheel SHA256 `e69dd873…4470`）；应用源码未改。离线全集 832 passed / 11 skipped 与 0.9.0 一致。固定发布入口的空闲检查、备份、完整性巡检（81 份报告、674 次调用、0 问题）及 worker 离线预检通过；容器内 Lib 版本核对为 0.10.0。无页面、凭据、schema 或 cron 修改。证据 `deploy-b8d4e54-20261103-172030/`，备份 `~/a-share-research-data/backup-pre-b8d4e54-20261103-172031.db`。Skills 同时激活 `0.1.33-5add5f365ee7`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `0b50486`** 于 2026-11-03 22:41（北京时间）按所有者当次批准发布 web、worker：新批次 `screen-v1.3` 将 SQ3 行业上限对齐 SL3（均为 1），S10 及大市值规则不变；月度 API 按 Q20/S10 的 `run_id` 汇总失败，修复取材失败仍存六位代码时漏报。旧版本执行/展示分支保留，不改写历史批次。a-stock-lib 仍为 0.10.0，无 schema、凭据、费用授权或 cron 修改。
+
+定向 101 passed（初筛小池、双组冻结/入场/展示、月批、HTTP 等），沿用上版全集，不重跑研究。固定发布入口空闲检查、备份、停服窗口业务表指纹比对、worker Pi 离线预检及完整性巡检（81 份报告、674 次调用、0 问题）通过。生产 GET 已确认 10 月正确返回任务 34 的年报取材失败，11 月仍返回任务 81 的失败，12 月无批次；真实浏览器 390×844 查看 10/11 月批次页，无横向溢出，临时会话已退出撤销。独立前后核对：历史批次完整内容哈希、两项月批 cron 配置及宿主脚本不变，仍为 2 批次、101 任务、81 报告、674 调用。证据 `monthly-fixes-20261103-223842/` 与 `deploy-0b50486-20261103-224051/`；备份 `~/a-share-research-data/backup-pre-0b50486-20261103-224052.db`。
+
+**12 月首跑最小验收（待真实事件）**：定时执行时间/HTTP 结果/唯一批次 ID 与 `screen-v1.3` 快照；Q20/S10 分池名单及各候选报告复用/新研究/失败关联；每研究 ≤21、三项比较/排序各 ≤2、全批 ≤636 的调用核算并单列缺失 usage；L5/SL3 共同冻结时间、草案与缺口；下一交易日共同入场、未成交现金席位、基准与首次收益；Telegram 实际送达及下一次查询去重、订阅/Skills 候选不含自动纳入的 SL3。冻结通知不替代入场验收。若超 48 小时未完按批次 ID 人工接管；状态任务只在 1–3 日轮询，去重回执不是送达确认，人工重开须查看具体新批次而非月度最早批次。研究中断不重跑该任务，但尚未开始的队列仍可继续；636 不是美元或供应商请求次数硬上限。
+
+前版 `b8d4e54` 于 2026-11-03 17:20 发布，仅锁定 a-stock-lib 0.10.0（wheel SHA256 `e69dd873…4470`）。离线全集 832 passed / 11 skipped，备份、完整性巡检及 worker 预检通过；证据 `deploy-b8d4e54-20261103-172030/`，备份 `~/a-share-research-data/backup-pre-b8d4e54-20261103-172031.db`。Skills 仍为同日激活的 `0.1.33-5add5f365ee7`。
 
 前版 `cb569ad` 于同日 13:43 发布（锁定 a-stock-lib 0.9.0）。
 
@@ -43,8 +49,8 @@
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:b8d4e54` | `6a1bee7f667d96ed356c2cca4593a24575ea6789061ae37149ab3eb5b60c2279` |
-| `a-share-research-worker:b8d4e54` | `5e7e17875b92bfcc634e67cd4618e3b8483e1e71280aaf418a675b086cd17d03` |
+| `a-share-research-web:0b50486` | `ef2672a57c27eec80099242b9e4391a92d3e07342e27a24f725cbf76654162cb` |
+| `a-share-research-worker:0b50486` | `7af8464b168c307f81a738cfd8004f04e38869d168290832e6c049ee80b4be25` |
 
 **前版验证记录**：离线全集 832 通过、11 环境跳过（较上版减少的为随模块删除的测试）。发布工具空闲检查、备份、完整性巡检通过（80 份报告、665 次调用、0 问题），worker Pi 离线预检通过。生产需登录，报告页撤下研究进展区块后未做登录态浏览器验收（仅登录页渲染无控制台错误）。证据 `deploy-7a8bbdd-20261103-110058/`。`cfcbc3d`：相关测试 41 项通过，发布工具检查与完整性巡检通过；未做浏览器验收（仅删一个 span）。证据 `deploy-cfcbc3d-20261103-111902/`，备份 `~/a-share-research-data/backup-pre-cfcbc3d-20261103-111903.db`。
 
@@ -53,7 +59,7 @@
 - 月批（11-03 安装）：no-agent 任务 `3d8b860808e4`（每月 1 日 20:00 `cron/a-share-monthly-submit.sh` 调 `POST /api/batches/monthly`，发一次确认）与 `112633a18054`（1–3 日每小时 :30 `cron/a-share-monthly-status.sh`，只在冻结/待确认/失败/带缺口完成或创建超 48 小时未完成时推送一次）；沿用 `hermes-advisor` 凭据与 Host 头，去重回执在宿主 `~/.local/state/a-share-monthly/<月>.receipt`（11 月手动批次已预置为已通知）。已对生产实测：11 月状态推送与去重、已有批次不新建、旧月 409。回退或停用先 `hermes cron pause` 这两项。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：回到 `cb569ad`（Lib 0.9.0）用 `rollback-cb569ad`（`9c654a90…3238`、`45396428…94de`）；`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：回到本次发布前的 `b8d4e54`（Lib 0.10.0）用两服务的 `rollback-0b50486`（web `6a1bee7f…2279`、worker `5e7e1787…7d03`）；应用回退不恢复数据库。更早回退：回到 `cb569ad`（Lib 0.9.0）用 `rollback-cb569ad`（`9c654a90…3238`、`45396428…94de`）；`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`598183c`（含 `ef07ecf`）的完整记录见 `git show b17a067:docs/implementation-plan.md`；`cd6c388` 见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
