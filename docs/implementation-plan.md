@@ -35,14 +35,16 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `cfcbc3d`** 于 2026-11-03 11:19（北京时间）例行发布 web、worker（在 11:01 的 `7a8bbdd` 之上只删去报告页历史相对判断的“到期记分”说明），无迁移、配置、凭据或依赖变更（`user_version=8`）。随附 `deb25f3`、`b70a48e`（中性不计分红敏感性端点、V1 `unavailable`/`tie`）、`83a155d`、`0de494d`、`ef77f06`（月批 HTTP 发起/查询，调度未安装）与 `7a8bbdd` 模块退役及页面/API 限定语精简（所有者决定，见 PRODUCT 原则；研究进展、`monthly.py` CLI、`backtest_experiment.py`、`db compact-calls`；发布空闲检查不再查 `research_progress`，发布前生产该表无排队/运行中记录）。前一版 `c2d212f` 的滚动区间通知过滤说明见 `git show 850e4b7:docs/implementation-plan.md`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `cb569ad`** 于 2026-11-03 13:43（北京时间）按所有者授权发布 web、worker，锁定 a-stock-lib 0.9.0 及其 wheel SHA256；沿用 832 passed / 11 skipped 与候选 wheel 验证，不重复测试。本次固定发布入口的空闲检查、备份、完整性巡检（81 份报告、674 次调用、0 问题）及 worker 离线预检通过；无应用代码、页面、凭据、schema 或 cron 修改，不新增研究/浏览器验收。证据 `deploy-cb569ad-20261103-134226/`，备份 `~/a-share-research-data/backup-pre-cb569ad-20261103-134228.db`。Skills 同时激活 `0.1.32-729d470ee38e`。
+
+前版 `cfcbc3d` 于同日 11:19 发布（在 `7a8bbdd` 之上只删去报告页历史相对判断的“到期记分”说明，`user_version=8`）。随附 `deb25f3`、`b70a48e`（中性不计分红敏感性端点、V1 `unavailable`/`tie`）、`83a155d`、`0de494d`、`ef77f06`（月批 HTTP 发起/查询，调度未安装）与 `7a8bbdd` 模块退役及页面/API 限定语精简（所有者决定，见 PRODUCT 原则；研究进展、`monthly.py` CLI、`backtest_experiment.py`、`db compact-calls`；发布空闲检查不再查 `research_progress`，发布前生产该表无排队/运行中记录）。前一版 `c2d212f` 的滚动区间通知过滤说明见 `git show 850e4b7:docs/implementation-plan.md`。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:cfcbc3d` | `f7577cdfb6f1b3362a600f8cd2547544dbf2dce02bcac61530cecea9e3e5099b` |
-| `a-share-research-worker:cfcbc3d` | `21a8e0a6cbbb6f6c73ece7ebf34c0458c064e7dfc399faa45513710feaebdb4e` |
+| `a-share-research-web:cb569ad` | `9c654a90c71d0a64668f1991060ec8b4f8b767ad417a3ac33493fab74cd33238` |
+| `a-share-research-worker:cb569ad` | `45396428a8c76164c1d852ea1a058236e7317650c68040e59e8a9c249f3794de` |
 
-**验证**：离线全集 832 通过、11 环境跳过（较上版减少的为随模块删除的测试）。发布工具空闲检查、备份、完整性巡检通过（80 份报告、665 次调用、0 问题），worker Pi 离线预检通过。生产需登录，报告页撤下研究进展区块后未做登录态浏览器验收（仅登录页渲染无控制台错误）。证据 `deploy-7a8bbdd-20261103-110058/`。`cfcbc3d`：相关测试 41 项通过，发布工具检查与完整性巡检通过；未做浏览器验收（仅删一个 span）。证据 `deploy-cfcbc3d-20261103-111902/`，备份 `~/a-share-research-data/backup-pre-cfcbc3d-20261103-111903.db`。
+**前版验证记录**：离线全集 832 通过、11 环境跳过（较上版减少的为随模块删除的测试）。发布工具空闲检查、备份、完整性巡检通过（80 份报告、665 次调用、0 问题），worker Pi 离线预检通过。生产需登录，报告页撤下研究进展区块后未做登录态浏览器验收（仅登录页渲染无控制台错误）。证据 `deploy-7a8bbdd-20261103-110058/`。`cfcbc3d`：相关测试 41 项通过，发布工具检查与完整性巡检通过；未做浏览器验收（仅删一个 span）。证据 `deploy-cfcbc3d-20261103-111902/`，备份 `~/a-share-research-data/backup-pre-cfcbc3d-20261103-111903.db`。
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
