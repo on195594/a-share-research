@@ -159,7 +159,6 @@ form.inline { display: inline; margin: 0; }
 .meta { color: var(--muted); font-size: 14px; }
 .conclusion { font-size: 18px; font-weight: 600; line-height: 1.6; margin: 16px 0; }
 .relative-call { font-size: 15px; margin: -8px 0 12px; }
-.relative-call .muted { font-size: 14px; }
 .snapshot { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 100px), 1fr)); margin: 16px 0 4px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 /* Hairlines between cells, drawn outward so the clipped outer edge stays the border; the last

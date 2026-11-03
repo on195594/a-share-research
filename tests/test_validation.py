@@ -192,6 +192,7 @@ def test_report_header_shows_relative_call():
     line = next(l for l in template.splitlines() if 'class="relative-call"' in l)
     html = ENV.from_string(line).render(body={"relative": {"call": "跑输", "confidence": 65}})
     assert "6 个月相对判断：跑输中证800全收益，把握 65%" in html
+    assert "记分" not in html  # single relative calls are no longer scored
     assert ENV.from_string(line).render(body={}).strip() == ""
 
 
