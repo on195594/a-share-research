@@ -28,7 +28,7 @@
 - **公司研究进展分类边界**（`1a6ab92`、`54676a4`，随 `b36b15d`）：新披露须逐引用满足新发布条件，生成与独立复核共用来源分类；旧资料补读、同 URL 换哈希、更正稿换 URL 均拒绝。万华原失败候选不可访问，语义修复未经真实重放。
 - **性能整改与校验误伤**（10-31 晚，`b36b15d`、`74f187e`、`e4f30e4`）：发布空闲检查纳入研究进展；撤下首页卡片 LRU、PDF 并发与研究取数的 TuShare 包装（初筛/回测保留缓存，Node 长驻推理保留）；机械校验不再把页码、产品代号当数字，阈值后置写法同样豁免，PDF 跨行金额按引文两段拼回。依据 `plan-review-perf-20261031/`（Codex 审查）、`repair-trigger-diagnosis-20261031/`。
 
-随 `7a8bbdd` 于 2026-11-03 发布（月批调度尚未在 Hermes 宿主安装，未创建真实月批）：
+随 `7a8bbdd` 于 2026-11-03 发布（月批调度已于同日安装，见下方“上线后接入”；首个真实月批 2026-12-01）：
 
 - **机会成本分红口径与验证边界**（`deb25f3`、`b70a48e`）：滚动估值新增中性不计累计分红的敏感性端点 `neutral_ex_dividend_return`（供 Skills 换仓比较检验分红已付比例敏感性）；V1 预测记分区分目标期数值缺失（`unavailable`）与区间未命中，并单列与延续基线打平样本（`tie`）。
 - **月批自动发起**（`83a155d`、`0de494d`、`ef77f06`）：新增 `POST /api/batches/monthly` 与 `GET /api/batches/monthly/{month}`（纯只读查询），同月任意状态原子防重、跨月滞留队列拒绝补跑、中断不自动重跑付费阶段。所有者已于 2026-11-03 批准自 2026-12-01 20:00 Asia/Shanghai（12:00 UTC）起每月 1 日执行，接受最多 `30×21+6=636` 次应用层调用上限；待部署后在 Hermes no-agent 宿主安装调度。
@@ -46,6 +46,7 @@
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
+- 月批（11-03 安装）：no-agent 任务 `3d8b860808e4`（每月 1 日 20:00 `cron/a-share-monthly-submit.sh` 调 `POST /api/batches/monthly`，发一次确认）与 `112633a18054`（1–3 日每小时 :30 `cron/a-share-monthly-status.sh`，只在冻结/待确认/失败/带缺口完成或创建超 48 小时未完成时推送一次）；沿用 `hermes-advisor` 凭据与 Host 头，去重回执在宿主 `~/.local/state/a-share-monthly/<月>.receipt`（11 月手动批次已预置为已通知）。已对生产实测：11 月状态推送与去重、已有批次不新建、旧月 409。回退或停用先 `hermes cron pause` 这两项。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
 **直接回退**：`a-share-research-web:rollback-7a8bbdd`、`a-share-research-worker:rollback-7a8bbdd` 即 `c2d212f`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
