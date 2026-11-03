@@ -35,7 +35,7 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `7a8bbdd`** 于 2026-11-03 11:01（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。随附 `deb25f3`、`b70a48e`（中性不计分红敏感性端点、V1 `unavailable`/`tie`）、`83a155d`、`0de494d`、`ef77f06`（月批 HTTP 发起/查询，调度未安装）与 `7a8bbdd` 模块退役（研究进展、`monthly.py` CLI、`backtest_experiment.py`、`db compact-calls`；发布空闲检查不再查 `research_progress`，发布前生产该表无排队/运行中记录）。前一版 `c2d212f` 的滚动区间通知过滤说明见 `git show 850e4b7:docs/implementation-plan.md`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `7a8bbdd`** 于 2026-11-03 11:01（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。随附 `deb25f3`、`b70a48e`（中性不计分红敏感性端点、V1 `unavailable`/`tie`）、`83a155d`、`0de494d`、`ef77f06`（月批 HTTP 发起/查询，调度未安装）与 `7a8bbdd` 模块退役及页面/API 限定语精简（所有者决定，见 PRODUCT 原则；研究进展、`monthly.py` CLI、`backtest_experiment.py`、`db compact-calls`；发布空闲检查不再查 `research_progress`，发布前生产该表无排队/运行中记录）。前一版 `c2d212f` 的滚动区间通知过滤说明见 `git show 850e4b7:docs/implementation-plan.md`。
 
 | 运行镜像 | SHA256 |
 |---|---|
