@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import logging
 import os
 import platform
 import subprocess
@@ -15,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 SCRIPT = Path(__file__).with_name("pi_infer.mjs")
-logger = logging.getLogger(__name__)
 
 
 def _complete_once(request: dict) -> dict:

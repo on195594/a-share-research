@@ -14,7 +14,7 @@ from a_share_research import db, evidence, research, sources
 from a_share_research.material import mdna_pages
 from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
-from support.reports import MATERIAL, CASH, SALES_ROW, report
+from support.reports import MATERIAL, SALES_ROW, report
 from test_review_evidence import BODY, REVIEW, captured_registry, issue, payload, accept, pending_ledger
 
 

@@ -113,6 +113,6 @@ def test_gap_disclosure_and_native_source_navigation():
         request = Request({'type': 'http', 'query_string': query})
         html = render('report.html', request=request, report=record, body=record['body'], feedback=None,
                       feedback_label='', replay_of=None, rows={}, price=None, followups=[], comparison={}, market=[], fin=[])
-        assert '本页未重新核验；可能包含程序提示和模型记录' in html
+        assert '本报告记录的缺口' in html
         assert f'id="{opened}" tabindex="-1" open' in html
         assert '?scope=1#research-scope' in html and '?evidence=1#evidence' in html

@@ -15,7 +15,7 @@ from a_share_research.research import _verified_facts
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest, legacy_issue_view, PROTOCOL
 from a_share_research.research_tools import record_stop
 from a_share_research import service, db
-from support.reports import MATERIAL, SALES, CASH, report
+from support.reports import MATERIAL, SALES, report
 from support.templates import ENV
 from support.continuation import load
 
@@ -248,7 +248,6 @@ def test_interrupted_repair_keeps_unresolved_opinion_and_safe_stage_in_api_and_p
     html = ENV.get_template("run.html").render(run={"status": "failed", "code": BODY["code"], "error": failure["message"]},
                 diagnostics=diagnostics, steps={"repair": "按复核意见修改"}, feedback_retry=False, csrf="", request_id="local")
     assert "按复核意见修改" in html and "中断前仍未解决" in html and "不会自动重试" in html
-    assert "可信投资结论" in html
 
 
 def test_interrupted_task_metadata_does_not_rehash_or_modify_evidence(tmp_path):

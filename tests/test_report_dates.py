@@ -23,7 +23,6 @@ def test_maotai_discloses_distinct_snapshot_dates_without_calling_price_expired(
     assert 'href="#price"' in notice
     assert "估值快照依据 2026-10-23 收盘" in notice
     assert "依据 2026-10-20 收盘，有效至 2026-10-27" in notice
-    assert "有效期不表示行情已更新" in notice
     assert "过期" not in notice
 
 

@@ -16,14 +16,14 @@
 {% macro dates(c, due, from_batch=false) %}
 {% set created_day = c.created_at[:10] if c.created_at else '' %}
 <p class="card-meta">{% if created_day %}<span class="date">研究于 <time datetime="{{ created_day }}">{{ created_day }}</time></span>{% endif %}<span class="date">资料至 {{ c.coverage or '未记录' }}</span>{% if from_batch %}<span>来自初筛</span>{% endif %}</p>
-{% if due and c.coverage and c.coverage < due[0] %}<p class="card-stale">资料未覆盖 {{ due[1] }}（法定披露截止日已过，不代表已确认该公司公告）</p>{% endif %}
+{% if due and c.coverage and c.coverage < due[0] %}<p class="card-stale">资料未覆盖 {{ due[1] }}（法定披露截止日已过）</p>{% endif %}
 {% endmacro %}
 
 {% macro failed(c) %}
 <p class="card-failed">最新一次研究复核未通过，不展示判断。</p>
 {% if c.last_passed %}
 {% set last_day = c.last_passed.created_at[:10] if c.last_passed.created_at else '' %}
-<p class="card-note">上次通过的判断：{{ verdict_pips(c.last_passed.verdict) }}{{ c.last_passed.verdict }}，见 <a href="/reports/{{ c.last_passed.id }}"><span class="date">{{ last_day ~ ' 的报告' if last_day else '上一份报告' }}</span></a>；早于最新研究，仅供对照。</p>
+<p class="card-note">上次通过的判断：{{ verdict_pips(c.last_passed.verdict) }}{{ c.last_passed.verdict }}，见 <a href="/reports/{{ c.last_passed.id }}"><span class="date">{{ last_day ~ ' 的报告' if last_day else '上一份报告' }}</span></a>。</p>
 {% endif %}
 {% endmacro %}
 
@@ -89,7 +89,7 @@
       {% endfor %}
       </tbody>
     </table>
-    <p class="card-note">取自报告保存的财务数据表；利润与现金流为累计值，余额为期末值。估值为研究时 <span class="date">{{ c.market_date }}</span> 收盘（市盈率、股息率为 TTM），不是实时行情。只并列保存值，不打分、不推导变化。</p>
+    <p class="card-note">取自报告保存的财务数据表；利润与现金流为累计值，余额为期末值，估值为 <span class="date">{{ c.market_date }}</span> 收盘（TTM）。</p>
   </section>
   {% endif %}
   {% if c.risks %}

@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import charts, db, batches, companies as company_data, service, reading, progress
+from a_share_research import charts, db, batches, companies as company_data, service, reading
 from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
@@ -543,8 +543,7 @@ def api_monthly_batch(request: Request, body: MonthlyBatchRequest):
 @app.get('/api/batches/monthly/{month}')
 def api_monthly_status(request: Request, month: str):
     api_session(request)
-    with batch_writes:
-        return service.monthly_batch(conn, month)
+    return service.monthly_batch(conn, month)
 
 
 @app.get("/api/companies/{code}/card")
@@ -628,7 +627,7 @@ def api_revoke(request: Request):
 
 
 @app.get("/stock/{code}")
-def stock_page(request: Request, code: str, report: int | None = None, progress_item: int | None = None):
+def stock_page(request: Request, code: str, report: int | None = None):
     if not (session := current_session(request)):
         return login_required()
     reports = reading.stock_reports(conn, code)
@@ -638,10 +637,6 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
     selected = next((r for r in reports if r['id'] == report), None) if report is not None else head
     if selected is None:
         return not_found(request, session, "这份报告不属于当前公司。")
-    advancement = progress.view(conn, selected['id'])
-    draft = None
-    if advancement['status'] == 'passed' and progress_item is not None and 0 <= progress_item < len(advancement['body']['items']):
-        draft = advancement['body']['items'][progress_item]['next_step']['text']
     # The newest non-replay report with an operating series lends its vitals to the company page,
     # falling back to the newest non-replay report's saved T.* financial table when no series exists.
     ordered = [r for r in reports if not r["replay_of"]] + [r for r in reports if r["replay_of"]]
@@ -662,34 +657,7 @@ def stock_page(request: Request, code: str, report: int | None = None, progress_
                   due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   vitals=latest[1], vitals_report=latest[0],
                   price=reading.latest_price(conn, code), comparison=reading.comparison(conn, selected),
-                  selected=selected, track=charts.verdict_track(reports), progress=advancement, progress_kinds=progress.KINDS, progress_draft=draft)
-
-
-@app.post('/reports/{report_id}/progress')
-def submit_progress(request: Request, report_id: int, csrf: str = Form('')):
-    if not (session := current_session(request)):
-        return login_required()
-    if not csrf_ok(session, csrf):
-        return message(request, session, '页面已过期', '请返回公司档案重新提交。', 403)
-    try:
-        progress.submit(conn, report_id)
-    except service.RequestError as exc:
-        return message(request, session, '无法整理研究进展', str(exc), exc.status)
-    row = reading.report(conn, report_id)
-    return RedirectResponse(f'/stock/{row["code"]}?report={report_id}#research-progress', status_code=303)
-
-
-@app.get('/api/reports/{report_id}/progress')
-def api_progress(request: Request, report_id: int):
-    api_session(request)
-    return progress.view(conn, report_id)
-
-
-@app.post('/api/reports/{report_id}/progress', status_code=202)
-def api_submit_progress(request: Request, report_id: int):
-    api_session(request)
-    identifier = progress.submit(conn, report_id)
-    return {'version': progress.VERSION, 'progress_id': identifier, **progress.view(conn, report_id)}
+                  selected=selected, track=charts.verdict_track(reports))
 
 
 @app.post("/price")

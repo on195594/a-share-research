@@ -52,17 +52,6 @@ def test_logged_chain_rebuilds_every_round(tmp_path):
     conn.close()
 
 
-def test_backfill_compacts_full_rows_once_and_keeps_prompts(tmp_path):
-    conn = chained(tmp_path / "app.db", base=False)
-    counts = db.compact_calls(conn)
-    # Round 1 gives up its material block; rounds 2 and 3 keep only what they appended.
-    assert counts["compacted"] == 3 and counts["bytes_after"] < counts["bytes_before"] / 2
-    ids = [r[0] for r in conn.execute("SELECT id FROM calls ORDER BY id")]
-    assert [db.call_prompt(conn, i) for i in ids] == PROMPTS
-    assert db.compact_calls(conn)["compacted"] == 0
-    conn.close()
-
-
 def test_integrity_reports_a_round_that_no_longer_rebuilds(tmp_path):
     path = tmp_path / "app.db"
     chained(path).close()
@@ -92,7 +81,7 @@ def test_integrity_reports_a_broken_chain(tmp_path):
     assert problems == [f"模型调用 {first + 1}：提示无法还原（前一轮或共享块缺失）", f"模型调用 {first + 2}：提示无法还原（前一轮或共享块缺失）"]
 
 
-BLOCK = db.material_block(PROMPTS[0])
+BLOCK = json.loads(PROMPTS[0])["messages"][0]["content"].split("\n# 起始材料\n", 1)[1].split("\n# 补证与引用", 1)[0].rstrip("\n")
 # What compose sends for the same material: the plain-text stage shares the block with exploration.
 COMPOSE = f"你是 A 股财报研究员，为普通投资者写一份研究报告。\n\n{RULES}\n\n{SCHEMA}\n\n# 资料\n{BLOCK}"
 
@@ -109,19 +98,6 @@ def test_material_block_is_cut_once_from_plain_and_tool_loop_prompts(tmp_path):
     assert conn.execute("SELECT count(*) FROM prompt_blocks").fetchone()[0] == 1
     assert len(rows[1]["prompt"]) < len(COMPOSE) - len(BLOCK) + 1
     assert [db.call_prompt(conn, i) for i in ids] == [PROMPTS[0], COMPOSE, "你是独立复核员。"]
-    conn.close()
-
-
-def test_backfill_cuts_material_from_old_full_rows(tmp_path):
-    conn = chained(tmp_path / "app.db", base=False)
-    run = conn.execute("SELECT run_id FROM calls").fetchone()[0]
-    db.log_call(conn, run, "compose", COMPOSE)
-    db.log_call(conn, run, "review", COMPOSE + "\n\n# 上一次复核输出被拒\n缺少 issues 数组")
-    assert db.compact_calls(conn)["compacted"] == 5
-    ids = [r[0] for r in conn.execute("SELECT id FROM calls ORDER BY id")]
-    assert [db.call_prompt(conn, i) for i in ids] == [*PROMPTS, COMPOSE, COMPOSE + "\n\n# 上一次复核输出被拒\n缺少 issues 数组"]
-    assert conn.execute("SELECT count(*) FROM prompt_blocks").fetchone()[0] == 1
-    assert db.compact_calls(conn)["compacted"] == 0
     conn.close()
 
 

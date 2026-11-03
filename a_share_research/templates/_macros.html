@@ -79,7 +79,7 @@
 
 {% macro snapshot_date_notice(market_date, p) %}
   {% if p and not p.expired and market_date and p.as_of and market_date != p.as_of %}
-  <p class="notice caution" role="status">数据日期不同：本报告估值快照依据 {{ market_date }} 收盘；<a href="#price">价格参考</a>依据 {{ p.as_of }} 收盘，有效至 {{ p.expires }}。有效期不表示行情已更新，请勿将两者视为同一天的数据。</p>
+  <p class="notice caution" role="status">数据日期不同：本报告估值快照依据 {{ market_date }} 收盘；<a href="#price">价格参考</a>依据 {{ p.as_of }} 收盘，有效至 {{ p.expires }}。</p>
   {% endif %}
 {% endmacro %}
 
@@ -98,11 +98,10 @@
     </dl>
     <ul class="facts">
       <li>MA20 {{ "%.2f"|format(l.ma20) }} 元、MA60 {{ "%.2f"|format(l.ma60) }} 元，{{ "收盘、MA20、MA60 向上排列" if l.uptrend else "未向上排列" }}。</li>
-      <li>近 20 个交易日较沪深 300 价格涨幅差 {{ "%.2f"|format(l.relative) }} 个百分点（不是超额收益预测）。</li>
-      <li>观察线为近 20 日最高价 + 0.01；失效线为近 10 日最低价；距离不是最大损失承诺。</li>
-      {% if p.adjustments %}<li>已按 TuShare 复权因子前复权，除权日：{{ p.adjustments | join("、") }}；历史价格换算到最新口径，可能不是当时实际成交价。</li>{% endif %}
+      <li>近 20 个交易日较沪深 300 价格涨幅差 {{ "%.2f"|format(l.relative) }} 个百分点。</li>
+      <li>观察线为近 20 日最高价 + 0.01；失效线为近 10 日最低价。</li>
+      {% if p.adjustments %}<li>已按 TuShare 复权因子前复权，除权日：{{ p.adjustments | join("、") }}。</li>{% endif %}
     </ul>
-    <p class="muted small">{{ p.limits }}</p>
   {% elif p %}
     <p class="muted">上次价格参考依据 {{ p.as_of }} 收盘，已于 {{ p.expires }} 过期，不再显示价位。</p>
   {% else %}

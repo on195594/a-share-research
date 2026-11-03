@@ -1,6 +1,5 @@
 """SQLite storage: runs, model calls, reports and candidate batches."""
 
-import argparse
 import hashlib
 import json
 import os
@@ -295,11 +294,6 @@ def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=
     return cur.lastrowid
 
 
-# Where research prompts put the material, and what may follow it; only used to compact old rows.
-BLOCK_HEADINGS = ("\n# 资料\n", "\n# 起始材料\n")
-BLOCK_TRAILERS = ("\n\n# 上一次复核输出被拒", "\n# 补证与引用")
-
-
 def _escaped(text: str) -> str:
     return json.dumps(text, ensure_ascii=False)[1:-1]
 
@@ -313,24 +307,6 @@ def _cut_block(conn: sqlite3.Connection, stored: str, block: str | None) -> tupl
             conn.execute("INSERT OR IGNORE INTO prompt_blocks (sha256, text) VALUES (?, ?)", (sha, block))
             return stored[:at] + stored[at + len(form):], json.dumps({"sha256": sha, "at": at, "escaped": escaped})
     return stored, None
-
-
-def material_block(prompt: str) -> str | None:
-    """The material section of a prompt written before blocks were cut out at call time."""
-    text = prompt
-    try:
-        text = json.loads(prompt)["messages"][0]["content"]
-    except (ValueError, KeyError, IndexError, TypeError):
-        pass
-    if not isinstance(text, str):
-        return None
-    for heading in BLOCK_HEADINGS:
-        if (start := text.find(heading)) >= 0:
-            block = text[start + len(heading):]
-            for trailer in BLOCK_TRAILERS:
-                block = block.split(trailer, 1)[0]
-            return block.rstrip("\n")
-    return None
 
 
 def expand_prompt(base: str, delta: str) -> str:
@@ -377,34 +353,6 @@ def call_prompt(conn: sqlite3.Connection, call_id: int) -> str:
     return prompt
 
 
-def compact_calls(conn: sqlite3.Connection) -> dict:
-    """Re-store earlier full prompts as appended rounds and shared material blocks, one run per transaction,
-    each rewritten call verified to rebuild exactly before commit."""
-    counts = {"compacted": 0, "bytes_before": 0, "bytes_after": 0}
-    for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM calls ORDER BY run_id").fetchall():
-        with transaction(conn):
-            previous = None
-            for call_id, stored, base_id, block_ref in conn.execute(
-                    "SELECT id, prompt, prompt_base, prompt_block FROM calls WHERE run_id = ? ORDER BY id",
-                    (run_id,)).fetchall():
-                prompt = call_prompt(conn, call_id)
-                if base_id is None and block_ref is None:
-                    new, new_base = prompt, None
-                    if previous and (delta := compact_prompt(previous[1], prompt)) is not None:
-                        new, new_base = delta, previous[0]
-                    new, new_ref = _cut_block(conn, new, material_block(prompt))
-                    if new != stored:
-                        conn.execute("UPDATE calls SET prompt = ?, prompt_base = ?, prompt_block = ? WHERE id = ?",
-                                     (new, new_base, new_ref, call_id))
-                        if call_prompt(conn, call_id) != prompt:
-                            raise RuntimeError(f"调用 {call_id} 压缩后无法还原原提示，本任务未改动")
-                        counts["compacted"] += 1
-                        counts["bytes_before"] += len(prompt.encode())
-                        counts["bytes_after"] += len(new.encode())
-                previous = (call_id, prompt)
-    return counts
-
-
 def save_material(conn, run_id: int, snapshot: dict) -> str:
     """Persist snapshots when their SHA changes; skip serialization and writes on a match."""
     sha = snapshot["sha256"]
@@ -435,20 +383,3 @@ def save_report(conn, run_id: int, code: str, name: str, period: str, passed: bo
 def update_batch(conn: sqlite3.Connection, batch_id: int, **fields) -> None:
     sets = ", ".join(f"{k} = ?" for k in fields)
     conn.execute(f"UPDATE batches SET {sets} WHERE id = ?", (*fields.values(), batch_id))
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Database maintenance")
-    parser.add_argument("command", choices=["compact-calls"])
-    parser.add_argument("--vacuum", action="store_true", help="reclaim the freed pages afterwards")
-    args = parser.parse_args()
-    conn = connect()
-    print(json.dumps(compact_calls(conn)))
-    if args.vacuum:
-        conn.execute("VACUUM")
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # in WAL mode VACUUM leaves the whole file in the log
-    conn.close()
-
-
-if __name__ == "__main__":
-    main()

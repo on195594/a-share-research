@@ -230,7 +230,7 @@
 
 {% macro verdict_track(t) %}
 <figure class="figure track" data-chart>
-  <figcaption><strong>判断轨迹</strong><span class="readout" aria-live="polite">已通过复核的 {{ t.points | length }} 份报告，按生成时间排列；各次研究问题与范围可能不同，判断只针对当次范围，不代表公司基本面转折</span></figcaption>
+  <figcaption><strong>判断轨迹</strong><span class="readout" aria-live="polite">已通过复核的 {{ t.points | length }} 份报告，按生成时间排列</span></figcaption>
   <svg class="chart" width="100%" height="{{ t.height }}" role="img" aria-label="各次研究判断的变化，逐条记录见下方研究记录">
     {% for r in t.rows %}<line class="grid" x1="30%" x2="100%" y1="{{ r.y }}" y2="{{ r.y }}"/><text class="tick" x="0" y="{{ r.y }}" dy="4">{{ r.label }}</text>{% endfor %}
     {% for s in t.segments %}<line class="line s0" x1="{{ s.x1 }}%" y1="{{ s.y1 }}" x2="{{ s.x2 }}%" y2="{{ s.y2 }}"/>{% endfor %}

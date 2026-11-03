@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import db, model, price, research, screening, progress, scans
+from a_share_research import db, model, price, research, screening, scans
 
 log = logging.getLogger(__name__)
 
@@ -49,10 +49,6 @@ def main() -> None:
         row = conn.execute("SELECT id, kind FROM runs WHERE status = 'queued'"
                            " ORDER BY request_id LIKE 'batch-%', id LIMIT 1").fetchone()
         if row is None:
-            comparison = conn.execute("SELECT id FROM research_progress WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
-            if comparison:
-                progress.execute(conn, comparison["id"])
-                continue
             scan = conn.execute("SELECT id FROM scans WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if scan:
                 scans.execute(conn, scan['id'])

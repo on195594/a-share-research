@@ -33,10 +33,6 @@ def instant(value: str) -> datetime:
     return parsed.replace(tzinfo=db.SHANGHAI) if parsed.tzinfo is None else parsed.astimezone(db.SHANGHAI)
 
 
-def current_zone(calc: dict | None, close: float | None, day: str) -> str | None:
-    return valuation.at(calc, close, day)['zone']
-
-
 def after_card(event: dict, completed_at: str) -> bool:
     """Announcements carry only a date: one disclosed before the card's completion day was available to it."""
     return instant(event['announced']).date() >= instant(completed_at).date()

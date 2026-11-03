@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from heapq import heappop, heappush
 from pathlib import Path
 
-from a_share_research import screening, validation
+from a_share_research import screening, validation, valuation
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -39,13 +39,7 @@ METHOD = {
 
 def zone_of(close: float | None, zones: dict) -> str | None:
     """Classify an unadjusted close; thresholds have been validated at loading."""
-    if close is None:
-        return None
-    if close <= zones["support_below"]:
-        return "测算支持区"
-    if close >= zones["stretched_above"]:
-        return "测算透支区"
-    return "中性区"
+    return None if close is None else valuation.price_zone(close, zones["support_below"], zones["stretched_above"])
 
 
 def first_days(labels: dict[str, str | None]) -> list[str]:

@@ -14,29 +14,6 @@ QUARTER_ENDS = ("03-31", "06-30", "09-30", "12-31")
 BALANCES = {"T.cash", "T.interest_debt", "T.receivables", "T.inventory", "T.contract_liab", "T.goodwill"}
 
 
-RELATIVE_CALLS = ("跑赢", "跑输")
-RELATIVE_CONFIDENCE = tuple(range(55, 95, 5))  # 55–90 in steps of 5
-RELATIVE_BENCHMARK = "中证800全收益"
-
-
-def relative_problems(relative) -> list[str]:
-    """V2: 结构核查（保留用于历史报告读取校验与向后兼容）。"""
-    if not isinstance(relative, dict) or set(relative) != {"call", "confidence"}:
-        return ['relative 须为 {"call": "跑赢" 或 "跑输", "confidence": 55–90 中 5 的倍数} 两个字段']
-    out = []
-    if relative["call"] not in RELATIVE_CALLS:
-        out.append("relative.call 只能是“跑赢”或“跑输”，必须二选一")
-    if relative["confidence"] not in RELATIVE_CONFIDENCE or isinstance(relative["confidence"], bool):
-        out.append("relative.confidence 须是 55–90 中 5 的倍数（判断正确的概率，%）")
-    return out
-
-
-def outperform_probability(relative: dict) -> float:
-    """Probability the stock beats the benchmark, for Brier scoring（保留用于历史报告记分向后兼容）。"""
-    p = relative["confidence"] / 100
-    return p if relative["call"] == "跑赢" else 1 - p
-
-
 def next_period(period: str) -> str:
     """Quarter end after `period` ("2026-09-30" → "2026-12-31")."""
     year, index = int(period[:4]), QUARTER_ENDS.index(period[5:])

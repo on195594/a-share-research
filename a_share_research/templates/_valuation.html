@@ -26,7 +26,7 @@
     </dl>
     {% if calc.zones.inverted %}<p class="notice caution">支持区上界不低于透支区下界，区间倒置，不能据此划分区域。</p>
     {% else %}<p class="muted small">不高于支持区上界为测算支持区；不低于透支区下界为测算透支区；两者之间为中性区。</p>{% endif %}
-    <p class="muted small">支持区按保守情景、年化门槛 {{ percent(calc.r) }} 计算；透支区按中性情景、年化门槛 {{ percent(calc.r_low) }} 计算。门槛是测算政策，尚未验证为安全边际；情景假设与研究结论、相对判断独立。</p>
+    <p class="muted small">支持区按保守情景、年化门槛 {{ percent(calc.r) }} 计算；透支区按中性情景、年化门槛 {{ percent(calc.r_low) }} 计算。</p>
 
     <h3>三种情景</h3>
     <p class="muted small">利润口径：{{ '扣非归母净利润' if calc.basis == 'core_profit' else '归母净利润' }}，单位亿元。退出倍数对应 {{ calc.years[-1] }} 年利润。</p>
@@ -44,7 +44,6 @@
 
     <h3>隐含盈利要求</h3>
     <p>在中性退出倍数与分红假设下，要达到年化 {{ percent(calc.r) }} 的门槛，{{ calc.years[-1] }} 年利润须为 <span class="num">{{ number(calc.implied.profit, ' 亿元') }}</span>；相对 {{ calc.base_year }} 年基期利润 <span class="num">{{ number(calc.base_profit, ' 亿元') }}</span>，年化增速为 <span class="num">{{ percent(calc.implied.cagr) }}</span>{% if calc.base_profit <= 0 %}（基期利润非正，不计算增速）{% endif %}。</p>
-    <p class="muted small">这是该组假设下的收益门槛，不代表市场一致预期。</p>
 
     <details class="block">
       <summary>敏感性矩阵与价格桥</summary>
@@ -64,14 +63,13 @@
         <div><dt>累计分红 / 当前市值</dt><dd class="num">{{ percent(calc.bridge.dividend_share) }}</dd></div>
       </dl>
       {% if calc.base_profit <= 0 %}<p class="muted small">基期利润非正，利润与市盈率变化倍数不具备解释意义。</p>{% endif %}
-      <p class="muted small">以上是倍数与现金分红比例，不是可相加的年化回报贡献率。</p>
     </details>
 
     <details class="block">
       <summary>历史 PE 与卖方预测对照</summary>
       <h3>近 5 年 PE 分位参照</h3>
       {% if calc.pe_reference %}<p>30 分位 <span class="num">{{ number(calc.pe_reference.p30, ' 倍') }}</span> · 50 分位 <span class="num">{{ number(calc.pe_reference.p50, ' 倍') }}</span> · 70 分位 <span class="num">{{ number(calc.pe_reference.p70, ' 倍') }}</span>。</p>
-      <p class="muted small">来源：报告行情日对应的 TuShare 历史市盈率，剔除空值与非正值；只作参照，不自动决定退出倍数。</p>
+      <p class="muted small">来源：报告行情日对应的 TuShare 历史市盈率，剔除空值与非正值。</p>
       {% else %}<p class="muted">未记录可用的近 5 年 PE 分位，资料缺口见报告记录。</p>{% endif %}
       <h3>所采集卖方预测，不作测算输入</h3>
       {% from "_consensus.html" import coverage_note %}

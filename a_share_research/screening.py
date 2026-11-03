@@ -17,21 +17,16 @@ import tushare as ts
 
 from a_share_research import db, model, service, sources
 from a_share_research.db import SHANGHAI
-from a_share_research.batches import load, group_return, returns, FROZEN_BY, small_rule
+from a_share_research.batches import load, group_return, returns, small_rule
 from a_share_research.reading import research_state
-from a_share_research.service import create_batch as create, freeze_batch as freeze
+from a_share_research.service import freeze_batch as freeze
 from a_share_research.material import METRICS
 from a_share_research.prompts import parse_json
 # Keep the existing import surface for callers and frozen backtest experiments.
 from a_share_research.screening_factors import (
-    RULE, FINANCIAL_INDUSTRIES, _months_after, announced_by, annual_rows,
+    RULE, _months_after, announced_by, annual_rows,
     indicator_check, factors, market_filters, windfall, percentiles, score, pick, rank_candidates,
 )
-
-__all__ = [
-    "RULE", "FINANCIAL_INDUSTRIES", "_months_after", "announced_by", "annual_rows",
-    "indicator_check", "factors", "market_filters", "windfall", "percentiles", "score", "pick",
-]
 
 log = logging.getLogger(__name__)
 
@@ -717,18 +712,6 @@ def tick(conn) -> bool:
                     _save(conn, batch["id"], status="researching", step=None, as_of=result["as_of"],
                           universe=result["universe"], q20=q20, q5=result["q5"], **small)
                 return True
-            if batch["status"] in ("researching", "proposed") and any("return_60d" not in r for r in batch["q20"]):
-                # Batches screened before momentum was recorded get it once, as of their screen date.
-                try:
-                    moves = momentum(_pro(), batch["as_of"], [r["code"] for r in batch["q20"]], batch["rule"])
-                except Exception:  # a missing hint must not fail the batch
-                    log.exception("batch %s momentum backfill failed", batch["id"])
-                    moves = {r["code"]: {"return_60d": None, "drawdown": False} for r in batch["q20"]}
-                q20 = json.dumps([r | moves[r["code"]] for r in batch["q20"]], ensure_ascii=False)
-                updated = conn.execute("UPDATE batches SET q20 = ?, updated_at = ?"
-                                       " WHERE id = ? AND status = ? AND q20 = ? RETURNING id",
-                                       (q20, db.now(), batch["id"], batch["status"], r["q20"])).fetchone()
-                return updated is not None
             if batch["status"] == "proposed":
                 # A draft with picks normally freezes in the same transaction that saved it; this
                 # catches one left behind by an older version, including an all-cash L5.

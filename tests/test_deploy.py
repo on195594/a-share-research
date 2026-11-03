@@ -22,17 +22,6 @@ def test_idle_guard_and_fingerprints_on_captured_records(tmp_path):
                 deploy.idle(database)
         conn.execute("UPDATE runs SET status='done' WHERE id=14")
         deploy.idle(database)
-        reports = [r[0] for r in conn.execute("SELECT id FROM reports ORDER BY id LIMIT 2")]
-        conn.execute("INSERT INTO research_progress (fingerprint, version, baseline_id, current_id,"
-                     " input_hashes, status, created_at) VALUES ('f', 'v', ?, ?, '{}', 'queued', ?)",
-                     (*reports, db.now()))
-        for status in ("queued", "running"):
-            conn.execute("UPDATE research_progress SET status=?", (status,))
-            with pytest.raises(RuntimeError, match="研究进展"):
-                deploy.idle(database)
-        conn.execute("UPDATE research_progress SET status='failed'")
-        deploy.idle(database)
-        conn.execute("DELETE FROM research_progress")
         conn.execute("UPDATE runs SET status='running' WHERE id=14")
         changed = deploy.fingerprints(database)
         assert changed["runs"] != original["runs"]

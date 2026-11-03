@@ -26,9 +26,9 @@ def connections(tmp_path):
     worker.close()
 
 
-def proposed(conn, *, momentum=True):
-    candidates = [{'code': f'{i:06d}.SZ', 'name': str(i), 'industry': str(i), 'verdict': '需要谨慎'}
-                  | ({'return_60d': 0.0, 'drawdown': False} if momentum else {}) for i in (1, 2)]
+def proposed(conn):
+    candidates = [{'code': f'{i:06d}.SZ', 'name': str(i), 'industry': str(i), 'verdict': '需要谨慎',
+                   'return_60d': 0.0, 'drawdown': False} for i in (1, 2)]
     selection = {'draft': {'picks': [{'code': candidates[0]['code']}]}}
     conn.execute('INSERT INTO batches (status,created_at,rule,q20,q5,selection) VALUES (?,?,?,?,?,?)',
                  ('proposed', db.now(), json.dumps(s.RULE), json.dumps(candidates), '[]', json.dumps(selection)))
@@ -108,22 +108,6 @@ def test_stale_proposed_selection_cannot_overwrite_new_selection(connections):
     assert snapshot(worker) == before
 
 
-def test_frozen_q20_not_changed_by_stale_momentum_backfill(connections, monkeypatch):
-    worker, web = connections
-    candidates, _ = proposed(worker, momentum=False)
-    monkeypatch.setattr(s, '_pro', lambda: object())
-    after_owner = []
-
-    def momentum(pro, as_of, codes, rule):
-        s.freeze(web, 1, [candidates[1]['code']], 'owner')
-        after_owner.append(snapshot(web))
-        return {c: {'return_60d': .1, 'drawdown': False} for c in codes}
-
-    monkeypatch.setattr(s, 'momentum', momentum)
-    assert s.tick(worker) is False
-    assert snapshot(worker) == after_owner[0]
-
-
 def test_auto_freeze_exception_is_transactional(connections, monkeypatch):
     worker, _ = connections
     _, selection = proposed(worker)
@@ -191,7 +175,7 @@ def test_queued_batch_uses_saved_rule_through_screen(connections, monkeypatch):
     codes = [f'{i:06d}.SZ' for i in (1, 2, 3)]
     monkeypatch.setitem(NEW_RULE, 'weights', {'roe': 1.0, 'cash': 0.0, 'growth': 0.0, 'pe': 0.0})
     monkeypatch.setitem(NEW_RULE, 'momentum_days', 2)
-    s.create(worker, 'synthetic-batch')
+    s.service.create_batch(worker, 'synthetic-batch')
     saved = json.loads(snapshot(worker)['rule'])
     monkeypatch.setitem(s.RULE, 'min_total_mv_yi', 200)
     monkeypatch.setitem(s.RULE, 'q20_per_industry', 1)

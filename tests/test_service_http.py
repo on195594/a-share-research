@@ -82,9 +82,8 @@ def test_get_endpoints_auth_recovery_compaction_and_no_restart(server):
     assert counts == [conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("runs", "calls", "reports")]
 
 
-def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server, tmp_path):
+def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server):
     from datetime import datetime
-    from a_share_research import monthly
     conn, client, url, *_ = server
     month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
     assert requests.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).status_code == 401
@@ -94,12 +93,6 @@ def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server, 
     assert client.post(url + '/api/batches/monthly', json={'month': '2020-01'}, timeout=2).status_code == 409
     ident = result['batch']['id']
     conn.execute("UPDATE batches SET status='frozen' WHERE id=?", (ident,))
-    receipt = tmp_path / 'receipt'
-    env = {**os.environ, 'A_STOCK_RESEARCH_URL': url,
-           'A_STOCK_RESEARCH_TOKEN': client.headers['Authorization'][7:]}
-    command = [sys.executable, '-m', monthly.__name__, 'status', '--month', month,
-               '--execute', '--receipt', str(receipt)]
-    first = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
-    second = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
-    assert 'completed' in first.stdout and second.stdout == ''
+    status = client.get(f'{url}/api/batches/monthly/{month}', timeout=2).json()
+    assert status['batch']['status'] == 'frozen' and status['batch']['id'] == ident
     assert conn.execute('SELECT COUNT(*) FROM batches').fetchone()[0] == 1

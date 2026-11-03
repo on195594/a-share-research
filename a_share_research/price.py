@@ -21,10 +21,7 @@ log = logging.getLogger(__name__)
 SESSIONS = 61
 VALID_SESSIONS = 5
 SUPPORTED_CODE = re.compile(r"(?:(?:60\d{4}|688\d{3})\.SH|(?:00\d{4}|30[01]\d{3})\.SZ)")
-LIMITS = (
-    "量价仅作风险纪律参考，历史重放未发现稳定超额，不代表投资价值或交易建议。"
-    "未覆盖公告、财报与资金变化；A 股 T+1、跳空、停牌和涨跌停可能使退出条件无法执行。"
-)
+LIMITS = "未覆盖公告、财报与资金变化；A 股 T+1、跳空、停牌和涨跌停可能影响执行。"
 
 
 class PriceError(Exception):

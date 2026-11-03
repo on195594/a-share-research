@@ -1,12 +1,8 @@
 """Report output contract shared by every writing stage, and parsing of model JSON."""
 
 import json
-from typing import TYPE_CHECKING
 
 from a_share_research import forecasts, valuation
-
-if TYPE_CHECKING:  # the web process imports this module and must not pull in market providers
-    from a_share_research.material import Material
 
 SCHEMA = """输出且只输出一个 JSON 对象：
 {

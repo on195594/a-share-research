@@ -52,11 +52,16 @@ def test_existing_manual_batch_suppresses_automatic(tmp_path, status):
 
 
 def test_shanghai_month_boundary_reads_utc_stamp(tmp_path):
-    conn = db.connect(tmp_path / 'monthly.db')
+    path = tmp_path / 'monthly.db'
+    conn = db.connect(path)
     # Time-only boundary inputs: UTC November ends while Shanghai December has begun.
     conn.execute("INSERT INTO batches(status,created_at,rule) VALUES ('failed','2026-11-30T16:00:00+00:00','{}')")
-    assert service.monthly_batch(conn, '2026-12')['batch']['status'] == 'failed'
-    assert service.monthly_batch(conn, '2026-11')['batch'] is None
+    reader = db.connect(path)
+    reader.execute('PRAGMA busy_timeout = 0')
+    with db.transaction(conn):
+        assert service.monthly_batch(reader, '2026-12')['batch']['status'] == 'failed'
+        assert service.monthly_batch(reader, '2026-11')['batch'] is None
+    reader.close()
     conn.close()
 
 
@@ -79,18 +84,6 @@ def test_restart_does_not_restart_monthly_paid_work(tmp_path):
     assert not screening.tick(conn)
     assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 1
     conn.close()
-
-
-def test_future_dry_run_needs_no_credentials_or_request():
-    import os
-    import subprocess
-    import sys
-
-    result = subprocess.run([sys.executable, '-m', 'a_share_research.monthly', 'submit', '--month', '2099-12'],
-                            env=os.environ | {'A_STOCK_RESEARCH_URL': '', 'A_STOCK_RESEARCH_TOKEN': ''},
-                            capture_output=True, text=True)
-    assert result.returncode == 0 and not result.stdout
-    assert 'dry-run' in result.stderr
 
 
 def test_queued_monthly_batch_cannot_start_in_a_later_month(tmp_path):

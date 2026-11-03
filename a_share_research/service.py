@@ -146,7 +146,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "coverage": {"periods": _table_periods(body),
                          "missing": body.get("gaps", extra.get("gaps", [])),
                          "announcement_searches": extra.get("announcement_searches", []),
-                         "limits": "覆盖已读取的披露和财务数据；公告检索范围单独列出，不代表全部公告、新闻或账户事实。历史结果不自动刷新。"}}
+                         "limits": "覆盖已读取的披露和财务数据；公告检索范围单独列出，历史结果不自动刷新。"}}
     result["diagnostics"] = diagnostics(row["status"], body, gaps=extra.get("gaps"),
                                         announcement_searches=extra.get("announcement_searches"))
     if not compact:
@@ -164,8 +164,6 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
     result.pop("identity")
     result.pop("model_calls")
     result["budget"] = run_budget(conn, row["run_id"])
-    result["diagnostics"] = diagnostics(row["status"], body, gaps=extra.get("gaps"),
-                                        announcement_searches=extra.get("announcement_searches"))
     result["continuation"] = continuation(conn, row, body, extra)
     return result
 
@@ -252,7 +250,7 @@ def diagnostics(status: str, body: dict, *, gaps: list | None = None,
             "review_binding": binding_view(body.get("review_binding")),
             "stop_reasons": body.get("stop_reasons", []), "gaps": missing, "gaps_basis": gaps_basis, "next_step": next_step,
             "announcement_searches": body.get("announcement_searches", announcement_searches or []),
-            "limits": "缺口与预算提示不是失败根因判定；不据此推断未披露或清除投资门禁。"}
+            "limits": "缺口与预算提示仅反映本次运行状态。"}
 
 
 def continuation(conn, row, body: dict, extra: dict) -> dict:
@@ -286,7 +284,7 @@ def continuation(conn, row, body: dict, extra: dict) -> dict:
                             for doc in documents if doc],
             "announcement_searches": extra.get("announcement_searches", []),
             "freshness_status": "historical_not_live_checked",
-            "limits": "表格变化不是投资理由变化；观察条件须重新取证，不自动写入 L3 或账户。"}
+            "limits": "仅对比已存表格变化；观察条件须重新取证。"}
 
 
 def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) -> dict:
@@ -335,17 +333,20 @@ def monthly_batch(conn, month: str, *, submit: bool = False) -> dict:
     """Automatic admission only: any existing month's batch, including failure, is final."""
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise RequestError("月份须为 YYYY-MM", 422)
-    # Serialize with other writers, including the existing manual INSERT. No check/insert race.
-    with db.transaction(conn):
-        stamp = db.now()  # Decide the month after acquiring the write lock, including midnight waits.
-        if submit and month != datetime.fromisoformat(stamp).astimezone(db.SHANGHAI).strftime("%Y-%m"):
-            raise RequestError("自动发起仅限当前上海自然月，不补跑历史月份", 409)
-        row = conn.execute("SELECT * FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? "
-                           "ORDER BY id LIMIT 1", (month,)).fetchone()
-        created = row is None and submit
-        if created:
-            ident = create_batch(conn, f"monthly:{month}", created_at=stamp)
-            row = conn.execute("SELECT * FROM batches WHERE id = ?", (ident,)).fetchone()
+    query = "SELECT * FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? ORDER BY id LIMIT 1"
+    if not submit:
+        row, created = conn.execute(query, (month,)).fetchone(), False
+    else:
+        # Serialize with other writers, including the existing manual INSERT. No check/insert race.
+        with db.transaction(conn):
+            stamp = db.now()  # Decide the month after acquiring the write lock, including midnight waits.
+            if month != datetime.fromisoformat(stamp).astimezone(db.SHANGHAI).strftime("%Y-%m"):
+                raise RequestError("自动发起仅限当前上海自然月，不补跑历史月份", 409)
+            row = conn.execute(query, (month,)).fetchone()
+            created = row is None
+            if created:
+                ident = create_batch(conn, f"monthly:{month}", created_at=stamp)
+                row = conn.execute("SELECT * FROM batches WHERE id = ?", (ident,)).fetchone()
     if row is None:
         return {"version": VERSION, "month": month, "batch": None, "created": False}
     batch = batches.load(row)

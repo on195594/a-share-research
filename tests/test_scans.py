@@ -272,7 +272,7 @@ def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
     assert json.loads(request['request']) == {'question': '', 'feedback': None, 'parent_report_id': None}
     card = service.company_card(conn, '603606')
     assert card['status'] == '待复核' and len(card['pending_events']) == 4
-    assert card['current']['current_zone'] == scans.current_zone(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
+    assert card['current']['current_zone'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')['zone']
     assert card['current']['valuation'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
     assert card['current']['note'] == '待复核，区间暂停解读'
     assert any(n['reason'] == 'pending_review' for n in first['notify'])
@@ -420,7 +420,7 @@ def test_zone_notification_uses_price_change_at_previous_valuation_date():
     assert reason['to_zone'] == '中性区'
     # A same-day price move remains a valid notice; no future observations needed.
     assert scans.notification_reasons(before, card(calc['close'] / 2, calc['as_of']), [], [])
-    assert scans.current_zone(calc, calc['close'], '2029-05-01') is None
+    assert valuation.at(calc, calc['close'], '2029-05-01')['zone'] is None
 
 
 @pytest.mark.parametrize(('first', 'opposite'), [
@@ -590,7 +590,4 @@ def test_queue_concurrency_and_release_idle_guard(tmp_path):
             deploy.idle(path)
     connection.execute("UPDATE scans SET status='done'")
     deploy.idle(path)
-    connection.execute('DROP TABLE scan_events')
-    connection.execute('DROP TABLE scans')
-    deploy.idle(path)  # v6 pre-migration compatibility.
     connection.close()

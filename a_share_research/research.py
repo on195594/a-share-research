@@ -78,7 +78,7 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
 2. 资料中是否有足以改变结论的重大风险或不利变化被遗漏（只依据资料判断，次要项不算）。
 3. verdict 与 summary 是否和报告内容一致。
 4. 有具体问题时，answer 是否回答了它；纠错是否核对了所指原文。
-5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。其中 forecast 是对下一期财务表数值的区间预测，不要求出处证明预测值，不评判区间宽窄；只核查所选行与 text 所述事项、本报告判断相关，且 text 中的基期事实正确。若历史报告存在顶层 relative，由程序事后记分，不复核其方向与把握。
+5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。其中 forecast 是对下一期财务表数值的区间预测，不要求出处证明预测值，不评判区间宽窄；只核查所选行与 text 所述事项、本报告判断相关，且 text 中的基期事实正确。
 6. valuation 的 rationale 与 not_priced 照常核查事实和数字；检查情景假设间的经济关系与口径是否自洽（如周期高点用高利润配高倍数、保守利润高于基期却无证据），不评判贵贱与区间宽窄；相关问题统一定位 where="valuation"，修复时顶层替换整个 valuation。
 原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
 通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
@@ -102,24 +102,13 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
         return ledger.accept(parse_json(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
 
 
-def _review_issues(text: str) -> list[dict]:
-    verdict = parse_json(text)
-    if (verdict is None or not isinstance(verdict.get("issues"), list)
-            or not all(isinstance(issue, dict)
-                       and isinstance(issue.get("where"), str) and issue["where"].strip()
-                       and isinstance(issue.get("problem"), str) and issue["problem"].strip()
-                       for issue in verdict["issues"])):
-        return [{"where": "review", "problem": "复核输出无法解析"}]
-    return verdict["issues"]
-
-
 REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods")
 
 
 def published(report: dict) -> dict:
     """Fields of a passed report that are saved; optional judgment fields only when the contract produced them."""
     return {k: report[k] for k in ("verdict", "summary", *SECTIONS)} | {
-        k: report[k] for k in ("checkpoints", "relative", "valuation") if k in report}
+        k: report[k] for k in ("checkpoints", "valuation") if k in report}
 PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
 {"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
 ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。

@@ -2,8 +2,9 @@
 import json
 from pathlib import Path
 
+from support.continuation import BODY, load
 from support.templates import ENV
-from a_share_research import charts, reading
+from a_share_research import charts, db, reading
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDS = {r['report']['id']: r['report'] for r in
@@ -94,4 +95,21 @@ def test_card_renders_standalone_with_report_dates_and_unicode_minus():
     assert str(CARD.value(mock_metric_ascii)) == '-5.20<small>%</small>'
     assert str(CARD.value(mock_metric_unicode)) == '−5.20<small>%</small>'
     assert str(CARD.value(mock_metric_pos)) == '+5.20<small>%</small>'
+
+
+def test_report_cards_match_cards_and_link_last_passed_report(tmp_path):
+    conn = db.connect(tmp_path / 'cards.db')
+    try:
+        load(conn)
+        reports = reading.latest_reports(conn, include_checkpoint=False)
+        passed = {r['code']: r for r in reading.latest_reports(conn, passed=True, include_checkpoint=False)}
+        cards = reading.report_cards(conn, reports, passed)
+        assert len(cards) == len(reports) > 0
+        for item, report in zip(cards, reports):
+            previous = None if report['passed'] else passed.get(report['code'])
+            assert item == reading.card(report, BODY[report['id']], previous) | {'from_batch': report['from_batch']}
+            assert item['last_passed'] == (dict(previous) if previous else None)
+        assert reading.report_cards(conn, [], {}) == []
+    finally:
+        conn.close()
 

@@ -12,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from a_share_research import db, service
 from a_share_research.material import Material, financial_table
 from a_share_research.checking import check
-from a_share_research.research import _research_context, _verified_facts, _review_issues
+from a_share_research.research import _research_context, _verified_facts
 from a_share_research.research_tools import calculate
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
@@ -207,17 +207,13 @@ def test_failed_report_feedback_uses_the_visible_fact_positions(tmp_path):
 
 def test_failed_review_does_not_endorse_unreviewed_claims():
     captured = json.loads((Path(__file__).parent / "data/603606-review.json").read_text())
-    issues = _review_issues(json.dumps({"issues": captured["problems"]}, ensure_ascii=False))
+    issues = captured["problems"]
     # A completed semantic review preserves the two unflagged captured claims.
     assert _verified_facts(captured["report"], issues, reviewed=True)["risks"] == captured["report"]["risks"][:2]
     # Mechanical failure skips review, and a repaired report cannot inherit prior endorsement.
     assert _verified_facts(captured["report"], issues) == {}
-    # Truncated or structurally incomplete review output cannot endorse any claims.
-    response = json.dumps({"issues": captured["problems"]}, ensure_ascii=False)
-    for text in (response[:-1], json.dumps({"issues": [{"where": issues[0]["where"]}]})):
-        failures = _review_issues(text)
-        assert failures[0]["where"] == "review"
-        assert _verified_facts(captured["report"], failures, reviewed=True) == {}
+    # Review-wide failure cannot endorse any claims even when reviewed=True.
+    assert _verified_facts(captured["report"], [{"where": "review", "problem": "复核输出无法解析"}], reviewed=True) == {}
 
 
 def test_failed_report_api_preserves_review_status_without_inference(tmp_path):

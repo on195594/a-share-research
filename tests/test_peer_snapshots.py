@@ -248,7 +248,7 @@ def test_text_gaps_are_not_parsed_as_structured_version_checks():
     peer, = reading.peer_snapshots(body)
     assert peer['rows'][1]['cells'][1]['value'] == '-21.54'
     html = panel(body)
-    assert '历史版本未经重新核对，不保证已覆盖后续更正' in html
+    assert '历史版本未经重新核对。' in html
     assert '逐期公告日与版本未在此行记录' in html
     assert 'href="?evidence=1#evidence"' in html
     assert json.dumps(body, ensure_ascii=False) == before

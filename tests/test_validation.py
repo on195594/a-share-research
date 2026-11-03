@@ -170,17 +170,7 @@ def test_report_item_shows_forecast_with_row_label_and_unit():
     assert "预测" not in str(ENV.get_template("_macros.html").module.item(entry, 0, rows, {}, "checkpoints", ""))
 
 
-# ---------- V2: 6-month relative call ----------
-
-def test_relative_call_must_pick_a_side():
-    assert forecasts.relative_problems({"call": "跑赢", "confidence": 55}) == []
-    assert forecasts.relative_problems({"call": "持平", "confidence": 60}) == ["relative.call 只能是“跑赢”或“跑输”，必须二选一"]
-    assert len(forecasts.relative_problems({"call": "跑输", "confidence": 50})) == 1  # a coin flip is not a call
-    assert len(forecasts.relative_problems({"call": "跑输", "confidence": 62})) == 1
-    assert len(forecasts.relative_problems({"call": "跑输", "confidence": 60, "reason": "x"})) == 1
-    assert len(forecasts.relative_problems(None)) == 1
-    assert forecasts.outperform_probability({"call": "跑输", "confidence": 70}) == pytest.approx(0.3)
-
+# ---------- V2: single-stock relative call removed from write path; historical display kept ----------
 
 def test_output_schema_does_not_contain_relative():
     from a_share_research.prompts import output_schema
@@ -190,31 +180,10 @@ def test_output_schema_does_not_contain_relative():
     assert '"relative"' not in output_schema(feedback)
 
 
-def test_check_allows_missing_relative_call_and_validates_when_present():
-    without_rel = report()
-    del without_rel["relative"]
-    assert check(without_rel, MATERIAL) == []
-    invalid_rel = report()
-    invalid_rel["relative"] = {"call": "持平", "confidence": 60}
-    assert [p["where"] for p in check(invalid_rel, MATERIAL)] == ["relative"]
-    feedback = MATERIAL.__class__(**{**MATERIAL.__dict__, "extra": {"feedback": {"location": "risks[0]", "text": "x"}}})
-    assert "relative" not in [p["where"] for p in check(without_rel, feedback)]
-    assert "relative" in [p["where"] for p in check(invalid_rel, feedback)]
-
-
 def test_repair_patch_rejects_relative_call():
     from a_share_research.research import merge_repair_patch, RepairFormatError
     with pytest.raises(RepairFormatError, match="只允许 ops、verdict、summary、gaps、valuation、rebuttals"):
         merge_repair_patch(report(), {"relative": {"call": "跑赢", "confidence": 55}}, [], MATERIAL)
-
-
-def test_relative_summary_scores_correctness_and_brier():
-    rows = [{"source": "batch", "relative": {"call": "跑输", "confidence": 80}, "returns": {"120d": {"excess": -0.4}}},
-            {"source": "batch", "relative": {"call": "跑赢", "confidence": 60}, "returns": {"120d": {"excess": -0.1}}},
-            {"source": "batch", "relative": None, "returns": {"120d": {"excess": 0.2}}}]
-    (g,) = validation.summarize_relative(rows)
-    assert g["n"] == 2 and g["correct"] == 0.5
-    assert g["brier"] == pytest.approx(((0.2 - 0) ** 2 + (0.6 - 0) ** 2) / 2)
 
 
 def test_report_header_shows_relative_call():
@@ -226,13 +195,15 @@ def test_report_header_shows_relative_call():
     assert ENV.from_string(line).render(body={}).strip() == ""
 
 
-def test_passed_report_saves_relative_call_and_checkpoints():
+def test_passed_report_saves_checkpoints_and_strips_extra_relative():
     from a_share_research.research import published
-    saved = published(report())
-    assert saved["relative"] == {"call": "跑输", "confidence": 60} and saved["checkpoints"][0]["forecast"]
+    draft = report(relative={"call": "跑输", "confidence": 60})
+    assert check(draft, MATERIAL) == []
+    saved = published(draft)
+    assert "relative" not in saved and saved["checkpoints"][0]["forecast"]
     legacy = report()
-    del legacy["relative"], legacy["checkpoints"]
-    assert "relative" not in published(legacy) and "checkpoints" not in published(legacy)
+    del legacy["checkpoints"]
+    assert "checkpoints" not in published(legacy)
 
 
 

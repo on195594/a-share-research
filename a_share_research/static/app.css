@@ -216,8 +216,6 @@ tbody th { font-weight: 400; white-space: normal; min-width: 5.5em; }
 th small { display: block; margin-left: 0; }
 @media (max-width: 480px) { th, td { padding: 8px 3px; font-size: 13px; } }
 
-.disclaimer { color: var(--muted); font-size: 13px; padding-top: 24px; padding-bottom: 32px; }
-
 @media (min-width: 1024px) {
   .stub { margin: 8px 0 0; border-radius: var(--radius); }
   .perforation { margin: 0 0 8px; }
@@ -271,11 +269,6 @@ nav[aria-label="报告章节"], #batch-sections {
   .btn:active { transform: none; }
 }
 
-/* Research increments use the existing reading column, without a card grid. */
-.research-increment { border-block-start: 1px solid var(--line); margin-block: 28px; padding-block-start: 16px; }
-.progress-step { margin-block: 20px; overflow-wrap: anywhere; }
-.progress-step h3 { font-size: 16px; margin-block-end: 8px; }
-.progress-step blockquote { margin-inline: 0; padding-inline-start: 16px; border-inline-start: 2px solid var(--line); }
 [id^="claim-"] { scroll-margin-block-start: 60px; }
 
 /* ---------- verdict, ledger ---------- */

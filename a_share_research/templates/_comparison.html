@@ -1,6 +1,6 @@
   {% if comparison.old %}
   <p><a href="/reports/{{ comparison.old.id }}">原报告 {{ comparison.old.created_at[:16].replace('T', ' ') }}</a> → <a href="/reports/{{ comparison.new.id }}">本次报告 {{ comparison.new.created_at[:16].replace('T', ' ') }}</a></p>
-  <p class="hint">只对照明确关联的报告；问题范围可能不同，结论措辞变化不等于公司整体判断反转，也不解释变化原因。</p>
+  <p class="hint">只对照明确关联的报告。</p>
   <details>
     <summary>研究问题与结论{% if comparison.old_question and comparison.new_question %} · {{ '问题相同' if comparison.old_question == comparison.new_question else '问题不同' }}{% else %} · 问题记录不完整{% endif %}</summary>
     <p>原问题：{{ comparison.old_question or '未记录具体问题' }}</p>
@@ -23,7 +23,7 @@
   {% set moved = diff.valuation | rejectattr('unchanged') | list %}
   <details {% if moved or diff.revised %}open{% endif %}>
     <summary>程序核对的指标变化{% if moved or diff.revised %} · {{ (moved | length) + (diff.revised | length) }} 项变动{% endif %}</summary>
-    <p class="hint">仅比较同指标、同单位、同期间的已记录值；不同期间的累计值不相减，缺失值不按零处理。{% if diff.revised %}不据此推断修订原因。{% endif %}{% if moved %}估值快照变化，不是收益。{% endif %}</p>
+    <p class="hint">仅比较同指标、同单位、同期间的已记录值；不同期间的累计值不相减，缺失值不按零处理。</p>
     {% if moved or diff.revised %}
     <dl class="diff-grid">
       {% for r in diff.revised %}
@@ -35,7 +35,7 @@
     </dl>
     {% endif %}
     <ul>
-      <li>新增财务数据覆盖期：{{ diff.disclosed | join('、') if diff.disclosed else '无' }}（不代表已完整阅读新披露原文）。</li>
+      <li>新增财务数据覆盖期：{{ diff.disclosed | join('、') if diff.disclosed else '无' }}。</li>
       {% if diff.backfilled %}<li>补齐比较期：{{ diff.backfilled | join('、') }}（不是新披露）。</li>{% endif %}
       {% if diff.uncollected %}<li>上次未采集：{{ diff.uncollected | join('、') }}。</li>{% endif %}
       {% if comparison.missing %}<li>本次未记录部分旧指标或期间：{{ comparison.missing | join('、') }}，不能认定没有变化。</li>{% endif %}
@@ -44,4 +44,3 @@
   </details>
   {% endif %}
   {% if comparison.excluded %}<p class="muted">口径不一致或字段不完整，未比较：{{ comparison.excluded | join('、') }}。</p>{% endif %}
-  <p class="hint">旧风险是否缓解或关闭，只以报告中带出处的核查记录为准；此对照不推断风险已解决。</p>

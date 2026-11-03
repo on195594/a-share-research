@@ -121,7 +121,7 @@ def test_report_without_recorded_risks_still_renders_risk_and_answer_sections(tm
                   rows={r['id']: r for r in body['table']}, price=None, followups=[],
                   comparison=reading.comparison(conn, conn.execute('SELECT * FROM reports WHERE id=39').fetchone()),
                   market=[], fin=[r for r in body['table'] if r['id'].startswith('T.')])
-    assert html.count('id="risks"') == 1 and '本报告未记录可列出的风险，不代表没有风险' in html
+    assert html.count('id="risks"') == 1 and '本报告未记录可列出的风险。' in html
     assert '<section id="answer" tabindex="-1">' in html
     conn.close()
 
@@ -135,10 +135,10 @@ def test_report_empty_risks_and_missing_summary_keep_unknown_explicit():
     html = render('report.html', report=record, body=body, feedback=None, feedback_label='', replay_of=None,
                   rows={r['id']: r for r in body['table']}, price=None, followups=[],
                   comparison={}, market=[], fin=[])
-    assert '本报告未记录可列出的风险，不代表没有风险' in html
+    assert '本报告未记录可列出的风险。' in html
     assert '本报告未记录一句话结论' in html
-    assert '不代表资料充分或没有风险' in html
-    assert '研究流程：已完成并通过复核' in html
+    assert '未记录明确的证据缺口。' in html
+    assert '研究判断：需要谨慎' in html
 
 
 def test_checkpoint_finding_keeps_other_reviewed_facts_but_never_the_checkpoints():

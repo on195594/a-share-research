@@ -81,7 +81,7 @@
   </details>
   {% set unfilled = batch.entry.prices.items() | rejectattr("1.filled") | list %}
   {% if unfilled %}<p class="small">未成交：{% for code, p in unfilled %}{{ names.get(code, code) }}（{{ p.reason }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
-  <p class="hint">单个批次只是一次观察；6 个月为主评价期限。</p>
+  <p class="hint">6 个月为主评价期限。</p>
 </section>
 {% endif %}
 
@@ -137,7 +137,7 @@
 {% if batch.q20 %}
 <section>
   <h2 id="candidates" tabindex="-1">候选 {{ batch.q20 | length }} 家</h2>
-  <p class="muted small">行业内分位加权：扣非 ROE、现金含量、扣非利润增速各 20%，低市盈率 40%。分位只是排序，不代表预期收益。</p>
+  <p class="muted small">行业内分位加权：扣非 ROE、现金含量、扣非利润增速各 20%，低市盈率 40%。</p>
   <p class="muted small" id="factor-basis">因子口径：扣非 ROE 为近 3 个年报扣非 ROE 的平均值；现金含量为这 3 年经营现金流合计 ÷ 合并净利润合计；扣非增速为扣非净利润的 3 年复合增速；市盈率为初筛日的 PE（TTM，归母口径）。</p>
   {% set heat = namespace(cells=[("roe", "roe_pct", "扣非ROE"), ("cash", "cash_pct", "现金含量"), ("growth", "growth_pct", "扣非增速"), ("pe", "pe_pct", "市盈率")]) %}
   <div class="table-wrap matrix-wrap" tabindex="0" role="region" aria-label="候选因子分位矩阵">
@@ -267,7 +267,7 @@
   {% for key, label in labels %}<li><span>{{ label }}</span><span class="num">{{ f[key] }}</span></li>{% endfor %}
   </ul>
   {% endif %}
-  <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名（缺口不代表质量差）。</p>
+  <p class="muted small">另有 {{ f.factor_excluded }} 家因扣非亏损或非标审计意见排除，{{ f.factor_gap }} 家因数据缺口未排名。</p>
   {% if market_strip is defined and market_strip %}
   <div class="market-strip" data-chart>
     <p class="small muted">粗筛后板块覆盖（共 {{ market_strip.total }} 家）：{% for s in market_strip.segments %}<span class="seg-key"><i class="seg-dot {{ s.cls }}"></i>{{ s.label }} {{ s.count }}（{{ s.pct }}%）</span>{% if not loop.last %}、{% endif %}{% endfor %}</p>

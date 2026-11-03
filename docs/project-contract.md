@@ -35,7 +35,7 @@ flowchart TD
 
 `a-share-research` 是应用名，`a-stock-research` 是 Skills 中的首次研究入口。前者判断“是否值得继续研究”，后者应用既有研究框架形成决策状态，不能直接映射两者的结论词。
 
-财报应用的价格参考继续由应用拥有；Skills 的止损、仓位和风险政策继续由 runtime 拥有。公式可重复计算，不表示对应投资规则已证明有效。研究实验的模拟组合不代表真实仓位，设计见[候选发现与研究实验方案](screening-experiment.md)。
+财报应用的价格参考继续由应用拥有；Skills 的止损、仓位和风险政策继续由 runtime 拥有。研究实验的模拟组合设计见[候选发现与研究实验方案](screening-experiment.md)。
 
 ## 3. 依赖与状态所有权
 

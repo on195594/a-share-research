@@ -163,7 +163,7 @@ def at(calc: dict, close, day: str) -> dict:
                                                      if neutral_exit >= 0 and neutral_dividends >= 0 else None),
                 'support_below': support, 'stretched_above': stretched, 'inverted': support >= stretched,
                 'zone': price_zone(p, support, stretched), 'horizon': horizon, 'as_of': day, 'close': p,
-                'assumption': '按冻结累计分红尚未支付测算，未核对实际剩余现金流；不代表已核实的换仓回报差。',
+                'assumption': '按冻结累计分红尚未支付测算。',
             })
     except KeyError as exc:
         return empty | {'reason': f'缺少测算字段 {exc.args[0]}，无法滚动测算'}

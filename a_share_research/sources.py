@@ -14,7 +14,6 @@ from functools import cache
 from pathlib import Path
 
 import pandas as pd
-import requests
 import tushare as ts
 from a_stock_lib.providers.tushare_financials import TushareFinancialProvider
 from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code

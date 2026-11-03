@@ -86,7 +86,7 @@
   </details>
   {% set unfilled = batch.entry.prices.items() | rejectattr("1.filled") | list %}
   {% if unfilled %}<p class="small">未成交：{% for code, p in unfilled %}{{ names.get(code, code) }}（{{ p.reason }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
-  <p class="hint">单个批次只是一次观察；6 个月为主评价期限。</p>
+  <p class="hint">6 个月为主评价期限。</p>
 </section>
 {% endif %}
 

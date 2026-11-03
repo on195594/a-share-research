@@ -11,7 +11,6 @@
     <a class="link" href="/reports/{{ card.id }}#more">追问或请求核查</a>
     <a class="link" href="#records">全部 {{ reports | length }} 份报告</a>
   </div>
-  {% if progress is defined %}{% include "_progress.html" %}{% endif %}
   {% if vitals %}
   <details class="block vitals-fold" id="vitals">
   <summary>近 8 期走势（财务体征）· 取自 {{ vitals_report.created_at[:10] }} 的报告</summary>
@@ -26,7 +25,6 @@
   {% for r in reports %}
     <li>
       <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
-      {% if r.parent_report_id or r.prior_report_id %}<a href="?report={{ r.id }}#research-progress">查看这次研究进展</a>{% endif %}
       {{ research_context(r.question, r.parent_report_id, r.feedback_text, r.prior_report_id) }}
       {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
       <p>{% if r.passed %}{{ verdict_pips(r.verdict) }}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}

@@ -22,15 +22,14 @@
 | 申万行业与同业快照 | `test_industry_peers.py`、`test_peer_snapshots.py` |
 | 财务序列与报表核验 | `test_financial_series.py`、`test_financial_table.py` |
 | 价格参考与技术纪律 | `test_price.py` |
-| 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py`、`test_report_cards.py` |
-| 引文、接续报告与首页事项 | `test_check.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_home_staleness.py` |
+| 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py`、`test_company_card.py` |
+| 引文、复核账本、接续报告与首页事项 | `test_check.py`、`test_review_evidence.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_home_staleness.py` |
 | 精确计算与研究工具 | `test_research_tools.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证共享补证、额度、来源冲突及跨材料账本，不代表模型语义验收） |
-| 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py` |
-| 历史回测与离线实验 | `test_backtest.py`、`test_backtest_experiment.py`、`test_backtest_identity.py` |
-| 判断记分（V0 超额、V1 检查点预测） | `test_validation.py` |
-| 公司研究进展 | `test_progress.py`：真实捕获的引用、重复公告反例、幂等、HTTP 与隔离导入；人工绑定的结构互变样本不代表真实模型验收 |
+| 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py`、`test_screening_small.py`、`test_batch_c.py`、`test_batch_small_reading.py`、`test_monthly_batch.py` |
+| 历史回测 | `test_backtest.py` |
+| 判断记分与估值诊断（V0–V3、A1、A3、A4） | `test_validation.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py` |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
-| 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、历史压缩、巡检互变） |
+| 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、巡检互变） |
 | TuShare 缓存与任务恢复 | `test_tushare_cache.py`、`test_worker_recovery.py`、`test_material_cache.py`（真实财报响应、SQLite 恢复事务和材料快照；`test_integrity.py` 核对 PDF 文本缓存复用与重建） |
 | 模型运行时 | `test_model_preflight.py`、`test_model_complete.py`（在 worker 环境下运行，验证 Node 预检、单次推理的错误与运行身份；付费实测需 `PI_LIVE_TEST=1`） |
 | API、会话与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py`、`test_web_connection.py` |

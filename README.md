@@ -18,7 +18,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 编排单股研究（取材料 `material.py`、机械核对 `checking.py`、成文契约 `prompts.py`、取证工具 `research_tools.py`），`screening.py` / `backtest.py` 为候选批次与历史回测，`backtest_experiment.py` 为离线归因 |
+| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 编排单股研究（取材料 `material.py`、机械核对 `checking.py`、成文契约 `prompts.py`、取证工具 `research_tools.py`），`screening.py` / `backtest.py` 为候选批次与历史回测 |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
 | `docs/` | 方案、项目契约、路线图、实施与部署状态；`PRODUCT.md` / `DESIGN.md` 是界面设计入口 |
@@ -61,14 +61,6 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## Agent 研究 API
 
-公司档案提供“这轮研究推进了什么”：对明确关联的已通过报告，显式整理旧认识、增量、判断影响、仍未知与下一步，逐项回到原证据。没有已复核结果时说明缺失，原报告与程序对照继续可读。生成/复核只在 worker 执行，各一次，不取新数据、不自动重试；浏览、刷新和返回不调用模型。
-
-`GET /api/reports/{id}/progress` 读取相同结果；`POST /api/reports/{id}/progress` 显式排队，同一前后报告与输入版本共用一个记录。鉴权沿用下述 API Key。附属记录不回写研究正文，升级会新增 `research_progress` / `progress_calls` 表，生产迁移及部署须另行确认。
-
-本地或隔离库可使用 `uv run --env-file .env python -m a_share_research.progress <本次报告ID>` 只读检查；追加 `--generate` 才执行最多一次生成和一次复核，不重新探索。中断任务保留状态和调用预留记录，须先核对进程/调用结果，不能删除记录重试。真实样本验证范围与当前阻碍见[实施计划](docs/implementation-plan.md#工作包与状态)。
-
-已有授权 API 消费者导出的完整 `research-v1` JSON 可用 `uv run python -m a_share_research.progress_import --database /path/to/new-isolated/app.db report-40.json report-41.json report-42.json report-44.json` 导入新建隔离库。目标已存在则拒绝；保留正文、报告 ID 与导出证据哈希，不伪造原运行材料快照，也不复制访问令牌。普通网页登录会话不能调用 Bearer API。
-
 Skills 等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
 
 ```bash
@@ -89,8 +81,8 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 |---|---|
 | `POST /api/research` | `{"code":"600519","question":"最新财报改变了什么？","request_id":"本次唯一编号"}` → 202 与 `run_id` |
 | `GET /api/runs/{run_id}` | 排队/研究/成功/失败、步骤、错误和 `report_id`；成功状态为 `done` |
-| `GET /api/request?request_id=...` | 只读找回原请求的任务、诊断与调用计数；404 不证明原提交失败，不自动重提或重启失败任务 |
-| `GET /api/research/budget` | 模型调用上限（循环保护而非金额预算）；费用未知，不按调用次数推算实付 |
+| `GET /api/request?request_id=...` | 只读找回原请求的任务、诊断与调用计数 |
+| `GET /api/research/budget` | 模型调用上限（循环保护而非金额预算） |
 | `GET /api/reports?code=600519` | 最近 100 份报告的身份、时间、状态 |
 | `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡；`current.valuation` 按最新收盘日滚动测算 |
 | `GET /api/cards` | `research-v1` 信封：`cards` 为扫描范围（订阅＋最近冻结批次 L5）的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |
@@ -103,15 +95,7 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 单家与批量卡片共用数据库读取路径，沿用 Bearer 鉴权，不联网取数、不触发研究。订阅与 L5 重叠时 `origin` 为 `external`。
 卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，`valuation` 仍是对象，其中各测算字段为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径。
 滚动测算冻结退出市值与累计分红，假设股本不变；报告日后已发放的分红仍计入，存在约一年派息量级的已知高估。`待复核` 卡片仍保留数值并提示区间暂停解读。
-精简视图中的 `continuation` 区分生成日、财务覆盖期、行情日、披露与公告检索范围；
-`historical_not_live_checked` 不承诺当前最新。旧检查点是待核查议程，不是当期事实；
-`baseline_status` 明确区分可用、失败、未就绪、缺失等基线，并携带基线财报期、生成日、行情日和公告范围。
-表格差值复用网页同一 `reading.comparison` → `since_prior` 入口；`excluded/missing/reason` 保留单位、名称、旧格式和缺失值限制，不把不同累计期间相减，也不推断投资理由已改变。精简视图额外要求两份报告均通过核查，否则不给 `diff`；这比网页的程序表格对照更保守。
-失败时返回已有核查问题和缺口；异常中断尚未保存报告时仍读取已落盘材料中的缺口，不曝光材料全文或未通过正文；预算提示不等于已确定根因。
-`cost=null/cost_status=unavailable` 不是零费用，硬金额上限无法保证时消费者应停止澄清；
-读取不触发付费重跑，不写真实账户或 L3。
-全局预算为 `scope=configuration`，`model_calls_recorded=null`；有具体任务时为 `scope=run` 并携带 `run_id` 和该任务调用计数。
-获得上线授权后须先部署服务端，再激活配套 runtime/Skills；旧服务缺接口不得解释为任务不存在或自动重开研究。
+精简视图中的 `continuation` 区分生成日、财务覆盖期、行情日、披露与公告检索范围；`baseline_status` 明确区分可用、失败、未就绪、缺失等基线，并携带基线财报期、生成日、行情日和公告范围。表格差值复用网页同一 `reading.comparison` → `since_prior` 入口；`excluded/missing/reason` 保留单位、名称、旧格式和缺失值限制，不同累计期间不相减。精简视图额外要求两份报告均通过核查，否则不给 `diff`。失败时返回已有核查问题和缺口；异常中断尚未保存报告时仍读取已落盘材料中的缺口。全局预算为 `scope=configuration`，`model_calls_recorded=null`；有具体任务时为 `scope=run` 并携带 `run_id` 和该任务调用计数。
 
 相同编号和内容返回原任务；编号相同但内容不同返回 409。不存在返回 404；未就绪或状态不一致返回 409；非法位置/跨公司返回 422；未认证或失效返回 401。`location` 是 `summary` 或 `answer/risks/business/financial/methods/checkpoints` 的实际零基下标，例如 `financial[0]`。报告的 `passed` 与任务状态一起判断；失败报告不提供已通过的结论，可保留的事实范围见[产品方案](docs/proposal.md#2-从用户角度的取舍)。
 
@@ -157,20 +141,9 @@ DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # �
 
 新批次冻结时为 Q20/S10 逐家保存近 90 日卖方覆盖机构数及缓存实际覆盖的交易日数；只读已缓存的按日全市场 `report_rc`，不补查缺失日，页面明确显示无缓存、截断及其他缺口，零机构不能解读为完整覆盖下无人跟踪。SQ3/SL3 与大组同日入场、同费率及期限，另加中证 1000 全收益（`H00852.CSI`）辅助基准，S10 不单独生成模拟组合；旧批次继续原规则与原展示。SL3 先只作模拟，不进入披露扫描或 Skills 换仓候选。
 
-月批调度适配器（仅实现，须另行批准并安装调度）：已有 Bearer API Key 可调用 `POST /api/batches/monthly`，请求 `{"month":"2026-12"}`；`GET /api/batches/monthly/2026-12` 只查询。服务端以上海当前自然月检查发起，旧月拒绝；同月已有任意状态批次都不另建。并发写入由 SQLite 写事务串行，自动身份复用现有唯一 `request_id`；网页手动失败后重开不受限制。GET 返回当月首批，因此人工重新开始后的结果仍应看对应批次页。
+月度自动发起（启用状态与时间/额度记录见[实施计划](docs/implementation-plan.md)）：Bearer API Key 可调用 `POST /api/batches/monthly`（`{"month":"2026-12"}`）入队当月批次，`GET /api/batches/monthly/2026-12` 只读查询当月首批状态。服务端仅接受上海当前自然月自动发起，旧月拒绝；同月已有任意状态批次（含失败）均不另建，网页手动重开不受此限；已入队但跨月仍未开始初筛的自动批次直接失败停止，不使用后来数据补跑。
 
-已有 Hermes/no-agent 宿主可运行以下适配器；默认只做 dry-run，不读取凭据或请求 API：
-
-```bash
-python -m a_share_research.monthly submit --month 2026-12
-# 正式启用须另获时间/费用批准；使用宿主已有 A_STOCK_RESEARCH_URL / A_STOCK_RESEARCH_TOKEN
-# submit --month 2026-12 --execute --receipt /宿主私有目录/monthly-2026-12.receipt
-# status --month 2026-12 --execute --receipt /宿主私有目录/monthly-2026-12.receipt
-```
-
-月度调度在批准的固定时间发起（当前启用授权见实施计划，不依赖当天开市），仍以既有已发布交易日初筛、冻结后下一交易日开盘模拟入场。月参数须取**计划执行月**，不得把迟到的旧任务改成当前月；错过即缺批；已入队但直到下月仍未初筛的自动批次失败停止，已开始研究可继续完成。现有调度可每小时只读 status 直到终态（跨月仍查原月，不补提交），非终态无 stdout，冻结/失败/需人工处理输出 JSON。每月独立 receipt 加锁抑制重复摘要；失败研究/排序缺口在摘要标出。宿主仅将终态 stdout 转到既有通知渠道、非零退出发异常告警；无自动 HTTP 重试，超时先 status 确认服务端是否已收单。不安装调度、不直接发送消息，真实送达尚未验收；stdout 与外部通知不具备原子交付，崩溃窗口可能重复或漏送，应复用宿主现有交付机制而非宣称恰好一次。
-
-**额度口径**：最简单的执行授权是每月最多一批，沿用 Q20 + S10 最多 30 家新研究、每家最多 21 次应用层模型调用，以及大组选择/排序和小组选择各最多 2 次（含格式纠正）；复用报告会减少调用。自动月批不因研究中断或比较异常重新启动付费阶段，人工任务原恢复策略不变。这是工作量/应用层调用限制，**不是美元硬上限或供应商实际请求数上限**；token 数、实时费率与底层提供方行为无法事前精确计费。若要求严格美元封顶，应先确认提供方已有独立配额能否硬停；当前适配器不提供也不假装提供美元限额。执行时间及费用授权记录见实施计划；部署完成并核对既有宿主与私有通知接线后才可启用。
+**额度口径**：自动月批每月最多一批（Q20 + S10 最多 30 家新研究 × 每家最多 21 次调用 + 大/小组比较与排序最多 6 次 = 最多 636 次应用层模型调用；7 天内已通过报告直接复用），且不因研究或比较中断自动重跑付费阶段。这是应用层调用次数上限，不是美元硬上限或供应商底层请求数上限。
 
 服务重启时，进行中的初筛记为失败（人工可重新开始本月批次），手动批次跨公司比较自动重试，自动月批中断比较则失败停止。只看初筛结果、不建批次：
 
@@ -186,29 +159,21 @@ uv run --env-file .env python -m a_share_research.backtest --out DIR --start 201
 
 续跑时只跳过已包含当前全部到期收益窗口的批次；缺少到期的 6/12 个月收益时复用接口缓存重算，成功后原子替换结果，失败保留原文件。仅处理已有下月交易日行情的完整月份，当前月自动跳过。接口缓存仍按请求参数复用，不主动刷新已有历史响应；需要全新取数时使用新的输出目录。
 
-固定三项离线归因实验（不调用模型、不联网补缓存、不修改线上规则；在 Linux 上使用 `fork`；程序拒绝 `python -O` 或 `PYTHONOPTIMIZE`，确保断言核验生效）：
-
-```bash
-uv run python -m a_share_research.backtest_experiment --source BASELINE_DIR --calendar CALENDAR_JSON --out EXPERIMENT_DIR
-```
-
 ### 判断记分
 
 只读打开数据库，不调用模型、不写库；口径见[判断验证方案](docs/judgment-validation.md)。`DATA_DIR` 只用于 TuShare 缓存，指向临时目录即可，不要指向生产数据目录：
 
 ```bash
-DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额与 V2 相对判断记分
+DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --forecasts [--json OUT]  # V1 预测记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --hypotheses [--json OUT] # V3 H1 避坑 / H3 读得快
 ```
-
-`BASELINE_DIR` 必须是可信私有目录，包含既有 `cache/` 与 `batches/`；`CALENDAR_JSON` 为已采集的交易日历，包含 `end`（缓存财务查询截止日）和 `days`（自 2015 年起的 SSE 开市日升序列表）。输出目录须与基线分离，不能相同或互为祖先目录。程序逐批核对基线名单、分数与收益，缺缓存立即失败；保存来源与代码哈希，同一输入可续跑。`--limit 1` 可先做一个真实批次的检查。结果与限制见[实验方案](docs/screening-experiment.md#5-历史回测)。
 
 ### 顾问闭环（批次 A）
 
 设计与验收见[顾问闭环方案](docs/investment-advisor.md)。
 
-- **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，限频 1 次/分钟，失败只标 `unavailable`）。区间不是买卖指令。
+- **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，限频 1 次/分钟，失败只标 `unavailable`）。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
 - **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码（Research 不存持仓标签），扫描范围另含最近冻结批次的 L5；`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回事件、失败与 `notify`，`GET /api/scans/weekly` 返回周报数据。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
 - **区间条件收益诊断**（只读，不调模型）：
@@ -219,7 +184,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 ## 部署
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。旧镜像写下的完整提示可用 `docker exec a-share-research-worker python -m a_share_research.db compact-calls --vacuum` 压缩：逐任务事务、提交前核对还原、可重复执行；改写生产数据，需当次授权。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。迁移只做加法，须另获授权并备份；回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
@@ -248,7 +213,7 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次与研究进展）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)）；失败恢复原应用镜像，保留数据、证据和全部备份，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和非加法迁移需要单独安排回退，不使用此工具；只做加法、旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。
+工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次与扫描）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)）；失败恢复原应用镜像，保留数据、证据和全部备份，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和非加法迁移需要单独安排回退，不使用此工具；只做加法、旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。
 
 业务表指纹只在两服务停止的窗口内比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `pi_infer.mjs` 的 `reasoning` 分别记录，模型未变时不追加模型配置检查或研究调用。
 

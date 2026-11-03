@@ -1,15 +1,11 @@
 """Read-only discovery and comparisons on real production/K2 validation records."""
 import json
-from pathlib import Path
 
 import pytest
 from support.templates import ENV
 
 from a_share_research import db, reading
 from support.continuation import load
-
-ROOT = Path(__file__).resolve().parents[1]
-
 
 
 @pytest.fixture
@@ -56,7 +52,7 @@ def test_explicit_parent_and_k2_prior_reuse_deterministic_tables(conn):
         assert result['old']['id'] == parent and 'diff' in result
         html = ENV.get_template('_comparison.html').render(comparison=result)
         assert f'/reports/{parent}' in html and f'/reports/{child}' in html
-        assert '不等于公司整体判断反转' in html and '不推断风险已解决' in html
+        assert '只对照明确关联的报告。' in html
     assert conn.total_changes == before
     assert reading.comparison(conn, report_row(conn, 39))['new_question'].startswith('相对上次研究')
 

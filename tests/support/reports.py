@@ -33,7 +33,6 @@ def report(**changes):
         "valuation": {"not_priced": {"text": "仅有收入与经营现金流，缺少利润基期，暂不足以定价。",
                                       "cites": [{"ref": "T.op_cash"}]},
                       "next_evidence": "补齐归母净利润与股本口径"},
-        "relative": {"call": "跑输", "confidence": 60},
         "risks": [{"text": "经营现金流从924.64亿元降至615.22亿元。", "cites": [{"ref": "T.op_cash"}, CASH]}],
         "business": [{"text": "销售费用增加主要因为广告宣传。", "cites": [SALES]}],
         "financial": [{"text": "销售费用同比增长28.62%，约72.53亿元。", "cites": [SALES_ROW]}],

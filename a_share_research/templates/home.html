@@ -6,7 +6,7 @@
 <ul class="list">
 {% for r in rows %}
   <li><a href="/runs/{{ r.id }}">{{ r.name or r.code }} · {{ r.label }}</a>
-    <p class="small">原报告 <a href="/reports/{{ r.parent_id }}{{ r.anchor }}">{{ r.parent_id }} 对应内容</a> · 已提交的核查请求，不表示原判断已被推翻。</p>
+    <p class="small">原报告 <a href="/reports/{{ r.parent_id }}{{ r.anchor }}">{{ r.parent_id }} 对应内容</a></p>
     <details><summary>核查问题</summary><p>{{ r.question }}</p></details>
   </li>
 {% endfor %}
@@ -67,13 +67,12 @@
     {% if pending|length > 3 %}<details><summary>展开本页其余 {{ pending|length - 3 }} 项核查</summary>{{ review_items(pending[3:]) }}</details>{% endif %}
     {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
   {% else %}<p>没有符合上述范围的待核查记录。</p>{% endif %}
-  <details><summary>提醒范围</summary><p>仅列原报告存在且就绪、尚未通过复核的已提交核查；完成不等于已读，也不表示投资判断正确。</p><p>尚未接入持续的新公告监测，检查点也未记录可自动判定的到期日期。当前不能确认这两类事项，不代表没有新证据或风险。关联记录缺失的核查无法纳入本清单，可从公司档案核对历史任务。</p></details>
 </section>
 
 <section aria-labelledby="companies">
   <h2 id="companies" tabindex="-1">主动研究过的公司 · {{ companies|length }} 家</h2>
   <p class="small"><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
-  {% if companies %}<p class="hint">按最新一份报告的判断分组，组内最近研究的在前；未通过复核的不展示判断。卡上数字均为研究时保存的值：营收与扣非为最新报告期累计同比，市盈率、股息率为 TTM、按研究当日收盘，不是实时行情。检查点尚不能自动判定是否到期。</p>{% endif %}
+  {% if companies %}<p class="hint">按最新报告判断分组，组内最近研究的在前；卡上数字为研究时保存的累计同比与收盘 TTM 估值。</p>{% endif %}
   {% if companies %}
   {% if verdict_summary is defined and verdict_summary %}
   <nav class="filter-pills" aria-label="按最新研究判断查看">
@@ -108,7 +107,7 @@
   <p><a href="/batches/{{ batch.id }}">{{ b.month(batch) }}</a> <span class="muted">· {{ b.batch_status[batch.status] }}</span></p>
   {% if performance %}
   <figure class="figure" data-chart>
-    <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite"><span class="date">{{ b.day(performance.entry) }}</span> 开盘入场至 <span class="date">{{ b.day(performance.date) }}</span> 收盘，扣往返费用；单个批次只是一次观察</span></figcaption>
+    <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite"><span class="date">{{ b.day(performance.entry) }}</span> 开盘入场至 <span class="date">{{ b.day(performance.date) }}</span> 收盘，扣往返费用</span></figcaption>
     {{ bars(performance.groups, "本批次各组合累计模拟收益", emphasis=true) }}
     {{ data_list(performance.groups) }}
   </figure>
