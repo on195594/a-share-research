@@ -14,9 +14,14 @@ AUTO_RESUME_ERROR = "服务重启后自动恢复"
 def recover(conn) -> None:
     """Requeue an interrupted worker run once; CLI runs belong to their own process."""
     with db.transaction(conn):
-        rows = conn.execute("SELECT id, error FROM runs WHERE status='running' AND request_id IS NOT NULL").fetchall()
+        rows = conn.execute("SELECT id, error, EXISTS(SELECT 1 FROM batches b WHERE b.request_id LIKE 'monthly:%' "
+                            "AND runs.request_id = 'batch-' || b.id || '-' || runs.code) AS monthly "
+                            "FROM runs WHERE status='running' AND request_id IS NOT NULL").fetchall()
         for row in rows:
-            if row["error"] == AUTO_RESUME_ERROR:
+            if row["monthly"]:
+                db.update_run(conn, row["id"], status="failed", step=None, finished_at=db.now(),
+                              error="自动月批研究中断，不自动重跑；请检查已记录调用")
+            elif row["error"] == AUTO_RESUME_ERROR:
                 db.update_run(conn, row["id"], status="failed", step=None, finished_at=db.now(),
                               error="研究中断（已自动恢复仍未完成，请重新开始）")
             else:

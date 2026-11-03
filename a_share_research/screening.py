@@ -667,9 +667,11 @@ def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "s
 
 
 def recover(conn) -> None:
-    """After a restart: an interrupted screen fails; an interrupted comparison is simply retried."""
+    """Interrupted automatic monthly work never restarts paid comparison; manual behavior is unchanged."""
     conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = '初筛中断（服务重启），请重新开始',"
                  " updated_at = ? WHERE status = 'screening'", (db.now(),))
+    conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = '自动月批比较中断，不自动重跑',"
+                 " updated_at = ? WHERE status = 'selecting' AND request_id LIKE 'monthly:%'", (db.now(),))
     conn.execute("UPDATE batches SET status = 'researching', step = NULL WHERE status = 'selecting'")
 
 
@@ -780,7 +782,7 @@ def tick(conn) -> bool:
                 except Exception as exc:  # the researched candidates stay; retry the comparison later
                     log.exception("batch %s comparison failed", batch["id"])
                     failures = ((batch["selection"] or {}).get("failures") or 0) + 1
-                    if failures >= 3:
+                    if str(batch.get("request_id") or "").startswith("monthly:") or failures >= 3:
                         raise ScreenError(f"跨公司比较连续 {failures} 次失败：{exc}") from exc
                     saved_selection = (selection or {}) if small else {}
                     updated = conn.execute("UPDATE batches SET status = 'researching', error = ?, selection = ?,"

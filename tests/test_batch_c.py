@@ -323,3 +323,21 @@ def test_csi1000_mapping_and_shared_total_return_entry_derivation():
         price = MARKET['index_daily'][screening.PRICE_INDEX[code]][0]
         assert screening.benchmark_entry_point(total['pre_close'], price['open'], price['pre_close']) == (
             total['pre_close'] * price['open'] / price['pre_close'])
+
+
+def test_automatic_monthly_comparison_failure_never_requeues_paid_work(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / 'automatic.db')
+    completed_pools(conn, large_passed=True, small_passed=False, small_draft=False)
+    db.update_batch(conn, 1, request_id='monthly:2026-12')
+    calls = []
+
+    def failed_comparison(*args):
+        # Transport-failure injection only; never call a model or invent a successful output.
+        calls.append(1)
+        raise screening.ScreenError('offline comparison transport failure')
+
+    monkeypatch.setattr(screening, 'select', failed_comparison)
+    assert screening.tick(conn)
+    assert conn.execute('SELECT status FROM batches').fetchone()[0] == 'failed'
+    assert not screening.tick(conn) and len(calls) == 1
+    conn.close()

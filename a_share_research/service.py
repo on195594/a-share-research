@@ -313,14 +313,15 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
                                        report_available=row["report_id"] is not None)}
 
 
-def create_batch(conn, request_id: str) -> int:
+def create_batch(conn, request_id: str, *, created_at: str | None = None) -> int:
     """Queue a batch; one live batch per calendar month (failed ones do not count)."""
-    month = datetime.now(db.SHANGHAI).strftime("%Y-%m")
+    created_at = created_at or db.now()
+    month = datetime.fromisoformat(created_at).astimezone(db.SHANGHAI).strftime("%Y-%m")
     row = conn.execute(
         "INSERT INTO batches (request_id, status, created_at, rule) SELECT ?, 'queued', ?, ?"
-        " WHERE NOT EXISTS (SELECT 1 FROM batches WHERE substr(created_at, 1, 7) = ? AND status != 'failed')"
+        " WHERE NOT EXISTS (SELECT 1 FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? AND status != 'failed')"
         " ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, db.now(), json.dumps(batches.NEW_RULE, ensure_ascii=False), month),
+        (request_id, created_at, json.dumps(batches.NEW_RULE, ensure_ascii=False), month),
     ).fetchone()
     if row:
         return row["id"]
@@ -328,6 +329,33 @@ def create_batch(conn, request_id: str) -> int:
     if existing:
         return existing["id"]
     raise RequestError("本月已有批次；每月一个独立批次", 409)
+
+
+def monthly_batch(conn, month: str, *, submit: bool = False) -> dict:
+    """Automatic admission only: any existing month's batch, including failure, is final."""
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise RequestError("月份须为 YYYY-MM", 422)
+    # Serialize with other writers, including the existing manual INSERT. No check/insert race.
+    with db.transaction(conn):
+        stamp = db.now()  # Decide the month after acquiring the write lock, including midnight waits.
+        if submit and month != datetime.fromisoformat(stamp).astimezone(db.SHANGHAI).strftime("%Y-%m"):
+            raise RequestError("自动发起仅限当前上海自然月，不补跑历史月份", 409)
+        row = conn.execute("SELECT * FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? "
+                           "ORDER BY id LIMIT 1", (month,)).fetchone()
+        created = row is None and submit
+        if created:
+            ident = create_batch(conn, f"monthly:{month}", created_at=stamp)
+            row = conn.execute("SELECT * FROM batches WHERE id = ?", (ident,)).fetchone()
+    if row is None:
+        return {"version": VERSION, "month": month, "batch": None, "created": False}
+    batch = batches.load(row)
+    summary = {key: batch.get(key) for key in
+               ("id", "status", "error", "created_at", "frozen_at", "as_of", "l5", "sl3")}
+    summary["failed_research"] = [dict(r) for r in conn.execute(
+        "SELECT code, error FROM runs WHERE status='failed' AND request_id = 'batch-' || ? || '-' || code",
+        (batch["id"],))]
+    summary["ranking_error"] = ((batch.get("selection") or {}).get("ranking") or {}).get("error")
+    return {"version": VERSION, "month": month, "created": created, "batch": summary}
 
 
 def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "owner", *,

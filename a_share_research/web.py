@@ -528,6 +528,25 @@ def api_reports(request: Request, code: str):
     return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
 
 
+class MonthlyBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    month: str
+
+
+@app.post('/api/batches/monthly')
+def api_monthly_batch(request: Request, body: MonthlyBatchRequest):
+    api_session(request)
+    with batch_writes:
+        return service.monthly_batch(conn, body.month, submit=True)
+
+
+@app.get('/api/batches/monthly/{month}')
+def api_monthly_status(request: Request, month: str):
+    api_session(request)
+    with batch_writes:
+        return service.monthly_batch(conn, month)
+
+
 @app.get("/api/companies/{code}/card")
 def api_company_card(request: Request, code: str):
     api_session(request)
