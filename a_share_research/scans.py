@@ -96,7 +96,7 @@ def notification_reasons(before: dict | None, after: dict | None, events: list[d
             and previous_value['as_of'] <= current_value['as_of']
             and current_value.get('close') is not None
             and all(previous_value.get(k) is not None for k in ('support_below', 'stretched_above'))):
-        price_only = valuation._zone(current_value['close'], previous_value['support_below'],
+        price_only = valuation.price_zone(current_value['close'], previous_value['support_below'],
                                      previous_value['stretched_above'])
         if price_only == old:
             new = old  # Suppress only the time-driven notice; keep the displayed rolling zone.

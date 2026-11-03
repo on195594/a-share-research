@@ -110,7 +110,7 @@ def compute(valuation, table, market_date, *, r=Decimal("0.10"), r_low=Decimal("
         return _json_numbers(_compute(valuation, table, market_date, r, r_low, pe_reference, consensus))
 
 
-def _zone(close, support, stretched):
+def price_zone(close, support, stretched):
     return (None if support >= stretched else "测算支持区" if close <= support else
             "测算透支区" if close >= stretched else "中性区")
 
@@ -157,7 +157,7 @@ def at(calc: dict, close, day: str) -> dict:
             return _json_numbers({
                 'annual_returns': {name: (total / current_cap) ** (1 / horizon) - 1 for name, total in totals.items()},
                 'support_below': support, 'stretched_above': stretched, 'inverted': support >= stretched,
-                'zone': _zone(p, support, stretched), 'horizon': horizon, 'as_of': day, 'close': p,
+                'zone': price_zone(p, support, stretched), 'horizon': horizon, 'as_of': day, 'close': p,
                 'assumption': '按冻结累计分红尚未支付测算，未核对实际剩余现金流；不代表已核实的换仓回报差。',
             })
     except KeyError as exc:
@@ -233,7 +233,7 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
             "basis": value["basis"], "base_year": base_year, "base_profit": base, "years": target_years,
             "exit_date": exit_date.isoformat(), "horizon": horizon, "scenarios": scenarios,
             "zones": {"support_below": support, "stretched_above": stretched, "inverted": inverted},
-            "zone": _zone(close, support, stretched),
+            "zone": price_zone(close, support, stretched),
             "implied": {"profit": implied, "cagr": cagr},
             "sensitivity": {"profit_factors": factors, "exit_pe": multiples,
                             "returns": [[annual(p3 * factor * multiple + dividends) for multiple in multiples] for factor in factors]},
