@@ -147,6 +147,11 @@ def at(calc: dict, close, day: str) -> dict:
             horizon = Decimal((date.fromisoformat(calc['exit_date']) - date.fromisoformat(day)).days) / Decimal('365.25')
             if horizon <= 0:
                 raise ValueError(f"收盘日须早于退出日 {calc['exit_date']}")
+            # A cumulative forecast has no payment dates: after its valuation date we
+            # cannot distinguish remaining cash flows from dividends already received.
+            if date.fromisoformat(day) > date.fromisoformat(calc['as_of']) and any(
+                    number(calc['scenarios'][name]['dividends'], f'{name}.dividends') != 0 for name in SCENARIOS):
+                raise ValueError('分红待核对：冻结测算未保存支付时点及已付金额，暂停跨日区间与回报提示')
             totals = {name: sum(number(calc['scenarios'][name][key], f'{name}.{key}')
                                 for key in ('exit_cap', 'dividends')) for name in SCENARIOS}
             if min(totals.values()) < 0:

@@ -200,6 +200,8 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
     current['valuation'] = (valuation.at(calc, current['last_close'], current['last_close_date'])
                             if current['last_close'] is not None else None)
     current['current_zone'] = current['valuation']['zone'] if current['valuation'] is not None else None
+    if current['valuation'] and current['valuation'].get('reason'):
+        current['note'] = current['valuation']['reason']
     if pending:
         current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'
     return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],

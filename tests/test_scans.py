@@ -403,8 +403,8 @@ def test_zone_notification_uses_rolled_close_date():
     calc = STORED[2]['valuation_calc']
     before = {'current': {'current_zone': scans.current_zone(calc, calc['close'], calc['as_of'])}, 'status': '有效'}
     after = {'current': {'current_zone': scans.current_zone(calc, calc['close'], '2027-10-30')}, 'status': '有效'}
-    reason, = scans.notification_reasons(before, after, [], [])
-    assert (reason['from_zone'], reason['to_zone']) == ('测算透支区', '中性区')
+    assert after['current']['current_zone'] is None
+    assert scans.notification_reasons(before, after, [], []) == []
     assert scans.current_zone(calc, calc['close'], '2029-05-01') is None
 
 

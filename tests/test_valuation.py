@@ -35,13 +35,20 @@ def test_at_reproduces_real_stored_compute_exactly(record):
 
 
 def test_at_rolls_lines_and_returns_without_changing_terminal_totals():
-    calc = STORED[2]['valuation_calc']  # Captured 600900 report, initially stretched.
+    calc = deepcopy(STORED[2]['valuation_calc'])  # Captured 600900 report.
+    original = deepcopy(calc)
+    blocked = valuation.at(calc, calc['close'], '2027-10-30')
+    assert blocked['annual_returns'] is None and blocked['zone'] is None
+    assert '分红待核对' in blocked['reason'] and calc == original
+    # Zero-payout boundary mutation: the existing date/price arithmetic still works.
+    for scenario in calc['scenarios'].values():
+        scenario['dividends'] = 0
+    initial = valuation.at(calc, calc['close'], calc['as_of'])
     rolled = valuation.at(calc, calc['close'], '2027-10-30')
-    assert rolled['support_below'] > calc['zones']['support_below']
-    assert rolled['stretched_above'] > calc['zones']['stretched_above']
-    assert calc['zone'] == '测算透支区' and rolled['zone'] == '中性区'
-    assert rolled['horizon'] < calc['horizon']
-    assert rolled['annual_returns']['中性'] > calc['scenarios']['中性']['annual_return']
+    assert rolled['support_below'] > initial['support_below']
+    assert rolled['stretched_above'] > initial['stretched_above']
+    assert rolled['horizon'] < initial['horizon']
+    assert rolled['annual_returns']['中性'] < initial['annual_returns']['中性']
     # Price mutation isolates cap scaling from the date roll; zone lines do not move with price.
     lower = valuation.at(calc, calc['close'] / 2, '2027-10-30')
     assert lower['support_below'] == rolled['support_below']
