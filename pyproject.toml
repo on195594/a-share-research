@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Post-close A-share single-company research assistant"
 requires-python = ">=3.13"
 dependencies = [
-    "a-stock-lib[tushare] @ https://github.com/on195594/a-stock-lib/releases/download/v0.8.2/a_stock_lib-0.8.2-py3-none-any.whl#sha256=cae49d9d7e71605a5543c1db93a18fd4f305e910a3d5060fde9028ff2d5a324c",
+    "a-stock-lib[tushare] @ https://github.com/on195594/a-stock-lib/releases/download/v0.9.0/a_stock_lib-0.9.0-py3-none-any.whl#sha256=4c470038479856767cd686b0c71abe160b8cc5b39dec65fc9d8d2e68ccaf74a9",
     "fastapi>=0.156.4",
     "jinja2>=3.1.6",
     "python-multipart>=0.0.32",
