@@ -696,6 +696,9 @@ def tick(conn) -> bool:
         batch = load(r)
         try:
             if batch["status"] == "queued":
+                request_id = str(batch.get("request_id") or "")
+                if request_id.startswith("monthly:") and request_id != f"monthly:{now:%Y-%m}":
+                    raise ScreenError("自动月批已错过发起月份，不使用后来数据补跑")
                 started = conn.execute("UPDATE batches SET status = 'screening', step = 'screen', updated_at = ?"
                                        " WHERE id = ? AND status = 'queued' RETURNING id",
                                        (db.now(), batch["id"])).fetchone()

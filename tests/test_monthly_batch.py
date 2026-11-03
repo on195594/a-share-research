@@ -91,3 +91,16 @@ def test_future_dry_run_needs_no_credentials_or_request():
                             capture_output=True, text=True)
     assert result.returncode == 0 and not result.stdout
     assert 'dry-run' in result.stderr
+
+
+def test_queued_monthly_batch_cannot_start_in_a_later_month(tmp_path):
+    from a_share_research import screening
+
+    conn = db.connect(tmp_path / 'late.db')
+    ident = service.create_batch(conn, 'monthly:2020-01')
+    assert screening.tick(conn)
+    row = conn.execute('SELECT status,error FROM batches WHERE id=?', (ident,)).fetchone()
+    assert row['status'] == 'failed' and '不使用后来数据补跑' in row['error']
+    assert not screening.tick(conn)
+    assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 0
+    conn.close()
