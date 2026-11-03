@@ -28,26 +28,24 @@
 - **公司研究进展分类边界**（`1a6ab92`、`54676a4`，随 `b36b15d`）：新披露须逐引用满足新发布条件，生成与独立复核共用来源分类；旧资料补读、同 URL 换哈希、更正稿换 URL 均拒绝。万华原失败候选不可访问，语义修复未经真实重放。
 - **性能整改与校验误伤**（10-31 晚，`b36b15d`、`74f187e`、`e4f30e4`）：发布空闲检查纳入研究进展；撤下首页卡片 LRU、PDF 并发与研究取数的 TuShare 包装（初筛/回测保留缓存，Node 长驻推理保留）；机械校验不再把页码、产品代号当数字，阈值后置写法同样豁免，PDF 跨行金额按引文两段拼回。依据 `plan-review-perf-20261031/`（Codex 审查）、`repair-trigger-diagnosis-20261031/`。
 
-**滚动估值维护（候选分支，未部署）**：`45b7a9e`的跨日全null方案已在后续提交撤销，不作为上线方案。参考测算与H3保留，明确累计分红尚未核对假设；仅同报告区间迁移通知排除纯时间缩短引起的变化，按之前已保存的边界核对价格，保留价格跨界及新报告变化。未改历史报告、账户数据或冻结批次，未补跑模型。真实分红现金流、Skills换仓比较及送达仍未验证；本批不宣称解决净3个百分点比较。
-
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `598183c`** 于 2026-11-02 23:45（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。含两项：`ef07ecf`（23:24 已发布）删除 Node 长驻推理守护，只保留单次 Pi 调用（11-01 起 299/299 次走守护、零回退；单次冷启动约 1.2 秒，约占每份研究 5%），调用身份不再记录 `request_parameters.transport`；`598183c` 让 `T.interest_debt` 按已有项求和、空白项按无余额计（原四项全齐才出数，10-30 后 25 家中 16 家整行为空），四项全空的期间仍缺失；旧报告不回填。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `c2d212f`** 于 2026-11-03 08:22（北京时间）例行发布 web、worker，无迁移、配置、凭据或依赖变更（`user_version=8`）。含滚动估值维护两项：`cf05eab` 让区间迁移通知排除纯时间缩短引起的变化（同一报告用上次扫描已保存的区间线核对本次价格，价格跨界与新报告变化照常提醒，展示仍按日滚动），滚动结果带 `assumption` 说明累计分红按尚未支付测算；其前一提交 `45b7a9e`（跨日含分红一律置空）已被它撤销，未上线。`c2d212f` 修正 `cf05eab` 把这句说明写进每张卡 `current.note` 的问题——`note` 仍只表示区间暂停解读（原有测试因此失败），并把 `valuation._zone` 改为公开的 `price_zone`。真实分红现金流、Skills 换仓净 3 个百分点比较与提醒送达仍未验证。
 
 | 运行镜像 | SHA256 |
 |---|---|
-| `a-share-research-web:598183c` | `c862f65685036fbb5fcc46a4bebae542431775d394130180909c3f97e79bee1b` |
-| `a-share-research-worker:598183c` | `64fcdb763d9e9b5925a9709606c4f570e9ff5e31d426cbf6f6cdb8ec0953d57f` |
+| `a-share-research-web:c2d212f` | `93e345959573441da95e87a7f9c2e7d5d03abde4d0691a6feb2880bf81a05599` |
+| `a-share-research-worker:c2d212f` | `548a63463a7ab0595290d5912f736d3faa2270395941df3c8c96155309a44028` |
 
-**验证**：两项各跑离线全集（881 通过、11 环境跳过）。`ef07ecf` 另跑 `test_model_complete.py` 真实付费调用（工具调用、普通补全、超时）；`598183c` 用 TuShare 实取阳光电源/格力/603606 核对债务行（阳光电源三季末 74.81 亿与三项手算一致），恢复旧规则时 2 项测试失败。两项均为小改动未派审查；无页面模板改动未做浏览器验收。证据 `deploy-ef07ecf-20261102-232354/`、`deploy-598183c-20261102-234534/`，备份 `~/a-share-research-data/backup-pre-598183c-20261102-234535.db`。
+**验证**：离线全集 881 通过、11 环境跳过。生产库只读回放：当前 7 张有效卡均不带 `note`、带 `assumption`；同日价格跨越区间线 7/7 仍产生通知；按原价推到 2026-11-10、2027-03-31、2027-09-30 均无纯时间引起的区间切换。上线后 worker 内 `company_card('600900')` 复核同上。生产只有 1 次扫描，尚无前后两次扫描的真实通知对照，首个工作日扫描后观察。无模板改动未做浏览器验收。证据 `deploy-c2d212f-20261103-082233/`，备份 `~/a-share-research-data/backup-pre-c2d212f-20261103-082236.db`。
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：`a-share-research-web:rollback-598183c`、`a-share-research-worker:rollback-598183c` 即 `ef07ecf`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：`a-share-research-web:rollback-c2d212f`、`a-share-research-worker:rollback-c2d212f` 即 `598183c`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
-**更早发布**：`cd6c388` 的完整记录见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
+**更早发布**：`598183c`（含 `ef07ecf`）的完整记录见 `git show b17a067:docs/implementation-plan.md`；`cd6c388` 见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
 ## 尚待完成与未采用项
 
