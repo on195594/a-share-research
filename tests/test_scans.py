@@ -399,12 +399,27 @@ def test_notify_rules_cooldown_holidays_and_major_risk_exemption(conn):
     assert scans.notification_reasons(before, before, [], []) == []
 
 
-def test_zone_notification_uses_rolled_close_date():
-    calc = STORED[2]['valuation_calc']
-    before = {'current': {'current_zone': scans.current_zone(calc, calc['close'], calc['as_of'])}, 'status': '有效'}
-    after = {'current': {'current_zone': scans.current_zone(calc, calc['close'], '2027-10-30')}, 'status': '有效'}
-    assert after['current']['current_zone'] is None
-    assert scans.notification_reasons(before, after, [], []) == []
+def test_zone_notification_uses_price_change_at_previous_valuation_date():
+    calc = STORED[2]['valuation_calc']  # Captured 600900 assumptions; dates/prices are boundary mutations.
+
+    def card(close, day, report_id=1):
+        value = valuation.at(calc, close, day)
+        return {'report_id': report_id, 'status': '有效',
+                'current': {'current_zone': value['zone'], 'valuation': value}}
+
+    before = card(calc['close'], calc['as_of'])
+    later = card(calc['close'], '2027-10-30')
+    assert before['current']['current_zone'] == '测算透支区'
+    assert later['current']['current_zone'] == '中性区'  # Display still rolls.
+    assert scans.notification_reasons(before, later, [], []) == []
+    cheaper = card(calc['close'] / 2, '2027-10-30')
+    reason, = scans.notification_reasons(before, cheaper, [], [])
+    assert (reason['from_zone'], reason['to_zone']) == ('测算透支区', '测算支持区')
+    # Different reports must not be filtered by the prior report's boundary.
+    reason, = scans.notification_reasons(before, later | {'report_id': 2}, [], [])
+    assert reason['to_zone'] == '中性区'
+    # A same-day price move remains a valid notice; no future observations needed.
+    assert scans.notification_reasons(before, card(calc['close'] / 2, calc['as_of']), [], [])
     assert scans.current_zone(calc, calc['close'], '2029-05-01') is None
 
 

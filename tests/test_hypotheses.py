@@ -33,8 +33,10 @@ def test_direction_uses_two_real_600900_calcs_at_one_real_close():
     # Old calc is the 11-01 evaluation capture, not asserted to be the live prior card.
     day, close = '2026-11-02', NEW['close']
     result = hypotheses.direction(OLD, NEW, close, day)
-    assert '分红待核对' in result['reason']
-    assert '分红待核对' in hypotheses.direction(NEW, OLD, close, day)['reason']
+    expected = valuation.at(NEW, close, day)['annual_returns']['中性'] - valuation.at(OLD, close, day)['annual_returns']['中性']
+    assert result['delta'] == pytest.approx(expected)
+    assert result['direction'] == '下调'
+    assert hypotheses.direction(NEW, OLD, close, day)['direction'] == '上调'
     assert hypotheses.direction(NEW, NEW, close, day)['direction'] == '不变'
 
 
@@ -157,8 +159,8 @@ def test_h3_real_unpriced_prior_is_excluded_before_waiting_for_market(conn):
 
 def test_h3_pending_and_latency_boundary_with_real_fixed_price(conn):
     sample = hypotheses.load_samples(conn)[0]
-    # Date-metadata mutation isolates scoring latency; dividend timing is tested above.
-    sample |= {'prior_calc': OLD | {'as_of': NEW['as_of']}, 'completed': '2026-11-02T09:00:00+08:00', 'announced': '2026-10-23'}
+    # Replay eligibility at the captured close's session; no price or calc alteration.
+    sample |= {'prior_calc': OLD, 'completed': '2026-11-02T09:00:00+08:00', 'announced': '2026-10-23'}
     days, bench, _ = market(CAPTURE['batch'])
     raw = {days[0]: NEW['close']}
     row = hypotheses.score_sample(sample, days, bench, raw, {})

@@ -86,6 +86,20 @@ def notification_reasons(before: dict | None, after: dict | None, events: list[d
                             'detail': '接续研究的参考区间或结论变化', 'change': completion['change']})
     old = ((before or {}).get('current') or {}).get('current_zone')
     new = ((after or {}).get('current') or {}).get('current_zone')
+    # Same report: require the price move to cross the already-known boundary too.
+    # Reuse the previous scan's valuation date, never a future date or a new report.
+    previous_value = ((before or {}).get('current') or {}).get('valuation') or {}
+    current_value = ((after or {}).get('current') or {}).get('valuation') or {}
+    if (before and after and before.get('report_id') is not None
+            and before['report_id'] == after.get('report_id')
+            and previous_value.get('as_of') and current_value.get('as_of')
+            and previous_value['as_of'] <= current_value['as_of']
+            and current_value.get('close') is not None
+            and all(previous_value.get(k) is not None for k in ('support_below', 'stretched_above'))):
+        price_only = valuation._zone(current_value['close'], previous_value['support_below'],
+                                     previous_value['stretched_above'])
+        if price_only == old:
+            new = old  # Suppress only the time-driven notice; keep the displayed rolling zone.
     last_extreme_zone = last_extreme_zone or (old if old in EXTREMES else None)
     if old is not None and new is not None and old != new and (old in EXTREMES or new in EXTREMES):
         reasons.append({'kind': 'current_zone', 'reason': 'current_zone_changed',
