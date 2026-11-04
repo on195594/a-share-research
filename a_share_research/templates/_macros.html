@@ -33,7 +33,8 @@
   {% for c in item.cites %}
     {% if c.ref %}
       {% set r = rows.get(c.ref) %}
-      {% if r %}<li><span class="tag">{{ "程序计算" if r.calculation else "财务表" }}</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}{% if not c.period or c.period == p %}<span class="num">{{ '结果' if p == 'result' else p }} {{ v }}</span> {% endif %}{% endfor %}
+      {% if r %}<li><span class="tag">{{ "程序计算" if r.calculation else ("外部数据" if r.source and r.source.api else "财务表") }}</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}{% if not c.period or c.period == p %}<span class="num">{{ '结果' if p == 'result' else p }} {{ v }}</span> {% endif %}{% endfor %}
+        {% if r.source and r.source.api %}<p class="muted small">来源：{{ r.source.provider }} {{ r.source.api }} · {{ r.source.field }}；查询 {{ r.source.params }}；取得于 {{ r.source.retrieved_at }}。</p>{% endif %}
         {% if r.calculation %}
         {% set operands = r.calculation.normalized_inputs %}
         {% if not operands and r.calculation.inputs[0].unit == r.calculation.inputs[1].unit %}{% set operands = r.calculation.inputs %}{% endif %}

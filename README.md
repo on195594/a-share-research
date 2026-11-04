@@ -41,7 +41,7 @@ uv run --env-file .env.web.dev uvicorn a_share_research.web:app --port 8610  # �
 
 `.env.web`（本机开发可用 `.env.web.dev`）只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 
-初筛与回测的 TuShare 查询使用 `DATA_DIR/tushare_cache.db`（研究取数不经缓存，始终直连）：仅缓存 `trade_date` 或 `end_date` 早于上海当天日期的历史行情与财报响应；开放时间范围、当天及未来日期的查询和空结果不缓存。设置 `TUSHARE_CACHE=0` 可完全旁路缓存，直接查询 TuShare（不改写已有缓存）。历史披露若发生更正，需刷新对应缓存后再恢复缓存查询。
+初筛与回测的 TuShare 查询使用 `DATA_DIR/tushare_cache.db`（公司研究原有财务取数仍直连；新增外部条件工具使用同一缓存）：仅缓存 `trade_date` 或 `end_date` 早于上海当天日期的历史行情与财报响应；开放时间范围、当天及未来日期的查询和空结果不缓存。设置 `TUSHARE_CACHE=0` 可完全旁路缓存，直接查询 TuShare（不改写已有缓存）。历史披露若发生更正，需刷新对应缓存后再恢复缓存查询。
 
 worker 重启时，带 `request_id` 的中断任务自动重新排队一次，重新获取干净材料并开始探索、成文和复核；再次中断则标记失败。恢复标记保存在 `runs.error`，`runs.request` 保持原样；命令行独立任务不参与自动恢复。
 
@@ -56,6 +56,10 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 本机开发改用开发库及 `.env.web.dev`。Playwright 直接使用 `browser.newContext({storageState: '/tmp/实际目录/state.json'})`；无需动态导入文件模块、打印令牌或手写会话 SQL。验收后通过页面“退出”撤销该会话，再删除本次临时文件。原有令牌输出和 `--agent` 接口仍保留，`--agent` 不与浏览器文件输出混用。
 
 ## 报告阅读
+
+研究员可自主调用 `commodities(exchange)` 查 SHFE/DCE/CZCE/INE/GFEX 品种代码，`commodity(code)` 取主力连续收盘及 20/60/120 个交易日变化，`macro(series, count=12)` 取 `pmi/money/financing/lpr/shibor/cpi/ppi` 最近 1–24 期。原始 `X.*` 与计算 `C.*` 行随报告 table 保存，均可按 `{ref, period}` 引用，API 与网页同源；期货换月未复权，不能当作现货或投资收益。外部条件接口按上海日期缓存当日快照；LPR 上游每小时一次。行业行情、估值分位及新闻接口因账号权限暂不可用。
+
+新报告 `stance.action` 只取 现在分批 / 等价格 / 回避；现在分批可带 `add_trigger: {metric, period, op, value}`，下一期披露阈值只是加仓参考，不阻止首批。`stance_calc` 冻结该字段。历史 等证据/trigger 不迁移，仍可读、显示和由 `validation --stances` 记分。检查点状态与入场至今相对中证800全收益超额同时展示，完整口径见 [V4](docs/judgment-validation.md#v4-研究立场与等待代价2026-11-04)。
 
 研究员可用 `peers` 发现申万行业内的公司，自主选择是否补取同行证据。通过报告的“财务与走势”章节可展开“已存同行快照对照”（有同行记录时显示）：按最近共同期间读取归母净利润、经营现金流和已有比率，显示口径与历史版本限制。浏览时不取数、补算或排名；详细边界见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业发现与快照对照)，部署与验收见[实施计划](docs/implementation-plan.md#当前部署)。
 

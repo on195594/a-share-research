@@ -16,6 +16,13 @@ from a_share_research.reviewing import digest
 log = logging.getLogger(__name__)
 
 TOOLS = [
+    {"name": "macro", "description": "查询最近已公布的宏观序列（缺失不填零）：pmi 制造业PMI，money M1/M2，financing 社融增量，lpr 贷款利率，shibor 拆借利率，cpi/ppi 价格同比环比。count 默认12，最多24期；月度键为YYYY-MM，日度键为YYYY-MM-DD；值与来源注册为可引用 X.* 行，也可交给 calculate。月度数据是当前可得版本，不代表当月已知。",
+     "parameters": {"type": "object", "properties": {"series": {"type": "string", "enum": ["pmi", "money", "financing", "lpr", "shibor", "cpi", "ppi"]},
+                    "count": {"type": "integer", "minimum": 1, "maximum": 24}}, "required": ["series"], "additionalProperties": False}},
+    {"name": "commodities", "description": "查期货可用品种主力连续代码、名称及报价单位；exchange 可用 SHFE（如铝）、DCE（如LPG）、CZCE、INE（如原油）、GFEX（如碳酸锂）。按目录代码调用 commodity，不凭记忆猜代码。",
+     "parameters": {"type": "object", "properties": {"exchange": {"type": "string", "enum": ["SHFE", "DCE", "CZCE", "INE", "GFEX"]}}, "required": [], "additionalProperties": False}},
+    {"name": "commodity", "description": "查询 commodities 目录中的主力连续合约，返回可引用 X.* 价格序列、逐日主力合约映射及经 calculate 计算的近20/60/120个交易日变化 C.*。价格是未复权连续收盘，换月跳空会影响变化率，不是现货价格或投资收益率。",
+     "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"], "additionalProperties": False}},
     {"name": "research_methods", "description": "按问题关键词检索已通过核查的历史纠错方法，可跨公司；用空格分隔关键词。返回最多五条及原报告出处。它们是待重新验证的方法线索，不能作为当前公司事实或投资政策。",
      "parameters": {"type": "object", "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 80}},
                     "required": ["query"], "additionalProperties": False}},
@@ -208,6 +215,20 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
                             "precision": precision}}
 
 
+def price_changes(table, row):
+    """Compute observed-session changes through the same audited calculator as model calls."""
+    days = sorted(row["values"])
+    changes, gaps = {}, []
+    for window in (20, 60, 120):
+        if len(days) <= window:
+            gaps.append(f"历史不足 {window + 1} 个交易日，无法计算 {window} 日变化")
+            continue
+        changes[str(window)] = calculate([*table, *changes.values()], label=f"{row['label']}近{window}个交易日变化",
+                                          operation="change_pct", left={"ref": row["id"], "period": days[-1]},
+                                          right={"ref": row["id"], "period": days[-window - 1]})
+    return {"changes": changes, "gaps": gaps}
+
+
 class ResearchTools:
     def __init__(self, material, conn):
         self.material = material
@@ -248,6 +269,35 @@ class ResearchTools:
         if not isinstance(value, str) or not re.fullmatch(r"\d{6}", value):
             raise ValueError("公司代码必须为六位数字")
         return value
+
+    def _condition_rows(self, rows):
+        existing = {r["id"]: r for r in self.material.table}
+        for row in rows:
+            if row["id"] in existing:
+                old = existing[row["id"]]
+                if any(p in old["values"] and old["values"][p] != v for p, v in row["values"].items()):
+                    raise ValueError("同一外部序列返回了不同版本，未覆盖已引用数值；请记录版本缺口")
+                for field in ("values", "exact_values"):
+                    old[field].update(row[field])
+            else:
+                self.material.table.append(row)
+        return rows
+
+    def macro(self, series: str, count: int = 12):
+        from a_share_research import conditions
+        return self._condition_rows(conditions.macro(series, count))
+
+    def commodities(self, exchange: str = "SHFE"):
+        from a_share_research import conditions
+        return {"source": "TuShare fut_basic", "retrieved_at": db.now(), "items": conditions.commodities(exchange)}
+
+    def commodity(self, code: str):
+        from a_share_research import conditions
+        rows = self._condition_rows(conditions.commodity(code))
+        row = rows[0]
+        result = price_changes(self.material.table, row)
+        self.material.table.extend(result["changes"].values())
+        return {"rows": rows, **result, "basis": "主力连续收盘（换月未复权），不是现货价格或可实现投资收益"}
 
     def peers(self, code: str, level: str = "l3"):
         result = sources.industry_peers(self.code(code), level)
@@ -353,9 +403,10 @@ class ResearchTools:
         return row
 
 
-REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate"}
+REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate", "macro", "commodities", "commodity"}
 
-FETCH_LIMIT = 24  # evidence-gathering tool calls per run; rounds, time and staleness bound the rest
+# The 601600 external-condition smoke needed more than 24 ordinary evidence fetches.
+FETCH_LIMIT = 48  # runaway guard; time, rounds and total calls still bound exploration
 # Model turns shared by explore and repair. 12 stopped a normal repair in production (688578
 # research, report 83, hit round_limit mid-repair), so it is a runaway guard, not a depth quota.
 ROUND_LIMIT = 18
@@ -433,7 +484,7 @@ class Acquisition:
         conflict = None
         try:
             if stage == "repair" and name not in REPAIR_TOOLS:
-                raise ValueError("修正只允许发现/读取披露与核验计算，不刷新行情或整套财务数据")
+                raise ValueError("修正可发现/读取披露、查询外部条件与核验计算，不刷新整套公司财务数据")
             if call.get("argumentsError"):
                 raise ValueError(call["argumentsError"])
             if failure_key in self.failures:

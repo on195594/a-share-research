@@ -270,3 +270,46 @@ def test_stance_summary_groups_outcomes_with_latest_excess():
     assert summary["等价格·missed"] == {"n": 2, "scored": 2, "mean_excess": pytest.approx(0.03)}
     assert summary["等价格·hit"] == {"n": 1, "scored": 0, "mean_excess": None}
     assert summary["现在分批"]["mean_excess"] == pytest.approx(0.01)
+
+
+def test_frozen_add_checkpoint_and_legacy_wait_share_disclosure_scoring():
+    table = {r['id']: r for r in DATA['forecast_table']}
+    trigger = {'metric': 'T.revenue', 'period': '2026-09-30', 'op': '>=', 'value': 100}
+    today = datetime(2026, 11, 4).date()
+    for action, field in [('现在分批', 'add_trigger'), ('等证据', 'trigger')]:
+        row = {'stance': action, 'stance_calc': {field: trigger}, 'trigger': trigger | {'value': 101.01}}
+        assert validation.checkpoint_outcome(row, table, today) == {'status': 'met', 'actual': '101.00'}
+        row['stance_calc'][field] = trigger | {'value': 101.01}
+        assert validation.checkpoint_outcome(row, table, today)['status'] == 'not_met'
+        row['stance_calc'][field] = trigger | {'period': '2026-12-31'}
+        assert validation.checkpoint_outcome(row, table, today)['status'] == 'pending'
+    assert validation.checkpoint_outcome({'stance': '现在分批'}, table, today) == {}
+
+
+def test_load_legacy_wait_and_new_frozen_add_without_migration():
+    from a_share_research import db
+    captured = json.loads(Path(__file__).with_name('data').joinpath('legacy-stance-20261104.json').read_text())
+    with db.connect() as conn:
+        run = db.create_run(conn, captured['code'], status='done')
+        db.save_report(conn, run, captured['code'], captured['name'], captured['body']['document']['period'],
+                       True, captured['verdict'], captured['body'])
+        loaded = validation.load_reports(str(db.DATA / 'app.db'))
+        assert loaded[0]['stance'] == '等证据'
+        assert loaded[0]['trigger'] == captured['body']['stance_calc']['trigger']
+        assert loaded[0]['add_trigger'] is None
+        body = captured['body']
+        # Contract migration of the same captured threshold, not a new financial observation.
+        body['stance'] = {k: v for k, v in body['stance'].items() if k != 'trigger'} | {
+            'action': '现在分批', 'add_trigger': loaded[0]['trigger']}
+        body['stance_calc'] = {'action': '现在分批', 'add_trigger': loaded[0]['trigger']}
+        conn.execute('UPDATE reports SET body=? WHERE run_id=?', (json.dumps(body), run))
+        loaded = validation.load_reports(str(db.DATA / 'app.db'))
+        assert loaded[0]['stance'] == '现在分批' and loaded[0]['add_trigger'] == body['stance_calc']['add_trigger']
+
+
+def test_future_checkpoint_is_pending_without_fetching_financials():
+    captured = json.loads(Path(__file__).with_name('data').joinpath('legacy-stance-20261104.json').read_text())
+    for action, field in [('等证据', 'trigger'), ('现在分批', 'add_trigger')]:
+        row = {'stance': action, 'stance_calc': {field: captured['body']['stance']['trigger']},
+               'trigger': captured['body']['stance']['trigger'], 'returns': {}, 'code': captured['code']}
+        assert validation.score_stances(None, [row], datetime(2026, 11, 4).date())[0]['stance_outcome'] == {'status': 'pending'}

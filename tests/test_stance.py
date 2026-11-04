@@ -24,13 +24,18 @@ EVIDENCE = {'action': '等证据', 'text': '上半年经营现金流转负，先
             'trigger': {'metric': 'T.op_cash', 'period': '2026-09-30', 'op': '>=', 'value': 0}}
 
 
+ADD = {k: deepcopy(v) for k, v in EVIDENCE.items() if k != 'trigger'}
+ADD.update(action='现在分批', add_trigger=deepcopy(EVIDENCE['trigger']))
+
+
 def stance_problems(value, table=None, valuation_value=None):
     return stance.problems(value, table or BODY['table'], valuation_value or assumptions(), BODY['market_date'])
 
 
 def test_fixture_stance_passes_and_schema_names_next_period():
     assert not [p for p in checking.check(report(), MATERIAL) if p['where'] == 'stance']
-    assert stance_problems(EVIDENCE) == []
+    assert stance_problems(ADD) == []
+    assert any('stance.action' in p for p in stance_problems(EVIDENCE))
     schema = prompts.output_schema(material())
     assert '"stance"' in schema and '"period": "2026-09-30"' in schema and 'probability' in schema
 
@@ -54,7 +59,8 @@ def test_missing_stance_required_except_feedback():
     ({'trigger': {'metric': 'T.op_cash', 'period': '2026-09-30', 'op': '>=', 'value': True}}, '有限数字'),
 ])
 def test_evidence_trigger_contract(change, needle):
-    assert any(needle in p for p in stance_problems(EVIDENCE | change))
+    change = {('add_trigger' if k == 'trigger' else k): v for k, v in change.items()}
+    assert any(needle in p for p in stance_problems(ADD | change))
 
 
 def test_wait_price_is_program_owned_and_must_be_coherent():
@@ -90,6 +96,9 @@ def test_stance_calc_freezes_scoring_inputs():
     assert frozen == {'action': '等价格', 'price': calc['v2']['support_below'], 'valid_until': '2027-04-26'}
     assert research.stance_calc({'action': '等价格'}, calc, '2026-08-31')['valid_until'] == '2027-02-28'
     assert research.stance_calc(EVIDENCE, calc, '2026-10-26') == {'action': '等证据', 'trigger': EVIDENCE['trigger']}
+    frozen_add = research.stance_calc(ADD, calc, '2026-10-26')
+    assert frozen_add == {'action': '现在分批', 'add_trigger': ADD['add_trigger']}
+    assert frozen_add['add_trigger'] is not ADD['add_trigger']
     assert research.stance_calc({'action': '现在分批'}, calc, '2026-10-26') == {'action': '现在分批'}
 
 
@@ -106,3 +115,9 @@ def test_patch_publish_review_target_and_describe():
     assert reviewing.target_exists('stance', merged)
     assert stance.describe(EVIDENCE, BODY['table']).startswith('等证据：2026-09-30 ')
     assert '≥ 0' in stance.describe(EVIDENCE, BODY['table'])
+
+
+def test_add_checkpoint_only_belongs_to_now_and_is_optional():
+    assert stance_problems({k: v for k, v in ADD.items() if k != 'add_trigger'}) == []
+    for action in ('回避', '等价格'):
+        assert any('只含' in p for p in stance_problems(ADD | {'action': action}))

@@ -18,6 +18,9 @@
       {% if body.stance is mapping and body.stance.action %}{% set sc = body.stance_calc or {} %}
       <div class="stance" id="stance">
         <p class="relative-call">研究立场：<strong>{{ body.stance.action }}</strong>{% if body.stance.action == '等价格' and sc.price is number %}（期望回报门槛价 <span class="num">{{ '%.2f' | format(sc.price) }}</span> 元，有效至 {{ sc.valid_until }}）{% elif body.stance.action == '等证据' and body.stance.trigger %}{% set t = body.stance.trigger %}（{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}）{% endif %}</p>
+        {% if body.stance.action == '现在分批' and body.stance.add_trigger %}{% set t = body.stance.add_trigger %}
+        <p class="small">加仓检查点（参考，不阻止首批）：{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}。达到才加后续批次；未达到则复核是否减仓。</p>
+        {% endif %}
         <p class="small">{{ body.stance.text }}</p>
         {{ cites(body.stance, rows, documents) }}
       </div>

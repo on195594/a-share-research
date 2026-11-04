@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -30,6 +31,9 @@ TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[�
 
 FINANCIAL_APIS = {"fina_indicator", "income", "cashflow", "fina_audit", "balancesheet"}
 HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal", "report_rc"}
+CONDITION_APIS = {"fut_basic", "fut_mapping", "fut_daily", "cn_pmi", "cn_m", "sf_month",
+                  "shibor", "shibor_lpr", "cn_cpi", "cn_ppi"}
+_condition_last_call = 0.0
 REPORT_RC_DAILY_BUDGET = 8
 REPORT_RC_ROW_CAP = 3000  # 上限未经官方文档核实，达到即视为可能截断
 REPORT_RC_MIN_INTERVAL = 61  # Leave margin around TuShare's one-request-per-minute quota.
@@ -40,6 +44,10 @@ def _tushare_cache_key(api: str, params: dict) -> str | None:
     if os.environ.get("TUSHARE_CACHE") == "0":
         return None
     today = datetime.now(SHANGHAI).date()
+    if api in CONDITION_APIS:
+        # A dated snapshot also covers catalogs and monthly publication/revision lag.
+        key = {"api": api, "params": params, "snapshot_day": today.isoformat()}
+        return hashlib.sha256(json.dumps(key, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     bound = params.get("trade_date") or params.get("end_date")
     try:
         historical = bool(bound) and date.fromisoformat(str(bound)) < today
@@ -161,6 +169,20 @@ def tushare_query(pro, api: str, **params) -> pd.DataFrame:
         return cached
     if api == "report_rc":
         _reserve_report_rc_call()
+    if api == "shibor_lpr":
+        # This account permits one upstream request per hour, shared across workers.
+        with closing(_report_rc_connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            at = datetime.now(SHANGHAI)
+            row = conn.execute("SELECT created_at FROM tushare_cache WHERE key='shibor_lpr:last-call'").fetchone()
+            if row and at < datetime.fromisoformat(row[0]) + timedelta(seconds=3601):
+                retry = datetime.fromisoformat(row[0]) + timedelta(seconds=3601)
+                raise SourceError(f"LPR 每小时一次，冷却至 {retry.isoformat()}；请先使用其他宏观系列，勿重复查询")
+            conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES ('shibor_lpr:last-call', '{}', ?)", (at.isoformat(),))
+    if api in CONDITION_APIS:
+        global _condition_last_call
+        time.sleep(max(0, 0.35 - (time.monotonic() - _condition_last_call)))
+        _condition_last_call = time.monotonic()
     try:
         frame = pro.query(api, **params)
         if api == "report_rc":

@@ -1,0 +1,1489 @@
+{
+ "captured_at": "2026-11-04",
+ "source": "TuShare live account probe; exact selected columns, no synthetic observations",
+ "apis": {
+  "fut_daily": {
+   "params": {
+    "ts_code": "AL.SHF",
+    "start_date": "20260101",
+    "end_date": "20261103"
+   },
+   "rows": [
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261103",
+     "close": 23035.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261102",
+     "close": 23155.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261030",
+     "close": 23395.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261029",
+     "close": 23310.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261028",
+     "close": 23540.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261027",
+     "close": 23405.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261026",
+     "close": 23450.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261023",
+     "close": 23350.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261022",
+     "close": 23175.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261021",
+     "close": 23050.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261020",
+     "close": 23310.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261019",
+     "close": 23340.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261016",
+     "close": 23270.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261015",
+     "close": 23040.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261014",
+     "close": 23285.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261013",
+     "close": 23320.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261012",
+     "close": 23465.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261009",
+     "close": 23470.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20261008",
+     "close": 23385.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260930",
+     "close": 23830.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260929",
+     "close": 24020.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260928",
+     "close": 23950.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260924",
+     "close": 24200.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260923",
+     "close": 24205.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260922",
+     "close": 24240.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260921",
+     "close": 24220.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260918",
+     "close": 24400.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260917",
+     "close": 24220.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260916",
+     "close": 24180.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260915",
+     "close": 24115.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260914",
+     "close": 24035.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260911",
+     "close": 24235.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260910",
+     "close": 24490.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260909",
+     "close": 24560.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260908",
+     "close": 24460.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260907",
+     "close": 24420.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260904",
+     "close": 24290.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260903",
+     "close": 24370.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260902",
+     "close": 24100.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260901",
+     "close": 24110.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260831",
+     "close": 24075.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260828",
+     "close": 23920.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260827",
+     "close": 23820.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260826",
+     "close": 23760.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260825",
+     "close": 23755.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260824",
+     "close": 23765.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260821",
+     "close": 23710.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260820",
+     "close": 23595.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260819",
+     "close": 23675.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260818",
+     "close": 23935.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260817",
+     "close": 24015.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260814",
+     "close": 23885.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260813",
+     "close": 24090.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260812",
+     "close": 24285.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260811",
+     "close": 24250.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260810",
+     "close": 24165.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260807",
+     "close": 24040.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260806",
+     "close": 23810.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260805",
+     "close": 23785.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260804",
+     "close": 23810.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260803",
+     "close": 23640.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260731",
+     "close": 23630.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260730",
+     "close": 23625.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260729",
+     "close": 23455.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260728",
+     "close": 23220.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260727",
+     "close": 23195.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260724",
+     "close": 23225.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260723",
+     "close": 23345.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260722",
+     "close": 23190.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260721",
+     "close": 23160.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260720",
+     "close": 23010.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260717",
+     "close": 23185.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260716",
+     "close": 23235.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260715",
+     "close": 23180.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260714",
+     "close": 23310.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260713",
+     "close": 22945.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260710",
+     "close": 23055.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260709",
+     "close": 23060.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260708",
+     "close": 23075.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260707",
+     "close": 22940.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260706",
+     "close": 22885.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260703",
+     "close": 22840.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260702",
+     "close": 22400.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260701",
+     "close": 22370.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260630",
+     "close": 22565.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260629",
+     "close": 23085.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260626",
+     "close": 23000.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260625",
+     "close": 22865.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260624",
+     "close": 23455.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260623",
+     "close": 23485.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260622",
+     "close": 24110.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260618",
+     "close": 23980.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260617",
+     "close": 23880.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260616",
+     "close": 23830.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260615",
+     "close": 24170.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260612",
+     "close": 24165.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260611",
+     "close": 24055.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260610",
+     "close": 23905.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260609",
+     "close": 24110.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260608",
+     "close": 24105.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260605",
+     "close": 24300.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260604",
+     "close": 24315.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260603",
+     "close": 24520.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260602",
+     "close": 24825.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260601",
+     "close": 24360.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260529",
+     "close": 24270.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260528",
+     "close": 24285.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260527",
+     "close": 24485.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260526",
+     "close": 24570.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260525",
+     "close": 24465.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260522",
+     "close": 24505.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260521",
+     "close": 24305.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260520",
+     "close": 24470.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260519",
+     "close": 24480.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260518",
+     "close": 24295.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260515",
+     "close": 24360.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260514",
+     "close": 24670.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260513",
+     "close": 24885.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260512",
+     "close": 24560.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260511",
+     "close": 24525.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260508",
+     "close": 24445.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260507",
+     "close": 24380.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260506",
+     "close": 24730.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260430",
+     "close": 24430.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260429",
+     "close": 24615.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260428",
+     "close": 24610.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260427",
+     "close": 24855.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260424",
+     "close": 24865.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260423",
+     "close": 24970.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260422",
+     "close": 25060.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260421",
+     "close": 24900.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260420",
+     "close": 25125.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260417",
+     "close": 25520.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260416",
+     "close": 25635.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260415",
+     "close": 24855.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260414",
+     "close": 24870.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260413",
+     "close": 24760.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260410",
+     "close": 24610.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260409",
+     "close": 24540.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260408",
+     "close": 24780.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260407",
+     "close": 24630.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260403",
+     "close": 24660.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260402",
+     "close": 24720.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260401",
+     "close": 24660.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260331",
+     "close": 24875.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260330",
+     "close": 24725.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260327",
+     "close": 23935.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260326",
+     "close": 23725.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260325",
+     "close": 23860.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260324",
+     "close": 23625.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260323",
+     "close": 23555.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260320",
+     "close": 24020.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260319",
+     "close": 24180.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260318",
+     "close": 24800.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260317",
+     "close": 24990.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260316",
+     "close": 25170.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260313",
+     "close": 24960.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260312",
+     "close": 25240.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260311",
+     "close": 25215.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260310",
+     "close": 24880.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260309",
+     "close": 24950.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260306",
+     "close": 24715.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260305",
+     "close": 24815.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260304",
+     "close": 24795.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260303",
+     "close": 23905.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260302",
+     "close": 24465.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260227",
+     "close": 23835.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260226",
+     "close": 23845.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260225",
+     "close": 23835.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260224",
+     "close": 23550.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260213",
+     "close": 23195.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260212",
+     "close": 23610.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260211",
+     "close": 23660.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260210",
+     "close": 23515.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260209",
+     "close": 23540.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260206",
+     "close": 23315.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260205",
+     "close": 23385.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260204",
+     "close": 23955.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260203",
+     "close": 23810.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260202",
+     "close": 23035.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260130",
+     "close": 24560.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260129",
+     "close": 25590.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260128",
+     "close": 25640.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260127",
+     "close": 24305.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260126",
+     "close": 24215.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260123",
+     "close": 24290.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260122",
+     "close": 24055.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260121",
+     "close": 24155.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260120",
+     "close": 23950.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260119",
+     "close": 24090.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260116",
+     "close": 23925.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260115",
+     "close": 24375.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260114",
+     "close": 24595.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260113",
+     "close": 24375.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260112",
+     "close": 24650.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260109",
+     "close": 24330.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260108",
+     "close": 23725.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260107",
+     "close": 24360.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260106",
+     "close": 24335.0
+    },
+    {
+     "ts_code": "AL.SHF",
+     "trade_date": "20260105",
+     "close": 23645.0
+    }
+   ]
+  },
+  "cn_pmi": {
+   "params": {
+    "start_m": "202601",
+    "end_m": "202610"
+   },
+   "rows": [
+    {
+     "month": "202610",
+     "pmi010000": 49.3,
+     "pmi010100": 50.2,
+     "pmi010200": 48.4
+    },
+    {
+     "month": "202609",
+     "pmi010000": 50.1,
+     "pmi010100": 50.6,
+     "pmi010200": 49.7
+    },
+    {
+     "month": "202608",
+     "pmi010000": 49.8,
+     "pmi010100": 50.6,
+     "pmi010200": 49.4
+    },
+    {
+     "month": "202607",
+     "pmi010000": 49.2,
+     "pmi010100": 49.5,
+     "pmi010200": 49.7
+    },
+    {
+     "month": "202606",
+     "pmi010000": 50.3,
+     "pmi010100": 50.7,
+     "pmi010200": 50.5
+    },
+    {
+     "month": "202605",
+     "pmi010000": 50.0,
+     "pmi010100": 51.1,
+     "pmi010200": 48.6
+    },
+    {
+     "month": "202604",
+     "pmi010000": 50.3,
+     "pmi010100": 50.2,
+     "pmi010200": 50.5
+    },
+    {
+     "month": "202603",
+     "pmi010000": 50.4,
+     "pmi010100": 51.6,
+     "pmi010200": 49.0
+    },
+    {
+     "month": "202602",
+     "pmi010000": 49.0,
+     "pmi010100": 51.5,
+     "pmi010200": 47.5
+    },
+    {
+     "month": "202601",
+     "pmi010000": 49.3,
+     "pmi010100": 50.3,
+     "pmi010200": 48.7
+    }
+   ]
+  },
+  "cn_m": {
+   "params": {
+    "start_m": "202601",
+    "end_m": "202610"
+   },
+   "rows": [
+    {
+     "month": "202609",
+     "m1": 1167563.84,
+     "m2": 3596289.7,
+     "m1_yoy": 3.2,
+     "m2_yoy": 7.2
+    },
+    {
+     "month": "202608",
+     "m1": 1157741.43,
+     "m2": 3568083.6,
+     "m1_yoy": 4.1,
+     "m2_yoy": 7.5
+    },
+    {
+     "month": "202607",
+     "m1": 1154623.0,
+     "m2": 3555077.24,
+     "m1_yoy": 4.0,
+     "m2_yoy": 7.7
+    },
+    {
+     "month": "202606",
+     "m1": 1184775.53,
+     "m2": 3567108.43,
+     "m1_yoy": 4.0,
+     "m2_yoy": 8.0
+    },
+    {
+     "month": "202605",
+     "m1": 1148891.41,
+     "m2": 3536688.9,
+     "m1_yoy": 5.5,
+     "m2_yoy": 8.6
+    },
+    {
+     "month": "202604",
+     "m1": 1145833.73,
+     "m2": 3530425.21,
+     "m1_yoy": 5.0,
+     "m2_yoy": 8.6
+    },
+    {
+     "month": "202603",
+     "m1": 1193200.0,
+     "m2": 3538600.0,
+     "m1_yoy": 5.1,
+     "m2_yoy": 8.5
+    },
+    {
+     "month": "202602",
+     "m1": 1159300.0,
+     "m2": 3492200.0,
+     "m1_yoy": 5.9,
+     "m2_yoy": 9.0
+    },
+    {
+     "month": "202601",
+     "m1": 1179680.52,
+     "m2": 3471860.39,
+     "m1_yoy": 4.9,
+     "m2_yoy": 9.0
+    }
+   ]
+  },
+  "sf_month": {
+   "params": {
+    "start_m": "202601",
+    "end_m": "202610"
+   },
+   "rows": [
+    {
+     "month": "202609",
+     "inc_month": 35476.0,
+     "inc_cumval": 274589.0
+    },
+    {
+     "month": "202608",
+     "inc_month": 16581.0,
+     "inc_cumval": 239113.0
+    },
+    {
+     "month": "202607",
+     "inc_month": 14068.0,
+     "inc_cumval": 222532.0
+    },
+    {
+     "month": "202606",
+     "inc_month": 33671.0,
+     "inc_cumval": 208464.0
+    },
+    {
+     "month": "202605",
+     "inc_month": 20293.0,
+     "inc_cumval": 174793.0
+    },
+    {
+     "month": "202604",
+     "inc_month": 6238.0,
+     "inc_cumval": 154500.0
+    },
+    {
+     "month": "202603",
+     "inc_month": 52240.0,
+     "inc_cumval": 148262.0
+    },
+    {
+     "month": "202602",
+     "inc_month": 23837.0,
+     "inc_cumval": 96022.0
+    },
+    {
+     "month": "202601",
+     "inc_month": 72185.0,
+     "inc_cumval": 72185.0
+    }
+   ]
+  },
+  "shibor_lpr": {
+   "params": {
+    "start_date": "20260101",
+    "end_date": "20261103"
+   },
+   "rows": [
+    {
+     "date": "20260820",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260720",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260622",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260520",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260420",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260320",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260224",
+     "1y": 3.0,
+     "5y": 3.5
+    },
+    {
+     "date": "20260120",
+     "1y": 3.0,
+     "5y": 3.5
+    }
+   ]
+  },
+  "shibor": {
+   "params": {
+    "start_date": "20261001",
+    "end_date": "20261103"
+   },
+   "rows": [
+    {
+     "date": "20261103",
+     "on": 1.2891,
+     "1w": 1.342,
+     "3m": 1.4015
+    },
+    {
+     "date": "20261102",
+     "on": 1.286,
+     "1w": 1.363,
+     "3m": 1.405
+    },
+    {
+     "date": "20261030",
+     "on": 1.289,
+     "1w": 1.392,
+     "3m": 1.401
+    },
+    {
+     "date": "20261029",
+     "on": 1.282,
+     "1w": 1.34,
+     "3m": 1.4009
+    },
+    {
+     "date": "20261028",
+     "on": 1.281,
+     "1w": 1.34,
+     "3m": 1.4035
+    },
+    {
+     "date": "20261027",
+     "on": 1.281,
+     "1w": 1.348,
+     "3m": 1.4055
+    },
+    {
+     "date": "20261026",
+     "on": 1.301,
+     "1w": 1.363,
+     "3m": 1.4065
+    },
+    {
+     "date": "20261023",
+     "on": 1.271,
+     "1w": 1.326,
+     "3m": 1.4078
+    },
+    {
+     "date": "20261022",
+     "on": 1.2612,
+     "1w": 1.321,
+     "3m": 1.4081
+    },
+    {
+     "date": "20261021",
+     "on": 1.261,
+     "1w": 1.324,
+     "3m": 1.411
+    },
+    {
+     "date": "20261020",
+     "on": 1.262,
+     "1w": 1.32,
+     "3m": 1.4229
+    },
+    {
+     "date": "20261019",
+     "on": 1.264,
+     "1w": 1.322,
+     "3m": 1.429
+    },
+    {
+     "date": "20261016",
+     "on": 1.264,
+     "1w": 1.339,
+     "3m": 1.43
+    },
+    {
+     "date": "20261015",
+     "on": 1.266,
+     "1w": 1.346,
+     "3m": 1.43
+    },
+    {
+     "date": "20261014",
+     "on": 1.269,
+     "1w": 1.3484,
+     "3m": 1.43
+    },
+    {
+     "date": "20261013",
+     "on": 1.288,
+     "1w": 1.341,
+     "3m": 1.43
+    },
+    {
+     "date": "20261012",
+     "on": 1.296,
+     "1w": 1.346,
+     "3m": 1.43
+    },
+    {
+     "date": "20261010",
+     "on": 1.2933,
+     "1w": 1.331,
+     "3m": 1.43
+    },
+    {
+     "date": "20261009",
+     "on": 1.313,
+     "1w": 1.341,
+     "3m": 1.43
+    },
+    {
+     "date": "20261008",
+     "on": 1.3756,
+     "1w": 1.39,
+     "3m": 1.43
+    }
+   ]
+  },
+  "cn_cpi": {
+   "params": {
+    "start_m": "202601",
+    "end_m": "202610"
+   },
+   "rows": [
+    {
+     "month": "202609",
+     "nt_yoy": 0.9,
+     "nt_mom": 0.2
+    },
+    {
+     "month": "202608",
+     "nt_yoy": 0.8,
+     "nt_mom": 0.4
+    },
+    {
+     "month": "202607",
+     "nt_yoy": 0.5,
+     "nt_mom": -0.1
+    },
+    {
+     "month": "202606",
+     "nt_yoy": 1.0,
+     "nt_mom": -0.3
+    },
+    {
+     "month": "202605",
+     "nt_yoy": 1.2,
+     "nt_mom": -0.1
+    },
+    {
+     "month": "202604",
+     "nt_yoy": 1.2,
+     "nt_mom": 0.3
+    },
+    {
+     "month": "202603",
+     "nt_yoy": 1.0,
+     "nt_mom": -0.7
+    },
+    {
+     "month": "202602",
+     "nt_yoy": 1.3,
+     "nt_mom": 1.0
+    },
+    {
+     "month": "202601",
+     "nt_yoy": 0.2,
+     "nt_mom": 0.2
+    }
+   ]
+  },
+  "cn_ppi": {
+   "params": {
+    "start_m": "202601",
+    "end_m": "202610"
+   },
+   "rows": [
+    {
+     "month": "202609",
+     "ppi_yoy": 5.0,
+     "ppi_mom": 1.2
+    },
+    {
+     "month": "202608",
+     "ppi_yoy": 3.8,
+     "ppi_mom": 0.4
+    },
+    {
+     "month": "202607",
+     "ppi_yoy": 3.5,
+     "ppi_mom": -0.7
+    },
+    {
+     "month": "202606",
+     "ppi_yoy": 4.1,
+     "ppi_mom": -0.3
+    },
+    {
+     "month": "202605",
+     "ppi_yoy": 3.9,
+     "ppi_mom": 0.5
+    },
+    {
+     "month": "202604",
+     "ppi_yoy": 2.8,
+     "ppi_mom": 1.7
+    },
+    {
+     "month": "202603",
+     "ppi_yoy": 0.5,
+     "ppi_mom": 1.0
+    },
+    {
+     "month": "202602",
+     "ppi_yoy": -0.9,
+     "ppi_mom": 0.4
+    },
+    {
+     "month": "202601",
+     "ppi_yoy": -1.4,
+     "ppi_mom": 0.4
+    }
+   ]
+  }
+ }
+}

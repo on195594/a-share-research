@@ -149,6 +149,15 @@ def evidence_wait(trigger: dict, row: dict, today: date) -> dict:
     return {"status": "met" if met else "not_met", "actual": actual}
 
 
+def checkpoint_outcome(row: dict, table: dict, today: date) -> dict:
+    """Score frozen new checkpoints and legacy waits against the same observed financial row."""
+    calc = row.get("stance_calc") or {}
+    trigger = calc.get("add_trigger") if row["stance"] == "现在分批" else calc.get("trigger", row.get("trigger"))
+    if not trigger:
+        return {}
+    return evidence_wait(trigger, table.get(trigger["metric"], {}), today)
+
+
 def summarize_stances(rows: list[dict]) -> dict:
     """Counts of wait outcomes plus each wait's V0 excess at the latest date (the cost or saving of waiting)."""
     out = {}
@@ -229,7 +238,8 @@ def load_reports(database: str) -> list[dict]:
         reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
                         "completed": datetime.fromisoformat(created),
                         "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
-                        "trigger": (json.loads(stance) or {}).get("trigger") if stance else None})
+                        "trigger": calc.get("trigger", (json.loads(stance) or {}).get("trigger")) if calc else None,
+                        "add_trigger": calc.get("add_trigger") if calc else None})
     return first_per_month(reports)
 
 
@@ -249,14 +259,16 @@ def score(pro, reports: list[dict], today: date) -> list[dict]:
     end = screening._compact(today)
     start = min(r["completed"] for r in reports).date() if reports else today
     trade_days = screening._trade_days(pro, screening._compact(start), end)
-    frame = screening._query(pro, "index_daily", ts_code=BENCHMARK, start_date=trade_days[0], end_date=end)
-    bench = dict(zip(frame["trade_date"].astype(str), frame["close"].astype(float)))
-    last = max(bench)  # total-return index publishes after stocks; never score beyond it
+    bench = {}
+    if trade_days:
+        frame = screening._query(pro, "index_daily", ts_code=BENCHMARK, start_date=trade_days[0], end_date=end)
+        bench = dict(zip(frame["trade_date"].astype(str), frame["close"].astype(float)))
+    last = max(bench, default=None)  # total-return index publishes after stocks; never score beyond it
     rows = []
     for report in reports:
         entry = entry_day(report["completed"], trade_days)
         row = report | {"entry": entry, "returns": {}, "mv": None}
-        if entry and entry <= last:
+        if entry and last and entry <= last:
             stock = _adjusted_closes(pro, report["code"], entry, last)
             basic = screening._query(pro, "daily_basic", ts_code=report["code"], trade_date=entry, fields="total_mv")
             row["mv"] = float(basic["total_mv"].iloc[0]) / 1e4 if not basic.empty else None  # 亿元
@@ -286,10 +298,14 @@ def score_stances(pro, rows: list[dict], today: date) -> list[dict]:
                                     fields="trade_date,low")
             lows = dict(zip(bars["trade_date"].astype(str), bars["low"].astype(float)))
             row["stance_outcome"] = price_wait(lows, calc["price"], row["entry"], calc["valid_until"], last)
-        elif row["stance"] == "等证据" and row["trigger"]:
+        elif (row["stance"] == "等证据" and row.get("trigger")) or (row["stance"] == "现在分批" and calc and calc.get("add_trigger")):
+            trigger = calc["add_trigger"] if row["stance"] == "现在分批" else row["trigger"]
+            if not period_ended(trigger["period"], today):
+                row["stance_outcome"] = checkpoint_outcome(row, {}, today)
+                continue
             if row["code"] not in tables:
                 tables[row["code"]] = {r["id"]: r for r in material.financial_table(sources.financials(row["code"]), {})}
-            row["stance_outcome"] = evidence_wait(row["trigger"], tables[row["code"]].get(row["trigger"]["metric"], {}), today)
+            row["stance_outcome"] = checkpoint_outcome(row, tables[row["code"]], today)
     return rows
 
 
@@ -304,7 +320,7 @@ def main() -> None:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
     modes.add_argument("--hypotheses", action="store_true", help="V3：H1 避坑与 H3 读得快假设记分")
-    modes.add_argument("--stances", action="store_true", help="V4：研究立场（等价格/等证据）兑现与等待代价")
+    modes.add_argument("--stances", action="store_true", help="V4：研究立场、加仓检查点与历史等证据兑现与等待代价")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.hypotheses:
@@ -345,7 +361,11 @@ def main() -> None:
             target = (f" 门槛价 {row['stance_calc']['price']:.2f} 至 {row['stance_calc']['valid_until']}" if row["stance"] == "等价格"
                       else f" {row['trigger']['period']} {row['trigger']['metric']} {row['trigger']['op']} {row['trigger']['value']:g}"
                       if row["stance"] == "等证据" and row["trigger"] else "")
-            lines.append(f"#{row['id']} {row['code']} {row['name']} {row['stance']}{target} → {outcome.get('status', '—')}"
+            if row.get("add_trigger"):
+                t = row["add_trigger"]
+                target = f" 加仓检查点（参考） {t['period']} {t['metric']} {t['op']} {t['value']:g}"
+            status = {"met": "达成", "not_met": "未达成", "pending": "待披露"}.get(outcome.get("status"), outcome.get("status", "—")) if row["stance"] != "等价格" else outcome.get("status", "—")
+            lines.append(f"#{row['id']} {row['code']} {row['name']} {row['stance']}{target} → {status}"
                          f"{' ' + outcome['date'] if outcome.get('date') else ''} 至今超额 {_pct(latest['excess']) if latest else '—'}")
         for key, g in summary.items():
             lines.append(f"{key} n={g['n']} 已入场 {g['scored']} 平均超额 {_pct(g['mean_excess']) if g['mean_excess'] is not None else '—'}")

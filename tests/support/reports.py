@@ -40,9 +40,9 @@ def report(**changes):
                          "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}],
                          "forecast": {"metric": "T.op_cash", "period": "2026-03-31", "low": 100, "high": 260,
                                       "confidence": 60}}],
-        "stance": {"action": "等证据", "text": "经营现金流明显下降，先看下一期现金转化是否恢复。",
+        "stance": {"action": "现在分批", "text": "经营现金流明显下降，首批之后观察下一期现金转化是否恢复。",
                    "cites": [{"ref": "T.op_cash", "period": "2025-12-31"}],
-                   "trigger": {"metric": "T.op_cash", "period": "2026-03-31", "op": ">=", "value": 200}},
+                   "add_trigger": {"metric": "T.op_cash", "period": "2026-03-31", "op": ">=", "value": 200}},
     }
     return deepcopy(base | changes)
 

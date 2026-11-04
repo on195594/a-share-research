@@ -117,3 +117,16 @@ def test_v2_shadow_and_research_stance_render_with_program_price():
     old['valuation_calc'].pop('v2')
     html = page(old)
     assert '<th scope="col" class="num">概率</th>' not in html and '研究立场' not in html
+
+
+def test_add_trigger_is_optional_reference_and_old_wait_still_renders():
+    from test_stance import ADD, EVIDENCE
+    body = calculated()
+    body['stance'] = ADD
+    html = page(body)
+    assert '加仓检查点（参考，不阻止首批）' in html
+    assert '达到才加后续批次；未达到则复核是否减仓' in html
+    body['stance'] = EVIDENCE
+    html = page(body)
+    assert '研究立场：<strong>等证据</strong>' in html
+    assert '加仓检查点' not in html

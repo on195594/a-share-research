@@ -41,8 +41,25 @@ def _threshold_key(match: re.Match) -> tuple[Decimal, str]:
             (match["unit"] or "").replace("％", "%"))
 
 
-def _checked_figures(text: str, material: Material) -> list[tuple[float, int]]:
+def _checked_figures(text: str, material: Material, cites=()) -> list[tuple[float, int]]:
     """Only the explicit threshold occurrence is a question term; equal factual amounts still need sources."""
+    # Session counts are measurement windows, not financial values. Derive them from
+    # the cited calculation's actual stored daily series; never whitelist the numeral.
+    rows = {r["id"]: r for r in material.table}
+    windows = set()
+    for cite in cites:
+        calc = rows.get(cite.get("ref"), {}).get("calculation", {})
+        inputs = calc.get("inputs", [])
+        if calc.get("operation") != "change_pct" or len(inputs) != 2:
+            continue
+        left, right = inputs
+        row = rows.get(left.get("ref"), {})
+        if left.get("ref") != right.get("ref") or row.get("source", {}).get("api") != "fut_daily":
+            continue
+        days = sorted(row.get("values", {}))
+        if left.get("period") in days and right.get("period") in days:
+            windows.add(days.index(left["period"]) - days.index(right["period"]))
+    text = re.sub(r"(?<![\d.])(\d+)\s*个?交易日", lambda m: " " if int(m[1]) in windows else m[0], text)
     question = str(material.extra.get("question") or "")
     terms = {_threshold_key(m) for pattern in (QUESTION_THRESHOLD, TRAILING_THRESHOLD) for m in pattern.finditer(question)}
     for pattern in (QUESTION_THRESHOLD, TRAILING_THRESHOLD):
@@ -170,7 +187,7 @@ def check(report: dict, material: Material) -> list[dict]:
             if errors:
                 continue
             candidates = _candidates(cites, material)
-            for value, decimals in _checked_figures(str(item.get("text", "")), material):
+            for value, decimals in _checked_figures(str(item.get("text", "")), material, cites):
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
             all_cites += cites
@@ -183,7 +200,7 @@ def check(report: dict, material: Material) -> list[dict]:
     candidates = _candidates(all_cites, material) + [float(v) for r in material.table
                                                    for fld in ("values", "exact_values")
                                                    for v in r.get(fld, {}).values()]
-    for value, decimals in _checked_figures(summary, material):
+    for value, decimals in _checked_figures(summary, material, all_cites):
         if not _supported(value, decimals, candidates):
             problems.append({"where": "summary", "problem": f"数字 {value:g} 在报告出处与表中找不到"})
     return problems

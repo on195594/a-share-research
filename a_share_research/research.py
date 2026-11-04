@@ -81,7 +81,7 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
 4. 有具体问题时，answer 是否回答了它；纠错是否核对了所指原文。
 5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。其中 forecast 是对下一期财务表数值的区间预测，不要求出处证明预测值，不评判区间宽窄；只核查所选行与 text 所述事项、本报告判断相关，且 text 中的基期事实正确。
 6. valuation 的 rationale 与 not_priced 照常核查事实和数字；检查情景假设间的经济关系与口径是否自洽（如周期高点用高利润配高倍数、保守利润高于基期却无证据），不评判贵贱与区间宽窄；相关问题统一定位 where="valuation"，修复时顶层替换整个 valuation。
-7. stance 是研究立场：核查 text 的事实与数字，以及立场是否与 verdict、主要风险和估值测算一致（如期望回报已高于门槛却等价格、结论暂不值得却现在分批而无理由）；不评判立场本身的激进或保守。等证据的 trigger 只核查所选行与理由相关，不要求原文证明未来值。相关问题定位 where="stance"，修复时顶层替换整个 stance。
+7. stance 是研究立场：核查 text 的事实与数字（包括引用的行业、宏观、政策与外部价格）有出处，以及立场是否与 verdict、主要风险和估值测算一致（如期望回报已高于门槛却等价格、结论暂不值得却现在分批而无理由）；不评判立场本身的激进或保守。现在分批的可选 add_trigger 只核查所选行与理由相关，不要求原文证明未来值；它是加仓参考，不阻止首批。相关问题定位 where="stance"，修复时顶层替换整个 stance。
 原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
 通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
 
@@ -421,6 +421,8 @@ def stance_calc(stance: dict, calc: dict | None, market_date: str) -> dict:
         out["valid_until"] = date(day.year + month // 12, month % 12 + 1, min(day.day, 28)).isoformat()
     elif stance["action"] == "等证据":
         out["trigger"] = deepcopy(stance["trigger"])
+    if stance["action"] == "现在分批" and "add_trigger" in stance:
+        out["add_trigger"] = deepcopy(stance["add_trigger"])
     return out
 
 
