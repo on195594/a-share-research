@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-11-03。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
+更新：2026-11-04。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
 
 ## 工作包与状态
 
@@ -16,7 +16,7 @@
 | B 账户侧接入（11-01，A5） | Research `ce5503b`（区间按日滚动、`GET /api/cards`）；Skills 0.1.29 `ebecd3e`..`094735e`（快照读卡、只提醒的透支/换仓提示、待复核升级）；隔离实例端到端通过，agy 审查 3 项次要已修，证据 `batch-b-20261101/` | Research 随 `d15af17` 发布；Skills 0.1.29 于 11-02 激活；11-03 浏览器验收确认 run 88–96 均已完成并通过复核，对应报告 70–78，华东另有后续 79；不重复研究。账户快照提醒是否已送达仍缺直接记录 |
 | 卖方覆盖恢复（11-04） | 已实现共享分钟冷却、空闲单日续补及空结果有限期缓存；沿用现有每日 8 次预算，无业务库迁移、配置或调度变更。服务形成判断与候选发现：补足一致预期对照和小市值覆盖快照；不以缺数据作为低覆盖证据。定向 244 passed；生产缓存一次真实查询由 6/59 增至 7/59，重置内存计时后仍受持久冷却约束，前台读取不额外耗额，缓存单公司读取正常；证据 `report-rc-recovery-20261104/` | 已随 `3227f63` 于 11-04 00:18 发布；完整窗口依上游额度跨日恢复，属非阻塞观察 |
 | C 小市值组（11-01） | `screen-v1.3` 已部署（v8 结构不变），对齐 SQ3/SL3 行业约束；2026-12 批次起增加独立 S10/SQ3/SL3、冻结时缓存卖方覆盖快照、双组展示与模拟；大市值组与旧批次不变 | 真实全市场 dry-run（基准日 2026-10-30：小池 2208 家、因子齐全 1030 家，双组约 35 分钟）与手机尺寸批次页已有验证；规则修复和月批失败汇总定向验证见当前部署；首次真实双组批次待 12 月；H2 至少 6 个到期批次后观察，见[实验方案第 9 节](screening-experiment.md#9-小市值组批次-cscreen-v132026-12-批次起) |
-| 公司研究进展 | 已退役（11-03）：生产首对万华 41→44 复核未通过且未重验，跨期对比已由 K2 接续回答与 `reading.comparison()` 程序对照承担 | 已从 web/worker/deploy 移除 `progress.py` 与 `progress_import.py`；数据库 `research_progress` / `progress_calls` 表保留只读兼容，不删历史数据 |
+| 公司研究进展 | 已退役（11-03）：生产首对万华 41→44 复核未通过且未重验，跨期对比已由 K2 接续回答与 `reading.comparison()` 程序对照承担 | 已从 web/worker/deploy 移除 `progress.py` 与 `progress_import.py`；数据库 `research_progress` / `progress_calls` 表保留只读兼容，不删历史数据；11-04 `28f34c6` 补阅读入口（接续回答不折叠、公司页直达、程序对照降噪），见当前部署 |
 
 已完成且已部署的近期工作包（详情见上述历史版本对应小节）：
 
@@ -36,7 +36,9 @@
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `fea5a75`** 于 2026-11-04 09:26（北京时间）按固定入口发布 web、worker：将公共依赖 `a-stock-lib` 升级至 `0.10.2`（wheel SHA256 `630d9aac…01bcf`），同步恢复旧缓存错误码兼容导出。无业务库迁移、凭据、配置、cron 或模型变更，离线全量 850 passed / 11 skipped 顺利通过。固定发布入口的空闲检查、备份、停服窗口业务表指纹比对、worker 离线预检和完整性巡检全部通过（81 份报告、674 次调用、0 问题）；容器内 Lib 版本核对为 `0.10.2`；页面 HTTP 200 验证通过。备份 `~/a-share-research-data/backup-pre-fea5a75-20261104-092606.db`。Skills 同步激活 `0.1.34-2d4d9ebe1a48`（Lib 0.10.2）。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `28f34c6`** 于 2026-11-04 10:27（北京时间）按固定入口发布 web、worker：研究进展退役后的阅读补位，只改展示。接续报告（`body.prior`）的回答不再折叠（报告 44 原先 8 条旧风险/检查点状态只露 1 条），公司页卡片链到该回答；`reading.table_comparison()` 只就 `T.*` 与估值快照判断未记录/口径不一致，不再列 `C.*` 与同业行，新表不保留的旧期间按期间列出，估值日变动不计入修订、不默认展开。无业务库迁移、凭据、配置、cron 或模型变更，不触发研究。定向 128 passed（回归输入为五粮液 6/40/42、万华 41/44 生产报告表只读副本，含互变）；生产库副本开发实例 390×844 走通报告 40/42/44 与两家公司页，发布后公网复核报告 44、万华与茅台公司页，临时会话已退出撤销。发布工具空闲检查、备份、业务表指纹、worker 预检与完整性巡检通过（82 份报告、685 次调用、0 问题）。证据 `deploy-28f34c6-20261104-102705/`；备份 `~/a-share-research-data/backup-pre-28f34c6-20261104-102706.db`。
+
+前版 **Research `fea5a75`** 于 2026-11-04 09:26（北京时间）按固定入口发布 web、worker：将公共依赖 `a-stock-lib` 升级至 `0.10.2`（wheel SHA256 `630d9aac…01bcf`），同步恢复旧缓存错误码兼容导出。无业务库迁移、凭据、配置、cron 或模型变更，离线全量 850 passed / 11 skipped 顺利通过。固定发布入口的空闲检查、备份、停服窗口业务表指纹比对、worker 离线预检和完整性巡检全部通过（81 份报告、674 次调用、0 问题）；容器内 Lib 版本核对为 `0.10.2`；页面 HTTP 200 验证通过。备份 `~/a-share-research-data/backup-pre-fea5a75-20261104-092606.db`。Skills 同步激活 `0.1.34-2d4d9ebe1a48`（Lib 0.10.2）。
 
 前版 **Research `3227f63`** 于 2026-11-04 00:18（北京时间）按固定入口发布 web、worker：卖方逐日覆盖在现有 worker 空闲时自动续补，共享分钟冷却与现有每日 8 次预算，成功空结果有限期缓存，可能截断的数据保留部分覆盖标记。无业务库迁移、凭据、配置、cron 或模型变更，不回填历史报告和批次。
 
@@ -66,7 +68,7 @@
 - 月批（11-03 安装）：no-agent 任务 `3d8b860808e4`（每月 1 日 20:00 `cron/a-share-monthly-submit.sh` 调 `POST /api/batches/monthly`，发一次确认）与 `112633a18054`（1–3 日每小时 :30 `cron/a-share-monthly-status.sh`，只在冻结/待确认/失败/带缺口完成或创建超 48 小时未完成时推送一次）；沿用 `hermes-advisor` 凭据与 Host 头，去重回执在宿主 `~/.local/state/a-share-monthly/<月>.receipt`（11 月手动批次已预置为已通知）。已对生产实测：11 月状态推送与去重、已有批次不新建、旧月 409。回退或停用先 `hermes cron pause` 这两项。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：回到本次发布前的 `3227f63`（Lib 0.10.0）用两服务的 `rollback-fea5a75`（web `8c51ffd0…0ab3`、worker `8b85e29b…95dd`）；无业务库迁移，只回退镜像、保留缓存。更早回退：回到 `0b50486`（Lib 0.10.0）用两服务的 `rollback-3227f63`（web `ef2672a5…62cb`、worker `7af8464b…be25`）；更早回退：回到 `b8d4e54`（Lib 0.10.0）用两服务的 `rollback-0b50486`（web `6a1bee7f…2279`、worker `5e7e1787…7d03`）；应用回退不恢复数据库。更早回退：回到 `cb569ad`（Lib 0.9.0）用 `rollback-cb569ad`（`9c654a90…3238`、`45396428…94de`）；`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：回到本次发布前的 `fea5a75`（Lib 0.10.2）用两服务的 `rollback-28f34c6`（web `179cc6ad…b467`、worker `7a0eeac1…c8d5`）；无业务库迁移，只回退镜像。更早回退：回到 `3227f63`（Lib 0.10.0）用两服务的 `rollback-fea5a75`（web `8c51ffd0…0ab3`、worker `8b85e29b…95dd`）；无业务库迁移，只回退镜像、保留缓存。更早回退：回到 `0b50486`（Lib 0.10.0）用两服务的 `rollback-3227f63`（web `ef2672a5…62cb`、worker `7af8464b…be25`）；更早回退：回到 `b8d4e54`（Lib 0.10.0）用两服务的 `rollback-0b50486`（web `6a1bee7f…2279`、worker `5e7e1787…7d03`）；应用回退不恢复数据库。更早回退：回到 `cb569ad`（Lib 0.9.0）用 `rollback-cb569ad`（`9c654a90…3238`、`45396428…94de`）；`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 **更早发布**：`598183c`（含 `ef07ecf`）的完整记录见 `git show b17a067:docs/implementation-plan.md`；`cd6c388` 见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
