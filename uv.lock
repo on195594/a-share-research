@@ -31,7 +31,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "a-stock-lib", extras = ["tushare"], url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.1/a_stock_lib-0.10.1-py3-none-any.whl" },
+    { name = "a-stock-lib", extras = ["tushare"], url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.156.4" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "python-multipart", specifier = ">=0.0.32" },
@@ -47,13 +47,13 @@ dev = [
 
 [[package]]
 name = "a-stock-lib"
-version = "0.10.1"
-source = { url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.1/a_stock_lib-0.10.1-py3-none-any.whl" }
+version = "0.10.2"
+source = { url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl" }
 dependencies = [
     { name = "pandas" },
 ]
 wheels = [
-    { url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.1/a_stock_lib-0.10.1-py3-none-any.whl", hash = "sha256:bd766933181a4f035f7c6e4138f4ea32d0e6f0dd085a04b2fcfc63afe84f8f8b" },
+    { url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl", hash = "sha256:630d9aac557a62a6c475b51d7a6c3e94d1953928dd9473f4604c1d910b301bcf" },
 ]
 
 [package.optional-dependencies]

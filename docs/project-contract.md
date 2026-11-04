@@ -42,7 +42,7 @@ flowchart TD
 - 两个消费者均通过锁定版本及哈希的 Lib wheel 使用公共能力，不导入对方源码或跨项目读取数据库。
 - 2026-11-03 源码锁定更新至 Lib 0.9.0（`b278e7b`；wheel SHA256 `4c470038479856767cd686b0c71abe160b8cc5b39dec65fc9d8d2e68ccaf74a9`）。删除无消费者的十年月度分位和全市场截面封装，不迁移 Research 自有的五年 PE 分位或选股/回测截面政策；`fetch_valuation_history` 与财务 Provider 合同不变。Research 隔离候选环境回归 832 passed / 11 skipped，正式锁同步及源码树外 wheel 身份检查通过；源码验证阶段未部署 Research，未运行无关的成文评估集；随后经所有者单独授权部署 `cb569ad`、激活 Skills `0.1.32-729d470ee38e`，见[当前部署](implementation-plan.md#当前部署)及 Skills operations 激活记录。
 - 2026-11-03 源码锁定更新至 Lib 0.10.0（`bd55597`；wheel SHA256 `e69dd873a57b5bc38f989650dad751e319554fd90190a07b0135854431164470`）。Research 调用的财务、估值 Provider 与 `to_tushare_stock_code` 语义不变；`fetched_at` 改为带 `+08:00` 偏移。
-- 2026-11-04 源码锁定更新至 Lib 0.10.1（`31bb1f0`；wheel SHA256 `bd766933181a4f035f7c6e4138f4ea32d0e6f0dd085a04b2fcfc63afe84f8f8b`）。精简行业缓存错误码与内部格式，收敛测试，Research 调用的财务、估值 Provider 行为不变。全量离线回归 850 passed / 11 skipped 通过。
+- 2026-11-04 源码锁定更新至 Lib 0.10.2（`da978f6`；wheel SHA256 `630d9aac557a62a6c475b51d7a6c3e94d1953928dd9473f4604c1d910b301bcf`）。精简行业缓存错误码与内部格式，收敛测试，保留历史兼容常量导出，Research 调用的财务、估值 Provider 行为不变。全量离线回归 850 passed / 11 skipped 通过。
 - 公共 Provider 保留来源、获取时间、数据时点、缺失与降级信息；消费者决定字段是否满足本次任务，不能把缺失默认为有效值。
 - 财报应用优先使用现有 Lib Provider；缺少的接口按当前项目约束直接调用 TuShare。只有出现真实复用需求且语义一致时，才考虑把新增公共能力放入 Lib，不为统一目录搬迁应用代码。
 - Lib 已被使用的 A—F 规则继续在原 owner 维护；框架路由、账户风险政策和应用动作出口仍在 Skills runtime。规则版本与软件版本分开。AI 可以质疑 A—F 的适用性、提出替代假设；未经 owner 采用不能自行修改生效政策，不因框架不适用而禁止继续研究。
