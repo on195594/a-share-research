@@ -51,6 +51,10 @@ def wait_price(value, table: list[dict], market_date: str) -> tuple[float | None
     except ValueError as exc:
         return None, f"等价格需要可测算的三情景估值：{exc}"
     price = calc["v2"]["support_below"]
+    if price is None or price <= 0:
+        shown = "无" if price is None else f"{price:.2f} 元"
+        return price, (f"期望回报门槛价（{shown}）非正数，等价格不成立："
+                       "请选择现在分批或回避，并说明依据与风险")
     if calc["close"] <= price:
         return price, (f"现价 {calc['close']:g} 元已不高于期望回报门槛价 {price:.2f} 元，等价格不成立："
                        "请选择现在分批或回避，并说明依据与风险")

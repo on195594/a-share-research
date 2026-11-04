@@ -12,7 +12,7 @@ import pytest
 
 from a_share_research import db, evidence, research, sources
 from a_share_research.material import mdna_pages
-from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, ROUND_LIMIT, _fetches
+from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, REPAIR_TOOLS, ROUND_LIMIT, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from support.reports import MATERIAL, SALES_ROW, report
 from test_review_evidence import BODY, REVIEW, captured_registry, issue, payload, accept, pending_ledger
@@ -97,7 +97,7 @@ def test_review_missing_previous_page_can_acquire_repair_and_close_with_new_bind
     resolved = ledger.snapshot()['issues'][0]
     assert resolved['material_sha256'] == old_hash and resolved['reviewed_material_sha256'] == latest
     assert ledger.rounds[-1]['material_sha256'] == latest
-    assert set(runner.offered[1]) == {'disclosures', 'announcements', 'read_disclosure', 'calculate'}
+    assert set(runner.offered[1]) == REPAIR_TOOLS
 
 
 def test_already_read_evidence_only_needs_citation_repair_without_fetch(session):

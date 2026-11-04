@@ -86,7 +86,9 @@ def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server):
     from datetime import datetime
     conn, client, url, *_ = server
     month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
-    assert requests.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).status_code == 401
+    unauth = requests.Session()
+    unauth.trust_env = False
+    assert unauth.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).status_code == 401
     result = client.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).json()
     assert result['created'] and result['batch']['status'] == 'queued'
     assert not client.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).json()['created']

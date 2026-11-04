@@ -82,6 +82,20 @@ def test_wait_price_is_program_owned_and_must_be_coherent():
     assert low is not None and high is not None and high > price > low
 
 
+def test_wait_price_rejects_non_positive_hurdle():
+    zero_val = deepcopy(assumptions())
+    for s in zero_val['scenarios'].values():
+        s['profit'] = [0, 0, 0]
+    zero_val['payout_pct'] = 0
+    price, problem = stance.wait_price(zero_val, BODY['table'], BODY['market_date'])
+    assert price == 0 and problem == "期望回报门槛价（0.00 元）非正数，等价格不成立：请选择现在分批或回避，并说明依据与风险"
+    wait = {'action': '等价格', 'text': '期望回报尚未达到门槛。', 'cites': [{'ref': 'T.op_cash', 'period': '2026-06-30'}]}
+    probs = stance_problems(wait, valuation_value=zero_val)
+    assert probs == ["期望回报门槛价（0.00 元）非正数，等价格不成立：请选择现在分批或回避，并说明依据与风险"]
+    now = {'action': '现在分批', 'text': '分批建仓。', 'cites': [{'ref': 'T.op_cash', 'period': '2026-06-30'}]}
+    assert stance_problems(now, valuation_value=zero_val) == []
+
+
 def test_stance_text_figures_still_need_sources():
     draft = report()
     draft['stance']['text'] = '经营现金流需恢复到888.88亿元以上。'
