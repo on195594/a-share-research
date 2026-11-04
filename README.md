@@ -57,7 +57,9 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## 报告阅读
 
-研究员可自主调用 `commodities(exchange)` 查 SHFE/DCE/CZCE/INE/GFEX 品种代码，`commodity(code)` 取主力连续收盘及 20/60/120 个交易日变化，`macro(series, count=12)` 取 `pmi/money/financing/lpr/shibor/cpi/ppi` 最近 1–24 期。原始 `X.*` 与计算 `C.*` 行随报告 table 保存，均可按 `{ref, period}` 引用，API 与网页同源；期货换月未复权，不能当作现货或投资收益。外部条件接口按上海日期缓存当日快照；LPR 上游每小时一次。行业行情、估值分位及新闻接口因账号权限暂不可用。
+研究员可自主调用 `commodities(exchange)` 查 SHFE/DCE/CZCE/INE/GFEX 品种代码，`commodity(code)` 取主力连续收盘及 20/60/120 个交易日变化，`macro(series, count=12)` 取 `pmi/money/financing/lpr/shibor/cpi/ppi` 最近 1–24 期。原始 `X.*` 与计算 `C.*` 行随报告 table 保存，均可按 `{ref, period}` 引用，API 与网页同源；期货换月未复权，不能当作现货或投资收益。外部条件接口按上海日期缓存当日快照；LPR 上游每小时一次。新闻接口因账号权限暂不可用。
+
+`industry_trend(code, level="l2")` 用当前申万成分合成近 20/60/120 交易日行业趋势（可选 l1/l2/l3）：等权个股复权收益中位数、起点流通市值加权收益、上涨占比、中证800价格指数收益及本公司复权收益，差额通过 calculate 返回 C.*。正 PE_TTM 中位数及近五年 60 个已完成月份月末分位共用全市场 `daily/adj_factor/daily_basic` 历史缓存。按截至昨日的最新交易日取截面；当前成分回看存在幸存者偏差，缺失行情及非正/缺失估值不填零，覆盖名单、API/参数、交易日和原始输入随 X.* 保存并可复算；中证800价格指数不含分红再投资。冷缓存约 76 次调用，后续同日查询复用缓存；暂不提供行业间轮动排名。
 
 新报告 `stance.action` 只取 现在分批 / 等价格 / 回避；现在分批可带 `add_trigger: {metric, period, op, value}`，下一期披露阈值只是加仓参考，不阻止首批。`stance_calc` 冻结该字段。历史 等证据/trigger 不迁移，仍可读、显示和由 `validation --stances` 记分。检查点状态与入场至今相对中证800全收益超额同时展示，完整口径见 [V4](docs/judgment-validation.md#v4-研究立场与等待代价2026-11-04)。
 

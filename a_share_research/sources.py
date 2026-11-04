@@ -31,7 +31,7 @@ TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[�
 
 FINANCIAL_APIS = {"fina_indicator", "income", "cashflow", "fina_audit", "balancesheet"}
 HISTORICAL_APIS = {"daily", "daily_basic", "adj_factor", "index_daily", "stk_limit", "suspend_d", "trade_cal", "report_rc"}
-CONDITION_APIS = {"fut_basic", "fut_mapping", "fut_daily", "cn_pmi", "cn_m", "sf_month",
+CONDITION_APIS = {"index_member_all", "fut_basic", "fut_mapping", "fut_daily", "cn_pmi", "cn_m", "sf_month",
                   "shibor", "shibor_lpr", "cn_cpi", "cn_ppi"}
 _condition_last_call = 0.0
 REPORT_RC_DAILY_BUDGET = 8
@@ -166,6 +166,7 @@ def tushare_query(pro, api: str, **params) -> pd.DataFrame:
     """Cache historical raw responses, before a-stock-lib normalizes dates and numbers."""
     cached = _tushare_cached(api, params)
     if cached is not None:
+        cached.attrs["cache_hit"] = True
         return cached
     if api == "report_rc":
         _reserve_report_rc_call()

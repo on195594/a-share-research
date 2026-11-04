@@ -201,6 +201,19 @@ def citation_errors(cites, registry, table):
         return ["出处必须是对象数组"]
     errors = []
     rows = {r["id"]: r for r in table}
+    pending = [c.get("ref") for c in cites if isinstance(c.get("ref"), str)]
+    linked = {}
+    while pending:
+        ref = pending.pop()
+        if ref in linked or ref not in rows:
+            continue
+        linked[ref] = rows[ref]
+        pending.extend(i["ref"] for i in rows[ref].get("calculation", {}).get("inputs", []) if "ref" in i)
+    from a_share_research.industry import validate_rows
+    try:
+        validate_rows(list(linked.values()), table)
+    except ValueError as exc:
+        errors.append(str(exc))
     for cite in cites:
         if "ref" in cite:
             if any(k in cite for k in ("source", "page", "quote")) or (cite.get("period") is not None and not isinstance(cite["period"], str)):

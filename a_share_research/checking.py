@@ -47,8 +47,22 @@ def _checked_figures(text: str, material: Material, cites=()) -> list[tuple[floa
     # the cited calculation's actual stored daily series; never whitelist the numeral.
     rows = {r["id"]: r for r in material.table}
     windows = set()
-    for cite in cites:
-        calc = rows.get(cite.get("ref"), {}).get("calculation", {})
+    pending = [c.get("ref") for c in cites if isinstance(c.get("ref"), str)]
+    visited = set()
+    while pending:
+        ref = pending.pop()
+        if ref in visited:
+            continue
+        visited.add(ref)
+        row = rows.get(ref, {})
+        source = row.get("source", {})
+        if source.get("api") == "industry_constituents" and source.get("window"):
+            sessions = source.get("sessions", [])
+            if (len(sessions) == source["window"] + 1 and sessions[0] == source["start"]
+                    and sessions[-1] == source["end"]):
+                windows.add(source["window"])
+        calc = row.get("calculation", {})
+        pending.extend(i["ref"] for i in calc.get("inputs", []) if "ref" in i)
         inputs = calc.get("inputs", [])
         if calc.get("operation") != "change_pct" or len(inputs) != 2:
             continue
