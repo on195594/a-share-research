@@ -345,7 +345,8 @@ def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
     v2 = calc["v2"]
     rows = {r["id"]: r for r in table}
     inputs = [{"ref": ref, "period": market_date, "label": rows[ref]["label"],
-               "value": rows[ref].get("exact_values", rows[ref]["values"]).get(market_date, rows[ref]["values"][market_date]),
+               # Displayed table value; the price itself is computed from the exact cell above.
+               "value": rows[ref]["values"][market_date],
                "unit": rows[ref]["unit"]} for ref in ("M.close", "M.total_mv")]
     n = sum(r["id"].startswith("C.") for r in table)
     common = {"operation": PROGRAM_OPERATION, "inputs": inputs, "valuation": priced,
