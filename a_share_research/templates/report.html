@@ -83,7 +83,8 @@
     <p class="question">{{ feedback.text if feedback else (body.question or '未记录专门问题，以下为已保存的回答。') }}</p>
     {% if body.parent_report_id %}<p><a href="/reports/{{ body.parent_report_id }}">查看原报告</a></p>{% endif %}
     {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。</p>{% endif %}
-    {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", focus, limit=4) }}
+    {# A continuation states each old risk/checkpoint at the end of the answer; never fold those away. #}
+    {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", focus, limit=0 if body.prior else 4) }}
   </section>
   {% endif %}
   {% if content.checkpoints %}

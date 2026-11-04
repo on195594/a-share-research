@@ -343,6 +343,24 @@ def comparison(conn, report) -> dict:
     old_rows, new_rows = before.get('table'), body.get('table')
     if not isinstance(old_rows, list) or not isinstance(new_rows, list) or not old_rows or not new_rows:
         return result | {'reason': '至少一份报告未记录财务表，无法计算指标变化。'}
+    return result | table_comparison(old_rows, new_rows)
+
+
+def table_comparison(old_rows: list, new_rows: list) -> dict:
+    """Deterministic diff of two saved financial tables, plus what could not be compared.
+
+    Only rows that since_prior() compares count: T.* statement rows and valuation snapshots.
+    C.* calculations are numbered per report and peer rows belong to other companies, so they
+    are neither "missing" nor "excluded"; a malformed row of unknown identity is still reported
+    as excluded. A T.* period the new table no longer keeps is listed
+    as a period rather than as every indicator that shares it.
+    """
+    def compared(row):
+        if not (isinstance(row, dict) and isinstance(row.get('id'), str)):
+            return True  # unknown identity: surfaced as excluded, never silently dropped
+        return row['id'].startswith('T.') or row['id'] in VALUATION
+    old_rows = [r for r in old_rows if compared(r)]
+    new_rows = [r for r in new_rows if compared(r)]
     # K2's deterministic comparison assumes identical row semantics. Exclude mismatched
     # units/labels and incomplete legacy rows instead of comparing unlike quantities.
     def valid(row):
@@ -359,13 +377,15 @@ def comparison(conn, report) -> dict:
     old_table = [r for key, r in old_map.items() if key not in incompatible]
     new_table = [r for key, r in new_map.items() if key not in incompatible]
     if not old_table or not new_table:
-        return result | {'reason': '缺少口径完整且可比较的指标，不能计算变化。', 'excluded': excluded}
+        return {'reason': '缺少口径完整且可比较的指标，不能计算变化。', 'excluded': excluded}
     diff = since_prior(old_table, new_table)
     # Empty market snapshots are missing observations, not comparable values.
     diff['valuation'] = [v for v in diff['valuation'] if v['before'] and v['after']]
-    missing = sorted({r['label'] for r in old_table if r['id'] not in new_map or
-                      set(r['values']) - set(new_map[r['id']]['values'])})
-    return result | {'diff': diff, 'excluded': excluded, 'missing': missing}
+    # Valuation rows are keyed by market date, so a later snapshot never "drops" the older date.
+    missing = sorted({r['label'] for r in old_table if r['id'] not in new_map})
+    dropped = sorted({p for r in old_table if r['id'].startswith('T.') and r['id'] in new_map
+                      for p in set(r['values']) - set(new_map[r['id']]['values'])})
+    return {'diff': diff, 'excluded': excluded, 'missing': missing, 'dropped': dropped}
 
 
 # Card check-up: saved financial-table rows grouped by what they tell a reader. No scores, no
@@ -423,6 +443,8 @@ def card(report, body: dict, last_passed=None) -> dict:
     bucket = verdict or '复核未通过'  # the same buckets as the home verdict strip
     created_at = report.get('created_at') or ''
     coverage = report.get('coverage') or (latest or report.get('period'))
+    continued = body.get('prior')
+    continued = continued if isinstance(continued, dict) else {}
     period_label = (f"{latest[2:4]}年{charts.CUMULATIVE.get(latest[5:], latest[5:])}"
                     if latest and len(latest) >= 7 and latest[:4].isdigit() else (latest or None))
     return {'id': report['id'], 'code': report['code'], 'name': report['name'], 'passed': passed,
@@ -431,7 +453,9 @@ def card(report, body: dict, last_passed=None) -> dict:
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
             'period': period_label, 'created_at': created_at, 'coverage': coverage,
-            'market_date': day, 'last_passed': dict(last_passed) if last_passed else None}
+            'market_date': day, 'last_passed': dict(last_passed) if last_passed else None,
+            # A continuation's answer restates the prior report's risks and checkpoints with sources.
+            'prior': continued if passed and isinstance(continued.get('report_id'), int) else None}
 
 
 VALUATION = ("M.pe_ttm", "M.pb", "M.dv_ttm")

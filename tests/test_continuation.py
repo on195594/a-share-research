@@ -171,3 +171,76 @@ def test_since_prior_lists_indicators_the_earlier_report_never_collected():
     # Report 4 predates the growth and margin rows; report 10 has them for periods report 4 already covered.
     assert change["uncollected"] == ["营业收入同比", "归母净利同比", "扣非净利同比", "毛利率", "加权ROE", "资产负债率"]
     assert change["backfilled"] == ["2025-06-30"] and change["revised"] == []
+
+
+def test_table_comparison_counts_only_compared_rows_on_real_continuations():
+    # Production K2 pairs: 五粮液 6→40 (half year → Q3), 40→42 and 万华 41→44 (same-period reruns).
+    wly = json.loads((ROOT / "tests/data/since-prior-000858.json").read_text())["tables"]
+    wh = json.loads((ROOT / "tests/data/since-prior-600309.json").read_text())["tables"]
+    cases = {(6, 40): (wly["6"], wly["40"], ["2026-06-30"]), (40, 42): (wly["40"], wly["42"], ["2025-09-30"]),
+             (41, 44): (wh["41"], wh["44"], [])}
+    for pair, (old, new, dropped) in cases.items():
+        result = reading.table_comparison(old, new)
+        # Valuation rows are keyed by market date and C.* rows are numbered per report: neither is "missing".
+        assert result["missing"] == [] and result["excluded"] == [], pair
+        # A T.* period the new table no longer keeps is one period, not every indicator sharing it.
+        assert result["dropped"] == dropped, pair
+        assert result["diff"]["revised"] == [], pair
+        assert {v["label"] for v in result["diff"]["valuation"]} == {"市盈率TTM", "市净率", "股息率TTM"}, pair
+    # The noise was real: per-report calculations reuse ids with different labels across reports.
+    assert {r["label"] for r in wly["40"] if r["id"] == "C.1"} != {r["label"] for r in wly["42"] if r["id"] == "C.1"}
+    # Mutation: a genuinely absent statement row and a changed same-period value still surface.
+    new = [dict(r) for r in wly["42"] if r["id"] != "T.inventory"]
+    row = next(r for r in new if r["id"] == "T.revenue")
+    period = next(p for p in row["values"] if p in next(r for r in wly["40"] if r["id"] == "T.revenue")["values"])
+    row["values"] = row["values"] | {period: "1"}
+    result = reading.table_comparison(wly["40"], new)
+    assert result["missing"] == ["存货"] and [r["period"] for r in result["diff"]["revised"]] == [period]
+    # Mutation: a T.* row whose unit changed is excluded rather than compared.
+    new = [dict(r, unit="万元") if r["id"] == "T.revenue" else r for r in wly["42"]]
+    assert reading.table_comparison(wly["40"], new)["excluded"] == ["营业总收入"]
+
+
+def test_comparison_page_does_not_announce_valuation_moves_as_changes(tmp_path):
+    conn = db.connect(tmp_path / "app.db")
+    load(conn)
+    for report_id in (9, 11, 39):
+        comparison = reading.comparison(conn, conn.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone())
+        assert comparison["missing"] == [], report_id  # was M.*, peer and C.* labels before
+        assert comparison["diff"]["valuation"] and not comparison["diff"]["revised"]
+        html = render("_comparison.html", comparison=comparison)
+        assert "项同口径数值修订" not in html and "项变动" not in html and "<details open" not in html
+        assert "估值快照" in html
+    conn.close()
+
+
+def test_continuation_answer_is_never_folded_and_company_card_links_to_it(tmp_path):
+    conn = db.connect(tmp_path / "app.db")
+    load(conn)
+    record = next(r["report"] for r in RECORDS if r["report"]["id"] == 39)
+    comparison = reading.comparison(conn, conn.execute("SELECT * FROM reports WHERE id=39").fetchone())
+    conn.close()
+
+    def answer_section(body):
+        html = render("report.html", report=record, body=body, feedback=None, feedback_label="", replay_of=None,
+                      rows={r["id"]: r for r in body["table"]}, price=None, followups=[], comparison=comparison,
+                      market=[], fin=[r for r in body["table"] if r["id"].startswith("T.")])
+        start = html.index('<section id="answer"')
+        return html[start:html.index('</section>', start)]
+    # 39 continues 37 with 8 answer items; the old-agenda statuses at the end stay visible.
+    body = record["body"]
+    assert len(body["answer"]) > 5 and body["prior"]["report_id"] == 37
+    assert "展开其余" not in answer_section(body)
+    # Mutation: the same answer without a continuation still folds after four items.
+    plain = {k: v for k, v in body.items() if k != "prior"}
+    assert "展开其余 4 条" in answer_section(plain)
+    # The company card links to the continuation answer only when the report continued an earlier one.
+    assert reading.card(record, body)["prior"]["report_id"] == 37
+    assert reading.card(record, plain)["prior"] is None
+    assert reading.card(record | {"passed": 0}, body)["prior"] is None
+    card = reading.card(record, body) | {"coverage": "2026-06-30", "created_at": record["created_at"]}
+    meta = {**record, "replay_of": None, "question": body.get("question"), "parent_report_id": None,
+            "feedback_text": None, "prior_report_id": 37}
+    stock = render("stock.html", reports=[meta], code=record["code"], vitals=None, vitals_report=None,
+                   comparison=comparison, price=None, track=None, due=None, card=card)
+    assert f'href="/reports/39#answer">相对上次（资料至 {body["prior"]["period"]}）的风险与检查点复核' in stock
