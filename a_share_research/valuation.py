@@ -320,3 +320,59 @@ def consensus(rows: list[dict], years: list[int], as_of: str, *, coverage=None) 
     return _json_numbers({"status": status, "years": result, "coverage":
                           {key: coverage[key] for key in ("trading_days", "covered_days", "truncated_days")}
                           if coverage is not None else None})
+
+
+PRICING_FIELDS = ("basis", "years", "scenarios", "payout_pct")
+PROGRAM_OPERATION = "valuation_v2"
+
+
+def pricing_inputs(value) -> dict | None:
+    """The fields that determine program prices; rationale wording can change without repricing."""
+    return {k: deepcopy(value.get(k)) for k in PRICING_FIELDS} if isinstance(value, dict) and "not_priced" not in value else None
+
+
+def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
+    """Citable C.n rows for the v2 hurdle price and expected return of these exact scenarios.
+
+    They are the same numbers the report page shows after review, frozen with the pricing inputs
+    so a later draft that changes the scenarios cannot keep citing them (see checking).
+    """
+    priced = pricing_inputs(value)
+    if priced is None:
+        raise ValueError("valuation 须为三情景对象（basis、years、scenarios、payout_pct）；not_priced 不测算价格")
+    # Rationale is checked in the report itself; a draft may price its scenarios before writing it.
+    calc = compute(priced | {"rationale": [{"text": "valuation 工具测算", "cites": []}]}, table, market_date)
+    v2 = calc["v2"]
+    rows = {r["id"]: r for r in table}
+    inputs = [{"ref": ref, "period": market_date, "label": rows[ref]["label"],
+               "value": rows[ref].get("exact_values", rows[ref]["values"]).get(market_date, rows[ref]["values"][market_date]),
+               "unit": rows[ref]["unit"]} for ref in ("M.close", "M.total_mv")]
+    n = sum(r["id"].startswith("C.") for r in table)
+    common = {"operation": PROGRAM_OPERATION, "inputs": inputs, "valuation": priced,
+              "exit_date": calc["exit_date"], "horizon_years": calc["horizon"],
+              "precision": f"按 {RULE_V2} 规则以 40 位十进制精度计算，显示四舍五入到两位；三情景利润、退出倍数、派息率与概率是研究员假设"}
+    hurdle = Decimal(str(v2["support_below"]))
+    annual = Decimal(str(v2["annual_return"])) * 100
+    formula = "Σ概率×(退出市值+两年分红)"
+    return [
+        {"id": f"C.{n + 1}", "label": f"期望回报门槛价（{RULE_V2}，期望年化{calc['r'] * 100:g}%）", "unit": "元",
+         "values": {"result": str(hurdle.quantize(Decimal("0.01")))}, "exact_values": {"result": str(hurdle)},
+         "calculation": common | {"formula": f"收盘价 × {formula} ÷ (总市值 × (1 + {calc['r']:g})^持有年数)"}},
+        {"id": f"C.{n + 2}", "label": f"按收盘价的期望年化回报（{RULE_V2}）", "unit": "%",
+         "values": {"result": str(annual.quantize(Decimal("0.01")))}, "exact_values": {"result": str(annual)},
+         "calculation": common | {"formula": f"(({formula} ÷ 总市值)^(1 ÷ 持有年数) − 1) × 100"}},
+    ]
+
+
+def program_summary(value, table: list[dict], market_date: str) -> dict | None:
+    """What the report page will show for this draft's valuation, for the reviewer and the repair writer."""
+    if pricing_inputs(value) is None or problems(value, table):
+        return None
+    try:
+        calc = compute(value, table, market_date)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    v2 = calc["v2"]
+    return {"rule": RULE_V2, "close": calc["close"], "hurdle_price": round(v2["support_below"], 2),
+            "expected_annual_return_pct": round(v2["annual_return"] * 100, 2), "zone": v2["zone"],
+            "stretched_price": round(v2["stretched_above"], 2), "conservative_support_price": round(calc["zones"]["support_below"], 2)}

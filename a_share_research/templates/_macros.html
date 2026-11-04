@@ -36,10 +36,13 @@
       {% if r %}<li><span class="tag">{{ "程序计算" if r.calculation else ("外部数据" if r.source and r.source.api else "财务表") }}</span>{{ r.label }}（{{ r.unit }}）：{% for p, v in r["values"].items() %}{% if not c.period or c.period == p %}<span class="num">{{ '结果' if p == 'result' else p }} {{ v }}</span> {% endif %}{% endfor %}
         {% if r.source and r.source.api %}<p class="muted small">来源：{{ r.source.provider }} {{ r.source.api }} · {{ r.source.field }}；查询 {{ r.source.params }}；取得于 {{ r.source.retrieved_at }}。</p>{% endif %}
         {% if r.calculation %}
+        {% if r.calculation.operation == 'valuation_v2' %}<p>按本报告三情景估值测算：{{ r.calculation.formula }}（退出日 {{ r.calculation.exit_date }}）</p>
+        {% else %}
         {% set operands = r.calculation.normalized_inputs %}
         {% if not operands and r.calculation.inputs[0].unit == r.calculation.inputs[1].unit %}{% set operands = r.calculation.inputs %}{% endif %}
         {% if operands %}<p>计算输入统一为{{ operands[0].unit }}：{{ r.calculation.formula | replace('left', operands[0].value) | replace('right', operands[1].value) }}</p>
         {% else %}<p>原始输入单位不同；该历史记录未保存换算后的操作数，故不展示代入算式。</p>{% endif %}
+        {% endif %}
         <p>{% for value in r.calculation.inputs %}{{ value.label or rows[value.ref].label }}（{{ value.source ~ '第' ~ value.page ~ '页·' if value.source and value.page else '' }}{{ value.period }}）= {{ value.value }} {{ value.unit }}{% if not loop.last %}；{% endif %}{% endfor %}</p><p>{{ r.calculation.precision }}</p>{% endif %}
       </li>{% endif %}
     {% else %}

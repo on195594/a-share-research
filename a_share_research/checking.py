@@ -141,6 +141,24 @@ def _candidates(cites: list[dict], material: Material) -> list[float]:
     return values
 
 
+def _stale_valuation(cites: list[dict], material: Material, value) -> list[str]:
+    """Program valuation rows (directly or through a calculation) must price this draft's scenarios."""
+    rows = {r["id"]: r for r in material.table}
+    current = valuation.pricing_inputs(value)
+    stale, seen = [], set()
+    pending = [c.get("ref") for c in cites if isinstance(c.get("ref"), str)]
+    while pending:
+        ref = pending.pop()
+        if ref in seen or ref not in rows:
+            continue
+        seen.add(ref)
+        calc = rows[ref].get("calculation") or {}
+        if calc.get("operation") == valuation.PROGRAM_OPERATION and calc.get("valuation") != current:
+            stale.append(ref)
+        pending.extend(i["ref"] for i in calc.get("inputs", []) if "ref" in i)
+    return sorted(stale)
+
+
 def quote_found(cite: dict, material: Material) -> bool:
     return bool(evidence.quote_match(cite, material.source_registry()))
 
@@ -211,6 +229,11 @@ def check(report: dict, material: Material) -> list[dict]:
             errors = evidence.citation_errors(cites, registry, material.table)
             problems += [{"where": where, "problem": error, "type": "citation_calculation"} for error in errors]
             if errors:
+                continue
+            if stale := _stale_valuation(cites, material, report.get("valuation")):
+                problems.append({"where": where, "type": "citation_calculation", "problem":
+                                 f"{'、'.join(stale)} 按另一组估值情景测算，与本稿 valuation 的 basis/years/scenarios/payout_pct 不一致；"
+                                 "请按最终 valuation 重新调用 valuation 工具并引用新行"})
                 continue
             candidates = _candidates(cites, material)
             for value, decimals in _checked_figures(str(item.get("text", "")), material, cites):

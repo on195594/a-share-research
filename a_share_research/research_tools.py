@@ -7,7 +7,7 @@ import time
 from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP
 
-from a_share_research import db, sources, evidence
+from a_share_research import db, sources, evidence, valuation as valuations
 from a_share_research.checking import quote_found
 from a_share_research.material import financial_table
 from a_share_research.prompts import RULES, output_schema, parse_json
@@ -48,6 +48,8 @@ TOOLS = [
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
                     "required": ["code"], "additionalProperties": False}},
+    {"name": "valuation", "description": "按拟定的三情景估值（与报告 valuation 同格式，rationale 可暂缺）由程序测算，生成两条可引用的 C.n：期望回报门槛价（元）与按收盘价的期望年化回报（%），与报告页随结论展示的 valuation-v2 结果相同。用于回答参考价格、判断等价格是否成立；正文引用这些数字时，最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动情景后须重新测算。",
+     "parameters": {"type": "object", "properties": {"valuation": {"type": "object"}}, "required": ["valuation"], "additionalProperties": False}},
     {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。表格输入优先使用未舍入值；label 仅记录计算目的，结果按运算类型命名，财务含义须结合输入出处解释。left/right 可传表格或前序计算行 {ref, period(引用 C.n 时可省略)}，或直接传已读披露原文中的原数 {source, page, quote, value, unit, period(可选), label(可选)}（value 必须与 quote 中的数字及正负号完全一致，元/千元/万元/百万元/亿元可自动换算）。growth_pct 要求同指标相邻年度同月日同比且基期为正；change_pct 用于环比、期末较期初、跨多年累计、预实偏离或同业相对变动率（(left/right - 1)*100，要求基数为正且同单位或同为货币单位）；difference/sum/ratio/ratio_pct 要求同单位或同为货币单位。",
      "parameters": {"type": "object", "properties": {
          "label": {"type": "string"},
@@ -427,8 +429,13 @@ class ResearchTools:
         self.material.table.append(row)
         return row
 
+    def valuation(self, valuation: dict):
+        rows = valuations.program_rows(valuation, self.material.table, self.material.market_date)
+        self.material.table.extend(rows)
+        return rows
 
-REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate", "macro", "commodities", "commodity", "industry_trend"}
+
+REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate", "valuation", "macro", "commodities", "commodity", "industry_trend"}
 
 # The 601600 external-condition smoke needed more than 24 ordinary evidence fetches.
 FETCH_LIMIT = 48  # runaway guard; time, rounds and total calls still bound exploration
@@ -436,10 +443,11 @@ FETCH_LIMIT = 48  # runaway guard; time, rounds and total calls still bound expl
 # research, report 83, hit round_limit mid-repair), so it is a runaway guard, not a depth quota.
 ROUND_LIMIT = 18
 CALL_LIMIT = 72  # runaway guard only, so calculations cannot swell the prompt without bound
+COMPUTE_TOOLS = {"calculate", "valuation"}  # program arithmetic on held evidence, not evidence fetches
 
 
 def _fetches(traces: list[dict]) -> int:
-    return sum(t["tool"] != "calculate" for t in traces)
+    return sum(t["tool"] not in COMPUTE_TOOLS for t in traces)
 
 
 def record_stop(material, reason, stage="explore"):
@@ -494,7 +502,7 @@ class Acquisition:
     def tool_result(self, call, stage):
         name, args = call["name"], call.get("arguments")
         reason = self.stopped()
-        if not reason and name != "calculate" and _fetches(self.traces) >= FETCH_LIMIT:
+        if not reason and name not in COMPUTE_TOOLS and _fetches(self.traces) >= FETCH_LIMIT:
             reason = "fetch_limit"
         if reason:
             record_stop(self.material, reason, stage)
@@ -524,7 +532,7 @@ class Acquisition:
             log.warning("run %s tool %s: %s", self.runner.run_id, name, exc, exc_info=True)
             # A rejected calculation is the model's own correctable input, already returned to it
             # as an actionable error; it is not missing evidence, so it never becomes a report gap.
-            gap = None if name == "calculate" else f"{name}：{exc}"
+            gap = None if name in COMPUTE_TOOLS else f"{name}：{exc}"
             if gap and gap not in self.material.extra["gaps"]:
                 self.material.extra["gaps"].append(gap)
         self.traces.append({"tool": name, "arguments": args, "result": result, "error": failed,

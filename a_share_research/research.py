@@ -71,6 +71,17 @@ def compose(runner: Runner, material: Material) -> dict | None:
     return parse_json(runner.ask("compose", prompt))
 
 
+def program_valuation(report: dict | None, material: Material) -> str:
+    """The valuation the report page shows for this draft, so judgments about price use the program's numbers."""
+    summary = valuation.program_summary((report or {}).get("valuation"), material.table, material.market_date)
+    if summary is None:
+        return ""
+    return ("\n# 程序估值测算（按本稿 valuation 计算，通过复核后随结论在报告页展示）\n"
+            + json.dumps(summary, ensure_ascii=False)
+            + "\nhurdle_price 是期望回报门槛价（等价格所等的价格）。这是程序输出，不是报告论断：报告以它作为参考价格时，"
+              "text 不重复数字也已给出价格；text 写出的价格与回报数字仍须引用 valuation 工具生成的 C.n。\n")
+
+
 def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedger) -> list[dict]:
     prompt = f"""你是独立复核员。检查下面这份研究报告是否忠实于资料。
 
@@ -92,7 +103,7 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
 
 # 待复核的报告
 {json.dumps(report, ensure_ascii=False, indent=1)}
-
+{program_valuation(report, material)}
 # 资料
 {material.prompt_block()}"""
     registry, material_sha256 = material.source_registry(), material.snapshot()["sha256"]
@@ -236,7 +247,7 @@ def repair_prompt(material: Material, report: dict | None, problems: list[dict])
 
 # 原报告
 {original}
-
+{program_valuation(report, material)}
 # 资料
 {material.prompt_block()}"""
 
