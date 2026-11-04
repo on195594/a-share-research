@@ -12,7 +12,7 @@ import pytest
 
 from a_share_research import db, evidence, research, sources
 from a_share_research.material import mdna_pages
-from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, _fetches
+from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, ROUND_LIMIT, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from support.reports import MATERIAL, SALES_ROW, report
 from test_review_evidence import BODY, REVIEW, captured_registry, issue, payload, accept, pending_ledger
@@ -178,7 +178,7 @@ def test_repair_uses_remaining_budget_and_never_expands_it(session, limit):
         for _ in range(CALL_LIMIT):
             acquisition.tool_result(call, 'explore')
     elif limit == 'rounds':
-        acquisition.rounds = 12
+        acquisition.rounds = ROUND_LIMIT
     elif limit == 'time':
         acquisition.deadline = 0
     else:
@@ -352,6 +352,8 @@ def test_newly_read_evidence_invalidates_failed_calculation_without_resetting_li
     deadline = acquisition.deadline
     first, failed = acquisition.tool_result(call, 'explore')
     assert failed and len(acquisition.traces) == 1
+    # The model gets the actionable error; a rejected calculation is never a report gap.
+    assert not any(g.startswith('calculate') for g in material.extra['gaps'])
     material.extra['gaps'].append('仍待核查销售费用原文')
     repeated, failed = acquisition.tool_result(call, 'repair')
     assert failed and repeated == first and len(acquisition.traces) == 1
@@ -363,9 +365,16 @@ def test_newly_read_evidence_invalidates_failed_calculation_without_resetting_li
     assert acquisition.deadline == deadline
 
 
+def test_failed_acquisition_tool_still_becomes_a_gap(session):
+    # Mutation partner of the calculate exemption: only calculate is exempt.
+    _, material, acquisition = session
+    _, failed = acquisition.tool_result({'name': 'financials', 'arguments': {}}, 'repair')
+    assert failed and any(g.startswith('financials：') for g in material.extra['gaps'])
+
+
 def test_stop_state_is_saved_before_a_model_interruption(session):
     runner, material, acquisition = session
-    acquisition.rounds = 12
+    acquisition.rounds = ROUND_LIMIT
     runner.responses = [research.ResearchError('中断')]
     with pytest.raises(research.ResearchError, match='中断'):
         acquisition.write('保留停止原因', 'repair')
@@ -424,11 +433,11 @@ def test_patch_fallback_keeps_acquisition_budget_and_persisted_evidence(session)
     runner, material, acquisition = session
     material.pages.pop(9)
     material.raw_pages.pop(9)
-    acquisition.rounds = 11
+    acquisition.rounds = ROUND_LIMIT - 1
     deadline = acquisition.deadline
     runner.responses = [[read(9)], {'ops': 'invalid'}, report()]
     assert research.repair(runner, material, report(), [], acquisition=acquisition) == report()
-    assert acquisition.rounds == 12 and acquisition.deadline == deadline
+    assert acquisition.rounds == ROUND_LIMIT and acquisition.deadline == deadline
     assert runner.calls == 3 and runner.offered[-2:] == [[], []]
     assert len(acquisition.traces) == 1
     restored = research.replay_material(runner.conn, runner.run_id)

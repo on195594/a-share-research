@@ -93,3 +93,27 @@ def test_unavailable_and_partial_without_samples_show_coverage():
     comparison.update(status='partial', coverage={'trading_days': 2, 'covered_days': 1, 'truncated_days': []})
     html = page(body)
     assert '部分覆盖' in html and '覆盖 1/2 个交易日' in html and '未采集到符合日期' in html
+
+
+def test_v2_shadow_and_research_stance_render_with_program_price():
+    from a_share_research import research
+    body = calculated()
+    calc = body['valuation_calc']
+    body['stance'] = {'action': '等价格', 'text': '期望回报尚未达到门槛。',
+                      'cites': [{'ref': 'T.op_cash', 'period': '2026-06-30'}]}
+    body['stance_calc'] = research.stance_calc(body['stance'], calc, body['market_date'])
+    html = page(body)
+    assert '研究立场：<strong>等价格</strong>' in html
+    assert f'{calc["v2"]["support_below"]:.2f}</span> 元，有效至 {body["stance_calc"]["valid_until"]}' in html
+    assert f'期望年化 <span class="num">{calc["v2"]["annual_return"] * 100:.2f}%' in html
+    assert '<th scope="col" class="num">概率</th>' in html and '<td class="num">50.00%</td>' in html
+    body['stance'] = {'action': '等证据', 'text': '先看现金流。', 'cites': [],
+                      'trigger': {'metric': 'T.op_cash', 'period': '2026-09-30', 'op': '>=', 'value': 0}}
+    html = page(body)
+    label = next(r['label'] for r in body['table'] if r['id'] == 'T.op_cash')
+    assert f'（2026-09-30 {label} ≥ <span class="num">0</span>' in html
+    # Pre-v2 reports keep the v1 page unchanged: no probability column or stance block.
+    old = calculated()
+    old['valuation_calc'].pop('v2')
+    html = page(old)
+    assert '<th scope="col" class="num">概率</th>' not in html and '研究立场' not in html

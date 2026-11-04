@@ -27,14 +27,17 @@
     {% if calc.zones.inverted %}<p class="notice caution">支持区上界不低于透支区下界，区间倒置，不能据此划分区域。</p>
     {% else %}<p class="muted small">不高于支持区上界为测算支持区；不低于透支区下界为测算透支区；两者之间为中性区。</p>{% endif %}
     <p class="muted small">支持区按保守情景、年化门槛 {{ percent(calc.r) }} 计算；透支区按中性情景、年化门槛 {{ percent(calc.r_low) }} 计算。</p>
+    {% if calc.v2 %}
+    <p>按三情景概率加权（{{ calc.v2.rule }}，与上方并行记分）：期望年化 <span class="num">{{ percent(calc.v2.annual_return) }}</span>，<strong>{{ calc.v2.zone or '区间倒置' }}</strong>；期望回报门槛价 <span class="num">{{ number(calc.v2.support_below, ' 元') }}</span>，透支价 <span class="num">{{ number(calc.v2.stretched_above, ' 元') }}</span>。</p>
+    {% endif %}
 
     <h3>三种情景</h3>
     <p class="muted small">利润口径：{{ '扣非归母净利润' if calc.basis == 'core_profit' else '归母净利润' }}，单位亿元。退出倍数对应 {{ calc.years[-1] }} 年利润。</p>
     <div class="table-wrap" tabindex="0" role="region" aria-label="三种情景的利润、退出倍数与年化回报">
       <table>
-        <thead><tr><th scope="col">情景</th>{% for year in calc.years %}<th scope="col" class="num">{{ year }} 利润</th>{% endfor %}<th scope="col" class="num">退出倍数</th><th scope="col" class="num">年化回报</th></tr></thead>
+        <thead><tr><th scope="col">情景</th>{% for year in calc.years %}<th scope="col" class="num">{{ year }} 利润</th>{% endfor %}<th scope="col" class="num">退出倍数</th>{% if calc.v2 %}<th scope="col" class="num">概率</th>{% endif %}<th scope="col" class="num">年化回报</th></tr></thead>
         <tbody>{% for name in ['保守', '中性', '乐观'] %}{% set scenario = v.scenarios[name] %}
-          <tr><th scope="row">{{ name }}</th>{% for profit in scenario.profit %}<td class="num">{{ number(profit) }}</td>{% endfor %}<td class="num">{{ number(scenario.exit_pe, ' 倍') }}</td><td class="num">{{ percent(calc.scenarios[name].annual_return) }}</td></tr>
+          <tr><th scope="row">{{ name }}</th>{% for profit in scenario.profit %}<td class="num">{{ number(profit) }}</td>{% endfor %}<td class="num">{{ number(scenario.exit_pe, ' 倍') }}</td>{% if calc.v2 %}<td class="num">{{ percent(calc.v2.probabilities[name]) }}</td>{% endif %}<td class="num">{{ percent(calc.scenarios[name].annual_return) }}</td></tr>
         {% endfor %}</tbody>
       </table>
     </div>

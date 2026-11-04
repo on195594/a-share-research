@@ -93,7 +93,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 
 request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。
 单家与批量卡片共用数据库读取路径，沿用 Bearer 鉴权，不联网取数、不触发研究。订阅与 L5 重叠时 `origin` 为 `external`。
-卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，`valuation` 仍是对象，其中各测算字段为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径。
+卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，`valuation` 仍是对象，其中各测算字段为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径；带情景概率的报告另有 `valuation_calc.v2`（`rule`、`probabilities`、`annual_return`、`zone`），滚动后的 `current.valuation.v2` 另含 `support_below`/`stretched_above`，旧报告为 null。卡片另带 `stance`（`action` 为 现在分批/等价格/等证据/回避，及理由、出处，等证据另有 `trigger`）与程序冻结的 `stance_calc`（等价格的 `price`、`valid_until`；等证据的 `trigger`），旧报告两者为 null。
 滚动测算冻结退出市值与累计分红，假设股本不变；报告日后已发放的分红仍计入，存在约一年派息量级的已知高估。`待复核` 卡片仍保留数值并提示区间暂停解读。
 精简视图中的 `continuation` 区分生成日、财务覆盖期、行情日、披露与公告检索范围；`baseline_status` 明确区分可用、失败、未就绪、缺失等基线，并携带基线财报期、生成日、行情日和公告范围。表格差值复用网页同一 `reading.comparison` → `since_prior` 入口；`excluded/missing/reason` 保留单位、名称、旧格式和缺失值限制，不同累计期间不相减。精简视图额外要求两份报告均通过核查，否则不给 `diff`。失败时返回已有核查问题和缺口；异常中断尚未保存报告时仍读取已落盘材料中的缺口。全局预算为 `scope=configuration`，`model_calls_recorded=null`；有具体任务时为 `scope=run` 并携带 `run_id` 和该任务调用计数。
 
@@ -113,7 +113,7 @@ Skills 通过 `a-stock-cache research` 接入本 API，先复用旧报告，再�
 
 `--replay` 复用该快照重新执行成文、检查、复核和修复（包括修正阶段都不开放取证工具、不重新探索、不取数），保存为新任务；快照缺失、版本不支持、哈希或公司不一致时失败。重放报告在网页上标明来源，首页最新报告和“今日已研究”判断排除重放。
 
-报告（纠错除外）带 1–3 条下期检查点，其中至少 2 条带对下一期财务表数值的区间预测（`forecast`），披露后由判断记分命令兑现；以及情景测算输入（`valuation`：未来三年三情景利润、退出倍数、派息率与有出处的依据，或 `not_priced`），价格区间与回报由程序算入 `valuation_calc`，见[顾问闭环](#顾问闭环批次-a)；初筛批次对通过复核的候选统一执行 6 个月相对表现强制排序（`screening.rank`）构建半组模拟组合。主动研究同一家公司且未指定原报告时，自动带入最近一份通过复核、非重放、非纠错报告的风险与检查点（不带结论与摘要），要求在回答末尾说明各自本期状态；批次深挖不接续。规则与验收见[积累方案](docs/research-accumulation.md)。
+报告（纠错除外）带 1–3 条下期检查点，其中至少 2 条带对下一期财务表数值的区间预测（`forecast`），披露后由判断记分命令兑现；以及情景测算输入（`valuation`：未来三年三情景利润、退出倍数、情景概率、派息率与有出处的依据，或 `not_priced`），价格区间与回报由程序算入 `valuation_calc`；研究立场 `stance` 的记分输入由程序冻结为 `stance_calc`，见[顾问闭环](#顾问闭环批次-a)；初筛批次对通过复核的候选统一执行 6 个月相对表现强制排序（`screening.rank`）构建半组模拟组合。主动研究同一家公司且未指定原报告时，自动带入最近一份通过复核、非重放、非纠错报告的风险与检查点（不带结论与摘要），要求在回答末尾说明各自本期状态；批次深挖不接续。规则与验收见[积累方案](docs/research-accumulation.md)。
 
 ```bash
 DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research          # 建基线（评估集）
@@ -167,13 +167,14 @@ uv run --env-file .env python -m a_share_research.backtest --out DIR --start 201
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --forecasts [--json OUT]  # V1 预测记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --hypotheses [--json OUT] # V3 H1 避坑 / H3 读得快
+DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --stances [--json OUT]    # V4 研究立场兑现与等待代价
 ```
 
 ### 顾问闭环（批次 A）
 
 设计与验收见[顾问闭环方案](docs/investment-advisor.md)。
 
-- **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，共享 61 秒间隔与默认每日 8 次预算，按覆盖情况标 `partial` / `unavailable`）。
+- **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%；另有影子规则 `valuation-v2` 按情景概率加权给出期望年化与门槛价，A3 并行记分）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，共享 61 秒间隔与默认每日 8 次预算，按覆盖情况标 `partial` / `unavailable`）。
 - **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
 - **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码（Research 不存持仓标签），扫描范围另含最近冻结批次的 L5；`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回事件、失败与 `notify`，`GET /api/scans/weekly` 返回周报数据。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。

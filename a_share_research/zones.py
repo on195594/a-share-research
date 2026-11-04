@@ -28,6 +28,7 @@ METHOD = {
     "observation": "每规则连续区间首日；换报告但区间不变不新增。无收盘或无法判定的日子跳过，不开启也不中断连续段。",
     "return": "观测后的下一交易日收盘起算；起点缺价不顺延。收益复用 V0 复权价和中证800全收益。",
     "pe": "此前 1250 个交易日（不含当日）的正 PE，至少 250 个；分位=严格小于当日 PE 的样本数/有效样本数。<30%低位，>70%高位，其余中位。",
+    "v2": "valuation-v2（三情景概率加权期望回报）与 v1 用同一套观测与收益口径并行记分；只有带 v2 的报告才有 v2 观测，分歧与重叠统计仍只比较 v1 与 PE。",
     "disagreement": "两规则段首日的并集，按公司×观测日去重；当日支持区对高位，或透支区对低位才计分歧，中性和缺失不计。",
     "overlap": "同时为两规则段首日的比例；另按规则×期限统计同公司收益窗口与此前窗口相交（不含仅共用端点）的观测数及配对数。",
     "sample": "n 和公司数只计该期限可记分的观测；同时列出总观测及待记分数。财报期取报告财务表最新期。",
@@ -84,7 +85,7 @@ def observations(reports: list[dict], trade_days: list[str], closes: dict[str, f
     for report in sorted(reports, key=lambda r: (r["completed"], r["id"])):
         if entry := validation.entry_day(report["completed"], trade_days):
             schedule[entry] = report
-    active, by_day, valuations, percentiles = None, {}, {}, {}
+    active, by_day, valuations, percentiles, shadows = None, {}, {}, {}, {}
     next_day = dict(zip(trade_days, trade_days[1:]))
     for day in trade_days:
         active = schedule.get(day, active)
@@ -92,17 +93,22 @@ def observations(reports: list[dict], trade_days: list[str], closes: dict[str, f
             continue
         by_day[day] = active
         valuations[day] = zone_of(closes.get(day), active["valuation_calc"]["zones"])
+        v2 = active["valuation_calc"].get("v2")
+        shadows[day] = zone_of(closes.get(day), v2) if isinstance(v2, dict) else None
         # Both rules must be observable in the same report/price window.
         percentiles[day] = pe_labels.get(day) if day in closes else None
     rows = []
-    for labels, is_pe in ((valuations, False), (percentiles, True)):
+    for labels, kind in ((valuations, "v1"), (percentiles, "pe"), (shadows, "v2")):
         for day in first_days(labels):
             report = by_day[day]
-            rows.append({"report": report["id"], "code": report["code"], "name": report["name"],
-                         "source": report["source"], "period": report.get("period"),
-                         "rule": PE_RULE if is_pe else report["valuation_calc"]["rule"],
-                         "zone": labels[day], "observation": day, "entry": next_day.get(day),
-                         "valuation_zone": valuations[day], "pe_zone": percentiles[day]})
+            row = {"report": report["id"], "code": report["code"], "name": report["name"],
+                   "source": report["source"], "period": report.get("period"),
+                   "rule": {"pe": PE_RULE, "v2": valuation.RULE_V2}.get(kind, report["valuation_calc"]["rule"]),
+                   "zone": labels[day], "observation": day, "entry": next_day.get(day),
+                   "valuation_zone": valuations[day], "pe_zone": percentiles[day]}
+            if kind == "v2":
+                row["v2_zone"] = shadows[day]
+            rows.append(row)
     return sorted(rows, key=lambda r: (r["observation"], r["rule"]))
 
 
@@ -143,9 +149,13 @@ def summarize(rows: list[dict]) -> list[dict]:
 
 
 def diagnostics(rows: list[dict]) -> dict:
-    """Count opposing directions once per company/day, plus correlated observations."""
+    """Count opposing directions once per company/day, plus correlated observations.
+
+    v1-versus-PE metrics ignore v2 shadow rows; v2 only adds its own maturity and v1-difference counts.
+    """
+    shadow = [r for r in rows if r["rule"] == valuation.RULE_V2]
     days = {}
-    for row in rows:
+    for row in (r for r in rows if r["rule"] != valuation.RULE_V2):
         days.setdefault((row["code"], row["observation"]), []).append(row)
     paired = [group[0] for group in days.values() if group[0]["valuation_zone"] and group[0]["pe_zone"]]
     opposites = {("测算支持区", "分位高位"), ("测算透支区", "分位低位")}
@@ -165,7 +175,7 @@ def diagnostics(rows: list[dict]) -> dict:
                 heappush(previous, row["returns"][horizon]["date"])
             overlaps.append({"rule": rule, "horizon": horizon, "n": len(done),
                              "overlapping": count, "pairs": pairs})
-    matured = [r for r in rows if r["rule"] != PE_RULE and "120d" in r["returns"]]
+    matured = [r for r in rows if r["rule"] not in (PE_RULE, valuation.RULE_V2) and "120d" in r["returns"]]
     return {"observation_days": len(days), "comparable_days": len(paired),
             "disagreements": sum((r["valuation_zone"], r["pe_zone"]) in opposites for r in paired),
             "both_first_days": both, "both_first_share": both / len(days) if days else None,
@@ -174,7 +184,9 @@ def diagnostics(rows: list[dict]) -> dict:
             "unknown_period_observations": sum(r.get("period") is None for r in rows),
             "matured_120d": len(matured), "matured_120d_companies": len({r["code"] for r in matured}),
             "evidence": "证据不足" if len(matured) < 60 else "达到首次诊断观察门槛，仍不自动作有效性结论",
-            "return_overlap": overlaps}
+            "return_overlap": overlaps,
+            "v2_observations": len(shadow), "v2_differs_from_v1": sum(r["zone"] != r["valuation_zone"] for r in shadow),
+            "v2_matured_120d": sum("120d" in r["returns"] for r in shadow)}
 
 
 # ---------- data boundaries ----------
@@ -198,10 +210,13 @@ def load_reports(database: str) -> list[dict]:
         zones = calc.get("zones")
         if not isinstance(zones, dict) or zones.get("inverted") is not False:
             continue
+        v2 = calc.get("v2")
         bounds = [zones.get(key) for key in ("support_below", "stretched_above")]
+        if v2 is not None:
+            bounds += [v2.get(key) if isinstance(v2, dict) else None for key in ("support_below", "stretched_above")]
         if (not isinstance(calc.get("rule"), str) or not calc["rule"]
                 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
-                       for v in bounds) or bounds[0] > bounds[1]):
+                       for v in bounds) or bounds[0] > bounds[1] or (len(bounds) == 4 and bounds[2] > bounds[3])):
             raise ValueError(f"报告 #{report_id} valuation_calc 的规则或区间阈值无效")
         reports.append({"id": report_id, "code": code, "name": name, "source": src,
                         "completed": datetime.fromisoformat(created), "valuation_calc": calc,

@@ -10,7 +10,7 @@ from a_share_research import checking, prompts, research, reviewing, valuation
 from a_share_research.material import Material
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
-from support.valuation import BODY, ROWS, STORED, assumptions
+from support.valuation import BODY, ROWS, STORED, assumptions, with_probabilities
 
 
 def material():
@@ -22,7 +22,7 @@ def material():
 def test_at_reproduces_real_stored_compute_exactly(record):
     calc = record['valuation_calc']
     original = deepcopy(calc)
-    computed = valuation.compute(record['valuation'], record['table'], record['market_date'])
+    computed = valuation.compute(with_probabilities(record['valuation']), record['table'], record['market_date'])
     rolled = valuation.at(calc, calc['close'], calc['as_of'])
     assert rolled['annual_returns'] == {n: calc['scenarios'][n]['annual_return'] for n in valuation.SCENARIOS}
     assert rolled['annual_returns'] == {n: computed['scenarios'][n]['annual_return'] for n in valuation.SCENARIOS}
@@ -281,3 +281,52 @@ def test_neutral_dividend_sensitivity_preserves_real_roll_and_rejects_negative_c
     negative = valuation.at(calc, calc['close'], calc['as_of'])
     assert negative['neutral_return_without_dividends'] is None
     assert negative['annual_returns'] is not None
+
+
+def test_v2_expected_return_hand_calculation_and_v1_independence():
+    calc = valuation.compute(assumptions(), BODY['table'], BODY['market_date'])
+    # Worksheet (25/50/25): totals 302.90217, 327.911827, 319.697432 → expected 319.605814亿元.
+    h = 917 / 365.25
+    total = .25 * 302.90217 + .5 * 327.911827 + .25 * 319.697432
+    assert total == pytest.approx(319.605814)
+    v2 = calc['v2']
+    assert v2['rule'] == 'valuation-v2'
+    assert v2['probabilities'] == {'保守': .25, '中性': .5, '乐观': .25}
+    assert v2['annual_return'] == pytest.approx((total / 297.18) ** (1 / h) - 1, rel=1e-12)
+    assert v2['support_below'] == pytest.approx(36.03 * total / (297.18 * 1.1 ** h), rel=1e-12)
+    assert v2['stretched_above'] == pytest.approx(36.03 * total / (297.18 * 1.03 ** h), rel=1e-12)
+    assert v2['annual_return'] < .03 and v2['zone'] == '测算透支区'  # 2.9% expected < r_low, v1 says 中性区
+    assert calc['zone'] == '中性区'
+    # Mutation: moving probability changes only v2; every v1 field stays byte-identical.
+    shifted = valuation.compute(with_probabilities(assumptions(), (10, 30, 60)), BODY['table'], BODY['market_date'])
+    assert {k: v for k, v in shifted.items() if k not in ('v2',)} == {k: v for k, v in calc.items() if k not in ('v2',)}
+    assert shifted['v2']['annual_return'] != pytest.approx(v2['annual_return'])
+    # The expected-value line sits above v1's conservative-only line whenever the other cases are richer.
+    assert v2['support_below'] > calc['zones']['support_below']
+    json.dumps(calc, allow_nan=False)
+
+
+def test_v2_rolls_with_close_and_date_like_v1():
+    calc = valuation.compute(assumptions(), BODY['table'], BODY['market_date'])
+    same = valuation.at(calc, calc['close'], calc['as_of'])
+    numeric = ('annual_return', 'support_below', 'stretched_above')
+    assert {k: same['v2'][k] for k in numeric} == pytest.approx({k: calc['v2'][k] for k in numeric}, rel=1e-13)
+    assert {k: same['v2'][k] for k in ('rule', 'probabilities', 'zone')} == {
+        k: calc['v2'][k] for k in ('rule', 'probabilities', 'zone')}
+    cheap = valuation.at(calc, calc['v2']['support_below'] * .99, calc['as_of'])
+    assert cheap['v2']['zone'] == '测算支持区' and cheap['v2']['annual_return'] > .10
+    assert cheap['zone'] == '中性区'  # v1 still demands the conservative case alone clears 10%
+    later = valuation.at(calc, calc['close'], '2027-10-26')
+    assert later['v2']['support_below'] > calc['v2']['support_below']
+    # Stored pre-v2 reports keep rolling without inventing probabilities.
+    assert valuation.at(STORED[2]['valuation_calc'], 30, '2026-11-03')['v2'] is None
+
+
+@pytest.mark.parametrize('weights,needle', [((25, 50, 30), '之和须为 100'), ((0, 50, 50), '5–90'),
+                                            ((95, 3, 2), '5–90'), ((25.0, 50, 25), '整数'), (('25', 50, 25), '整数')])
+def test_v2_probability_contract(weights, needle):
+    draft = with_probabilities(assumptions(), weights)
+    assert any(needle in p for p in valuation.problems(draft, BODY['table']))
+    missing = assumptions()
+    del missing['scenarios']['乐观']['probability']
+    assert any('probability' in p for p in valuation.problems(missing, BODY['table']))

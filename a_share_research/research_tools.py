@@ -356,6 +356,9 @@ class ResearchTools:
 REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate"}
 
 FETCH_LIMIT = 24  # evidence-gathering tool calls per run; rounds, time and staleness bound the rest
+# Model turns shared by explore and repair. 12 stopped a normal repair in production (688578
+# research, report 83, hit round_limit mid-repair), so it is a runaway guard, not a depth quota.
+ROUND_LIMIT = 18
 CALL_LIMIT = 72  # runaway guard only, so calculations cannot swell the prompt without bound
 
 
@@ -408,7 +411,7 @@ class Acquisition:
             return "tool_limit"
         if self.stale >= 2:
             return "no_new_evidence"
-        if self.rounds >= 12:
+        if self.rounds >= ROUND_LIMIT:
             return "round_limit"
         return None
 
@@ -443,8 +446,10 @@ class Acquisition:
             failed, result = True, {"error": str(exc)}
             self.failures[failure_key] = result
             log.warning("run %s tool %s: %s", self.runner.run_id, name, exc, exc_info=True)
-            gap = f"{name}：{exc}"
-            if gap not in self.material.extra["gaps"]:
+            # A rejected calculation is the model's own correctable input, already returned to it
+            # as an actionable error; it is not missing evidence, so it never becomes a report gap.
+            gap = None if name == "calculate" else f"{name}：{exc}"
+            if gap and gap not in self.material.extra["gaps"]:
                 self.material.extra["gaps"].append(gap)
         self.traces.append({"tool": name, "arguments": args, "result": result, "error": failed,
                             "stage": stage, "seconds": round(time.monotonic() - started, 3)})

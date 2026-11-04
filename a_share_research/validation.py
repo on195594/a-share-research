@@ -1,4 +1,5 @@
-"""Judgment validation: V0 excess return after each report, V1 checkpoint forecast scoring (read-only, no model calls).
+"""Judgment validation: V0 excess return after each report, V1 checkpoint forecast scoring, V4 stance
+scoring (read-only, no model calls).
 
 Scores the verdicts already frozen in passed reports against the CSI 800 total-return index, from the
 close of the first full session after the report finished. Only the aggregate is meaningful; one
@@ -12,7 +13,7 @@ import statistics
 from contextlib import closing
 from datetime import date, datetime, time
 
-from a_share_research import forecasts, screening
+from a_share_research import forecasts, screening, stance as stances
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -124,6 +125,44 @@ def mark_first(items: list[dict]) -> list[dict]:
     return items
 
 
+def price_wait(lows: dict[str, float], price: float, entry: str, until: str, last: str) -> dict:
+    """等价格 outcome: first session from entry through `until` whose unadjusted low touched the price.
+
+    The price is in the report-day unadjusted basis; an ex-dividend inside the window lowers later lows by
+    the dividend, slightly favouring a hit. 'pending' while the window has not closed in the data.
+    """
+    end = min(until.replace("-", ""), last)
+    hit = next((d for d in sorted(lows) if entry <= d <= end and lows[d] <= price), None)
+    if hit:
+        return {"status": "hit", "date": hit}
+    return {"status": "missed" if last >= until.replace("-", "") else "pending"}
+
+
+def evidence_wait(trigger: dict, row: dict, today: date) -> dict:
+    """等证据 outcome from the disclosed financial table row (values are stored as text)."""
+    if not period_ended(trigger["period"], today):
+        return {"status": "pending"}
+    actual = (row.get("values") or {}).get(trigger["period"])
+    met = stances.met(trigger, actual)
+    if met is None:
+        return {"status": "pending", "reason": "目标期尚未披露或数值缺失"}
+    return {"status": "met" if met else "not_met", "actual": actual}
+
+
+def summarize_stances(rows: list[dict]) -> dict:
+    """Counts of wait outcomes plus each wait's V0 excess at the latest date (the cost or saving of waiting)."""
+    out = {}
+    for row in rows:
+        action, outcome = row["stance"], row.get("stance_outcome") or {}
+        group = out.setdefault(f"{action}·{outcome['status']}" if outcome else action, {"n": 0, "excess": []})
+        group["n"] += 1
+        if latest := row["returns"].get("latest"):
+            group["excess"].append(latest["excess"])
+    return {key: {"n": g["n"], "scored": len(g["excess"]),
+                  "mean_excess": statistics.fmean(g["excess"]) if g["excess"] else None}
+            for key, g in sorted(out.items())}
+
+
 def size_bucket(mv: float | None, cuts: tuple[float, float]) -> str:
     if mv is None:
         return "未知"
@@ -177,16 +216,20 @@ def load_reports(database: str) -> list[dict]:
     """Passed, non-replay, non-feedback research reports from a read-only connection."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
-            "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request FROM reports r "
+            "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, "
+            "json_extract(r.body, '$.stance'), json_extract(r.body, '$.stance_calc') FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL"
         ).fetchall()
     reports = []
-    for report_id, code, name, verdict, created, request in rows:
+    for report_id, code, name, verdict, created, request, stance, calc in rows:
         src = source(json.loads(request) if request else {})
         if src is None:
             continue
+        calc = json.loads(calc) if calc else None
         reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
-                        "completed": datetime.fromisoformat(created)})
+                        "completed": datetime.fromisoformat(created),
+                        "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
+                        "trigger": (json.loads(stance) or {}).get("trigger") if stance else None})
     return first_per_month(reports)
 
 
@@ -228,6 +271,28 @@ def score(pro, reports: list[dict], today: date) -> list[dict]:
     return rows
 
 
+def score_stances(pro, rows: list[dict], today: date) -> list[dict]:
+    """Attach V4 wait outcomes to V0-scored rows; prices from TuShare daily lows, evidence from financials."""
+    from a_share_research import material, sources  # provider imports only when scoring
+    last = max((d for r in rows for d in [v["date"] for v in r["returns"].values()]), default=None)
+    tables = {}
+    for row in rows:
+        calc = row["stance_calc"]
+        if row["stance"] == "等价格" and calc and calc.get("price") is not None and row["entry"]:
+            if last is None:
+                row["stance_outcome"] = {"status": "pending"}
+                continue
+            bars = screening._query(pro, "daily", ts_code=row["code"], start_date=row["entry"], end_date=last,
+                                    fields="trade_date,low")
+            lows = dict(zip(bars["trade_date"].astype(str), bars["low"].astype(float)))
+            row["stance_outcome"] = price_wait(lows, calc["price"], row["entry"], calc["valid_until"], last)
+        elif row["stance"] == "等证据" and row["trigger"]:
+            if row["code"] not in tables:
+                tables[row["code"]] = {r["id"]: r for r in material.financial_table(sources.financials(row["code"]), {})}
+            row["stance_outcome"] = evidence_wait(row["trigger"], tables[row["code"]].get(row["trigger"]["metric"], {}), today)
+    return rows
+
+
 def _pct(v: float) -> str:
     return f"{v * 100:+.1f}%"
 
@@ -239,6 +304,7 @@ def main() -> None:
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
     modes.add_argument("--hypotheses", action="store_true", help="V3：H1 避坑与 H3 读得快假设记分")
+    modes.add_argument("--stances", action="store_true", help="V4：研究立场（等价格/等证据）兑现与等待代价")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.hypotheses:
@@ -267,16 +333,36 @@ def main() -> None:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump({"forecasts": scored, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
         return
-    rows = score(screening._pro(), load_reports(args.database), datetime.now(SHANGHAI).date())
-    summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size")}
+    pro, today = screening._pro(), datetime.now(SHANGHAI).date()
+    rows = score(pro, load_reports(args.database), today)
+    if args.stances:
+        rows = score_stances(pro, [r for r in rows if r["stance"] != "未记录"], today)
+        summary = summarize_stances(rows)
+        lines = [f"V4 研究立场记分（{len(rows)} 份带立场报告；超额为入场至今相对 {BENCHMARK}）"]
+        for row in rows:
+            outcome = row.get("stance_outcome") or {}
+            latest = row["returns"].get("latest")
+            target = (f" 门槛价 {row['stance_calc']['price']:.2f} 至 {row['stance_calc']['valid_until']}" if row["stance"] == "等价格"
+                      else f" {row['trigger']['period']} {row['trigger']['metric']} {row['trigger']['op']} {row['trigger']['value']:g}"
+                      if row["stance"] == "等证据" and row["trigger"] else "")
+            lines.append(f"#{row['id']} {row['code']} {row['name']} {row['stance']}{target} → {outcome.get('status', '—')}"
+                         f"{' ' + outcome['date'] if outcome.get('date') else ''} 至今超额 {_pct(latest['excess']) if latest else '—'}")
+        for key, g in summary.items():
+            lines.append(f"{key} n={g['n']} 已入场 {g['scored']} 平均超额 {_pct(g['mean_excess']) if g['mean_excess'] is not None else '—'}")
+        log.info("\n%s", "\n".join(lines))
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump({"rows": rows, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
+        return
+    summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size"), "stance": summarize(rows, "stance")}
     lines = [f"V0 事后超额（基准 {BENCHMARK}，起点为报告完成后首个完整交易日收盘）", ""]
     for row in rows:
         latest = row["returns"].get("latest")
         lines.append(f"#{row['id']} {row['source']} {row['code']} {row['name']} {row['verdict']} 入场 {row['entry'] or '待入场'} "
                      f"市值 {row['mv'] and round(row['mv'])}亿 至今超额 {_pct(latest['excess']) if latest else '—'}")
-    for key in ("verdict", "size"):
+    for key in ("verdict", "size", "stance"):
         groups = summary[key]
-        lines += ["", f"按{ {'verdict': '结论', 'size': '市值三分位'}[key] }汇总"]
+        lines += ["", f"按{ {'verdict': '结论', 'size': '市值三分位', 'stance': '研究立场'}[key] }汇总"]
         for g in groups:
             lines.append(f"{g['source']} {g[key]} {g['horizon']} n={g['n']} 均值 {_pct(g['mean'])} 中位 {_pct(g['median'])} "
                          f"跑赢 {g['beat']:.0%} 左尾≤{LEFT_TAIL:.0%} {g['left_tail']:.0%}")

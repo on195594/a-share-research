@@ -22,6 +22,10 @@ def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
                 'truncated_days': []}
     body['valuation_calc'] = valuation.compute(body['valuation'], body['table'], body['market_date'],
                                                consensus=valuation.consensus(ROWS, [2026, 2027, 2028], body['market_date'], coverage=coverage))
+    from a_share_research import research
+    body['stance'] = {'action': '等价格', 'text': '期望回报尚未达到门槛。',
+                      'cites': [{'ref': 'T.op_cash', 'period': '2026-06-30'}]}
+    body['stance_calc'] = research.stance_calc(body['stance'], body['valuation_calc'], body['market_date'])
     # Add the new fields to an actual saved report using the normal persistence API.
     run = service.submit(conn, '603606', 'a2-current')
     report_id = db.save_report(conn, run, RECORD['code'], RECORD['name'], RECORD['period'], True, RECORD['verdict'], body)
@@ -38,8 +42,13 @@ def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
     assert card['valuation_calc']['consensus']['coverage'] == coverage
     assert card['current']['valuation'] is None and card['current']['current_zone'] is None
     assert card['valuation_calc']['scenarios']['中性'] == {'annual_return': body['valuation_calc']['scenarios']['中性']['annual_return']}
+    v2 = body['valuation_calc']['v2']
+    assert card['valuation_calc']['v2'] == {k: v2[k] for k in ('rule', 'probabilities', 'annual_return', 'zone')}
+    assert card['stance'] == body['stance'] and card['stance_calc']['price'] == v2['support_below']
+    assert card['current']['valuation'] is None  # rolled v2 travels inside current.valuation when priced
     compact = service.report_view(conn, report_id, compact=True)['report']
     assert compact['valuation'] == body['valuation'] and compact['valuation_calc'] == body['valuation_calc']
+    assert compact['stance'] == body['stance'] and compact['stance_calc'] == body['stance_calc']
     # Later feedback, failed, running, and replay rows must not replace the reviewed research.
     for label in ['feedback', 'failed', 'running', 'replay']:
         newer = service.submit(conn, '603606', 'a2-' + label)
@@ -60,7 +69,7 @@ def test_legacy_card_and_no_report(tmp_path):
     assert error.value.status == 404
     load(conn)
     card = service.company_card(conn, '600519')
-    assert card['valuation_calc'] is None
+    assert card['valuation_calc'] is None and card['stance'] is None and card['stance_calc'] is None
     assert card['summary'] and card['risks']
     assert card['completed_at'] == card['created_at']
     with pytest.raises(service.RequestError) as error:

@@ -3,7 +3,7 @@
 import re
 from decimal import Decimal
 
-from a_share_research import evidence, forecasts, valuation
+from a_share_research import evidence, forecasts, stance as stances, valuation
 from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.material import Material
 
@@ -138,15 +138,21 @@ def check(report: dict, material: Material) -> list[dict]:
             item_sections.append(("valuation.not_priced", [value["not_priced"]]))
         else:
             item_sections.append(("valuation.rationale", value.get("rationale")))
+    stance = report.get("stance")
+    if not material.extra.get("feedback") or stance is not None:
+        problems += [{"where": "stance", "problem": p}
+                     for p in stances.problems(stance, material.table, value, material.market_date)]
+    if isinstance(stance, dict):
+        item_sections.append(("stance.text", [stance]))
     for section, items in item_sections:
+        whole = section.split(".")[0] if "." in section else None  # one-object fields: valuation, stance
         if not isinstance(items, list) or (not items and section != "methods"):
-            problems.append({"where": "valuation" if section.startswith("valuation.") else section,
-                             "problem": f"{section} 该段缺失或为空"})
+            problems.append({"where": whole or section, "problem": f"{section} 该段缺失或为空"})
             continue
         for i, item in enumerate(items):
-            where = "valuation" if section.startswith("valuation.") else f"{section}[{i}]"
+            where = whole or f"{section}[{i}]"
             if (not isinstance(item, dict) or not isinstance(item.get("text"), str)
-                    or section.startswith("valuation.") and not item["text"].strip()):
+                    or whole and not item["text"].strip()):
                 problems.append({"where": where, "problem": "条目必须包含 text 和 cites"})
                 continue
             cites = item.get("cites") or []

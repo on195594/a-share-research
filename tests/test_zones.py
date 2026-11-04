@@ -213,3 +213,21 @@ def test_missing_database_is_not_created(tmp_path):
     with pytest.raises(sqlite3.OperationalError):
         zones.load_reports(str(path))
     assert not path.exists()
+
+
+def test_v2_shadow_rule_scores_beside_v1_without_touching_v1_and_pe_diagnostics():
+    # Captured closes 20.01–25.65 are all v1 support (<=30); a 22/30 v2 band makes most of them neutral.
+    v2 = {"support_below": 22.0, "stretched_above": 30.0}
+    labels = {"20261026": "分位低位"}
+    base = zones.observations([report()], CAL, RAW, labels)
+    rows = zones.observations([report(valuation_calc={"rule": "valuation-v1", "zones": BOUNDS, "v2": v2})], CAL, RAW, labels)
+    assert [r for r in rows if r["rule"] != "valuation-v2"] == base
+    shadow = [r for r in rows if r["rule"] == "valuation-v2"]
+    assert shadow and all(r["v2_zone"] == r["zone"] == zones.zone_of(RAW[r["observation"]], v2) for r in shadow)
+    scored_rows = zones.score_observations(rows, CAL, ADJUSTED, V0["benchmark"])
+    with_v2, without = zones.diagnostics(scored_rows), zones.diagnostics(zones.score_observations(base, CAL, ADJUSTED, V0["benchmark"]))
+    for key in ("observation_days", "comparable_days", "disagreements", "both_first_days", "matured_120d"):
+        assert with_v2[key] == without[key]
+    assert with_v2["v2_observations"] == len(shadow)
+    assert with_v2["v2_differs_from_v1"] == sum(r["zone"] != r["valuation_zone"] for r in shadow) > 0
+    assert any(g["rule"] == "valuation-v2" for g in zones.summarize(scored_rows))

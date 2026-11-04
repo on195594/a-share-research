@@ -182,7 +182,7 @@ def test_output_schema_does_not_contain_relative():
 
 def test_repair_patch_rejects_relative_call():
     from a_share_research.research import merge_repair_patch, RepairFormatError
-    with pytest.raises(RepairFormatError, match="只允许 ops、verdict、summary、gaps、valuation、rebuttals"):
+    with pytest.raises(RepairFormatError, match="只允许 ops、verdict、summary、gaps、valuation、stance、rebuttals"):
         merge_repair_patch(report(), {"relative": {"call": "跑赢", "confidence": 55}}, [], MATERIAL)
 
 
@@ -230,3 +230,43 @@ def test_forecast_missing_disclosed_period_is_not_pending():
     assert forecasts.score(_forecast(), '2026-09-30', row, row)['status'] == 'pending'
     known = forecasts.score(_forecast(metric='T.net_profit', period='2026-09-30'), '2026-06-30', row, {})
     assert known['status'] == 'scored' and known['baseline'] is None
+
+
+# ---------- V4 stance scoring ----------
+
+LOWS = {bar["trade_date"]: bar["low"] for bar in
+        json.loads(Path(__file__).with_name("data").joinpath("600900-61d.json").read_text())["stock"]}
+
+
+def test_price_wait_hits_on_first_touching_low_and_misses_only_after_expiry():
+    # 600900 captured unadjusted lows: the window minimum is 27.51 on 2026-08-07.
+    assert validation.price_wait(LOWS, 27.55, "20260720", "2027-01-20", "20261020") == {"status": "hit", "date": "20260807"}
+    assert validation.price_wait(LOWS, 27.51, "20260720", "2027-01-20", "20261020")["date"] == "20260807"
+    # Touching after the validity window does not count; an open window is pending, a closed one missed.
+    assert validation.price_wait(LOWS, 27.55, "20260720", "2026-08-06", "20261020") == {"status": "missed"}
+    assert validation.price_wait(LOWS, 27.50, "20260720", "2027-01-20", "20261020") == {"status": "pending"}
+    assert validation.price_wait(LOWS, 27.50, "20260720", "2026-10-20", "20261020") == {"status": "missed"}
+    # Entry-day low counts; lows before entry never do.
+    assert validation.price_wait(LOWS, 27.55, "20260808", "2027-01-20", "20261020")["status"] == "pending"
+
+
+def test_evidence_wait_reads_disclosed_table_text():
+    row = next(r for r in DATA["forecast_table"] if r["id"] == "T.revenue")  # 2026-09-30 = '101.00'
+    trigger = {"metric": "T.revenue", "period": "2026-09-30", "op": ">=", "value": 100}
+    today = datetime(2026, 11, 4).date()
+    assert validation.evidence_wait(trigger, row, today) == {"status": "met", "actual": "101.00"}
+    assert validation.evidence_wait(trigger | {"value": 101.01}, row, today)["status"] == "not_met"
+    assert validation.evidence_wait(trigger | {"op": "<="}, row, today)["status"] == "not_met"
+    assert validation.evidence_wait(trigger | {"period": "2026-12-31"}, row, today) == {"status": "pending"}
+    assert validation.evidence_wait(trigger, {"values": {}}, today)["status"] == "pending"
+
+
+def test_stance_summary_groups_outcomes_with_latest_excess():
+    rows = [{"stance": "等价格", "stance_outcome": {"status": "missed"}, "returns": {"latest": {"excess": 0.08}}},
+            {"stance": "等价格", "stance_outcome": {"status": "missed"}, "returns": {"latest": {"excess": -0.02}}},
+            {"stance": "等价格", "stance_outcome": {"status": "hit", "date": "20261101"}, "returns": {}},
+            {"stance": "现在分批", "returns": {"latest": {"excess": 0.01}}}]
+    summary = validation.summarize_stances(rows)
+    assert summary["等价格·missed"] == {"n": 2, "scored": 2, "mean_excess": pytest.approx(0.03)}
+    assert summary["等价格·hit"] == {"n": 1, "scored": 0, "mean_excess": None}
+    assert summary["现在分批"]["mean_excess"] == pytest.approx(0.01)

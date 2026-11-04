@@ -6,6 +6,7 @@ import re
 from statistics import median
 
 RULE = "valuation-v1"
+RULE_V2 = "valuation-v2"  # shadow rule: probability-weighted expected return, scored beside v1 by A3
 SCENARIOS = ("保守", "中性", "乐观")
 
 
@@ -56,12 +57,17 @@ def problems(value, table: list[dict]) -> list[str]:
     if not isinstance(scenarios, dict) or set(scenarios) != set(SCENARIOS):
         out.append("valuation.scenarios 须且仅含 保守、中性、乐观 三个情景")
         scenarios = scenarios if isinstance(scenarios, dict) else {}
-    terminal = []
+    terminal, weights = [], []
     for name in SCENARIOS:
         scenario = scenarios.get(name)
-        if not isinstance(scenario, dict) or set(scenario) != {"profit", "exit_pe"}:
-            out.append(f"valuation.scenarios.{name} 须为 {{profit: [三年利润数字], exit_pe: 退出倍数}}")
+        if not isinstance(scenario, dict) or set(scenario) != {"profit", "exit_pe", "probability"}:
+            out.append(f"valuation.scenarios.{name} 须为 {{profit: [三年利润数字], exit_pe: 退出倍数, probability: 发生概率}}")
             continue
+        weight = scenario.get("probability")
+        if type(weight) is not int or not 5 <= weight <= 90:
+            out.append(f"{name}.probability 须为 5–90 的整数（%），表示你认为该情景发生的概率")
+        else:
+            weights.append(weight)
         profit = scenario.get("profit")
         if not isinstance(profit, list) or len(profit) != 3 or any(_assumption(p) is None for p in profit):
             out.append(f"{name}.profit 须为 {expected} 对应的三个有限数字，单位亿元")
@@ -70,6 +76,8 @@ def problems(value, table: list[dict]) -> list[str]:
         pe = _assumption(scenario.get("exit_pe"))
         if pe is None or not 0 < pe <= 200:
             out.append(f"{name}.exit_pe 须为第 Y3 年利润对应的退出市盈率，0 < 倍数 ≤ 200")
+    if len(weights) == 3 and sum(weights) != 100:
+        out.append(f"三个情景的 probability 之和须为 100，当前为 {sum(weights)}")
     if len(terminal) == 3 and not terminal[0] <= terminal[1] <= terminal[2]:
         out.append("Y3 利润须满足 保守 ≤ 中性 ≤ 乐观；退出倍数不要求单调")
     payout = _assumption(value.get("payout_pct"))
@@ -115,9 +123,26 @@ def price_zone(close, support, stretched):
             "测算透支区" if close >= stretched else "中性区")
 
 
+def expected(totals: dict, probabilities: dict, *, close, cap, base_close, base_cap, horizon, r, r_low) -> dict:
+    """valuation-v2: the probability-weighted terminal value, priced like v1 but on one expectation.
+
+    v1 prices its support zone on the conservative case alone, so it almost never shows a price as
+    cheap; v2 asks whether the expected (not worst) outcome clears the same hurdle. `totals` are exit
+    value plus dividends (亿元) frozen at `base_close`/`base_cap`; `cap` is the market value at `close`.
+    """
+    weights = {name: Decimal(probabilities[name]) for name in SCENARIOS}
+    if sum(weights.values()) != 1 or min(weights.values()) < 0:
+        raise ValueError("情景概率须非负且合计为 1")
+    total = sum(weights[name] * totals[name] for name in SCENARIOS)
+    support = base_close * total / (base_cap * (1 + r) ** horizon)
+    stretched = base_close * total / (base_cap * (1 + r_low) ** horizon)
+    return {"rule": RULE_V2, "probabilities": weights, "annual_return": (total / cap) ** (1 / horizon) - 1,
+            "support_below": support, "stretched_above": stretched, "zone": price_zone(close, support, stretched)}
+
+
 def at(calc: dict, close, day: str) -> dict:
     """Roll frozen terminal totals to a closing date, assuming unchanged share count."""
-    empty = dict.fromkeys(('annual_returns', 'support_below', 'stretched_above', 'inverted', 'zone', 'horizon'))
+    empty = dict.fromkeys(('annual_returns', 'support_below', 'stretched_above', 'inverted', 'zone', 'horizon', 'v2'))
     empty.update(as_of=day, close=None)
 
     def number(value, field):
@@ -156,6 +181,11 @@ def at(calc: dict, close, day: str) -> dict:
             neutral_dividends = number(calc['scenarios']['中性']['dividends'], '中性.dividends')
             support = base_close * totals['保守'] / (cap * (1 + r) ** horizon)
             stretched = base_close * totals['中性'] / (cap * (1 + r_low) ** horizon)
+            v2 = None
+            if isinstance(calc.get('v2'), dict):
+                probabilities = {name: number(calc['v2']['probabilities'][name], f'v2.{name}') for name in SCENARIOS}
+                v2 = expected(totals, probabilities, close=p, cap=current_cap, base_close=base_close, base_cap=cap,
+                              horizon=horizon, r=r, r_low=r_low)
             return _json_numbers({
                 'annual_returns': {name: (total / current_cap) ** (1 / horizon) - 1 for name, total in totals.items()},
                 # Sensitivity endpoint within the frozen nonnegative dividend assumption, not a realized-return bound.
@@ -163,7 +193,7 @@ def at(calc: dict, close, day: str) -> dict:
                                                      if neutral_exit >= 0 and neutral_dividends >= 0 else None),
                 'support_below': support, 'stretched_above': stretched, 'inverted': support >= stretched,
                 'zone': price_zone(p, support, stretched), 'horizon': horizon, 'as_of': day, 'close': p,
-                'assumption': '按冻结累计分红尚未支付测算。',
+                'assumption': '按冻结累计分红尚未支付测算。', 'v2': v2,
             })
     except KeyError as exc:
         return empty | {'reason': f'缺少测算字段 {exc.args[0]}，无法滚动测算'}
@@ -211,6 +241,9 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
         total = exit_cap + dividends
         scenarios[name] = {"exit_cap": exit_cap, "dividends": dividends,
                            "annual_return": annual(total), "price_at_r": price(total, r)}
+    v2 = expected({name: s["exit_cap"] + s["dividends"] for name, s in scenarios.items()},
+                  {name: Decimal(value["scenarios"][name]["probability"]) / 100 for name in SCENARIOS},
+                  close=close, cap=cap, base_close=close, base_cap=cap, horizon=horizon, r=r, r_low=r_low)
     neutral = value["scenarios"]["中性"]
     p3, pe = _number(neutral["profit"][2]), _number(neutral["exit_pe"])
     dividends = scenarios["中性"]["dividends"]
@@ -231,14 +264,15 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     assumptions = ["假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。",
                    "退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。",
                    "累计分红只计前两年利润乘派息率；终点年分红在退出后，不计入；不考虑分红再投资、税费与交易费用。",
-                   "回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。"]
+                   "回报门槛属于政策假设；参考区间不是已验证的安全边际，情景不承诺兑现。",
+                   "v2 按研究员给出的情景概率加权终点价值，期望年化与 v1 用同一门槛定价；概率是主观判断，与 v1 并行记分。"]
     if value["basis"] == "core_profit":
         assumptions.append("测算采用扣非归母净利润；卖方 np 按归母净利润处理，两者口径不同，对照差异包含口径影响。")
     return {"rule": RULE, "r": r, "r_low": r_low, "as_of": market_date, "close": close, "market_cap": cap,
             "basis": value["basis"], "base_year": base_year, "base_profit": base, "years": target_years,
             "exit_date": exit_date.isoformat(), "horizon": horizon, "scenarios": scenarios,
             "zones": {"support_below": support, "stretched_above": stretched, "inverted": inverted},
-            "zone": price_zone(close, support, stretched),
+            "zone": price_zone(close, support, stretched), "v2": v2,
             "implied": {"profit": implied, "cagr": cagr},
             "sensitivity": {"profit_factors": factors, "exit_pe": multiples,
                             "returns": [[annual(p3 * factor * multiple + dividends) for multiple in multiples] for factor in factors]},

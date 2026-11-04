@@ -153,7 +153,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
     result["report"] = ({key: body[key] for key in
-                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "answer", "risks", "business", "financial", "methods", "checkpoints")
+                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "stance", "stance_calc", "answer", "risks", "business", "financial", "methods", "checkpoints")
                          if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],
@@ -189,6 +189,8 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         if "scenarios" in calc:
             summary["scenarios"] = {name: {"annual_return": scenario["annual_return"]}
                                     for name, scenario in calc["scenarios"].items()}
+        if isinstance(calc.get("v2"), dict):
+            summary["v2"] = {k: calc["v2"][k] for k in ("rule", "probabilities", "annual_return", "zone")}
     from a_share_research import scans, valuation
     pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
     failure = scans.announcement_failure(conn, code, scan_id=scan_id)
@@ -206,7 +208,8 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "risks": [item["text"] for item in body.get("risks", [])[:3]],
             "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
                             for item in body.get("checkpoints", [])],
-            "relative": body.get("relative"), "valuation_calc": summary}
+            "relative": body.get("relative"), "valuation_calc": summary,
+            "stance": body.get("stance"), "stance_calc": body.get("stance_calc")}
 
 
 def company_cards(conn: sqlite3.Connection) -> dict:
