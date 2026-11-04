@@ -55,6 +55,22 @@ def test_industry_citations_calculator_and_period_scope():
     assert evidence.citation_errors([{'ref': row['id'], 'period': '2026-01-01'}], {}, material.table)
     with pytest.raises(ValueError, match='可用期间'):
         calculate(material.table, '错配期间', 'difference', {'ref': row['id'], 'period': '2026-01-01'}, {'ref': benchmark['id'], 'period': period})
+    # Report 91 (300750, run 111) failed on "近20、60、120个交易日…中证800": window lists and the
+    # benchmark name are identifiers of the cited rows, not figures.
+    cited = {w: {k: next(r for r in rows if r['id'].endswith(f'.{k}_{w}')) for k in ('median', 'benchmark')}
+             for w in (20, 60, 120)}
+    draft['stance']['cites'] = [{'ref': cited[w][k]['id'], 'period': period} for w in cited for k in cited[w]]
+    figures = '、'.join(cited[w]['median']['values'][period] for w in cited)
+    draft['stance']['text'] = f"近20、60、120个交易日，行业收益中位数分别为{figures}%，对照中证800价格指数。"
+    assert not [p for p in checking.check(draft, material) if p['where']=='stance']
+    # Mutations: a window the cites do not measure, or an unsupported figure, still fails.
+    draft['stance']['text'] = f"近20、60、90个交易日，行业收益中位数分别为{figures}%，对照中证800价格指数。"
+    assert any('90' in p['problem'] for p in checking.check(draft, material) if p['where']=='stance')
+    draft['stance']['text'] = f"近20、60、120个交易日，行业收益中位数分别为{figures}%，中证800下跌800.5%。"
+    assert any('800.5' in p['problem'] for p in checking.check(draft, material) if p['where']=='stance')
+    draft['stance']['cites'] = [{'ref': row['id'], 'period': period}]
+    draft['stance']['text'] = f"近20个交易日行业收益中位数为{row['values'][period]}%，跑赢沪深300。"
+    assert any('300' in p['problem'] for p in checking.check(draft, material) if p['where']=='stance')
     # A chained comparison must not conceal corrupted constituent evidence.
     row['values'][period] = '987654.32'
     assert evidence.citation_errors([{'ref': calc['id']}], {}, material.table)

@@ -19,6 +19,8 @@ def _without_codes(text: str, material: Material) -> str:
     return re.sub(r"(?<!\d)(?:" + "|".join(codes) + r")(?!\d)", " ", text) if codes else text
 
 
+WINDOW_LIST = re.compile(r"(?<![\d.])(\d+(?:\s*[、,，/和及]\s*\d+)*)\s*个?交易日")
+INDEX_NAME = re.compile(r"(?:中证|沪深|上证|深证|国证|创业板|科创)\d+")
 REPORT_ID = re.compile(r"(?:报告|report)\s*#?\s*\d+", re.I)
 # Page references ("第11—12页") and product/project codes ("HDM1002", "GLP-1") are identifiers, not figures.
 # Currency prefixes stay figures so "RMB100亿" still needs a source.
@@ -73,7 +75,17 @@ def _checked_figures(text: str, material: Material, cites=()) -> list[tuple[floa
         days = sorted(row.get("values", {}))
         if left.get("period") in days and right.get("period") in days:
             windows.add(days.index(left["period"]) - days.index(right["period"]))
-    text = re.sub(r"(?<![\d.])(\d+)\s*个?交易日", lambda m: " " if int(m[1]) in windows else m[0], text)
+    # A list such as "近20、60、120个交易日" names several windows at once; drop only listed numerals
+    # that are windows of the cited rows, so a stray figure in the list still needs a source.
+    def drop_windows(match: re.Match) -> str:
+        rest = [n for n in re.findall(r"\d+", match[1]) if int(n) not in windows]
+        return " " + "、".join(rest) + "个交易日" if rest else " "
+
+    text = WINDOW_LIST.sub(drop_windows, text)
+    # Index names ("中证800") are identifiers when a cited row in the chain is measured against that index.
+    names = {name for ref in visited for name in INDEX_NAME.findall(str(rows.get(ref, {}).get("label", "")))}
+    if names:
+        text = re.sub("(?:" + "|".join(map(re.escape, sorted(names, key=len, reverse=True))) + r")(?![\d.])", " ", text)
     question = str(material.extra.get("question") or "")
     terms = {_threshold_key(m) for pattern in (QUESTION_THRESHOLD, TRAILING_THRESHOLD) for m in pattern.finditer(question)}
     for pattern in (QUESTION_THRESHOLD, TRAILING_THRESHOLD):
