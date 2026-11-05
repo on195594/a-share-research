@@ -10,8 +10,8 @@ import pandas as pd
 from a_share_research import db, sources
 
 MACRO = {
-    "pmi": ("cn_pmi", {"pmi010000": ("制造业PMI", "指数"), "pmi010100": ("制造业生产PMI", "指数"),
-                       "pmi010200": ("制造业新订单PMI", "指数")}),
+    "pmi": ("cn_pmi", {"pmi010000": ("制造业PMI", "指数"), "pmi010400": ("制造业生产指数", "指数"),
+                       "pmi010500": ("制造业新订单指数", "指数")}),
     "money": ("cn_m", {"m1": ("M1余额", "亿元"), "m2": ("M2余额", "亿元"),
                        "m1_yoy": ("M1同比", "%"), "m2_yoy": ("M2同比", "%")}),
     "financing": ("sf_month", {"inc_month": ("社融当月增量", "亿元"), "inc_cumval": ("社融累计增量", "亿元")}),

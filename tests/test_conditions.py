@@ -97,3 +97,9 @@ def test_missing_cites_still_reports_a_problem_instead_of_crashing():
     draft = report()
     draft['stance']['cites'] = None
     assert any(p['where'] == 'stance' and '没有出处' in p['problem'] for p in checking.check(draft, MATERIAL))
+
+
+def test_pmi_fields_mean_what_their_labels_say():
+    # NBS 2026-10 release: production 49.8, new orders 49.4; 50.2 and 48.4 are large and medium firms.
+    by_label = {r['label']: r['values']['2026-10'] for r in rows('cn_pmi')}
+    assert by_label == {'制造业PMI': '49.3', '制造业生产指数': '49.8', '制造业新订单指数': '49.4'}

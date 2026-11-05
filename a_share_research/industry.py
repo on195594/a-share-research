@@ -147,6 +147,10 @@ def industry_rows(data):
                    'breadth': (Decimal(sum(v > 0 for v in returns.values())) / len(returns) * 100, '上涨家数占比', 'count(return_pct > 0) / valid_members * 100'),
                    'company': (returns[code], '本公司复权收益', '(close_end * adj_end / (close_start * adj_start) - 1) * 100'),
                    'benchmark': ((benchmark[end] / benchmark[start] - 1) * 100, '中证800价格指数收益', '(index_close_end / index_close_start - 1) * 100')}
+        peers = {c: w for c, w in weighted.items() if c != code}
+        if peers:
+            results['weighted_ex'] = (sum(returns[c] * w for c, w in peers.items()) / sum(peers.values()),
+                                      '剔除本公司后的起点流通市值加权收益', 'sum(return_pct * start_circ_mv) / sum(start_circ_mv), excluding company')
         for metric, (value, label, formula) in results.items():
             emit(f'{metric}_{window}', f'{window}个交易日{label}（{start}至{end}）', '%', {current: value}, **meta, formula=formula)
     return rows

@@ -16,7 +16,7 @@ from a_share_research.reviewing import digest
 log = logging.getLogger(__name__)
 
 TOOLS = [
-    {"name": "industry_trend", "description": "按公司当前申万成分合成行业趋势与估值。code 为六位公司代码，level 默认 l2，可用 l1/l2/l3。返回近20/60/120交易日复权收益中位数、起点流通市值加权收益、上涨家数占比、中证800价格指数同期收益、本公司收益；C.* 给出行业相对基准及公司相对行业差。正PE_TTM中位数及近五年60个月末分位走缓存。X.* 保存成分、交易日、API参数及可复算输入；当前成分回看有幸存者偏差，缺失不填零，指数不含分红再投资。冷缓存约76次查询，可能超过一分钟；同日复用缓存。",
+    {"name": "industry_trend", "description": "按公司当前申万成分合成行业趋势与估值。code 为六位公司代码，level 默认 l2，可用 l1/l2/l3。返回近20/60/120交易日复权收益中位数、起点流通市值加权收益及剔除本公司后的加权收益、上涨家数占比、中证800价格指数同期收益、本公司收益；C.* 给出加权口径相对中证800的差及本公司相对行业中位数、相对同业加权的差。收益中位数与市值加权的中证800风格不同，二者之差不是超额。正PE_TTM中位数及近五年60个月末分位走缓存。X.* 保存成分、交易日、API参数及可复算输入；当前成分回看有幸存者偏差，缺失不填零，指数不含分红再投资。冷缓存约76次查询，可能超过一分钟；同日复用缓存。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "level": {"type": "string", "enum": ["l1", "l2", "l3"]}}, "required": ["code"], "additionalProperties": False}},
     {"name": "macro", "description": "查询最近已公布的宏观序列（缺失不填零）：pmi 制造业PMI，money M1/M2，financing 社融增量，lpr 贷款利率，shibor 拆借利率，cpi/ppi 价格同比环比。count 默认12，最多24期；月度键为YYYY-MM，日度键为YYYY-MM-DD；值与来源注册为可引用 X.* 行，也可交给 calculate。月度数据是当前可得版本，不代表当月已知。",
      "parameters": {"type": "object", "properties": {"series": {"type": "string", "enum": ["pmi", "money", "financing", "lpr", "shibor", "cpi", "ppi"]},
@@ -296,15 +296,19 @@ class ResearchTools:
         changes = []
         by_metric = {r['id'].rsplit('.', 1)[-1]: r for r in rows}
         for window in (20, 60, 120):
-            for metric in ('median', 'weighted'):
-                for left, right, label in ((metric, 'benchmark', '行业相对中证800超额'),
-                                           ('company', metric, '本公司相对行业差')):
-                    a, b = (by_metric[f'{m}_{window}'] for m in (left, right))
-                    period = next(iter(a['values']))
-                    calc = calculate(self.material.table, f'{window}交易日{label}（{metric}）', 'difference',
-                                     {'ref': a['id'], 'period': period}, {'ref': b['id'], 'period': period})
-                    self.material.table.append(calc)
-                    changes.append(calc)
+            # The median is not compared with the cap-weighted index: their style gap can flip the sign.
+            for left, right, label in (('weighted', 'benchmark', '行业加权相对中证800差'),
+                                       ('weighted_ex', 'benchmark', '同业（剔除本公司）加权相对中证800差'),
+                                       ('company', 'median', '本公司相对行业收益中位数差'),
+                                       ('company', 'weighted_ex', '本公司相对同业（剔除本公司）加权差')):
+                a, b = by_metric.get(f'{left}_{window}'), by_metric.get(f'{right}_{window}')
+                if a is None or b is None:  # An industry with no other weighted member has no peer row.
+                    continue
+                period = next(iter(a['values']))
+                calc = calculate(self.material.table, f'{window}交易日{label}', 'difference',
+                                 {'ref': a['id'], 'period': period}, {'ref': b['id'], 'period': period})
+                self.material.table.append(calc)
+                changes.append(calc)
         # The full replay inputs stay in material; keep the model-facing response concise.
         result['rows'] = [{**r, 'source': {k: v for k, v in r['source'].items()
                                           if k not in ('dataset', 'eligible', 'sessions', 'members')}} for r in rows]
