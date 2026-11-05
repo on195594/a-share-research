@@ -104,6 +104,13 @@
     {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。{% if comparison and comparison.old %}<a class="compare-shortcut" href="#comparison">查看前后变化对照 ↓</a>{% endif %}</p>{% endif %}
     {# A continuation states each old risk/checkpoint at the end of the answer; never fold those away. #}
     {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", focus, limit=0 if body.prior else 4) }}
+    {% if body.open_questions %}
+    <div class="open-questions">
+      <h3>复核认为尚未答完</h3>
+      <p class="small muted">以下部分未完成，其余结论已通过复核；未完成部分不能当作已回答。</p>
+      <ul>{% for q in body.open_questions %}<li>{{ q.problem }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
   </section>
   {% endif %}
   {% if content.checkpoints %}

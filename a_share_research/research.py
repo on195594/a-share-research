@@ -367,6 +367,24 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
                           error="研究核查未通过，不展示结论")
 
 
+# Where an unanswered part of the user's question can stay open without withholding the verified rest.
+OPEN_QUESTION_WHERE = re.compile(r"answer\[\d+\]|valuation|missing|gaps\[\d+\]")
+
+
+def open_questions(problems: list[dict], reviewed: bool) -> list[dict] | None:
+    """Unresolved review issues that may ship as named gaps, or None when any of them must block.
+
+    Only a completed review of the final draft qualifies, and only `question` issues about the answer,
+    the scenario valuation, or evidence still missing: the reviewer found the work incomplete, not wrong.
+    A disputed claim, an omitted material risk, or doubt about a fact, verdict or stance still blocks."""
+    if not problems or not reviewed:
+        return None
+    if all(p.get("id") and p.get("type") == "question" and OPEN_QUESTION_WHERE.fullmatch(str(p.get("where")))
+           for p in problems):
+        return problems
+    return None
+
+
 def revise(runner, material, report, ledger, *, acquisition=None):
     """Check and independently review each draft; keep one ledger across evidence additions."""
     problems: list[dict] = []
@@ -499,6 +517,11 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             # Derived from the frozen question so replays, including of older snapshots, keep the label.
             body["prior"] = {"report_id": prior["report_id"], "period": prior["period"],
                              "question_added": material.extra.get("question") == prior_question(prior)}
+        if (unanswered := open_questions(problems, reviewed)) is not None:
+            # Shipped with the incomplete parts named; the ledger keeps them unresolved for audit.
+            body["open_questions"] = [{"id": p["id"], "where": p["where"], "problem": p["problem"]} for p in unanswered]
+            body["gaps"] = body["gaps"] + [f"复核认为尚未完成：{p['problem']}" for p in unanswered]
+            problems = []
         if problems:
             body["failure"] = {"stage": "review" if reviewed or any(p.get("type") == "review_format" for p in problems) else "check",
                                "category": "review_format" if any(p.get("type") == "review_format" for p in problems)

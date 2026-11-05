@@ -1,0 +1,44 @@
+{
+ "106": {
+  "code": "601728.SH",
+  "failure": {
+   "stage": "review",
+   "category": "substantive_review"
+  },
+  "problems": [
+   {
+    "id": "issue-1-7fb7dbb975df-2",
+    "type": "question",
+    "where": "answer[2]",
+    "problem": "用户要求判断持有3至5年的风险回报，但当前唯一量化模型于2029-04-30退出，实际期限约2.49年，未覆盖目标持有期。报告只说明它不是完整五年预测，并在gaps中承认缺口，仍未给出至少覆盖三年的情景回报或目标持有期的补充分析。",
+    "importance": "当前价格门槛及负期望回报只能代表模型规定期限，尚不足以完整回答用户指定的3至5年投资问题；承认期限限制不等于完成分析。",
+    "status": "unresolved"
+   }
+  ]
+ },
+ "108": {
+  "code": "000651.SZ",
+  "failure": {
+   "stage": "review",
+   "category": "substantive_review"
+  },
+  "problems": [
+   {
+    "id": "issue-1-8fcf0fea2742-1",
+    "type": "question",
+    "where": "answer[3]",
+    "problem": "用户要求对利润下降20%及持续下降作分红压力测试，本稿仅完成19.5119%参数的测试。虽然已准确说明区别，但仍未回答指定的20%情景；gaps中的说明不能替代测试。",
+    "importance": "指定压力情景是判断固定分红承受力的明确要求，需要补齐一次下降20%及连续下降20%的结果，并明确利润与分红基期。",
+    "status": "unresolved"
+   },
+   {
+    "id": "issue-1-8fcf0fea2742-2",
+    "type": "question",
+    "where": "valuation",
+    "problem": "风险回报回答仍不完整：已展示三情景假设及概率加权回报，但未给出各情景、尤其保守情景的独立风险回报；现有程序持有期约2.49年，也未覆盖用户要求的3至5年。报告主动承认这些缺口，避免了误称，但尚未完成相应问题。",
+    "importance": "加权回报不能替代下行情景的损失衡量，较短期限测算也不能直接回答3至5年防御性持有的风险回报。应补齐相应测算，而非仅保留缺口声明。",
+    "status": "unresolved"
+   }
+  ]
+ }
+}
