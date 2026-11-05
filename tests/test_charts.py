@@ -391,19 +391,29 @@ def test_home_screening_is_one_summary_line_above_the_company_cards():
              "l5": {"codes": codes}, "q5": codes, "q20": [{"code": c, "name": c} for c in codes]}
     results = screening.returns(batch)
     performance = charts.batch_returns(batch, results, {})
-    # The selected group stays beside its control and one benchmark, so it can't read better than it is.
+    # The selected group stays beside its control and its size benchmark, so it can't read better than it is.
     assert [r["label"] for r in performance["summary"]] == ["选定组合", "机械前五", "中证800全收益"]
     assert performance["summary"][0]["text"] == performance["groups"]["rows"][0]["text"]
 
-    dual = batch | {"rule": batch["rule"] | {"version": "screen-v1.3"}}
+    dual = batch | {"rule": batch["rule"] | {"version": "screen-v1.3",
+                                             "benchmarks": benchmarks | {"H00852.CSI": "中证1000全收益"}}}
     assert [r["label"] for r in charts.batch_returns(dual, results, {})["summary"]] == [
-        "大市值选定 L5", "大市值机械 Q5", "小市值选定 SL3", "小市值机械 SQ3", "中证800全收益"]
+        "大市值选定 L5", "大市值机械 Q5", "小市值选定 SL3", "小市值机械 SQ3", "中证800全收益", "中证1000全收益"]
 
     page = ENV.get_template("home.html")
     context = dict(steps={}, request_id="r", companies=[], pending=[], pending_more=False, active=[])
     html = page.render(csrf="token", batch=batch, performance=performance, **context)
     assert html.index('id="start-title"') < html.index('id="screening"') < html.index('id="companies"')
     assert f'href="/batches/{batch["id"]}"' in html and performance["summary"][1]["text"] in html
+    # A cumulative figure beside one close date would read as that day's move.
+    entry, close = prices["entry"]["date"], prices["mark"]["date"]
+    assert f"{entry[:4]}-{entry[4:6]}-{entry[6:]}</span> 开盘入场至" in html
+    assert f"{close[:4]}-{close[4:6]}-{close[6:]}</span> 收盘累计" in html
+    assert '<span class="muted">· 模拟跟踪中</span>' in html
+    # States that need the owner stand out.
+    for status, label in (("proposed", "待你确认"), ("failed", "没有完成")):
+        html = page.render(csrf="token", batch=batch | {"status": status}, performance=None, **context)
+        assert f'<span class="flag">· {label}</span>' in html
     # Charts and per-company returns stay on the batch page.
     assert "<svg" not in html and "选定公司各自表现" not in html
     nav = html[html.index('<nav class="shell-nav"'):html.index("</nav>")]

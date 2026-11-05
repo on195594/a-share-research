@@ -78,10 +78,10 @@
 <section class="home-screening" aria-labelledby="screening">
   <h2 id="screening" tabindex="-1">候选初筛</h2>
   <a class="batch-line" href="/batches/{{ batch.id }}">
-    <span class="batch-head"><span class="batch-month">{{ b.month(batch) }}</span> <span class="muted">· {{ b.batch_status[batch.status] }}</span></span>
+    <span class="batch-head"><span class="batch-month">{{ b.month(batch) }}</span> <span class="{{ 'flag' if batch.status in ('proposed', 'failed') else 'muted' }}">· {{ b.batch_status[batch.status] }}</span></span>
     {% if performance %}
     <span class="batch-returns">{% for r in performance.summary %}<span{% if r.emphasis %} class="lead"{% endif %}>{{ r.label }} <span class="num">{{ r.text }}</span></span>{% endfor %}</span>
-    <span class="hint"><span class="date">{{ b.day(performance.date) }}</span> 收盘，扣往返费用</span>
+    <span class="hint"><span class="date">{{ b.day(performance.entry) }}</span> 开盘入场至 <span class="date">{{ b.day(performance.date) }}</span> 收盘累计，扣往返费用</span>
     {% endif %}
   </a>
 </section>

@@ -765,8 +765,8 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
     if batch["rule"].get("version") in {"screen-v1.2", "screen-v1.3"}:
         labels = [("L5", "大市值选定 L5"), ("Q5", "大市值机械 Q5"), ("Q20", "大市值候选 Q20"),
                   ("SL3", "小市值选定 SL3"), ("SQ3", "小市值机械 SQ3")]
-    # The home summary keeps each selected group beside its mechanical control and the first benchmark.
-    summary_keys = {"L5", "Q5", "SL3", "SQ3", *list(batch["rule"]["benchmarks"])[:1]}
+    # The home summary keeps each selected group beside its mechanical control and its own size benchmark.
+    summary_keys = {"L5", "Q5", "SL3", "SQ3", "H00906.CSI", "H00852.CSI"}
     labels += list(batch["rule"]["benchmarks"].items())
     rows, summary = [], []
     for key, label in labels:
