@@ -61,7 +61,7 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 `industry_trend(code, level="l2")` 用当前申万成分合成近 20/60/120 交易日行业趋势（可选 l1/l2/l3）：等权个股复权收益中位数、起点流通市值加权收益（含剔除本公司后的同业口径）、上涨占比、中证800价格指数收益及本公司复权收益，差额通过 calculate 返回 C.*：加权口径相对中证800，本公司相对行业中位数和相对同业加权；中位数不与市值加权的中证800直接比较。正 PE_TTM 中位数及近五年 60 个已完成月份月末分位共用全市场 `daily/adj_factor/daily_basic` 历史缓存。按截至昨日的最新交易日取截面；当前成分回看存在幸存者偏差，缺失行情及非正/缺失估值不填零，覆盖名单、API/参数、交易日和原始输入随 X.* 保存并可复算；中证800价格指数不含分红再投资。冷缓存约 76 次调用，后续同日查询复用缓存；暂不提供行业间轮动排名。
 
-新报告 `stance.action` 只取 现在分批 / 等价格 / 回避；现在分批可带 `add_trigger: {metric, period, op, value}`，下一期披露阈值只是加仓参考，不阻止首批。`stance_calc` 冻结该字段。历史 等证据/trigger 不迁移，仍可读、显示和由 `validation --stances` 记分。检查点状态与入场至今相对中证800全收益超额同时展示，完整口径见 [V4](docs/judgment-validation.md#v4-研究立场与等待代价2026-11-04)。
+新报告 `stance.action` 只取 现在分批 / 等价格 / 回避；现价与 v2 期望回报门槛价相差 ±5% 以内时页面标“边界立场”，`validation --stances` 单列“·边界”组（同材料重跑可能翻转，不作判断力证据）；现在分批可带 `add_trigger: {metric, period, op, value}`，下一期披露阈值只是加仓参考，不阻止首批。`stance_calc` 冻结该字段。历史 等证据/trigger 不迁移，仍可读、显示和由 `validation --stances` 记分。检查点状态与入场至今相对中证800全收益超额同时展示，完整口径见 [V4](docs/judgment-validation.md#v4-研究立场与等待代价2026-11-04)。
 
 研究员可用 `peers` 发现申万行业内的公司，自主选择是否补取同行证据。通过报告的“财务与走势”章节可展开“已存同行快照对照”（有同行记录时显示）：按最近共同期间读取归母净利润、经营现金流和已有比率，显示口径与历史版本限制。浏览时不取数、补算或排名；详细边界见[步骤 1b](docs/investment-upgrade.md#76-步骤-1b同业发现与快照对照)，部署与验收见[实施计划](docs/implementation-plan.md#当前部署)。
 
@@ -93,7 +93,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡；`current.valuation` 按最新收盘日滚动测算 |
 | `GET /api/cards` | `research-v1` 信封：`cards` 为扫描范围（订阅＋最近冻结批次 L5）的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |
 | `GET /api/reports/{report_id}` | `research-v1` 信封、核验结果、回答、来源页、表格及计算输入；GET 不刷新数据 |
-| `GET /api/reports/{report_id}?compact=true` | 精简正文与来源目录（不含整页原文）、失败 `diagnostics`、`budget`、`continuation`；完整读取保持原合同 |
+| `GET /api/reports/{report_id}?compact=true` | 精简正文与来源目录（不含整页原文）、失败 `diagnostics`、`budget`、`continuation`；完整读取保持原合同。通过报告可带 `open_questions: [{id, where, problem}]`：复核认定用户问题尚未答完的部分（同时追加到 `gaps`），不能当作已回答 |
 | `POST /api/research`（追问） | 上述输入加 `parent_report_id`，必须同公司，创建关联新任务 |
 | `POST /api/reports/{id}/feedback` | `{"request_id":"新编号","location":"financial[0]","text":"具体问题与依据"}` → 核查任务 |
 
