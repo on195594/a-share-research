@@ -95,6 +95,25 @@ def test_home_and_legacy_report_distinguish_unknown_from_no_saved_request():
     assert '未记录明确的证据缺口。' in html
 
 
+def test_every_batch_awaiting_the_owner_is_listed_even_behind_a_newer_batch(conn):
+    assert reading.proposed_batches(conn) == []
+    created = [('proposed', '2026-10-01T12:00:00+00:00'), ('tracking', '2026-11-01T12:00:00+00:00')]
+    ids = [conn.execute("INSERT INTO batches(status,created_at,rule) VALUES (?,?,'{}') RETURNING id", row).fetchone()['id']
+           for row in created]
+    rows = reading.proposed_batches(conn)
+    assert [r['id'] for r in rows] == [ids[0]]  # the newer tracking batch does not hide October
+
+    html = render('home.html', pending=[], pending_more=False, companies=[], active=[], batch=None, proposed=rows)
+    assert 'id="attention"' in html
+    assert f'<a href="/batches/{ids[0]}">2026 年 10 月批次 · <span class="flag">待你确认</span></a>' in html
+
+    conn.execute("UPDATE batches SET status='frozen' WHERE id=?", (ids[0],))
+    rows = reading.proposed_batches(conn)
+    assert rows == []  # confirming clears the item
+    html = render('home.html', pending=[], pending_more=False, companies=[], active=[], batch=None, proposed=rows)
+    assert 'id="attention"' not in html
+
+
 def test_failed_report_hides_judgment_but_keeps_evidence_gaps():
     record = copy.deepcopy(next(r['report'] for r in RECORDS if r['report']['id'] == 39))
     record['passed'] = 0

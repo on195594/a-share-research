@@ -651,5 +651,10 @@ def batch_list(conn):
     return conn.execute("SELECT id, status, error, created_at, as_of, l5, sl3, frozen_at FROM batches ORDER BY id DESC").fetchall()
 
 
+def proposed_batches(conn):
+    # By status, not the latest batch: a later month's batch must not hide one still awaiting the owner.
+    return conn.execute("SELECT id, created_at FROM batches WHERE status = 'proposed' ORDER BY id DESC").fetchall()
+
+
 def batch(conn, batch_id: int):
     return conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()

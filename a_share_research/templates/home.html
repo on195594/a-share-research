@@ -13,6 +13,7 @@
 {% endmacro %}
 {% block body_attrs %} class="page-wide"{% endblock %}
 {% block main %}
+{% import "_batch.html" as b with context %}
 <h1 class="visually-hidden">研究首页</h1>
 <div class="home-top">
 <div class="home-main">
@@ -50,9 +51,16 @@
   {% endif %}
 </section>
 
-{% if active or pending %}
+{% if proposed or active or pending %}
 <section aria-labelledby="attention">
   <h2 id="attention" tabindex="-1">待处理事项</h2>
+{% if proposed %}
+<ul class="list">
+  {% for p in proposed %}
+  <li><a href="/batches/{{ p.id }}">{{ b.month(p) }} · <span class="flag">{{ b.batch_status.proposed }}</span></a></li>
+  {% endfor %}
+</ul>
+{% endif %}
 {% if active %}
 <div class="active-runs">
   <h3>进行中</h3>
@@ -74,7 +82,6 @@
 </div>
 
 {% if batch %}
-{% import "_batch.html" as b with context %}
 <section class="home-screening" aria-labelledby="screening">
   <h2 id="screening" tabindex="-1">候选初筛</h2>
   <a class="batch-line" href="/batches/{{ batch.id }}">

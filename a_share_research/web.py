@@ -296,7 +296,7 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
                   pending=pending, pending_more=pending_more,
                   due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   active=[r for r in reading.active_runs(conn) if r['id'] not in listed], batch=batch,
-                  performance=performance, **context)
+                  proposed=reading.proposed_batches(conn), performance=performance, **context)
 
 
 @app.get("/")

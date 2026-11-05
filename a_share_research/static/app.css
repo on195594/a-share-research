@@ -133,6 +133,7 @@ form.inline { display: inline; margin: 0; }
 .list { list-style: none; padding: 0; margin: 0; }
 .list > li { padding: 12px 0; border-top: 1px solid var(--line); }
 .list > li:last-child { border-bottom: 1px solid var(--line); }
+.list + .list > li:first-child { border-top: 0; }
 .list p { margin: 2px 0 0; }
 .company { text-decoration: none; }
 .company strong { color: var(--ink); font-size: 18px; }
