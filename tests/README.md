@@ -24,7 +24,7 @@
 | 价格参考与技术纪律 | `test_price.py` |
 | 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py`、`test_company_card.py` |
 | 引文、复核账本、接续报告与首页事项 | `test_check.py`、`test_review_evidence.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_home_staleness.py` |
-| 精确计算与研究工具 | `test_research_tools.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证共享补证、额度、来源冲突及跨材料账本，不代表模型语义验收） |
+| 精确计算与研究工具 | `test_research_tools.py`、`test_calculation_assumptions.py`、`test_valuation_tool.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证假设链传播、长期补充回报、分情景引用、共享补证、修订调用储备、来源冲突及跨材料账本；不代表真实模型语义验收或研究通过率） |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py`、`test_screening_small.py`、`test_batch_c.py`、`test_batch_small_reading.py`、`test_monthly_batch.py` |
 | 历史回测 | `test_backtest.py` |
 | 判断记分与估值诊断（V0–V3、A1、A3、A4） | `test_validation.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py` |
