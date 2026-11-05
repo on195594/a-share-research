@@ -42,6 +42,9 @@ body {
 .shell, main, .disclaimer { max-width: var(--column); margin: 0 auto; padding: 0 20px; }
 .shell { display: flex; align-items: center; justify-content: space-between; min-height: 56px; }
 .brand { color: var(--ink); font-weight: 700; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
+.shell-nav { display: flex; gap: 16px; margin: 0 16px 0 auto; }
+.shell-nav a { display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; text-decoration: none; }
+.shell-nav a:hover { text-decoration: underline; }
 
 h1 { font-size: 26px; line-height: 1.3; letter-spacing: -0.01em; margin: 20px 0 4px; text-wrap: balance; }
 h2 { font-size: 19px; line-height: 1.4; letter-spacing: -0.005em; margin: 36px 0 12px; }
@@ -584,9 +587,17 @@ a.plain:hover { text-decoration-color: var(--accent); }
   .card-keys div { padding: 0 4px; }
   .card-keys dd { font-size: 14px; }
 }
+/* Home: the screening panel sits above the long card list so it stays on the first screen. */
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 36px 0 4px; }
+.section-head h2 { margin: 0; }
+.section-head a { flex: none; font-size: 15px; padding: 10px 0; }
 @media (min-width: 1100px) {
-  /* Cards spread to two columns on wide screens, beyond the reading column. */
-  .wide { width: min(1120px, calc(100vw - 40px)); margin-left: calc(50% - min(560px, 50vw - 20px)); }
+  /* The whole home page shares one 1120px grid; the top row lines up with the two card columns. */
+  .page-wide { --column: 1160px; }
+  .home-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; align-items: start; }
+  .home-main { padding-right: 24px; }
+  .home-screening { margin-top: 8px; }
+  .home-screening .section-head { margin-top: -10px; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Cards in a row share a height; the thesis takes the slack so the figures line up. */
   .card { display: flex; flex-direction: column; }

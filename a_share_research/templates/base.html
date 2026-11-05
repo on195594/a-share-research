@@ -9,10 +9,14 @@
 <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
 <script src="/static/app.js?v={{ asset_version }}" defer></script>
 </head>
-<body>
+<body{% block body_attrs %}{% endblock %}>
 <header class="shell">
   <a class="brand" href="/">个股研究</a>
   {% if csrf %}
+  <nav class="shell-nav" aria-label="主要页面">
+    <a href="/batches">候选初筛</a>
+    <a href="/research-library">研究库</a>
+  </nav>
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">退出</button></form>
   {% endif %}
 </header>
