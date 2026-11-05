@@ -27,8 +27,8 @@
 | 精确计算与研究工具 | `test_research_tools.py`、`test_calculation_assumptions.py`、`test_valuation_tool.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证假设链传播、长期补充回报、分情景引用、共享补证、修订调用储备、来源冲突及跨材料账本；不代表真实模型语义验收或研究通过率） |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py`、`test_screening_small.py`、`test_batch_c.py`、`test_batch_small_reading.py`、`test_monthly_batch.py` |
 | 历史回测 | `test_backtest.py` |
-| 判断记分与估值诊断（V0–V3、A1、A3、A4） | `test_validation.py`、`test_stance_boundary.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py` |
-| 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py` |
+| 判断记分与估值诊断（V0–V3、V5、A1、A3、A4） | `test_validation.py`、`test_agenda.py`、`test_stance_boundary.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py` |
+| 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py`、`test_content_search.py` |
 | 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、巡检互变） |
 | TuShare 缓存与任务恢复 | `test_tushare_cache.py`、`test_worker_recovery.py`、`test_material_cache.py`（真实财报响应、SQLite 恢复事务和材料快照；`test_integrity.py` 核对 PDF 文本缓存复用与重建） |
 | 模型运行时 | `test_model_preflight.py`、`test_model_complete.py`（在 worker 环境下运行，验证 Node 预检、单次推理的错误与运行身份；付费实测需 `PI_LIVE_TEST=1`） |

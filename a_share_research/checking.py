@@ -3,7 +3,7 @@
 import re
 from decimal import Decimal
 
-from a_share_research import evidence, forecasts, stance as stances, valuation
+from a_share_research import agenda, evidence, forecasts, stance as stances, valuation
 from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.material import Material
 
@@ -203,6 +203,14 @@ def check(report: dict, material: Material) -> list[dict]:
         if problem := forecasts.count_problem(report.get("checkpoints")):
             problems.append({"where": "checkpoints", "problem": problem})
     item_sections = [(section, report.get(section)) for section in sections]
+    prior_status = report.get("prior_status")
+    if prior := material.extra.get("prior"):
+        problems += agenda.problems(prior_status, prior)
+        # An empty agenda legitimately yields []; structure was just checked above.
+        if isinstance(prior_status, list) and prior_status:
+            item_sections.append(("prior_status", prior_status))
+    elif "prior_status" in report:
+        problems.append({"where": "prior_status", "problem": "本次没有旧议程（无 prior），不应输出 prior_status"})
     value = report.get("valuation")
     if not material.extra.get("feedback") or value is not None:
         problems += [{"where": "valuation", "problem": p} for p in valuation.problems(value, material.table)]
@@ -234,7 +242,7 @@ def check(report: dict, material: Material) -> list[dict]:
                 continue
             if REF_IN_TEXT.search(str(item.get("text", ""))):
                 problems.append({"where": where, "problem": "text 中不要写出处编号"})
-            if not cites:
+            if not cites and not (section == "prior_status" and item.get("status") in agenda.NO_EVIDENCE):
                 problems.append({"where": where, "problem": "没有出处"})
             if section == "checkpoints" and "forecast" in item:
                 problems += [{"where": where, "problem": p} for p in forecasts.problems(item["forecast"], material.table)]

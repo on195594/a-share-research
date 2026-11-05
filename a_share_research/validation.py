@@ -1,5 +1,5 @@
 """Judgment validation: V0 excess return after each report, V1 checkpoint forecast scoring, V4 stance
-scoring (read-only, no model calls).
+scoring, V5 agenda status (read-only, no model calls).
 
 Scores the verdicts already frozen in passed reports against the CSI 800 total-return index, from the
 close of the first full session after the report finished. Only the aggregate is meaningful; one
@@ -13,7 +13,7 @@ import statistics
 from contextlib import closing
 from datetime import date, datetime, time
 
-from a_share_research import forecasts, screening, stance as stances
+from a_share_research import agenda, forecasts, screening, stance as stances
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -247,6 +247,58 @@ def load_reports(database: str) -> list[dict]:
     return first_per_month(reports)
 
 
+def load_agenda(database: str) -> list[dict]:
+    """Passed, non-replay, non-feedback continuations with their prior period and status, if recorded."""
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
+        rows = conn.execute(
+            "SELECT r.id, r.code, r.name, r.created_at, r.coverage, u.request, "
+            "json_extract(r.body, '$.prior.period'), json_extract(r.body, '$.prior_status') FROM reports r "
+            "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL "
+            "AND json_type(r.body, '$.prior') = 'object'"
+        ).fetchall()
+    reports = []
+    for report_id, code, name, created, coverage, request, prior_period, status in rows:
+        if src := source(json.loads(request or "{}") or {}):
+            reports.append({"id": report_id, "code": code, "name": name, "source": src, "period": coverage,
+                            "completed": datetime.fromisoformat(created), "prior_period": prior_period,
+                            "prior_status": json.loads(status) if status is not None else None})
+    return reports
+
+
+def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> dict:
+    """V5 summary; market data is only requested once a scored sample exists."""
+    split = agenda.sample(reports)
+    rows = split["picked"]
+    if rows:
+        rows = score(pro or screening._pro(), rows, today or datetime.now(SHANGHAI).date())
+    counts = {name: {"reports": 0, "scored": 0, "pending_entry": 0, "no_market_data": 0} for name in agenda.GROUPS}
+    for row in rows:
+        group = counts[row["group"]]
+        group["reports"] += 1
+        key = "scored" if row["returns"] else "no_market_data" if row["entry"] else "pending_entry"
+        group[key] += 1
+    return {"rows": rows, "unrecorded": len(split["unrecorded"]), "reruns": len(split["reruns"]),
+            "tally": agenda.tally(rows), "groups": counts, "returns": summarize(rows, "group")}
+
+
+def agenda_lines(result: dict) -> list[str]:
+    tally = result["tally"]
+    share = lambda v: f"{v:.0%}" if v is not None else "—"
+    lines = [f"V5 议程状态：入样 {len(result['rows'])} 份，历史未记录 {result['unrecorded']} 份，"
+             f"同期重跑 {result['reruns']} 份（不入比率）"]
+    for section, label in (("risks", "旧风险"), ("checkpoints", "旧检查点")):
+        lines.append(f"{label}：" + "，".join(f"{status} {n}" for status, n in tally["counts"][section].items()))
+    lines.append(f"可判定条目中的已发生占比 {share(tally['occurred'])}；检查点已触发占比 {share(tally['triggered'])}")
+    lines += [f"#{r['id']} {r['code']} 共 {r['items']} 项，无法判断 {share(r['unknown'])}" for r in tally["per_report"]]
+    for name, group in result["groups"].items():
+        lines.append(f"{name}：{group['reports']} 份，可记分 {group['scored']}，待入场 {group['pending_entry']}，"
+                     f"缺行情 {group['no_market_data']}")
+    for s in result["returns"]:
+        lines.append(f"{s['source']}·{s['group']} {s['horizon']}：n={s['n']} 平均超额 {_pct(s['mean'])} "
+                     f"中位 {_pct(s['median'])} 跑赢 {s['beat']:.0%} 左尾 {s['left_tail']:.0%}")
+    return lines
+
+
 def _adjusted_closes(pro, code: str, start: str, end: str) -> dict[str, float]:
     bars = screening._query(pro, "daily", ts_code=code, start_date=start, end_date=end, fields="trade_date,close")
     factors = screening._query(pro, "adj_factor", ts_code=code, start_date=start, end_date=end)
@@ -325,6 +377,7 @@ def main() -> None:
     modes.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
     modes.add_argument("--hypotheses", action="store_true", help="V3：H1 避坑与 H3 读得快假设记分")
     modes.add_argument("--stances", action="store_true", help="V4：研究立场、加仓检查点与历史等证据兑现与等待代价")
+    modes.add_argument("--agenda", action="store_true", help="V5：接续报告对旧风险与检查点的逐项状态及各状态组后续表现")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.hypotheses:
@@ -352,6 +405,13 @@ def main() -> None:
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump({"forecasts": scored, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
+        return
+    if args.agenda:
+        result = score_agenda(load_agenda(args.database))
+        log.info("\n%s", "\n".join(agenda_lines(result)))
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(result, fh, ensure_ascii=False, indent=1, default=str)
         return
     pro, today = screening._pro(), datetime.now(SHANGHAI).date()
     rows = score(pro, load_reports(args.database), today)

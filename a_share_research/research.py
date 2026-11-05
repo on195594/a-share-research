@@ -93,6 +93,7 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
 5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。其中 forecast 是对下一期财务表数值的区间预测，不要求出处证明预测值，不评判区间宽窄；只核查所选行与 text 所述事项、本报告判断相关，且 text 中的基期事实正确。
 6. valuation 的 rationale 与 not_priced 照常核查事实和数字；检查情景假设间的经济关系与口径是否自洽（如周期高点用高利润配高倍数、保守利润高于基期却无证据），不评判贵贱与区间宽窄；相关问题统一定位 where="valuation"，修复时顶层替换整个 valuation。
 7. stance 是研究立场：核查 text 的事实与数字（包括引用的行业、宏观、政策与外部价格）有出处，以及立场是否与 verdict、主要风险和估值测算一致（如期望回报已高于门槛却等价格、结论暂不值得却现在分批而无理由）；不评判立场本身的激进或保守。现在分批的可选 add_trigger 只核查所选行与理由相关，不要求原文证明未来值；它是加仓参考，不阻止首批。相关问题定位 where="stance"，修复时顶层替换整个 stance。
+8. prior_status 是对 prior 旧议程的逐项状态：核查状态是否被本次出处支持，已发生（不利结果已体现）与仍存在（条件还在、结果未体现）的区分是否合理；旧报告文字不是证据。未到期核对其等待的披露确实尚未发生。无法判断分三种：资料已有证据却未用，用 claim；可补读但还没读，用 question；确实无法取得，text 写明缺口即可，不算问题。定位 where="prior_status[i]"。
 原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
 通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
 
@@ -115,17 +116,17 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
         return ledger.accept(parse_json(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
 
 
-REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods")
+REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods", "prior_status")
 
 
 def published(report: dict) -> dict:
     """Fields of a passed report that are saved; optional judgment fields only when the contract produced them."""
     return {k: report[k] for k in ("verdict", "summary", *SECTIONS)} | {
-        k: report[k] for k in ("checkpoints", "valuation", "stance") if k in report}
+        k: report[k] for k in ("checkpoints", "valuation", "stance", "prior_status") if k in report}
 PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
 {"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
 ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
-add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods；不能整段替换。value 是完整条目 {"text": "论断", "cites": [出处]}；checkpoints 条目可再带 forecast（格式同原报告），替换带 forecast 的检查点时须保留或修正它。
+add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods/prior_status；不能整段替换。value 是完整条目 {"text": "论断", "cites": [出处]}；checkpoints 条目可再带 forecast（格式同原报告），替换带 forecast 的检查点时须保留或修正它；prior_status 条目必须带 ref 和 status，缺项用 add 补齐。
 出处格式：原文 {"source": "实际文档标识", "page": 页码, "quote": "该页连续原文，逐字复制，20–200 字"}；表格/程序计算 {"ref": "实际行标识", "period": "实际期间键，跨期论断可省略"}。
 verdict、summary、gaps、valuation、stance 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组，valuation、stance 格式同原报告（整体替换）；未提到的字段与条目由程序逐字保留。
 可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
@@ -152,7 +153,7 @@ def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material
         keys = {"op", "where"} if kind == "delete" else {"op", "where", "value"}
         if not keys <= op.keys():
             raise RepairFormatError(label + f"{kind} 必须包含字段 {sorted(keys)}")
-        match = re.fullmatch(r"([a-z]+)\[(0|[1-9]\d*)\]", where) if isinstance(where, str) else None
+        match = re.fullmatch(r"([a-z_]+)\[(0|[1-9]\d*)\]", where) if isinstance(where, str) else None
         section = where if kind == "add" else match[1] if match else None
         if not isinstance(section, str) or section not in REPAIR_SECTIONS:
             raise RepairFormatError(label + f"章节或位置不存在：{where}；replace/delete 用章节[序号]，add 用章节名；章节仅 {', '.join(REPAIR_SECTIONS)}")
@@ -199,6 +200,8 @@ def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material
             merged["methods"] = []
     else:
         required.add("checkpoints")
+    if material.extra.get("prior"):
+        required.add("prior_status")
     for section in {s for s, _ in replacements} | additions.keys():
         merged[section] = [deepcopy(replacements.get((section, i), item))
                            for i, item in enumerate(report.get(section) or [])
@@ -289,7 +292,7 @@ def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool
             location = location.strip()
             if location == "missing":
                 continue
-            match = re.fullmatch(r"(risks|business|financial|answer|checkpoints)(?:\[(\d+)\])?", location)
+            match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|prior_status)(?:\[(\d+)\])?", location)
             if not match:
                 return {}
             section, index = match.groups()
@@ -320,7 +323,7 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     for parent in parents:
         body = json.loads(parent["body"])
         content = body if parent["passed"] else body.get("facts", {})
-        claims = {k: content.get(k) for k in ("summary", "answer", "methods", "checkpoints", *SECTIONS)}
+        claims = {k: content.get(k) for k in ("summary", "answer", "methods", "checkpoints", "prior_status", *SECTIONS)}
         # Retired methods must not return through automatic same-company context.
         if parent["id"] != parent_id:
             claims["methods"] = None
@@ -368,14 +371,15 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
 
 
 # Where an unanswered part of the user's question can stay open without withholding the verified rest.
-OPEN_QUESTION_WHERE = re.compile(r"answer\[\d+\]|valuation|missing|gaps\[\d+\]")
+OPEN_QUESTION_WHERE = re.compile(r"answer\[\d+\]|prior_status\[\d+\]|valuation|missing|gaps\[\d+\]")
 
 
 def open_questions(problems: list[dict], reviewed: bool) -> list[dict] | None:
     """Unresolved review issues that may ship as named gaps, or None when any of them must block.
 
     Only a completed review of the final draft qualifies, and only `question` issues about the answer,
-    the scenario valuation, or evidence still missing: the reviewer found the work incomplete, not wrong.
+    a prior item's status, the scenario valuation, or evidence still missing: the reviewer found the work
+    incomplete, not wrong.
     A disputed claim, an omitted material risk, or doubt about a fact, verdict or stance still blocks."""
     if not problems or not reviewed:
         return None

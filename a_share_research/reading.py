@@ -257,7 +257,7 @@ def pending_reviews(conn, limit: int = PAGE_SIZE) -> tuple[list, bool]:
     ).fetchall()
     labels = {'queued': '核查排队中', 'running': '核查进行中', 'failed': '核查未完成'}
     anchors = {'risks': '#risks', 'answer': '#answer', 'business': '#business',
-               'financial': '#financial', 'checkpoints': '#checkpoints'}
+               'financial': '#financial', 'checkpoints': '#checkpoints', 'prior_status': '#prior-status'}
     return [dict(r) | {'label': ('核查未通过' if r['status'] == 'failed' and r['passed'] == 0
                                else labels.get(r['status'], '核查结果未就绪')),
                       'anchor': anchors.get(r['location'].split('[')[0], '')}
@@ -286,7 +286,7 @@ def evidence_context(body: dict, coverage: str | None) -> dict:
 def evidence_ledger(content: dict, rows: dict, evidence: dict) -> dict:
     """Counts of what a report shows: its items, distinct quoted passages and program calculations."""
     quotes, calculations = set(), set()
-    for key in ('answer', 'risks', 'business', 'financial', 'checkpoints', 'methods'):
+    for key in ('answer', 'prior_status', 'risks', 'business', 'financial', 'checkpoints', 'methods'):
         for item in content.get(key) or []:
             for cite in item.get('cites') or [] if isinstance(item, dict) else []:
                 if cite.get('ref'):
@@ -340,6 +340,84 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
 def search_reports(conn, query: str, page: int = 1, *, page_size: int = PAGE_SIZE) -> tuple[list, bool]:
     rows = latest_reports(conn, query=query, limit=page_size + 1, offset=(page - 1) * page_size)
     return rows[:page_size], len(rows) > page_size
+
+
+SEARCH_SECTIONS = {'risks': '风险与反证', 'checkpoints': '下期检查点', 'answer': '问题回答', 'business': '业务',
+                   'financial': '财务', 'stance': '研究立场', 'prior_status': '旧议程状态'}
+SEARCH_MAX_TERMS = 5
+
+
+def search_items(conn, query: str, *, code: str | None = None, section: str | None = None, history: bool = False,
+                 page: int = 1, page_size: int = PAGE_SIZE) -> tuple[list[dict], bool]:
+    """Literal AND search across report items, newest report first, scanning stored JSON.
+
+    Each company's report is chosen first, by the company card's rule, and only then matched: a term found
+    only in an older report does not surface unless `history` asks for every report.
+    shortcut: no index; revisit if the measured production P95 exceeds one second.
+    """
+    query = query.strip()
+    terms = [term.casefold() for term in query.split()]
+    if not terms or len(query) > 100 or len(terms) > SEARCH_MAX_TERMS:
+        raise service.RequestError(f"查询须为 1–100 字、最多 {SEARCH_MAX_TERMS} 个词")
+    if code is not None and not re.fullmatch(r"\d{6}", code):
+        raise service.RequestError("公司代码必须为六位数字")
+    if section is not None and section not in SEARCH_SECTIONS:
+        raise service.RequestError("章节仅限：" + "、".join(SEARCH_SECTIONS))
+    # Fixed names only; json_extract with several paths parses each body once and returns just the prose.
+    paths = ", ".join("'$.stance.text'" if name == "stance" else f"'$.{name}'" for name in SEARCH_SECTIONS)
+    rows = conn.execute(
+        "SELECT c.id, c.code, c.name, c.created_at, c.coverage, json_extract(b.body, " + paths + ") AS found FROM ("
+        " SELECT r.id, r.code, r.name, r.created_at, r.coverage, ROW_NUMBER() OVER ("
+        "  PARTITION BY substr(r.code, 1, 6) ORDER BY r.created_at DESC, r.id DESC) AS position"
+        " FROM reports r JOIN runs u ON u.id = r.run_id"
+        " WHERE r.passed = 1 AND u.status = 'done' AND u.kind = 'research' AND u.replay_of IS NULL"
+        " AND json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL"
+        " AND (? IS NULL OR substr(r.code, 1, 6) = ?)) c JOIN reports b ON b.id = c.id"
+        " WHERE (? OR c.position = 1) ORDER BY c.created_at DESC, c.id DESC",
+        (code, code, int(history)),
+    ).fetchall()
+    wanted, matched = (page - 1) * page_size + page_size + 1, []
+    for row in rows:
+        for name, value in zip(SEARCH_SECTIONS, json.loads(row['found'])):
+            if not value or section not in (None, name):
+                continue
+            entries = [(name, value)] if name == 'stance' else [(f"{name}[{i}]", item['text']) for i, item in enumerate(value)]
+            for location, text in entries:
+                if all(term in text.casefold() for term in terms):
+                    matched.append({'report_id': row['id'], 'code': row['code'], 'name': row['name'],
+                                    'created_at': row['created_at'], 'period': row['coverage'],
+                                    'location': location, 'text': text})
+        if len(matched) >= wanted:
+            break
+    start = (page - 1) * page_size
+    return matched[start:start + page_size], len(matched) > start + page_size
+
+
+def item_link(report_id: int, location: str) -> str:
+    """Where a search hit sits on the report page; ?claim= opens its fold and its sources."""
+    match = re.fullmatch(r"([a-z_]+)\[(\d+)\]", location)
+    if not match:
+        return f"/reports/{report_id}#{location}"
+    return f"/reports/{report_id}?claim={match[1]}:{match[2]}#claim-{match[1]}-{match[2]}"
+
+
+def prior_agenda(conn, body: dict) -> list[dict]:
+    """prior_status with each old item's wording, resolved against the immutable prior report."""
+    entries = body.get('prior_status') or []
+    if not entries:
+        return []
+    report_id = (body.get('prior') or {}).get('report_id')
+    row = conn.execute("SELECT json_extract(body, '$.risks') AS risks, json_extract(body, '$.checkpoints') AS checkpoints"
+                       " FROM reports WHERE id = ?", (report_id,)).fetchone()
+    old = {name: json.loads(row[name] or '[]') if row else [] for name in ('risks', 'checkpoints')}
+    resolved = []
+    for entry in entries:
+        name, index = entry['ref'][:-1].split('[')
+        found = old[name][int(index)] if int(index) < len(old[name]) else None
+        resolved.append(entry | {'previous': found['text'] if found else None,
+                                 'previous_label': f"{'旧风险' if name == 'risks' else '旧检查点'}第 {int(index) + 1} 条",
+                                 'previous_url': item_link(report_id, entry['ref'])})
+    return resolved
 
 
 def recent_report(conn, code: str):
@@ -507,8 +585,10 @@ def card(report, body: dict, last_passed=None) -> dict:
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
             'period': period_label, 'created_at': created_at, 'coverage': coverage,
             'market_date': day, 'last_passed': dict(last_passed) if last_passed else None,
-            # A continuation's answer restates the prior report's risks and checkpoints with sources.
-            'prior': continued if passed and isinstance(continued.get('report_id'), int) else None}
+            # A continuation restates the prior report's risks and checkpoints with sources:
+            # item by item in prior_status, or at the end of the answer in reports before that field.
+            'prior': continued if passed and isinstance(continued.get('report_id'), int) else None,
+            'prior_status': bool(body.get('prior_status')) if passed else False}
 
 
 VALUATION = ("M.pe_ttm", "M.pb", "M.dv_ttm")

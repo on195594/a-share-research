@@ -237,6 +237,9 @@ th small { display: block; margin-left: 0; }
 .candidate-head label { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
 .badge { font-size: 13px; padding: 1px 8px; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); }
 .badge.quiet { background: var(--band); color: var(--ink); }
+.prior-old { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.search .check { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.search .check input { flex: none; width: 20px; height: 20px; min-height: 0; padding: 0; margin: 0; appearance: auto; accent-color: var(--accent); }
 .factors { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0 4px; }
 .factors div { margin: 0; }
 .factors dt { color: var(--muted); font-size: 12px; }

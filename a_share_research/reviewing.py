@@ -99,7 +99,7 @@ def binding_view(value):
 def target_exists(target, report):
     if target in ("summary", "verdict", "gaps", "valuation", "stance"):
         return target in report
-    match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|methods|gaps)\[(\d+)\]", target or "")
+    match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|methods|gaps|prior_status)\[(\d+)\]", target or "")
     return bool(match and int(match[2]) < len(report.get(match[1], [])))
 
 
@@ -224,7 +224,7 @@ issues: 新发现的实质问题数组，每项 {type: omission/claim/question, 
 problem: 具体问题, importance: 为什么会影响本次问题或结论, evidence: 已存出处数组}；
 where 是单个位置，如 risks[0]、business[1]、gaps[0]、summary、verdict、valuation、stance，或 missing。
 omission/claim 必须给支持批评的已读原文/表格/程序计算出处，不能只凭经验列风险清单；question 可无出处。
-question 只用于用户要求或分析尚未完成、仍需补证；已写内容有误、夸大或假设不自洽一律用 claim。定位在 answer、valuation、gaps 或 missing 的未解决 question 会作为具名缺口随报告交付，其余未解决问题阻断交付。
+question 只用于用户要求或分析尚未完成、仍需补证；已写内容有误、夸大或假设不自洽一律用 claim。定位在 answer、valuation、gaps、prior_status 或 missing 的未解决 question 会作为具名缺口随报告交付，其余未解决问题阻断交付。
 resolutions: 对下方每个 unresolved_issues 的 ID 恰好一项 {id, status: resolved/unresolved/dismissed,
 reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；omission 无论 where 指向何处都不能用空 targets 解决。
 dismissed 表示原批评不成立，必须用证据说明理由；unresolved 保留阻断并说明仍缺什么。不能因修复者声称完成或本轮未再提起就关闭。

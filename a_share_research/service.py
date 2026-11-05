@@ -43,7 +43,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
             body = json.loads(parent["body"])
             content = body if "summary" in body else body.get("facts", {})
-            match = re.fullmatch(r"(answer|risks|business|financial|methods|checkpoints)\[(\d{1,4})\]", location)
+            match = re.fullmatch(r"(answer|risks|business|financial|methods|checkpoints|prior_status)\[(\d{1,4})\]", location)
             valid = location == "summary" and bool(content.get("summary"))
             if match:
                 valid = int(match[2]) < len(content.get(match[1], []))
@@ -153,7 +153,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
     result["report"] = ({key: body[key] for key in
-                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "stance", "stance_calc", "answer", "open_questions", "risks", "business", "financial", "methods", "checkpoints")
+                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "stance", "stance_calc", "answer", "open_questions", "prior", "prior_status", "risks", "business", "financial", "methods", "checkpoints")
                          if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],
@@ -279,6 +279,7 @@ def continuation(conn, row, body: dict, extra: dict) -> dict:
                          "status": parent.get("status"), "passed": bool(parent["passed"]) if parent else None},
             "previous_checkpoints": previous.get("checkpoints", []) if baseline_status == "ready" else [],
             "previous_checkpoints_basis": "agenda_to_recheck_not_current_facts",
+            "previous_risks": previous.get("risks", []) if baseline_status == "ready" else [],
             "current_checkpoints": body.get("checkpoints", []) if row["passed"] else [],
             "table_changes": changes,
             "generated_at": row["created_at"], "financial_period": max([row["period"], *_table_periods(body)]),

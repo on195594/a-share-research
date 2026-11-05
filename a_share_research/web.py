@@ -262,14 +262,26 @@ def logout(request: Request, csrf: str = Form("")):
 # ---------- pages ----------
 
 @app.get("/research-library")
-def research_library(request: Request, q: str = "", page: int = Query(1, ge=1, le=10000)):
+def research_library(request: Request, q: str = "", content: str = "", history: bool = False,
+                     page: int = Query(1, ge=1, le=10000)):
     if not (session := current_session(request)):
         return login_required()
-    q = q.strip()
-    error = "请将查询缩短到 100 个字符以内。" if len(q) > 100 else ""
-    rows, more = reading.search_reports(conn, q, page) if not error else ([], False)
-    params = {"q": q} if q else {}
-    return render(request, "research_library.html", session, companies=rows, q=q, page=page, more=more,
+    q, content = q.strip(), content.strip()
+    error, rows, hits, more = "", [], [], False
+    if content:
+        try:
+            hits, more = reading.search_items(conn, content, history=history, page=page)
+        except service.RequestError as exc:
+            error = str(exc)
+        hits = [hit | {"label": reading.SEARCH_SECTIONS[hit["location"].split("[")[0]],
+                       "url": reading.item_link(hit["report_id"], hit["location"])} for hit in hits]
+    elif len(q) > 100:
+        error = "请将查询缩短到 100 个字符以内。"
+    else:
+        rows, more = reading.search_reports(conn, q, page)
+    params = {"content": content} | ({"history": "true"} if history else {}) if content else {"q": q} if q else {}
+    return render(request, "research_library.html", session, companies=rows, q=q, content=content, history=history,
+                  hits=hits, page=page, more=more,
                   error=error, previous_url="/research-library?" + urlencode(params | {"page": page - 1}),
                   next_url="/research-library?" + urlencode(params | {"page": page + 1}))
 
@@ -408,7 +420,7 @@ def report_page(request: Request, report_id: int):
         section, _, index = feedback["location"].partition("[")
         feedback_label = {"summary": "一句话结论", "answer": "问题回答", "risks": "风险与反证",
                           "business": "业务", "financial": "财务", "methods": "研究方法",
-                          "checkpoints": "下期检查点"}[section]
+                          "checkpoints": "下期检查点", "prior_status": "旧议程状态"}[section]
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     evidence = reading.evidence_context(body, row['coverage'])
@@ -425,6 +437,7 @@ def report_page(request: Request, report_id: int):
                   rows=rows, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=fin, price=reading.latest_price(conn, row["code"]),
+                  prior_agenda=reading.prior_agenda(conn, body) if row['passed'] else [],
                   followups=reading.followups(conn, row['code'], report_id))
 
 
@@ -526,6 +539,14 @@ def api_reports(request: Request, code: str):
         raise service.RequestError("公司代码必须为六位数字")
     rows = reading.api_reports(conn, code)
     return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
+
+
+@app.get("/api/search")
+def api_search(request: Request, q: str, code: str | None = None, section: str | None = None, history: bool = False,
+               page: int = Query(1, ge=1, le=10000)):
+    api_session(request)
+    items, more = reading.search_items(conn, q, code=code, section=section, history=history, page=page)
+    return {"version": service.VERSION, "items": items, "page": page, "more": more}
 
 
 class MonthlyBatchRequest(BaseModel):
