@@ -12,6 +12,30 @@ from a_share_research import forecasts, valuation
 ACTIONS = ("现在分批", "等价格", "回避")
 OPERATORS = (">=", "<=")
 WAIT_MONTHS = 6
+# Same-version reruns on one market day moved the v2 hurdle by up to ±5.5% around its midpoint (11-05: 新乳业
+# 15.89–17.74 around a 16.90 close flipped 现在分批/等价格). Within this band the side of the hurdle is not
+# treated as a stable judgment. Owner-approved 5%; it narrows the noise, it does not remove it.
+BOUNDARY = Decimal("0.05")
+
+
+def hurdle_margin(valuation_calc) -> float | None:
+    """Close relative to the v2 expected-return hurdle price (close / hurdle - 1), or None when not priced."""
+    calc = valuation_calc if isinstance(valuation_calc, dict) else {}
+    v2 = calc.get("v2") if isinstance(calc.get("v2"), dict) else {}
+    close, hurdle = calc.get("close"), v2.get("support_below")
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) and v > 0 for v in (close, hurdle)):
+        return None
+    return close / hurdle - 1
+
+
+def on_boundary(valuation_calc) -> bool | None:
+    """True when the close sits within BOUNDARY of the hurdle; None when there is no priced hurdle."""
+    margin = hurdle_margin(valuation_calc)
+    if margin is None:
+        return None
+    calc = valuation_calc
+    # Decimal on the shown values keeps the band edge exact (105 vs 100 is on it, not 5.000…04% off).
+    return abs(Decimal(str(calc["close"])) / Decimal(str(calc["v2"]["support_below"])) - 1) <= BOUNDARY
 
 
 def _number(value) -> Decimal | None:

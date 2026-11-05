@@ -25,6 +25,7 @@
           <div><dt>期望回报门槛价</dt><dd class="num">{{ '%.2f' | format(sd.hurdle) }}<small>元</small></dd></div>
           <div><dt>测算位置</dt><dd>{{ sd.zone or '区间倒置' }}{% if sd.annual_return is number %}<small class="num">· 年化 {{ sd.annual_return }}%</small>{% endif %}</dd></div>
         </dl>
+        {% if sd.boundary %}<p class="small stance-boundary"><strong>边界立场</strong>：现价与期望回报门槛价相差不足 5%，同样材料重跑可能得出相反立场；记分单列，不作判断力证据。</p>{% endif %}
         {% endif %}
         {% if body.stance.action == '现在分批' and body.stance.add_trigger %}{% set t = body.stance.add_trigger %}
         <p class="small stance-trigger">加仓检查点（参考，不阻止首批）：{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}。达到才加后续批次；未达到则复核是否减仓。</p>

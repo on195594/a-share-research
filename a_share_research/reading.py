@@ -4,7 +4,7 @@ import re
 from datetime import date, datetime
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
-from a_share_research import charts, db, service
+from a_share_research import charts, db, service, stance as stances
 
 PAGE_SIZE = 20
 
@@ -57,6 +57,7 @@ def stance_decision(stance: dict | None, stance_calc: dict | None, valuation_cal
         out["annual_return"] = round(float(v2["annual_return"]) * 100, 1)
 
     out["zone"] = v2.get("zone") or vc.get("zone")
+    out["boundary"] = stances.on_boundary(vc) is True
     return out
 
 

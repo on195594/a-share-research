@@ -163,7 +163,9 @@ def summarize_stances(rows: list[dict]) -> dict:
     out = {}
     for row in rows:
         action, outcome = row["stance"], row.get("stance_outcome") or {}
-        group = out.setdefault(f"{action}·{outcome['status']}" if outcome else action, {"n": 0, "excess": []})
+        key = f"{action}·{outcome['status']}" if outcome else action
+        # Boundary stances (close within stance.BOUNDARY of the hurdle) are scored apart, never pooled.
+        group = out.setdefault(key + ("·边界" if row.get("boundary") else ""), {"n": 0, "excess": []})
         group["n"] += 1
         if latest := row["returns"].get("latest"):
             group["excess"].append(latest["excess"])
@@ -226,11 +228,12 @@ def load_reports(database: str) -> list[dict]:
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, "
-            "json_extract(r.body, '$.stance'), json_extract(r.body, '$.stance_calc') FROM reports r "
+            "json_extract(r.body, '$.stance'), json_extract(r.body, '$.stance_calc'), "
+            "json_extract(r.body, '$.valuation_calc') FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL"
         ).fetchall()
     reports = []
-    for report_id, code, name, verdict, created, request, stance, calc in rows:
+    for report_id, code, name, verdict, created, request, stance, calc, valuation_calc in rows:
         src = source(json.loads(request) if request else {})
         if src is None:
             continue
@@ -239,7 +242,8 @@ def load_reports(database: str) -> list[dict]:
                         "completed": datetime.fromisoformat(created),
                         "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
                         "trigger": calc.get("trigger", (json.loads(stance) or {}).get("trigger")) if calc else None,
-                        "add_trigger": calc.get("add_trigger") if calc else None})
+                        "add_trigger": calc.get("add_trigger") if calc else None,
+                        "boundary": stances.on_boundary(json.loads(valuation_calc) if valuation_calc else None)})
     return first_per_month(reports)
 
 
@@ -365,7 +369,7 @@ def main() -> None:
                 t = row["add_trigger"]
                 target = f" 加仓检查点（参考） {t['period']} {t['metric']} {t['op']} {t['value']:g}"
             status = {"met": "达成", "not_met": "未达成", "pending": "待披露"}.get(outcome.get("status"), outcome.get("status", "—")) if row["stance"] != "等价格" else outcome.get("status", "—")
-            lines.append(f"#{row['id']} {row['code']} {row['name']} {row['stance']}{target} → {status}"
+            lines.append(f"#{row['id']} {row['code']} {row['name']} {row['stance']}{'（边界）' if row.get('boundary') else ''}{target} → {status}"
                          f"{' ' + outcome['date'] if outcome.get('date') else ''} 至今超额 {_pct(latest['excess']) if latest else '—'}")
         for key, g in summary.items():
             lines.append(f"{key} n={g['n']} 已入场 {g['scored']} 平均超额 {_pct(g['mean_excess']) if g['mean_excess'] is not None else '—'}")

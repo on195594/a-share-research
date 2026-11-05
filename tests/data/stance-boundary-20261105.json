@@ -1,0 +1,100 @@
+[
+ {
+  "run": 1,
+  "code": "601899.SH",
+  "market_date": "2026-11-04",
+  "action": "现在分批",
+  "valuation_calc": {
+   "close": 29.25,
+   "v2": {
+    "support_below": 29.788412058059343,
+    "annual_return": 0.10810052972152868,
+    "zone": "测算支持区"
+   }
+  }
+ },
+ {
+  "run": 2,
+  "code": "002946.SZ",
+  "market_date": "2026-11-04",
+  "action": "现在分批",
+  "valuation_calc": {
+   "close": 16.9,
+   "v2": {
+    "support_below": 17.739758409597446,
+    "annual_return": 0.12166878322568118,
+    "zone": "测算支持区"
+   }
+  }
+ },
+ {
+  "run": 3,
+  "code": "601899.SH",
+  "market_date": "2026-11-04",
+  "action": "现在分批",
+  "valuation_calc": {
+   "close": 29.25,
+   "v2": {
+    "support_below": 30.30250418995413,
+    "annual_return": 0.11575388264577993,
+    "zone": "测算支持区"
+   }
+  }
+ },
+ {
+  "run": 4,
+  "code": "002946.SZ",
+  "market_date": "2026-11-04",
+  "action": "等价格",
+  "valuation_calc": {
+   "close": 16.9,
+   "v2": {
+    "support_below": 16.172557717046512,
+    "annual_return": 0.08070297474842751,
+    "zone": "中性区"
+   }
+  }
+ },
+ {
+  "run": 5,
+  "code": "601899.SH",
+  "market_date": "2026-11-04",
+  "action": "现在分批",
+  "valuation_calc": {
+   "close": 29.25,
+   "v2": {
+    "support_below": 30.670454691281424,
+    "annual_return": 0.121184070589657,
+    "zone": "测算支持区"
+   }
+  }
+ },
+ {
+  "run": 6,
+  "code": "002946.SZ",
+  "market_date": "2026-11-04",
+  "action": "等价格",
+  "valuation_calc": {
+   "close": 16.9,
+   "v2": {
+    "support_below": 15.892212603398034,
+    "annual_return": 0.07312784464513424,
+    "zone": "中性区"
+   }
+  }
+ },
+ {
+  "report": 109,
+  "code": "601088.SH",
+  "market_date": "2026-11-04",
+  "action": "等价格",
+  "valuation_calc": {
+   "close": 50.98,
+   "v2": {
+    "support_below": 35.583900178657686,
+    "annual_return": -0.04812123447724464,
+    "zone": "测算透支区"
+   }
+  }
+ }
+]
