@@ -99,7 +99,7 @@ def test_retry_rejects_ordinary_completed_replay_and_incomplete_records(web):
 def test_home_search_stays_visible_and_question_fold_keeps_typed_text():
     for pending, error, question in [([], None, None), ([{'id': 18, 'parent_id': 11}], None, None),
                                       ([{'id': 18, 'parent_id': 11}], '请重新选择', '现金流是否一致？')]:
-        html = render('home.html', pending=pending, pending_more=False, companies=[], batch_only=0,
+        html = render('home.html', pending=pending, pending_more=False, companies=[],
                       active=[], batch=None, error=error, question=question)
         # The search row is never folded, whatever the pending state; a typed question reopens its fold.
         assert '<section class="start"' in html and 'id="q" name="q"' in html

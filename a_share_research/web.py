@@ -283,7 +283,6 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
                                            {r["code"]: r["name"] for r in (loaded["q20"] or []) + (loaded.get("s10") or [])})
     latest = reading.latest_reports(conn, include_checkpoint=False)
     companies = [r for r in latest if r["own"]]
-    batch_only = sum(1 for r in latest if not r["own"])
     pending, pending_more = reading.pending_reviews(conn)
     if companies:
         passed_before = {r["code"]: r for r in reading.latest_reports(
@@ -292,7 +291,7 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     else:
         cards = []
     listed = {r['id'] for r in pending}
-    return render(request, "home.html", session, status, companies=cards, batch_only=batch_only,
+    return render(request, "home.html", session, status, companies=cards,
                   verdict_summary=charts.verdict_summary(companies),
                   pending=pending, pending_more=pending_more,
                   due=company_data.due_report(datetime.now(db.SHANGHAI).date()),

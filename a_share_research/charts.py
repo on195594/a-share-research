@@ -765,13 +765,17 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
     if batch["rule"].get("version") in {"screen-v1.2", "screen-v1.3"}:
         labels = [("L5", "大市值选定 L5"), ("Q5", "大市值机械 Q5"), ("Q20", "大市值候选 Q20"),
                   ("SL3", "小市值选定 SL3"), ("SQ3", "小市值机械 SQ3")]
+    # The home summary keeps each selected group beside its mechanical control and the first benchmark.
+    summary_keys = {"L5", "Q5", "SL3", "SQ3", *list(batch["rule"]["benchmarks"])[:1]}
     labels += list(batch["rule"]["benchmarks"].items())
-    rows = []
+    rows, summary = [], []
     for key, label in labels:
         value = results["values"].get(key)
         rows.append({"label": label, "value": value * 100 if value is not None else None, "emphasis": key in ("L5", "SL3"),
                      "text": f"{value * 100:+.2f}%" if value is not None else "—",
                      "tip": f"{label}：{f'{value * 100:+.2f}%' if value is not None else '未计算'}"})
+        if key in summary_keys:
+            summary.append(rows[-1])
     mark = batch["marks"]["latest"]
     members = []
     selected = (batch.get("l5") or {}).get("codes", []) + (batch.get("sl3") or {}).get("codes", [])
@@ -781,7 +785,8 @@ def batch_returns(batch: dict, results: dict | None, names: dict) -> dict | None
         members.append({"label": names.get(code, code), "value": value * 100 if filled else None,
                         "text": f"{value * 100:+.2f}%" if filled else "未成交",
                         "tip": f"{names.get(code, code)}：{f'{value * 100:+.2f}%' if filled else '未成交，按现金计'}"})
-    return {"groups": bars(rows), "members": bars(members), "entry": batch["entry"]["date"], "date": results["date"]}
+    return {"groups": bars(rows), "members": bars(members), "summary": summary,
+            "entry": batch["entry"]["date"], "date": results["date"]}
 
 
 def funnel(batch: dict, labels: list[tuple[str, str]]) -> dict | None:

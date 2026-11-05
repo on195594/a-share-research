@@ -587,17 +587,23 @@ a.plain:hover { text-decoration-color: var(--accent); }
   .card-keys div { padding: 0 4px; }
   .card-keys dd { font-size: 14px; }
 }
-/* Home: the screening panel sits above the long card list so it stays on the first screen. */
-.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 36px 0 4px; }
-.section-head h2 { margin: 0; }
-.section-head a { flex: none; font-size: 15px; padding: 10px 0; }
+/* Home: one tappable line for the latest batch; the charts live on the batch page. */
+.batch-line { display: block; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.batch-line:hover { color: var(--ink); }
+.batch-line > span { display: block; }
+.batch-month { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.batch-line:hover .batch-month { color: var(--accent-strong); text-decoration-thickness: 2px; }
+.batch-line > .batch-returns { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 4px; font-size: 15px; }
+.batch-returns > span { white-space: nowrap; }
+.batch-returns .lead { font-weight: 650; }
+.batch-line > .hint { margin-top: 2px; font-size: 13px; }
 @media (min-width: 1100px) {
   /* The whole home page shares one 1120px grid; the top row lines up with the two card columns. */
   .page-wide { --column: 1160px; }
   .home-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; align-items: start; }
   .home-main { padding-right: 24px; }
   .home-screening { margin-top: 8px; }
-  .home-screening .section-head { margin-top: -10px; }
+  .home-screening h2 { margin-top: 0; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Cards in a row share a height; the thesis takes the slack so the figures line up. */
   .card { display: flex; flex-direction: column; }

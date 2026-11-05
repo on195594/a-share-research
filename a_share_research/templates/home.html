@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
-{% from "_charts.html" import bars, data_list, verdict_pips %}
 {% from "_card.html" import summary_card %}
 {% macro review_items(rows) %}
 <ul class="list">
@@ -14,7 +13,7 @@
 {% endmacro %}
 {% block body_attrs %} class="page-wide"{% endblock %}
 {% block main %}
-<h1>研究首页</h1>
+<h1 class="visually-hidden">研究首页</h1>
 <div class="home-top">
 <div class="home-main">
 <section class="start" aria-labelledby="start-title">
@@ -32,7 +31,6 @@
       <label for="question" class="visually-hidden">想弄清什么？</label>
       <textarea id="question" name="question" rows="3" maxlength="4000" placeholder="例如：最新财报改变了什么，利润与现金流是否一致？">{{ question or '' }}</textarea>
     </details>
-    <p class="hint">按问题补读定期报告、核对财务与计算，通常需要几分钟。银行、保险、券商暂不支持。</p>
   </form>
 
   {% if error %}<p class="notice caution" role="alert">{{ error }}</p>{% endif %}
@@ -52,6 +50,7 @@
   {% endif %}
 </section>
 
+{% if active or pending %}
 <section aria-labelledby="attention">
   <h2 id="attention" tabindex="-1">待处理事项</h2>
 {% if active %}
@@ -69,45 +68,28 @@
     {{ review_items(pending[:3]) }}
     {% if pending|length > 3 %}<details><summary>展开本页其余 {{ pending|length - 3 }} 项核查</summary>{{ review_items(pending[3:]) }}</details>{% endif %}
     {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
-  {% else %}<p>没有符合上述范围的待核查记录。</p>{% endif %}
+  {% endif %}
 </section>
+{% endif %}
 </div>
 
+{% if batch %}
+{% import "_batch.html" as b with context %}
 <section class="home-screening" aria-labelledby="screening">
-  {% import "_batch.html" as b with context %}
-  <div class="section-head">
-    <h2 id="screening" tabindex="-1">候选初筛</h2>
-    <a href="/batches">{{ "全部批次" if batch else "开始初筛" }}</a>
-  </div>
-  {% if batch %}
-  <p><a href="/batches/{{ batch.id }}">{{ b.month(batch) }}</a> <span class="muted">· {{ b.batch_status[batch.status] }}</span></p>
-  {% if performance %}
-  <figure class="figure" data-chart>
-    <figcaption><strong>累计模拟收益</strong><span class="readout" aria-live="polite"><span class="date">{{ b.day(performance.entry) }}</span> 开盘入场至 <span class="date">{{ b.day(performance.date) }}</span> 收盘，扣往返费用</span></figcaption>
-    {{ bars(performance.groups, "本批次各组合累计模拟收益", emphasis=true) }}
-    {{ data_list(performance.groups) }}
-  </figure>
-  {% if performance.members and performance.members.rows %}
-  <details class="block">
-    <summary>选定公司各自表现 · {{ performance.members.rows | length }} 家</summary>
-    <figure class="figure" data-chart>
-      <figcaption><span class="readout" aria-live="polite">单家等额持有，同样扣往返费用</span></figcaption>
-      {{ bars(performance.members, "选定公司各自累计收益") }}
-      {{ data_list(performance.members) }}
-    </figure>
-  </details>
-  {% endif %}
-  {% endif %}
-  {% else %}
-  <p class="muted">每月从全市场筛出 20 家候选、深挖后选 5 家做模拟跟踪。</p>
-  {% endif %}
+  <h2 id="screening" tabindex="-1">候选初筛</h2>
+  <a class="batch-line" href="/batches/{{ batch.id }}">
+    <span class="batch-head"><span class="batch-month">{{ b.month(batch) }}</span> <span class="muted">· {{ b.batch_status[batch.status] }}</span></span>
+    {% if performance %}
+    <span class="batch-returns">{% for r in performance.summary %}<span{% if r.emphasis %} class="lead"{% endif %}>{{ r.label }} <span class="num">{{ r.text }}</span></span>{% endfor %}</span>
+    <span class="hint"><span class="date">{{ b.day(performance.date) }}</span> 收盘，扣往返费用</span>
+    {% endif %}
+  </a>
 </section>
+{% endif %}
 </div>
 
 <section aria-labelledby="companies">
   <h2 id="companies" tabindex="-1">主动研究过的公司 · {{ companies|length }} 家</h2>
-  <p class="small"><a href="/research-library">查已有研究</a> · 主动研究和初筛深挖均可查，不会启动研究。</p>
-  {% if companies %}<p class="hint">按最新报告判断分组，组内最近研究的在前；卡上数字为研究时保存的累计同比与收盘 TTM 估值。</p>{% endif %}
   {% if companies %}
   {% if verdict_summary is defined and verdict_summary %}
   <nav class="filter-pills" aria-label="按最新研究判断查看">
@@ -129,9 +111,8 @@
   {% endif %}
   {% endfor %}
   </div>
-  {% elif not batch_only %}
+  {% else %}
   <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
   {% endif %}
-  {% if batch_only %}<p class="muted">另有 {{ batch_only }} 家只在初筛中深挖过，见<a href="/batches">各批次</a>。</p>{% endif %}
 </section>
 {% endblock %}

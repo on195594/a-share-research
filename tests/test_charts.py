@@ -382,30 +382,36 @@ def test_member_returns_reuse_group_return_and_portfolio_matches():
     assert (performance["entry"], performance["date"]) == (prices["entry"]["date"], prices["mark"]["date"])
 
 
-def test_home_keeps_screening_above_the_company_cards_and_folds_selected_members():
+def test_home_screening_is_one_summary_line_above_the_company_cards():
     prices = json.loads((ROOT / "tests/data/screen-prices.json").read_text())
     codes = list(prices["entry"]["prices"])
+    benchmarks = {"H00906.CSI": "中证800全收益", "H00300.CSI": "沪深300全收益"}
     batch = {"id": 2, "status": "tracking", "created_at": "2026-11-01", "entry": prices["entry"],
-             "marks": {"latest": prices["mark"]},
-             "rule": {"cost": 0.002, "picks": 5, "benchmarks": {"H00906.CSI": "中证800全收益"}},
+             "marks": {"latest": prices["mark"]}, "rule": {"cost": 0.002, "picks": 5, "benchmarks": benchmarks},
              "l5": {"codes": codes}, "q5": codes, "q20": [{"code": c, "name": c} for c in codes]}
     results = screening.returns(batch)
-    page = ENV.get_template("home.html")
-    context = dict(steps={}, request_id="r", batch=batch, companies=[], batch_only=0, pending=[],
-                   pending_more=False, active=[])
+    performance = charts.batch_returns(batch, results, {})
+    # The selected group stays beside its control and one benchmark, so it can't read better than it is.
+    assert [r["label"] for r in performance["summary"]] == ["选定组合", "机械前五", "中证800全收益"]
+    assert performance["summary"][0]["text"] == performance["groups"]["rows"][0]["text"]
 
-    html = page.render(csrf="token", performance=charts.batch_returns(batch, results, {}), **context)
-    # The long card list comes last, so screening stays on the first screen.
-    assert html.index('id="start-title"') < html.index('id="attention"') < html.index('id="screening"') < html.index('id="companies"')
-    assert f"选定公司各自表现 · {len(codes)} 家" in html
+    dual = batch | {"rule": batch["rule"] | {"version": "screen-v1.3"}}
+    assert [r["label"] for r in charts.batch_returns(dual, results, {})["summary"]] == [
+        "大市值选定 L5", "大市值机械 Q5", "小市值选定 SL3", "小市值机械 SQ3", "中证800全收益"]
+
+    page = ENV.get_template("home.html")
+    context = dict(steps={}, request_id="r", companies=[], pending=[], pending_more=False, active=[])
+    html = page.render(csrf="token", batch=batch, performance=performance, **context)
+    assert html.index('id="start-title"') < html.index('id="screening"') < html.index('id="companies"')
+    assert f'href="/batches/{batch["id"]}"' in html and performance["summary"][1]["text"] in html
+    # Charts and per-company returns stay on the batch page.
+    assert "<svg" not in html and "选定公司各自表现" not in html
     nav = html[html.index('<nav class="shell-nav"'):html.index("</nav>")]
     assert 'href="/batches"' in nav and 'href="/research-library"' in nav
 
-    # No selected companies: no empty fold. Signed out (no csrf): no navigation to pages it can't open.
-    empty = charts.batch_returns(batch | {"l5": {"codes": []}}, results, {})
-    html = page.render(csrf="", performance=empty, **context)
-    assert "选定公司各自表现" not in html and "累计模拟收益" in html
-    assert "shell-nav" not in html
+    # No batch: no empty block. Signed out (no csrf): no navigation to pages it can't open.
+    html = page.render(csrf="", batch=None, performance=None, **context)
+    assert 'id="screening"' not in html and "shell-nav" not in html
 
 
 def test_verdict_track_uses_reviewed_original_reports_with_their_questions():
