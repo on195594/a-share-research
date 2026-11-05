@@ -119,22 +119,32 @@ def _split_numbers(cite: dict, registry: dict) -> list[float]:
     return values
 
 
-def _candidates(cites: list[dict], material: Material) -> list[float]:
+def _assumed(row: dict) -> bool:
+    return bool((row.get("calculation") or {}).get("assumptions"))
+
+
+def _candidates(cites: list[dict], material: Material, *, facts_only=False) -> list[float]:
+    """Values the cites can support; `facts_only` drops results and operands that rest on explicit assumptions."""
     rows = {r["id"]: r for r in material.table}
     registry = None
     values = []
     for cite in cites:
         if "ref" in cite and cite["ref"] in rows:
             row = rows[cite["ref"]]
-            for fld in ("values", "exact_values"):
-                cited = row.get(fld, {})
-                values += [float(v) for p, v in cited.items()
-                           if not cite.get("period") or cite["period"] == p or row["id"].startswith("C.")]
             calc = row.get("calculation") or {}
-            # Explicit assumptions are citable as assumptions, not company disclosures.
-            # Keep their provenance in the row for semantic review and chained calculations.
-            for group in ("inputs", "normalized_inputs", "assumptions"):
-                values += [float(i["value"]) for i in calc.get(group, []) if "value" in i]
+            if not (facts_only and _assumed(row)):
+                for fld in ("values", "exact_values"):
+                    cited = row.get(fld, {})
+                    values += [float(v) for p, v in cited.items()
+                               if not cite.get("period") or cite["period"] == p or row["id"].startswith("C.")]
+            inputs = calc.get("inputs", [])
+            normalized = calc.get("normalized_inputs") or [{} for _ in inputs]
+            for raw, norm in zip(inputs, normalized):
+                if facts_only and ("assumption" in raw or raw.get("assumptions")):
+                    continue
+                values += [float(i["value"]) for i in (raw, norm) if "value" in i]
+            if not facts_only:
+                values += [float(i["value"]) for i in calc.get("assumptions", []) if "value" in i]
         elif "quote" in cite:
             values += [v for v, _ in _numbers(cite["quote"])]
             if SPLIT_HALF.search(str(cite["quote"])):
@@ -237,10 +247,13 @@ def check(report: dict, material: Material) -> list[dict]:
                                  f"{'、'.join(stale)} 按另一组估值情景测算，与本稿 valuation 的 basis/years/scenarios/payout_pct 不一致；"
                                  "请按最终 valuation 重新调用 valuation 工具并引用新行"})
                 continue
+            text = str(item.get("text", ""))
             candidates = _candidates(cites, material)
-            for value, decimals in _checked_figures(str(item.get("text", "")), material, cites):
+            for value, decimals in _checked_figures(text, material, cites):
                 if not _supported(value, decimals, candidates):
                     problems.append({"where": where, "problem": f"数字 {value:g} 在所引出处中找不到"})
+            problems += [{"where": where, "problem": p}
+                         for p in _unmarked_assumptions(text, material, cites, candidates, _candidates(cites, material, facts_only=True))]
             all_cites += cites
     # A full rewrite is raw model output, so the key may be echoed back in any shape.
     for i, note in enumerate(report.get("repair_rebuttals") or []):
@@ -254,4 +267,26 @@ def check(report: dict, material: Material) -> list[dict]:
     for value, decimals in _checked_figures(summary, material, all_cites):
         if not _supported(value, decimals, candidates):
             problems.append({"where": "summary", "problem": f"数字 {value:g} 在报告出处与表中找不到"})
+    facts = _candidates(all_cites, material, facts_only=True) + [float(v) for r in material.table if not _assumed(r)
+                                                                for fld in ("values", "exact_values")
+                                                                for v in r.get(fld, {}).values()]
+    problems += [{"where": "summary", "problem": p}
+                 for p in _unmarked_assumptions(summary, material, all_cites, candidates, facts)]
     return problems
+
+
+ASSUMPTION_MARK = re.compile(r"假设|假定|测算|情景|压力|若|如果|倘若")
+
+
+def _unmarked_assumptions(text: str, material: Material, cites: list[dict],
+                          candidates: list[float], facts: list[float]) -> list[str]:
+    """A figure only an explicit-assumption calculation supports must be stated as conditional in its sentence."""
+    out = []
+    for sentence in re.split(r"(?<=[。；;！？!?\n])", text):
+        if ASSUMPTION_MARK.search(sentence):
+            continue
+        for value, decimals in _checked_figures(sentence, material, cites):
+            if _supported(value, decimals, candidates) and not _supported(value, decimals, facts):
+                out.append(f"数字 {value:g} 只来自显式假设的测算；请在同一句写明假设或测算条件（如“假设……测算为”），"
+                           "不要写成已披露事实")
+    return out

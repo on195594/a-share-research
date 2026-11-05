@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+from decimal import Decimal
 from urllib.parse import urldefrag, urlparse
 
 
@@ -265,6 +266,23 @@ def material_hash(data: dict) -> str:
 NUMBER = re.compile(r"[-−+]?\d[\d,]*(?:\.\d+)?(?![\d.])(?!\s*[年月日])")
 ISO_DATE = re.compile(r"(?<!\d)(?:19|20)\d{2}[-/](?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])(?!\d)")
 SCALES = (1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e2, 1e4)
+
+
+def signed_numbers(text: str) -> list:
+    """Every figure in `text` as an exact Decimal, reading accounting parentheses as negative.
+
+    "(18,271,433,398.44)" is only the negative amount; a bare integer such as the note number in
+    "附注七(12)" is ambiguous, so it stays available with either sign.
+    """
+    out = []
+    for match in NUMBER.finditer(text):
+        token = Decimal(match[0].replace(",", "").replace("−", "-"))
+        before, after = text[:match.start()].rstrip(), text[match.end():].lstrip()
+        if token >= 0 and any(before.endswith(left) and after.startswith(right) for left, right in (("(", ")"), ("（", "）"))):
+            out += [-token] if re.search(r"[,.]", match[0]) else [token, -token]
+        else:
+            out.append(token)
+    return out
 
 
 def numbers(text: str) -> list[tuple[float, int]]:

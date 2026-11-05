@@ -151,3 +151,44 @@ def test_assumptions_and_mixed_units_are_visible_in_the_existing_citation_ui():
         item={"cites": [{"ref": row["id"]}]}, rows={r["id"]: r for r in m.table})
     assert "假设测算，不是披露事实" in html and "利润下降20%" in html
     assert "输入单位分别为亿元、倍" in html and "计算输入统一为亿元" not in html
+
+
+def stress_problems(m, text, row):
+    m.extra["question"] = "利润压力测试"
+    report = {"verdict": "需要谨慎", "summary": "需要谨慎：测试。", "answer": [{"text": text, "cites": [{"ref": row["id"]}]}]}
+    return [p["problem"] for p in checking.check(report, m) if p["where"] == "answer[0]"]
+
+
+def test_assumption_only_figure_must_be_stated_as_conditional():
+    m, row = stress()
+    base = next(r for r in m.table if r["id"] == "T.net_profit")["values"]["2025-12-31"]
+    result = row["values"]["result"]
+    assert stress_problems(m, f"假设利润保留八成，归母净利润测算为{result}亿元。", row) == []
+    assert stress_problems(m, f"2025年归母净利润{base}亿元。", row) == []  # factual operand stays a fact
+    # Mutations: the same assumed figures written as facts, and a fabricated one, are still caught.
+    for text in (f"归母净利润为{result}亿元。", "利润保留系数为0.8。"):
+        assert any("显式假设" in p for p in stress_problems(m, text, row)), text
+    assert any("找不到" in p for p in stress_problems(m, "假设下降后归母净利润为123.45亿元。", row))
+
+
+def test_identical_pricing_inputs_reuse_rows_and_scenario_returns_come_from_compute():
+    from a_share_research.research_tools import ResearchTools
+    sample = DATA["000651"]
+    m = material("000651")
+    tools = ResearchTools(m, None)
+    rows = tools.run("valuation", {"valuation": sample["valuation"]})
+    reworded = sample["valuation"] | {"rationale": [{"text": "改写理由", "cites": []}]}
+    assert tools.run("valuation", {"valuation": reworded}) == rows and len(m.table) == len(sample["table"]) + 8
+    calc = valuation.compute(sample["valuation"] | {"rationale": [{"text": "复算", "cites": []}]}, sample["table"], sample["market_date"])
+    for name in valuation.SCENARIOS:
+        total = next(r for r in rows if r["calculation"].get("scenario") == name and r["calculation"]["metric"] == "total_return")
+        scenario = calc["scenarios"][name]
+        assert float(total["exact_values"]["result"]) == pytest.approx(
+            ((scenario["exit_cap"] + scenario["dividends"]) / calc["market_cap"] - 1) * 100, rel=1e-12)
+
+
+def test_parenthesized_amount_is_negative_but_note_numbers_keep_either_sign():
+    from a_share_research.evidence import signed_numbers
+    assert signed_numbers("(18,271,433,398.44)") == [Decimal("-18271433398.44")]
+    assert signed_numbers("（4,517,748,687.12）") == [Decimal("-4517748687.12")]
+    assert set(signed_numbers("见附注七(12)")) >= {Decimal(12), Decimal(-12)}

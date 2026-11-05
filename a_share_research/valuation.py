@@ -16,7 +16,7 @@ def years(table: list[dict]) -> list[int]:
     return list(range(max(annual) + 1, max(annual) + 4)) if annual else []
 
 
-def _number(value) -> Decimal | None:
+def finite_number(value) -> Decimal | None:
     if isinstance(value, bool) or not isinstance(value, (int, float, str, Decimal)):
         return None
     try:
@@ -26,8 +26,17 @@ def _number(value) -> Decimal | None:
     return result if result.is_finite() else None
 
 
+def annual_return(total: Decimal, cost: Decimal, years: Decimal) -> Decimal:
+    """Compound annual return of `total` (exit value plus undistributed-reinvested dividends) over `cost`."""
+    if total < 0 or cost <= 0:
+        raise ValueError("年化回报要求退出价值加累计分红非负、买入价值为正；请调整正常化假设或用 not_priced")
+    with localcontext() as context:
+        context.prec = 40
+        return (total / cost) ** (1 / years) - 1
+
+
 def _assumption(value) -> Decimal | None:
-    return _number(value) if isinstance(value, (int, float, Decimal)) else None
+    return finite_number(value) if isinstance(value, (int, float, Decimal)) else None
 
 
 def problems(value, table: list[dict]) -> list[str]:
@@ -104,7 +113,7 @@ def _json_numbers(value):
 def _cell(table: list[dict], ref: str, period: str) -> Decimal:
     row = next((r for r in table if r["id"] == ref), {})
     raw = row.get("exact_values", {}).get(period, row.get("values", {}).get(period))
-    value = _number(raw)
+    value = finite_number(raw)
     if value is None:
         raise ValueError(f"缺少有效的 {ref}[{period}]，请补齐报告财务或行情表")
     return value
@@ -146,7 +155,7 @@ def at(calc: dict, close, day: str) -> dict:
     empty.update(as_of=day, close=None)
 
     def number(value, field):
-        result = _number(value)
+        result = finite_number(value)
         if result is None:
             raise ValueError(f'{field} 缺少有限数值，无法滚动测算')
         return result
@@ -212,7 +221,7 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     cap = _cell(table, "M.total_mv", market_date)
     if close <= 0 or cap <= 0:
         raise ValueError("M.close 与 M.total_mv 须为正数，无法计算当前价格下的回报")
-    r, r_low = _number(r), _number(r_low)
+    r, r_low = finite_number(r), finite_number(r_low)
     if r is None or r_low is None or min(r, r_low) <= -1:
         raise ValueError("r 与 r_low 须为大于 -1 的有限回报率")
     target_years = years(table)
@@ -222,12 +231,7 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     horizon = Decimal((exit_date - as_of).days) / Decimal("365.25")
     if horizon <= 0:
         raise ValueError(f"行情日须早于退出日 {exit_date.isoformat()}")
-    payout = _number(value["payout_pct"]) / 100
-
-    def annual(total):
-        if total < 0:
-            raise ValueError("退出市值加分红为负，无法计算实数年化回报；请调整正常化假设或用 not_priced")
-        return (total / cap) ** (1 / horizon) - 1
+    payout = finite_number(value["payout_pct"]) / 100
 
     def price(total, rate):
         return close * total / (cap * (1 + rate) ** horizon)
@@ -235,17 +239,17 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     scenarios = {}
     for name in SCENARIOS:
         assumption = value["scenarios"][name]
-        profits = [_number(p) for p in assumption["profit"]]
-        exit_cap = profits[2] * _number(assumption["exit_pe"])
+        profits = [finite_number(p) for p in assumption["profit"]]
+        exit_cap = profits[2] * finite_number(assumption["exit_pe"])
         dividends = payout * (profits[0] + profits[1])
         total = exit_cap + dividends
         scenarios[name] = {"exit_cap": exit_cap, "dividends": dividends,
-                           "annual_return": annual(total), "price_at_r": price(total, r)}
+                           "annual_return": annual_return(total, cap, horizon), "price_at_r": price(total, r)}
     v2 = expected({name: s["exit_cap"] + s["dividends"] for name, s in scenarios.items()},
                   {name: Decimal(value["scenarios"][name]["probability"]) / 100 for name in SCENARIOS},
                   close=close, cap=cap, base_close=close, base_cap=cap, horizon=horizon, r=r, r_low=r_low)
     neutral = value["scenarios"]["中性"]
-    p3, pe = _number(neutral["profit"][2]), _number(neutral["exit_pe"])
+    p3, pe = finite_number(neutral["profit"][2]), finite_number(neutral["exit_pe"])
     dividends = scenarios["中性"]["dividends"]
     support = scenarios["保守"]["price_at_r"]
     stretched = price(scenarios["中性"]["exit_cap"] + dividends, r_low)
@@ -254,12 +258,12 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     # A negative required profit has no real CAGR against a positive base either.
     cagr = (implied / base) ** (Decimal(1) / (target_years[-1] - base_year)) - 1 if base > 0 and implied >= 0 else None
     factors = [Decimal(n) / 10 for n in (8, 9, 10, 11, 12)]
-    multiples = [_number(value["scenarios"][name]["exit_pe"]) for name in SCENARIOS]
+    multiples = [finite_number(value["scenarios"][name]["exit_pe"]) for name in SCENARIOS]
     comparison = deepcopy(consensus) if consensus is not None else {"status": "none", "years": {}}
     comparison["neutral_vs_median"] = {
-        str(year): _number(neutral["profit"][i]) / _number(stats["median"]) - 1
+        str(year): finite_number(neutral["profit"][i]) / finite_number(stats["median"]) - 1
         for i, year in enumerate(target_years)
-        if (stats := comparison.get("years", {}).get(str(year))) and _number(stats.get("median")) not in (None, 0)
+        if (stats := comparison.get("years", {}).get(str(year))) and finite_number(stats.get("median")) not in (None, 0)
     }
     assumptions = ["假设股本不变，不计增发、回购或摊薄；利润与市值单位亿元，价格单位元。",
                    "退出日为终点年度次年4月30日；持有期按实际天数除以365.25计算。",
@@ -275,7 +279,7 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
             "zone": price_zone(close, support, stretched), "v2": v2,
             "implied": {"profit": implied, "cagr": cagr},
             "sensitivity": {"profit_factors": factors, "exit_pe": multiples,
-                            "returns": [[annual(p3 * factor * multiple + dividends) for multiple in multiples] for factor in factors]},
+                            "returns": [[annual_return(p3 * factor * multiple + dividends, cap, horizon) for multiple in multiples] for factor in factors]},
             # Multiples of a non-positive base have no meaning; leave them empty as with cagr.
             "bridge": {"profit_change": p3 / base if base > 0 else None,
                        "pe_change": pe / (cap / base) if base > 0 else None, "dividend_share": dividends / cap},
@@ -298,7 +302,7 @@ def consensus(rows: list[dict], years: list[int], as_of: str, *, coverage=None) 
             continue
         key = (row["org_name"], int(quarter[1]))
         if key not in latest or reported > latest[key][0]:
-            latest[key] = (reported, _number(row.get("np")))
+            latest[key] = (reported, finite_number(row.get("np")))
     result = {}
     for year in years:
         samples = [(reported, np / 10000) for (_, y), (reported, np) in latest.items() if y == year and np is not None]
@@ -369,10 +373,11 @@ def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
             ("annual_return", "年化回报", "((退出市值 + 累计分红) ÷ 买入总市值)^(1 ÷ 持有年数) − 1"),
             ("total_return", "累计回报", "(退出市值 + 累计分红) ÷ 买入总市值 − 1"),
         ):
+            # Both metrics read compute()'s own scenario values; only the cumulative ratio is formed here.
             value = (Decimal(str(scenario["annual_return"])) if metric == "annual_return"
                      else (Decimal(str(scenario["exit_cap"])) + Decimal(str(scenario["dividends"])))
                      / Decimal(str(calc["market_cap"])) - 1) * 100
-            result.append({"id": f"C.{n + len(result) + 1}", "label": f"{name}情景{label}（非最坏情景）", "unit": "%",
+            result.append({"id": f"C.{n + len(result) + 1}", "label": f"{name}情景{label}（{RULE_V2}）", "unit": "%",
                            "values": {"result": str(value.quantize(Decimal("0.01")))}, "exact_values": {"result": str(value)},
                            "calculation": common | {"scenario": name, "metric": metric, "formula": f"({formula}) × 100"}})
     return result

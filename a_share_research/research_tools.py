@@ -48,9 +48,9 @@ TOOLS = [
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
                     "required": ["code"], "additionalProperties": False}},
-    {"name": "valuation", "description": "按拟定三情景估值（与报告 valuation 同格式，rationale 可暂缺）生成可引用 C.n：期望回报门槛价、期望年化回报，以及保守/中性/乐观各自的年化和累计回报，后者不是概率加权结果，也不是最坏情景。与报告页 valuation-v2 同源。正文引用时最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动后重算。期限固定且返回实际年数；更长持有期请按显式假设构建该期限的退出价值和累计分红，再用 calculate annual_return，不能借用短期限结果。",
+    {"name": "valuation", "description": "按拟定三情景估值（与报告 valuation 同格式，rationale 可暂缺）生成可引用 C.n：期望回报门槛价、期望年化回报，以及保守/中性/乐观各自的年化和累计回报，后者不是概率加权结果，也不是最坏情景。与报告页 valuation-v2 同源。正文引用时最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动后重算。期限固定并返回实际年数；其他持有期用 calculate annual_return。相同定价输入重复调用返回已有行。",
      "parameters": {"type": "object", "properties": {"valuation": {"type": "object"}}, "required": ["valuation"], "additionalProperties": False}},
-    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。事实输入用表格/前序计算 {ref, period}，或已读披露原数 {source, page, quote, value, unit, period(可选), label(可选)}；原数含正负号、小数位必须匹配引文，会计括号表示负数。假设参数单独用 {assumption: 非空说明, value: 数字, unit: 单位}，不得混入事实出处；假设及其链式结果均标为假设测算，不是披露事实。multiply 用于数量乘无量纲系数（单位倍），如利润乘0.8检验下降20%；ratio 可除以倍数，其余比值要求同单位或可换算货币单位。annual_return 的 left 为退出价值加持有期间累计现金分红，right 为买入价值，另传 holding_years（正数，不超过50年），计算总回报的复合年化百分比；分红不再投资，不是IRR。按三年/五年分别输入终值及对应累计分红，不把固定 valuation 的短期限冒充长期。growth_pct 只用于同指标相邻年度同月日同比；跨期、环比或异源变动用 change_pct。label 只记录目的，不证明财务含义。",
+    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。事实输入用表格/前序计算 {ref, period}，或已读披露原数 {source, page, quote, value, unit, period(可选), label(可选)}；原数含正负号、小数位必须匹配引文，会计括号表示负数。假设参数单独用 {assumption: 非空说明, value: 数字, unit: 单位}，不得混入事实出处；假设及其链式结果均标为假设测算，不是披露事实。multiply 用于数量乘无量纲系数（单位倍），如利润乘0.8检验下降20%；ratio 可除以倍数，其余比值要求同单位或可换算货币单位。annual_return 的 left 为退出价值加持有期间累计现金分红，right 为买入价值，另传 holding_years（正数，不超过50年），计算总回报的复合年化百分比；分红不再投资，不是IRR。growth_pct 只用于同指标相邻年度同月日同比；跨期、环比或异源变动用 change_pct。label 只记录目的，不证明财务含义。",
      "parameters": {"type": "object", "properties": {
          "label": {"type": "string"},
          "operation": {"type": "string", "enum": ["difference", "sum", "multiply", "growth_pct", "change_pct", "ratio", "ratio_pct", "annual_return"]},
@@ -112,10 +112,10 @@ def _operand(side: dict, rows: dict, material) -> dict:
         if (set(side) != {"assumption", "value", "unit"}
                 or not isinstance(side["assumption"], str) or not 1 <= len(side["assumption"].strip()) <= 200
                 or not isinstance(side["unit"], str) or not side["unit"].strip()
-                or valuations._number(side["value"]) is None):
+                or valuations.finite_number(side["value"]) is None):
             raise ValueError("假设输入仅用 {assumption: 非空说明, value: 有限数字, unit: 单位}，不得混入事实出处")
         return {"assumption": side["assumption"].strip(), "label": side["assumption"].strip(),
-                "value": str(valuations._number(side["value"])), "unit": side["unit"].strip(), "period": "假设"}
+                "value": str(valuations.finite_number(side["value"])), "unit": side["unit"].strip(), "period": "假设"}
     if set(clean) <= {"ref", "period"} and "ref" in clean and not (set(side) - {"ref", "period", "source", "page", "quote", "value", "unit", "label"}):
         if clean["ref"] not in rows:
             raise ValueError(f"表中没有 {clean['ref']}；可引用 financials 返回的行或此前计算得到的 C.n")
@@ -142,15 +142,7 @@ def _operand(side: dict, rows: dict, material) -> dict:
             num = Decimal(raw)
         except ArithmeticError as exc:
             raise ValueError("计算输入必须是有限数字") from exc
-        quote = str(side["quote"])
-        tokens = []
-        for match in evidence.NUMBER.finditer(quote):
-            token = Decimal(match[0].replace(",", "").replace("−", "-"))
-            before, after = quote[:match.start()].rstrip(), quote[match.end():].lstrip()
-            if token >= 0 and any(before.endswith(left) and after.startswith(right)
-                                  for left, right in (("(", ")"), ("（", "）"))):
-                token = -token
-            tokens.append(token)
+        tokens = evidence.signed_numbers(str(side["quote"]))
         if not num.is_finite() or not any(num == t and num.as_tuple().exponent == t.as_tuple().exponent for t in tokens):
             raise ValueError("计算输入的数值（含正负号与小数位）须与所引原文中的原数完全一致")
         source = str(side.get("source") or "D0")
@@ -184,7 +176,7 @@ def _operand(side: dict, rows: dict, material) -> dict:
 def calculate(table: list[dict], label: str, operation: str, left: dict, right: dict, *, material=None, holding_years=None) -> dict:
     if not isinstance(label, str) or not 1 <= len(label) <= 160:
         raise ValueError("计算名称须为 1–160 字")
-    years = valuations._number(holding_years)
+    years = valuations.finite_number(holding_years)
     if operation == "annual_return":
         if years is None or not 0 < years <= 50:
             raise ValueError("annual_return 须传 holding_years：大于0、不超过50年的有限数字")
@@ -223,11 +215,9 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
         result, formula = a * b, "left * right"
     elif operation == "annual_return":
         assert years is not None  # validated before resolving the operands
-        if a < 0 or b <= 0:
-            raise ValueError("年化回报要求退出价值加累计分红非负、买入价值为正")
         with localcontext() as context:
             context.prec = 40
-            result = ((a / b) ** (1 / years) - 1) * 100
+            result = valuations.annual_return(a, b, years) * 100
         formula, unit = f"((left / right)^(1 / {years}) - 1) * 100", "%"
     elif operation == "growth_pct":
         lp, rp = inputs[0]["period"], inputs[1]["period"]
@@ -489,6 +479,12 @@ class ResearchTools:
         return row
 
     def valuation(self, valuation: dict):
+        # Rationale wording does not change prices: reuse rows already priced from the same inputs.
+        priced = valuations.pricing_inputs(valuation)
+        if existing := [r for r in self.material.table
+                        if (r.get("calculation") or {}).get("operation") == valuations.PROGRAM_OPERATION
+                        and r["calculation"].get("valuation") == priced]:
+            return existing
         rows = valuations.program_rows(valuation, self.material.table, self.material.market_date)
         self.material.table.extend(rows)
         return rows
