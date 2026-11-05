@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from a_share_research import db, scans, service, valuation
+from a_share_research import db, scans, service, stance, valuation
 from support.continuation import BODY as CAPTURED_BODIES, load
 from support.valuation import BODY, RECORD, STORED, assumptions
 
@@ -272,7 +272,8 @@ def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
     card = service.company_card(conn, '603606')
     assert card['status'] == '待复核' and len(card['pending_events']) == 4
     assert card['current']['current_zone'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')['zone']
-    assert card['current']['valuation'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
+    rolled = valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
+    assert card['current']['valuation'] == rolled | {'boundary': stance.on_boundary(rolled)}
     assert card['current']['note'] == '待复核，区间暂停解读'
     assert any(n['reason'] == 'pending_review' for n in first['notify'])
     second = run_scan(conn, source, '2026-10-31T18:00:00+08:00')

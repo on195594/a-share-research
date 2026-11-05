@@ -5,7 +5,7 @@ import re
 import sqlite3
 from datetime import datetime
 
-from a_share_research import batches, db
+from a_share_research import batches, db, stance as stances
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
@@ -184,13 +184,14 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
     calc = body.get("valuation_calc")
     summary = None
     if isinstance(calc, dict):
-        summary = {k: calc[k] for k in ("rule", "zone", "zones", "implied", "consensus", "as_of", "not_priced", "error")
+        summary = {k: calc[k] for k in ("rule", "zone", "zones", "implied", "consensus", "as_of", "close", "not_priced", "error")
                    if k in calc}
         if "scenarios" in calc:
             summary["scenarios"] = {name: {"annual_return": scenario["annual_return"]}
                                     for name, scenario in calc["scenarios"].items()}
         if isinstance(calc.get("v2"), dict):
-            summary["v2"] = {k: calc["v2"][k] for k in ("rule", "probabilities", "annual_return", "zone")}
+            summary["v2"] = {k: calc["v2"][k] for k in ("rule", "probabilities", "annual_return", "zone", "support_below")}
+        summary["boundary"] = stances.on_boundary(calc)
     from a_share_research import scans, valuation
     pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
     failure = scans.announcement_failure(conn, code, scan_id=scan_id)
@@ -199,6 +200,8 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
     current = scans.latest_close(conn, code)
     current['valuation'] = (valuation.at(calc, current['last_close'], current['last_close_date'])
                             if current['last_close'] is not None else None)
+    if current['valuation'] is not None:
+        current['valuation']['boundary'] = stances.on_boundary(current['valuation'])
     current['current_zone'] = current['valuation']['zone'] if current['valuation'] is not None else None
     if pending:
         current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'
@@ -209,7 +212,8 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
                             for item in body.get("checkpoints", [])],
             "relative": body.get("relative"), "valuation_calc": summary,
-            "stance": body.get("stance"), "stance_calc": body.get("stance_calc")}
+            "stance": body.get("stance"), "stance_calc": body.get("stance_calc"),
+            "open_questions": body.get("open_questions", [])}
 
 
 def company_cards(conn: sqlite3.Connection) -> dict:

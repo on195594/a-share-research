@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from a_share_research import db, scans, service, valuation
+from a_share_research import db, scans, service, stance, valuation
 from support.continuation import load
 from support.valuation import BODY, RECORD, ROWS, STORED, assumptions
 from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, run_scan
@@ -42,7 +42,7 @@ def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
     assert card['current']['valuation'] is None and card['current']['current_zone'] is None
     assert card['valuation_calc']['scenarios']['中性'] == {'annual_return': body['valuation_calc']['scenarios']['中性']['annual_return']}
     v2 = body['valuation_calc']['v2']
-    assert card['valuation_calc']['v2'] == {k: v2[k] for k in ('rule', 'probabilities', 'annual_return', 'zone')}
+    assert card['valuation_calc']['v2'] == {k: v2[k] for k in ('rule', 'probabilities', 'annual_return', 'zone', 'support_below')}
     assert card['stance'] == body['stance'] and card['stance_calc']['price'] == v2['support_below']
     assert card['current']['valuation'] is None  # rolled v2 travels inside current.valuation when priced
     compact = service.report_view(conn, report_id, compact=True)['report']
@@ -120,7 +120,8 @@ def test_cards_scope_origins_missing_and_rolled_valuation_read_only(tmp_path):
     for code, card in cards.items():
         assert card == service.company_card(conn, code) | {'origin': card['origin']}
     current = cards['600900']['current']
-    assert current['valuation'] == valuation.at(calc, calc['close'], '2027-10-30')
+    rolled = valuation.at(calc, calc['close'], '2027-10-30')
+    assert current['valuation'] == rolled | {'boundary': stance.on_boundary(rolled)}
     assert current['current_zone'] == current['valuation']['zone'] == '中性区'
     assert cards['600900']['valuation_calc']['zone'] == '测算透支区'
     assert cards['600519']['current']['valuation'] is None

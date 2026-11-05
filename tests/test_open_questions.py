@@ -56,12 +56,27 @@ def _execute(tmp_path, monkeypatch, problems):
     return row["status"], row["passed"], json.loads(row["body"])
 
 
-def test_open_questions_publish_the_report_with_named_gaps(tmp_path, monkeypatch):
-    problems = CAPTURED["108"]["problems"]
+@pytest.mark.parametrize("report_id,where", [("106", None), ("108", None), ("108", "prior_status[0]")])
+def test_open_questions_publish_the_report_with_named_gaps(tmp_path, monkeypatch, report_id, where):
+    problems = deepcopy(CAPTURED[report_id]["problems"])
+    if where:
+        problems[0]["where"] = where  # Explicit location-only mutation for the new agenda question contract.
     status, passed, body = _execute(tmp_path, monkeypatch, problems)
     assert (status, passed) == ("done", 1) and "failure" not in body and "problems" not in body
     assert [q["id"] for q in body["open_questions"]] == [p["id"] for p in problems]
-    assert body["gaps"][-2:] == [f"复核认为尚未完成：{p['problem']}" for p in problems]
+    assert body["gaps"][-len(problems):] == [f"复核认为尚未完成：{p['problem']}" for p in problems]
+    from a_share_research import db, service
+    conn = db.connect(tmp_path / "isolated.db")
+    conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
+                 (db.now(), json.dumps({"codes": [body["code"]]}), db.now()))
+    conn.execute('PRAGMA query_only=ON')
+    before = conn.total_changes
+    card = service.company_card(conn, body["code"][:6])
+    assert card["status"] == "有效" and card["open_questions"] == body["open_questions"]
+    assert service.company_cards(conn)["cards"][0]["open_questions"] == body["open_questions"]
+    assert service.report_view(conn, card["report_id"], compact=True)["report"]["open_questions"] == body["open_questions"]
+    assert conn.total_changes == before
+    conn.close()
 
 
 def test_a_disputed_claim_still_fails_the_report(tmp_path, monkeypatch):
