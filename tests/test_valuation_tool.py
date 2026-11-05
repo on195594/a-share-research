@@ -36,7 +36,7 @@ def test_tool_rows_equal_program_wait_price_and_are_citable():
     rows = ResearchTools(mat, None).run('valuation', {'valuation': assumptions()})
     price, _ = stance.wait_price(assumptions(), BODY['table'], BODY['market_date'])
     calc = valuation.compute(assumptions(), BODY['table'], BODY['market_date'])
-    assert [r['id'] for r in rows] == ['C.4', 'C.5'] and rows == mat.table[-2:]
+    assert [r['id'] for r in rows] == [f'C.{n}' for n in range(4, 12)] and rows == mat.table[-8:]
     assert float(rows[0]['exact_values']['result']) == pytest.approx(price) == pytest.approx(30.502715198880022)
     assert float(rows[1]['exact_values']['result']) == pytest.approx(calc['v2']['annual_return'] * 100)
     annual = rows[1]['values']['result']
@@ -65,7 +65,7 @@ def test_changed_scenarios_cannot_keep_old_price(change):
 def test_stale_price_through_a_derived_calculation_is_caught():
     mat = material()
     tools = ResearchTools(mat, None)
-    hurdle, _ = tools.run('valuation', {'valuation': assumptions()})
+    hurdle = tools.run('valuation', {'valuation': assumptions()})[0]
     gap = tools.run('calculate', {'label': '现价高于门槛价', 'operation': 'difference',
                                   'left': {'ref': 'M.close', 'period': BODY['market_date']}, 'right': {'ref': hurdle['id']}})
     report = {'verdict': '值得继续研究', 'summary': '值得继续研究：测试。', 'valuation': assumptions(),

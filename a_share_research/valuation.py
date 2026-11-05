@@ -332,7 +332,7 @@ def pricing_inputs(value) -> dict | None:
 
 
 def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
-    """Citable C.n rows for the v2 hurdle price and expected return of these exact scenarios.
+    """Citable C.n rows for v2 pricing plus each scenario's annual and cumulative return.
 
     They are the same numbers the report page shows after review, frozen with the pricing inputs
     so a later draft that changes the scenarios cannot keep citing them (see checking).
@@ -355,7 +355,7 @@ def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
     hurdle = Decimal(str(v2["support_below"]))
     annual = Decimal(str(v2["annual_return"])) * 100
     formula = "Σ概率×(退出市值+两年分红)"
-    return [
+    result = [
         {"id": f"C.{n + 1}", "label": f"期望回报门槛价（{RULE_V2}，期望年化{calc['r'] * 100:g}%）", "unit": "元",
          "values": {"result": str(hurdle.quantize(Decimal("0.01")))}, "exact_values": {"result": str(hurdle)},
          "calculation": common | {"formula": f"收盘价 × {formula} ÷ (总市值 × (1 + {calc['r']:g})^持有年数)"}},
@@ -363,6 +363,19 @@ def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
          "values": {"result": str(annual.quantize(Decimal("0.01")))}, "exact_values": {"result": str(annual)},
          "calculation": common | {"formula": f"(({formula} ÷ 总市值)^(1 ÷ 持有年数) − 1) × 100"}},
     ]
+    for name in SCENARIOS:
+        scenario = calc["scenarios"][name]
+        for metric, label, formula in (
+            ("annual_return", "年化回报", "((退出市值 + 累计分红) ÷ 买入总市值)^(1 ÷ 持有年数) − 1"),
+            ("total_return", "累计回报", "(退出市值 + 累计分红) ÷ 买入总市值 − 1"),
+        ):
+            value = (Decimal(str(scenario["annual_return"])) if metric == "annual_return"
+                     else (Decimal(str(scenario["exit_cap"])) + Decimal(str(scenario["dividends"])))
+                     / Decimal(str(calc["market_cap"])) - 1) * 100
+            result.append({"id": f"C.{n + len(result) + 1}", "label": f"{name}情景{label}（非最坏情景）", "unit": "%",
+                           "values": {"result": str(value.quantize(Decimal("0.01")))}, "exact_values": {"result": str(value)},
+                           "calculation": common | {"scenario": name, "metric": metric, "formula": f"({formula}) × 100"}})
+    return result
 
 
 def program_summary(value, table: list[dict], market_date: str) -> dict | None:

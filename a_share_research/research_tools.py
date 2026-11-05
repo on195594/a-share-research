@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from copy import deepcopy
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 
 from a_share_research import db, sources, evidence, valuation as valuations
 from a_share_research.checking import quote_found
@@ -48,17 +48,18 @@ TOOLS = [
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
                     "required": ["code"], "additionalProperties": False}},
-    {"name": "valuation", "description": "按拟定的三情景估值（与报告 valuation 同格式，rationale 可暂缺）由程序测算，生成两条可引用的 C.n：期望回报门槛价（元）与按收盘价的期望年化回报（%），与报告页随结论展示的 valuation-v2 结果相同。用于回答参考价格、判断等价格是否成立；正文引用这些数字时，最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动情景后须重新测算。",
+    {"name": "valuation", "description": "按拟定三情景估值（与报告 valuation 同格式，rationale 可暂缺）生成可引用 C.n：期望回报门槛价、期望年化回报，以及保守/中性/乐观各自的年化和累计回报，后者不是概率加权结果，也不是最坏情景。与报告页 valuation-v2 同源。正文引用时最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动后重算。期限固定且返回实际年数；更长持有期请按显式假设构建该期限的退出价值和累计分红，再用 calculate annual_return，不能借用短期限结果。",
      "parameters": {"type": "object", "properties": {"valuation": {"type": "object"}}, "required": ["valuation"], "additionalProperties": False}},
-    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。表格输入优先使用未舍入值；label 仅记录计算目的，结果按运算类型命名，财务含义须结合输入出处解释。left/right 可传表格或前序计算行 {ref, period(引用 C.n 时可省略)}，或直接传已读披露原文中的原数 {source, page, quote, value, unit, period(可选), label(可选)}（value 必须与 quote 中的数字及正负号完全一致，元/千元/万元/百万元/亿元可自动换算）。growth_pct 要求同指标相邻年度同月日同比且基期为正；change_pct 用于环比、期末较期初、跨多年累计、预实偏离或同业相对变动率（(left/right - 1)*100，要求基数为正且同单位或同为货币单位）；difference/sum/ratio/ratio_pct 要求同单位或同为货币单位。",
+    {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。事实输入用表格/前序计算 {ref, period}，或已读披露原数 {source, page, quote, value, unit, period(可选), label(可选)}；原数含正负号、小数位必须匹配引文，会计括号表示负数。假设参数单独用 {assumption: 非空说明, value: 数字, unit: 单位}，不得混入事实出处；假设及其链式结果均标为假设测算，不是披露事实。multiply 用于数量乘无量纲系数（单位倍），如利润乘0.8检验下降20%；ratio 可除以倍数，其余比值要求同单位或可换算货币单位。annual_return 的 left 为退出价值加持有期间累计现金分红，right 为买入价值，另传 holding_years（正数，不超过50年），计算总回报的复合年化百分比；分红不再投资，不是IRR。按三年/五年分别输入终值及对应累计分红，不把固定 valuation 的短期限冒充长期。growth_pct 只用于同指标相邻年度同月日同比；跨期、环比或异源变动用 change_pct。label 只记录目的，不证明财务含义。",
      "parameters": {"type": "object", "properties": {
          "label": {"type": "string"},
-         "operation": {"type": "string", "enum": ["difference", "sum", "growth_pct", "change_pct", "ratio", "ratio_pct"]},
+         "operation": {"type": "string", "enum": ["difference", "sum", "multiply", "growth_pct", "change_pct", "ratio", "ratio_pct", "annual_return"]},
+         "holding_years": {"type": "number", "exclusiveMinimum": 0, "maximum": 50},
          **{side: {"type": "object", "properties": {
              "ref": {"type": "string"}, "period": {"type": "string"},
              "source": {"type": "string"}, "page": {"type": "integer", "minimum": 1},
              "quote": {"type": "string"}, "value": {"type": ["string", "number"]},
-             "unit": {"type": "string"}, "label": {"type": "string"}},
+             "unit": {"type": "string"}, "label": {"type": "string"}, "assumption": {"type": "string", "minLength": 1, "maxLength": 200}},
              "additionalProperties": False} for side in ("left", "right")}},
          "required": ["label", "operation", "left", "right"], "additionalProperties": False}},
 ]
@@ -69,7 +70,8 @@ CURRENCY_UNITS = {
 }
 DECLARED_UNIT = re.compile(r"单位\s*[：:]\s*(?:人民币)?(亿元|百万元|万元|千元|元)")
 OPERATION_NAMES = {"difference": "差额", "sum": "合计", "growth_pct": "相对变动率",
-                   "change_pct": "相对变动率", "ratio": "比值", "ratio_pct": "比值（百分比）"}
+                   "change_pct": "相对变动率", "ratio": "比值", "ratio_pct": "比值（百分比）",
+                   "multiply": "乘积", "annual_return": "持有期复合年化回报"}
 
 
 def research_methods(conn, query: str) -> list[dict]:
@@ -106,6 +108,14 @@ def _operand(side: dict, rows: dict, material) -> dict:
     if not isinstance(side, dict):
         raise ValueError("计算输入须为对象")
     clean = {k: v for k, v in side.items() if v is not None and v != ""}
+    if "assumption" in side:
+        if (set(side) != {"assumption", "value", "unit"}
+                or not isinstance(side["assumption"], str) or not 1 <= len(side["assumption"].strip()) <= 200
+                or not isinstance(side["unit"], str) or not side["unit"].strip()
+                or valuations._number(side["value"]) is None):
+            raise ValueError("假设输入仅用 {assumption: 非空说明, value: 有限数字, unit: 单位}，不得混入事实出处")
+        return {"assumption": side["assumption"].strip(), "label": side["assumption"].strip(),
+                "value": str(valuations._number(side["value"])), "unit": side["unit"].strip(), "period": "假设"}
     if set(clean) <= {"ref", "period"} and "ref" in clean and not (set(side) - {"ref", "period", "source", "page", "quote", "value", "unit", "label"}):
         if clean["ref"] not in rows:
             raise ValueError(f"表中没有 {clean['ref']}；可引用 financials 返回的行或此前计算得到的 C.n")
@@ -119,8 +129,11 @@ def _operand(side: dict, rows: dict, material) -> dict:
         if period not in row.get(value_field, {}):
             # Tell the model what exists so it can retry instead of guessing.
             raise ValueError(f"{clean['ref']} 没有期间 {period}；可用期间：{'、'.join(sorted(row.get(value_field, {}))) or '无'}")
-        return {"ref": clean["ref"], "period": period, "label": row["label"],
-                "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
+        result = {"ref": clean["ref"], "period": period, "label": row["label"],
+                  "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
+        if assumptions := row.get("calculation", {}).get("assumptions"):
+            result["assumptions"] = deepcopy(assumptions)
+        return result
     if {"page", "quote", "value", "unit"} <= set(clean) and not clean.get("ref"):
         if material is None or not quote_found(side, material):
             raise ValueError("计算输入的原文引文在已读取页面中找不到")
@@ -129,7 +142,15 @@ def _operand(side: dict, rows: dict, material) -> dict:
             num = Decimal(raw)
         except ArithmeticError as exc:
             raise ValueError("计算输入必须是有限数字") from exc
-        tokens = [Decimal(t.replace(",", "").replace("−", "-")) for t in evidence.NUMBER.findall(str(side["quote"]))]
+        quote = str(side["quote"])
+        tokens = []
+        for match in evidence.NUMBER.finditer(quote):
+            token = Decimal(match[0].replace(",", "").replace("−", "-"))
+            before, after = quote[:match.start()].rstrip(), quote[match.end():].lstrip()
+            if token >= 0 and any(before.endswith(left) and after.startswith(right)
+                                  for left, right in (("(", ")"), ("（", "）"))):
+                token = -token
+            tokens.append(token)
         if not num.is_finite() or not any(num == t and num.as_tuple().exponent == t.as_tuple().exponent for t in tokens):
             raise ValueError("计算输入的数值（含正负号与小数位）须与所引原文中的原数完全一致")
         source = str(side.get("source") or "D0")
@@ -160,16 +181,29 @@ def _operand(side: dict, rows: dict, material) -> dict:
     raise ValueError("计算输入须为 {ref, period} 或带原文出处的 {source, page, quote, value, unit}")
 
 
-def calculate(table: list[dict], label: str, operation: str, left: dict, right: dict, *, material=None) -> dict:
+def calculate(table: list[dict], label: str, operation: str, left: dict, right: dict, *, material=None, holding_years=None) -> dict:
     if not isinstance(label, str) or not 1 <= len(label) <= 160:
         raise ValueError("计算名称须为 1–160 字")
+    years = valuations._number(holding_years)
+    if operation == "annual_return":
+        if years is None or not 0 < years <= 50:
+            raise ValueError("annual_return 须传 holding_years：大于0、不超过50年的有限数字")
+    elif holding_years is not None:
+        raise ValueError("holding_years 仅用于 annual_return")
     rows = {r["id"]: r for r in table}
     inputs = [_operand(left, rows, material), _operand(right, rows, material)]
     u0, u1 = inputs[0]["unit"], inputs[1]["unit"]
     a, b = (Decimal(v["value"]) for v in inputs)
     if not a.is_finite() or not b.is_finite():
         raise ValueError("计算输入必须是有限数字")
-    if u0 == u1:
+    if operation == "annual_return" and not (u0 in CURRENCY_UNITS and u1 in CURRENCY_UNITS):
+        raise ValueError("annual_return 的终值和买入价值须为金额，不能用增长率或百分比代替")
+    scaling = (operation == "multiply" and "倍" in (u0, u1)) or (operation == "ratio" and u1 == "倍")
+    if scaling:
+        unit = u1 if operation == "multiply" and u0 == "倍" else u0
+    elif operation == "multiply":
+        raise ValueError("multiply 至少一项须为无量纲系数（单位倍），不能将两个金额相乘")
+    elif u0 == u1:
         unit = u0
     elif u0 in CURRENCY_UNITS and u1 in CURRENCY_UNITS:
         # Convert both operands deterministically to the larger currency unit (e.g. 元 -> 亿元).
@@ -178,12 +212,23 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
         b = b * CURRENCY_UNITS[u1] / CURRENCY_UNITS[unit]
     else:
         raise ValueError("计算输入单位不同，不能直接比较")
-    normalized_inputs = [{"value": str(value), "unit": unit} for value in (a, b)]
+    normalized_inputs = [{"value": str(value), "unit": original if scaling else unit}
+                         for value, original in zip((a, b), (u0, u1))]
     if operation == "difference":
         result, formula = a - b, "left - right"
         unit = "个百分点" if unit == "%" else unit
     elif operation == "sum":
         result, formula = a + b, "left + right"
+    elif operation == "multiply":
+        result, formula = a * b, "left * right"
+    elif operation == "annual_return":
+        assert years is not None  # validated before resolving the operands
+        if a < 0 or b <= 0:
+            raise ValueError("年化回报要求退出价值加累计分红非负、买入价值为正")
+        with localcontext() as context:
+            context.prec = 40
+            result = ((a / b) ** (1 / years) - 1) * 100
+        formula, unit = f"((left / right)^(1 / {years}) - 1) * 100", "%"
     elif operation == "growth_pct":
         lp, rp = inputs[0]["period"], inputs[1]["period"]
         same_metric = (
@@ -203,7 +248,7 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
     elif operation in ("ratio", "ratio_pct"):
         if b == 0:
             raise ValueError("分母为零，不能计算比率")
-        result, formula, unit = a / b, "left / right", "倍"
+        result, formula, unit = a / b, "left / right", u0 if scaling else "倍"
         if operation == "ratio_pct":
             result, formula, unit = result * 100, "left / right * 100", "%"
     else:
@@ -211,12 +256,22 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
     precision = "基于所列输入计算，显示结果四舍五入到两位"
     if any(value.get("value_field") == "values" for value in inputs):
         precision += "；部分输入仅有已保存表值，精度受该表值限制"
+    assumptions = []
+    for item in inputs:
+        for assumption in ([{k: item[k] for k in ("assumption", "value", "unit")}] if "assumption" in item
+                           else item.get("assumptions", [])):
+            if assumption not in assumptions:
+                assumptions.append(deepcopy(assumption))
+    if years is not None:
+        assumptions.append({"assumption": "指定持有年数；累计现金分红不再投资，非IRR", "value": str(years), "unit": "年"})
+    if assumptions:
+        precision += "；包含显式假设，不是已披露事实"
     return {"id": f"C.{1 + sum(r['id'].startswith('C.') for r in table)}", "label": OPERATION_NAMES[operation],
             "unit": unit, "values": {"result": str(result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))},
             "exact_values": {"result": str(result)},
             "calculation": {"operation": operation, "formula": formula, "inputs": inputs, "requested_label": label,
                             "normalized_inputs": normalized_inputs,
-                            "precision": precision}}
+                            "precision": precision, **({"assumptions": assumptions} if assumptions else {})}}
 
 
 def price_changes(table, row):
@@ -447,6 +502,7 @@ FETCH_LIMIT = 48  # runaway guard; time, rounds and total calls still bound expl
 # research, report 83, hit round_limit mid-repair), so it is a runaway guard, not a depth quota.
 ROUND_LIMIT = 18
 CALL_LIMIT = 72  # runaway guard only, so calculations cannot swell the prompt without bound
+REPAIR_CALL_RESERVE = 36  # shared by both repairs; exploration cannot consume it
 COMPUTE_TOOLS = {"calculate", "valuation"}  # program arithmetic on held evidence, not evidence fetches
 
 
@@ -462,7 +518,7 @@ def record_stop(material, reason, stage="explore"):
 
 
 class Acquisition:
-    """One run's tool state and limits, shared by exploration and both repairs.
+    """One tool session; exploration cannot consume the shared repair-call reserve.
 
     This is not a retry scheduler: identical failures are returned from the session cache,
     and two turns without new evidence end acquisition. The writer then gets one tool-free
@@ -492,10 +548,10 @@ class Acquisition:
         return digest({"sources": self.material.source_registry(), "table": sorted(table),
                        "methods": self.material.extra.get("methods_used", [])})
 
-    def stopped(self):
+    def stopped(self, stage="explore"):
         if time.monotonic() >= self.deadline:
             return "time_limit"
-        if len(self.traces) >= CALL_LIMIT:
+        if len(self.traces) >= CALL_LIMIT + (REPAIR_CALL_RESERVE if stage == "repair" else 0):
             return "tool_limit"
         if self.stale >= 2:
             return "no_new_evidence"
@@ -505,7 +561,7 @@ class Acquisition:
 
     def tool_result(self, call, stage):
         name, args = call["name"], call.get("arguments")
-        reason = self.stopped()
+        reason = self.stopped(stage)
         if not reason and name not in COMPUTE_TOOLS and _fetches(self.traces) >= FETCH_LIMIT:
             reason = "fetch_limit"
         if reason:
@@ -552,7 +608,7 @@ class Acquisition:
             # Keep room for a final draft and a review with its existing format correction.
             # A smaller caller-supplied limit is never raised to the default.
             remaining = self.runner.max_calls - self.runner.calls
-            reason = self.stopped() or ("model_limit" if remaining <= 3 else None)
+            reason = self.stopped(stage) or ("model_limit" if remaining <= 3 else None)
             if reason:
                 record_stop(self.material, reason, stage)
                 gap = "共享取证已到停止条件；未完成的取证仍未知。"

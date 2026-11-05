@@ -131,7 +131,9 @@ def _candidates(cites: list[dict], material: Material) -> list[float]:
                 values += [float(v) for p, v in cited.items()
                            if not cite.get("period") or cite["period"] == p or row["id"].startswith("C.")]
             calc = row.get("calculation") or {}
-            for group in ("inputs", "normalized_inputs"):
+            # Explicit assumptions are citable as assumptions, not company disclosures.
+            # Keep their provenance in the row for semantic review and chained calculations.
+            for group in ("inputs", "normalized_inputs", "assumptions"):
                 values += [float(i["value"]) for i in calc.get(group, []) if "value" in i]
         elif "quote" in cite:
             values += [v for v, _ in _numbers(cite["quote"])]

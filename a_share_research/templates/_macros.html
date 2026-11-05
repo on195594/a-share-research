@@ -40,10 +40,12 @@
         {% else %}
         {% set operands = r.calculation.normalized_inputs %}
         {% if not operands and r.calculation.inputs[0].unit == r.calculation.inputs[1].unit %}{% set operands = r.calculation.inputs %}{% endif %}
-        {% if operands %}<p>计算输入统一为{{ operands[0].unit }}：{{ r.calculation.formula | replace('left', operands[0].value) | replace('right', operands[1].value) }}</p>
+        {% if operands %}<p>{{ '计算输入统一为' ~ operands[0].unit if operands[0].unit == operands[1].unit else '输入单位分别为' ~ operands[0].unit ~ '、' ~ operands[1].unit }}：{{ r.calculation.formula | replace('left', operands[0].value) | replace('right', operands[1].value) }}</p>
         {% else %}<p>原始输入单位不同；该历史记录未保存换算后的操作数，故不展示代入算式。</p>{% endif %}
         {% endif %}
-        <p>{% for value in r.calculation.inputs %}{{ value.label or rows[value.ref].label }}（{{ value.source ~ '第' ~ value.page ~ '页·' if value.source and value.page else '' }}{{ value.period }}）= {{ value.value }} {{ value.unit }}{% if not loop.last %}；{% endif %}{% endfor %}</p><p>{{ r.calculation.precision }}</p>{% endif %}
+        <p>{% for value in r.calculation.inputs %}{{ value.label or rows[value.ref].label }}（{{ value.source ~ '第' ~ value.page ~ '页·' if value.source and value.page else '' }}{{ value.period }}）= {{ value.value }} {{ value.unit }}{% if not loop.last %}；{% endif %}{% endfor %}</p>
+        {% if r.calculation.assumptions %}<p class="notice caution">假设测算，不是披露事实：{% for a in r.calculation.assumptions %}{{ a.assumption }} = {{ a.value }} {{ a.unit }}{{ '；' if not loop.last else '' }}{% endfor %}</p>{% endif %}
+        <p>{{ r.calculation.precision }}</p>{% endif %}
       </li>{% endif %}
     {% else %}
       {% set source = sources.get(c.source or 'D0') %}

@@ -12,7 +12,7 @@ import pytest
 
 from a_share_research import db, evidence, research, sources
 from a_share_research.material import mdna_pages
-from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, REPAIR_TOOLS, ROUND_LIMIT, _fetches
+from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, REPAIR_CALL_RESERVE, REPAIR_TOOLS, ROUND_LIMIT, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from support.reports import MATERIAL, SALES_ROW, report
 from test_review_evidence import BODY, REVIEW, captured_registry, issue, payload, accept, pending_ledger
@@ -161,7 +161,7 @@ def test_no_new_evidence_stops_across_stages_and_does_not_reset_deadline(session
 
 
 @pytest.mark.parametrize('limit', ['fetch', 'tools', 'rounds', 'time', 'model'])
-def test_repair_uses_remaining_budget_and_never_expands_it(session, limit):
+def test_repair_reserve_remains_bounded_and_respects_other_guards(session, limit):
     runner, _material, acquisition = session
     if limit == 'fetch':
         # Exercise actual cached reads, not made-up trace rows.
@@ -177,6 +177,12 @@ def test_repair_uses_remaining_budget_and_never_expands_it(session, limit):
                 'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}}
         for _ in range(CALL_LIMIT):
             acquisition.tool_result(call, 'explore')
+        assert acquisition.stopped('explore') == 'tool_limit'
+        assert acquisition.stopped('repair') is None
+        for _ in range(REPAIR_CALL_RESERVE):
+            result, failed = acquisition.tool_result(call, 'repair')
+            assert not failed
+        assert len(acquisition.traces) == CALL_LIMIT + REPAIR_CALL_RESERVE
     elif limit == 'rounds':
         acquisition.rounds = ROUND_LIMIT
     elif limit == 'time':
@@ -286,6 +292,20 @@ def test_unavailable_disclosure_and_unknown_gap_remain_unresolved_after_repairs(
     assert problems[0]['status'] == 'unresolved' and len(ledger.rounds) == 3
     assert runner.calls == 7 and len(acquisition.traces) == 1
     assert acquisition.stale == 2 and runner.offered[-2] == []
+
+
+def test_repair_writer_can_act_after_exploration_uses_all_calls(session):
+    runner, _material, acquisition = session
+    args = {'label': '现金流差额', 'operation': 'difference',
+            'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
+            'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}
+    for _ in range(CALL_LIMIT):
+        acquisition.tool_result({'name': 'calculate', 'arguments': args}, 'explore')
+    runner.responses = [[{'type': 'toolCall', 'id': 'repair-reserved-capacity',
+                          'name': 'calculate', 'arguments': args}], {'done': True}]
+    assert acquisition.write('按已有现金流表计算并修订', 'repair') == {'done': True}
+    assert 'calculate' in runner.offered[0]
+    assert len(acquisition.traces) == CALL_LIMIT + 1 and acquisition.traces[-1]['stage'] == 'repair'
 
 
 def test_run_call_guard_preserves_a_smaller_cap_and_never_exceeds_default(session):
