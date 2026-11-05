@@ -46,13 +46,14 @@ def test_a_term_only_in_an_older_report_needs_history(conn):
 
 def test_corrections_and_replays_never_appear_even_with_history(conn):
     ids = {r["report"]["id"] for r in RECORDS}
-    assert {12, 143} <= ids  # 茅台: 12 is a correction, 143 a replay of captured records
-    hits, _ = reading.search_items(conn, "茅台", history=True)
-    found = {h["report_id"] for h in hits}
+    assert {12, 143} <= ids  # 12 is a correction, 143 a replay of captured records
+    # Each term is the excluded report's own searchable text, so only eligibility can keep it out.
     for report_id in (12, 143):
-        assert report_id not in found
-    allowed = {row["id"] for row in eligible(conn, "600519")}
-    assert {h["report_id"] for h in hits if h["code"].startswith("600519")} <= allowed
+        term = BODY[report_id]["risks"][0]["text"][:14]
+        hits, _ = reading.search_items(conn, term, history=True)
+        assert report_id not in {h["report_id"] for h in hits}
+        allowed = {row["id"] for row in eligible(conn, "600519")}
+        assert {h["report_id"] for h in hits if h["code"].startswith("600519")} <= allowed
 
 
 def test_every_term_must_match_and_case_is_ignored(conn):

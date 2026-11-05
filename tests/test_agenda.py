@@ -177,8 +177,25 @@ def test_status_entries_can_be_corrected_and_compact_readers_can_explain_them(tm
     with pytest.raises(service.RequestError):
         service.submit(conn, "603606", "agenda-feedback-2", parent_report_id=39,
                        feedback={"location": "prior_status[1]", "text": "越界"})
-    assert _research_context(conn, "603606.SH", 39)[0]["claims_to_recheck"]["prior_status"] == body["prior_status"]
+    target = _research_context(conn, "603606.SH", 39)[0]
+    assert target["claims_to_recheck"]["prior_status"] == body["prior_status"]
+    # risks[0] names the prior report's item, which this report's own risks[0] is not.
+    agenda_shown = target["prior_agenda"]
+    assert agenda_shown["report_id"] == 37
+    assert agenda_shown["period"] == conn.execute("SELECT coverage FROM reports WHERE id = 37").fetchone()[0]
+    assert agenda_shown["risks"] == [item["text"] for item in BODY[37]["risks"]]
+    assert agenda_shown["checkpoints"] == [item["text"] for item in BODY[37].get("checkpoints", [])]
+    assert agenda_shown["risks"][0] != target["claims_to_recheck"]["risks"][0]["text"]
+    # A report that continued nothing carries no old agenda.
+    assert "prior_agenda" not in _research_context(conn, "603606.SH", 37)[0]
     conn.close()
+
+
+@pytest.mark.parametrize("status", [["无法判断"], {"value": "无法判断"}, 1, None])
+def test_a_malformed_status_is_a_repairable_problem_not_a_crash(status):
+    items = statuses(i1={"status": status})
+    found = where(check(report(prior_status=items), material()), "prior_status[1]")
+    assert any("没有出处" in p for p in found) and any("可用" in p for p in found)
 
 
 def test_the_report_page_shows_old_wording_status_and_sources_and_older_reports_keep_their_answer(tmp_path):

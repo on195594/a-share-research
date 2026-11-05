@@ -242,7 +242,8 @@ def check(report: dict, material: Material) -> list[dict]:
                 continue
             if REF_IN_TEXT.search(str(item.get("text", ""))):
                 problems.append({"where": where, "problem": "text 中不要写出处编号"})
-            if not cites and not (section == "prior_status" and item.get("status") in agenda.NO_EVIDENCE):
+            status = item.get("status")
+            if not cites and not (section == "prior_status" and isinstance(status, str) and status in agenda.NO_EVIDENCE):
                 problems.append({"where": where, "problem": "没有出处"})
             if section == "checkpoints" and "forecast" in item:
                 problems += [{"where": where, "problem": p} for p in forecasts.problems(item["forecast"], material.table)]

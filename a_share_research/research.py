@@ -327,10 +327,30 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
         # Retired methods must not return through automatic same-company context.
         if parent["id"] != parent_id:
             claims["methods"] = None
-        context.append({"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
-                        "basis": "report" if parent["passed"] else "facts",
-                        "claims_to_recheck": claims})
+        entry = {"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
+                 "basis": "report" if parent["passed"] else "facts",
+                 "claims_to_recheck": claims}
+        if agenda := _corrected_agenda(conn, body):
+            entry["prior_agenda"] = agenda
+        context.append(entry)
     return context
+
+
+def _corrected_agenda(conn, body: dict) -> dict | None:
+    """The old items a corrected report's prior_status refs point into, unavailable in its own risks and checkpoints."""
+    row = conn.execute("SELECT id, body, created_at, coverage FROM reports WHERE id = ?",
+                       ((body.get("prior") or {}).get("report_id"),)).fetchone()
+    if row is None:
+        return None
+    return {"note": "prior_status 的 ref 指这里的旧条目（上一份报告），不是 claims_to_recheck 里的 risks 或 checkpoints", **_agenda(row)}
+
+
+def _agenda(row) -> dict:
+    body = json.loads(row["body"])
+    return {"report_id": row["id"], "researched": row["created_at"][:10], "period": row["coverage"],
+            "market_date": body.get("market_date"),
+            "risks": [item["text"] for item in body.get("risks", [])],
+            "checkpoints": [item["text"] for item in body.get("checkpoints", [])]}
 
 
 def _prior_report(conn, code: str, run_id: int) -> dict | None:
@@ -344,13 +364,7 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
         " AND u.replay_of IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
         " ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
-    if row is None:
-        return None
-    body = json.loads(row["body"])
-    return {"report_id": row["id"], "researched": row["created_at"][:10], "period": row["coverage"],
-            "market_date": body.get("market_date"),
-            "risks": [item["text"] for item in body.get("risks", [])],
-            "checkpoints": [item["text"] for item in body.get("checkpoints", [])]}
+    return _agenda(row) if row else None
 
 
 def prior_question(prior: dict) -> str:
