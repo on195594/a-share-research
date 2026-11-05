@@ -189,7 +189,7 @@ def test_repair_patch_rejects_relative_call():
 def test_report_header_shows_relative_call():
     from support.templates import ENV
     template = (Path(__file__).resolve().parents[1] / "a_share_research/templates/report.html").read_text()
-    line = next(l for l in template.splitlines() if 'class="relative-call"' in l)
+    line = next(line_text for line_text in template.splitlines() if 'class="relative-call"' in line_text)
     html = ENV.from_string(line).render(body={"relative": {"call": "跑输", "confidence": 65}})
     assert "6 个月相对判断：跑输中证800全收益，把握 65%" in html
     assert "记分" not in html  # single relative calls are no longer scored

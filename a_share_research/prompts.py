@@ -1,8 +1,12 @@
 """Report output contract shared by every writing stage, and parsing of model JSON."""
 
 import json
+from typing import TYPE_CHECKING
 
 from a_share_research import forecasts, valuation
+
+if TYPE_CHECKING:
+    from a_share_research.material import Material
 
 SCHEMA = """输出且只输出一个 JSON 对象：
 {

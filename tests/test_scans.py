@@ -14,7 +14,6 @@ import pytest
 from a_share_research import db, scans, service, valuation
 from support.continuation import BODY as CAPTURED_BODIES, load
 from support.valuation import BODY, RECORD, STORED, assumptions
-from test_service_http import server
 
 DATA = Path(__file__).parent / 'data'
 ANNOUNCEMENTS = sum((json.loads((DATA / f).read_text())['items'] for f in
@@ -492,7 +491,7 @@ def test_scan_failure_recovery_and_unknown_scan(conn):
 
 
 def test_api_auth_single_active_and_weekly_route(server):
-    conn, client, url, *_ = server
+    _conn, client, url, *_ = server
     for path in ('/api/subscriptions', '/api/scans/weekly', '/api/scans/1'):
         assert client.get(url + path, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
     assert client.put(url + '/api/subscriptions', json={'codes': ['bad']}, timeout=3).status_code == 422

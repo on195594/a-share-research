@@ -162,7 +162,7 @@ def test_no_new_evidence_stops_across_stages_and_does_not_reset_deadline(session
 
 @pytest.mark.parametrize('limit', ['fetch', 'tools', 'rounds', 'time', 'model'])
 def test_repair_uses_remaining_budget_and_never_expands_it(session, limit):
-    runner, material, acquisition = session
+    runner, _material, acquisition = session
     if limit == 'fetch':
         # Exercise actual cached reads, not made-up trace rows.
         for _ in range(FETCH_LIMIT):
@@ -205,7 +205,7 @@ def test_snapshot_survives_interruption_after_tool_result(session):
 
 @pytest.mark.parametrize('mutation', ['hash', 'page'])
 def test_same_source_conflict_rejects_before_mutating_material(session, mutation):
-    runner, material, acquisition = session
+    _runner, material, acquisition = session
     before = deepcopy(material.snapshot())
     changed = deepcopy(material.doc)
     if mutation == 'hash':

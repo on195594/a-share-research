@@ -7,7 +7,6 @@ import pytest
 from a_share_research import db, scans, service, valuation
 from support.continuation import load
 from support.valuation import BODY, RECORD, ROWS, STORED, assumptions
-from test_service_http import server  # Existing isolated real HTTP fixture.
 from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, run_scan
 from test_advisor_sources import CALENDAR
 
@@ -224,7 +223,7 @@ def test_announcement_failure_pauses_card_until_same_code_recovers(tmp_path, val
 
 
 def test_card_http_authentication_read_only_and_404(server):
-    conn, client, url, run, report, failed, queued = server
+    conn, client, url, _run, report, _failed, _queued = server
     before = conn.total_changes
     route = url + '/api/companies/600519/card'
     assert client.get(route, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
