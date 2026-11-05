@@ -1,6 +1,9 @@
 """Investment cards read only what a captured report saved; a failed review shows none of it."""
 import json
+from copy import deepcopy
 from pathlib import Path
+
+import pytest
 
 from support.continuation import BODY, load
 from support.templates import ENV
@@ -112,4 +115,54 @@ def test_report_cards_match_cards_and_link_last_passed_report(tmp_path):
         assert reading.report_cards(conn, [], {}) == []
     finally:
         conn.close()
+
+
+def warning_report():
+    # Controlled combination of captured valuation and reviewer issues, not a historical report claim.
+    record = deepcopy(json.loads((ROOT / 'tests/data/valuation-warning-reports-20261105.json').read_text())['reports'][1])
+    problems = json.loads((ROOT / 'tests/data/review-open-questions-20261105.json').read_text())['108']['problems']
+    record['body']['open_questions'] = [{k: q[k] for k in ('id', 'where', 'problem')} for q in problems]
+    return record | {'passed': 1}
+
+
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
+def test_both_web_cards_preserve_boundary_and_full_open_questions_before_the_fold(macro):
+    report = warning_report()
+    original = deepcopy(report['body'])
+    card = reading.card(report, report['body'])
+    assert card['boundary'] is True and card['open_questions'] == original['open_questions']
+    assert card['verdict'] == report['verdict'] and card['bucket'] == report['verdict']
+    html = str(getattr(CARD, macro)(card))
+    assert '边界立场（报告时点）' in html and '同样材料重跑可能得出相反立场' in html
+    assert '复核认为尚未答完' in html
+    for question in original['open_questions']:
+        escaped = str(ENV.from_string('{{ text }}').render(text=question['problem']))
+        assert escaped in html
+        if '<details class="card-fold">' in html:
+            assert html.index(escaped) < html.index('<details class="card-fold">')
+    assert report['body'] == original  # Neither projection nor render changes the saved report.
+
+
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
+@pytest.mark.parametrize('priced', [True, False])
+def test_ordinary_and_legacy_web_cards_do_not_invent_cautions(macro, priced):
+    record = deepcopy(json.loads((ROOT / 'tests/data/valuation-warning-reports-20261105.json').read_text())['reports'][5])
+    if not priced:
+        record['body'].pop('valuation_calc')  # Explicit legacy/missing-basis mutation.
+    card = reading.card(record | {'passed': 1}, record['body'])
+    assert card['boundary'] is (False if priced else None)
+    assert card['open_questions'] == []
+    html = str(getattr(CARD, macro)(card))
+    assert '边界立场' not in html and '复核认为尚未答完' not in html
+
+
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
+def test_failed_web_card_does_not_present_cautions_as_a_passed_judgment(macro):
+    report = warning_report() | {'passed': 0}
+    card = reading.card(report, report['body'])
+    assert card['boundary'] is None and card['open_questions'] == [] and card['verdict'] is None
+    html = str(getattr(CARD, macro)(card))
+    assert '最新一次研究复核未通过' in html
+    assert '边界立场' not in html and '复核认为尚未答完' not in html
+    assert all(q['problem'] not in html for q in report['body']['open_questions'])
 

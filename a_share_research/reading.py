@@ -534,7 +534,7 @@ CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
 
 
 def card(report, body: dict, last_passed=None) -> dict:
-    """One company's investment card, read from its latest saved report; nothing is fetched or recomputed.
+    """One company's investment card from saved data; no market fetch or valuation recomputation.
 
     A report that failed review shows no verdict, summary, risks, checkpoints or figures. The last
     passed report, when the caller supplies one, is named with its own date rather than standing in.
@@ -582,6 +582,8 @@ def card(report, body: dict, last_passed=None) -> dict:
             'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
             'consensus': (body.get('valuation_calc') or {}).get('consensus') if passed else None,
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
+            'open_questions': body.get('open_questions', []) if passed else [],
+            'boundary': stances.on_boundary(body.get('valuation_calc')) if passed else None,
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
             'period': period_label, 'created_at': created_at, 'coverage': coverage,
             'market_date': day, 'last_passed': dict(last_passed) if last_passed else None,

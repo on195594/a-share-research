@@ -35,6 +35,15 @@
 </ol>
 {% endmacro %}
 
+{# Report limitations stay visible in both card shapes, not inside the ordinary risk fold. #}
+{% macro cautions(c) %}
+{% if c.boundary %}<p class="card-note"><strong class="flag">边界立场（报告时点）</strong>：报告收盘价接近期望回报门槛，同样材料重跑可能得出相反立场；不代表稳定的买入优势。</p>{% endif %}
+{% if c.open_questions %}
+<p class="card-label risk">复核认为尚未答完</p>
+<ol class="card-list risk">{% for q in c.open_questions %}<li>{{ q.problem }}</li>{% endfor %}</ol>
+{% endif %}
+{% endmacro %}
+
 {# Home: scannable summary. Four saved key figures, then the lists behind one disclosure. #}
 {% macro summary_card(c, due=none, from_batch=false) %}
 <article class="card" id="card-{{ c.code }}" data-order="{{ c.id }}">
@@ -46,6 +55,7 @@
   {% if c.passed %}
   {{ coverage_note(c.consensus) }}
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
+  {{ cautions(c) }}
   {% if c.figures %}
   <dl class="card-keys">
     {% for m in c.figures %}<div><dt>{{ m.label }}</dt><dd class="num">{{ value(m) }}</dd></div>{% endfor %}
@@ -76,6 +86,7 @@
   {{ coverage_note(c.consensus) }}
   {% if c.verdict %}{{ verdict_scale(c.verdict) }}{% endif %}
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
+  {{ cautions(c) }}
   {% if c.dims %}
   <section class="card-section" aria-labelledby="checkup-{{ c.code }}">
     <h2 class="card-label" id="checkup-{{ c.code }}">财务概览{% if c.period %} <span class="muted">{{ c.period }}累计 · 括号内为上年同期</span>{% endif %}</h2>
