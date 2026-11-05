@@ -9,6 +9,58 @@ from a_share_research import charts, db, service
 PAGE_SIZE = 20
 
 
+def stance_decision(stance: dict | None, stance_calc: dict | None, valuation_calc: dict | None) -> dict | None:
+    """Derive safe, deterministic display view for the stance and price barrier.
+
+    Pure function: never throws, guarantees valid numeric operations, returns clean dict.
+    """
+    if not isinstance(stance, dict) or not stance.get("action"):
+        return None
+    action = stance["action"]
+    out = {
+        "action": action,
+        "text": stance.get("text", ""),
+        "cites": stance.get("cites") if isinstance(stance.get("cites"), list) else [],
+        "has_prices": False,
+        "close": None,
+        "hurdle": None,
+        "diff_pct": None,
+        "valid_until": None,
+        "annual_return": None,
+        "zone": None,
+        "add_trigger": stance.get("add_trigger") if action == "现在分批" and isinstance(stance.get("add_trigger"), dict) else None,
+        "trigger": stance.get("trigger") if action == "等证据" and isinstance(stance.get("trigger"), dict) else None,
+    }
+
+    sc = stance_calc if isinstance(stance_calc, dict) else {}
+    vc = valuation_calc if isinstance(valuation_calc, dict) else {}
+    v2 = vc.get("v2") if isinstance(vc.get("v2"), dict) else {}
+
+    close = vc.get("close")
+    hurdle = sc.get("price")
+    if hurdle is None:
+        hurdle = v2.get("support_below")
+
+    if isinstance(close, (int, float)) and close > 0 and isinstance(hurdle, (int, float)) and hurdle > 0:
+        out["has_prices"] = True
+        out["close"] = round(float(close), 2)
+        out["hurdle"] = round(float(hurdle), 2)
+        if action == "等价格" and close > hurdle:
+            out["diff_pct"] = round((close - hurdle) / close * 100, 1)
+        elif close <= hurdle:
+            out["diff_pct"] = round((hurdle - close) / hurdle * 100, 1)
+
+    if action == "等价格":
+        out["valid_until"] = sc.get("valid_until")
+
+    if isinstance(v2.get("annual_return"), (int, float)):
+        out["annual_return"] = round(float(v2["annual_return"]) * 100, 1)
+
+    out["zone"] = v2.get("zone") or vc.get("zone")
+    return out
+
+
+
 def peer_snapshots(body: dict) -> list[dict]:
     """Read saved cumulative snapshots only; never infer peers or produce values.
 

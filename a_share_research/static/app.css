@@ -603,3 +603,11 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .card-keys + .card-note + .card-label.risk { margin-top: 14px; }
 .vitals-fold { margin-top: 8px; }
 .vitals-fold > summary { font-size: 15px; }
+
+/* ---------- Decision, Steps and Navigation Polish ---------- */
+.stance { margin: 12px 0 16px; }
+.stance-snapshot { margin: 8px 0 12px; }
+.stance-trigger { margin: 6px 0; color: var(--ink); }
+.compare-shortcut { display: inline-block; margin-left: 8px; color: var(--accent); text-underline-offset: 3px; }
+.compare-shortcut:hover { color: var(--accent-strong); }
+.step-desc { font-size: 13px; font-weight: 400; color: var(--muted); margin: 4px 0 2px; line-height: 1.5; }

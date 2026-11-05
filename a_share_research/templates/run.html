@@ -13,14 +13,26 @@
     <ol class="steps" aria-label="研究进度">
       {% set order = ["gather", "explore", "compose", "review", "repair"] %}
       {% set current = order.index(run.step) if run.step in order else 0 %}
+      {% set step_descs = {
+        "gather": "正在获取披露原文与财务数据…",
+        "explore": "正在检索披露原文、同业对比并执行程序计算…",
+        "compose": "正在组织事实、反证与结构化预测，生成报告草稿…",
+        "review": "正在启动独立复核员，逐项核验引文出处、计算与论断…",
+        "repair": "正在根据复核员的意见进行补充取证与修正…"
+      } %}
       {% for key in order %}
         {% if key != "repair" or run.step == "repair" %}
         <li class="{{ 'done' if loop.index0 < current else ('now' if loop.index0 == current else '') }}"
-            {% if loop.index0 == current %}aria-current="step"{% endif %}>{{ steps[key] }}{% if loop.index0 == current %}<span class="muted">（进行中）</span>{% endif %}</li>
+            {% if loop.index0 == current %}aria-current="step"{% endif %}>
+          {{ steps[key] }}{% if loop.index0 == current %}<span class="muted">（进行中）</span>{% endif %}
+          {% if run.kind == 'research' and loop.index0 == current and key in step_descs %}
+          <p class="step-desc">{{ step_descs[key] }}</p>
+          {% endif %}
+        </li>
         {% endif %}
       {% endfor %}
     </ol>
-    <p class="muted">已用 <span data-elapsed="{{ elapsed }}">{{ elapsed // 60 }} 分 {{ elapsed % 60 }} 秒</span>，页面每 4 秒自动刷新。可以离开，稍后在首页查看。</p>
+    <p class="muted">已用 <span data-elapsed="{{ elapsed }}" class="num">{{ elapsed // 60 }} 分 {{ elapsed % 60 }} 秒</span>，页面每 4 秒自动刷新。任务在后台安全运行，你可以离开页面，稍后从首页“待处理事项”进入查看。</p>
   {% else %}
     <p class="notice caution" role="alert">没有完成：{{ run.error }}</p>
     {% if diagnostics and diagnostics.failure %}

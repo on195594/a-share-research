@@ -130,3 +130,56 @@ def test_add_trigger_is_optional_reference_and_old_wait_still_renders():
     html = page(body)
     assert '研究立场：<strong>等证据</strong>' in html
     assert '加仓检查点' not in html
+
+
+def test_stance_decision_handles_zero_negative_and_missing_prices():
+    # Zero, negative or non-finite values must not throw zero division or display negative hurdle
+    assert reading.stance_decision(None, {}, {}) is None
+    assert reading.stance_decision({}, {}, {}) is None
+
+    # Invalid price combinations
+    for close, hurdle in [(0, 10), (-1, 10), (10, 0), (10, -3.2), (None, 10), (10, None)]:
+        sd = reading.stance_decision(
+            {"action": "等价格"},
+            {"price": hurdle},
+            {"close": close, "v2": {"support_below": hurdle}}
+        )
+        assert sd["has_prices"] is False
+        assert sd["diff_pct"] is None
+
+    # Valid waiting: close > hurdle
+    sd_wait = reading.stance_decision(
+        {"action": "等价格"},
+        {"price": 27.77, "valid_until": "2027-05-04"},
+        {"close": 29.25, "v2": {"support_below": 27.77, "annual_return": 0.0772, "zone": "中性区"}}
+    )
+    assert sd_wait["has_prices"] is True
+    assert sd_wait["close"] == 29.25 and sd_wait["hurdle"] == 27.77
+    assert sd_wait["diff_pct"] == 5.1
+    assert sd_wait["valid_until"] == "2027-05-04"
+    assert sd_wait["annual_return"] == 7.7
+
+    # Valid batch: close <= hurdle
+    sd_batch = reading.stance_decision(
+        {"action": "现在分批"},
+        {"price": 9.64},
+        {"close": 8.83, "v2": {"support_below": 9.64, "annual_return": 0.139, "zone": "测算支持区"}}
+    )
+    assert sd_batch["has_prices"] is True
+    assert sd_batch["close"] == 8.83 and sd_batch["hurdle"] == 9.64
+    assert sd_batch["diff_pct"] == 8.4
+    assert sd_batch["zone"] == "测算支持区"
+
+
+def test_page_renders_without_500_on_adversarial_stance_data():
+    body = calculated()
+    # Injected dirty values that previously triggered 500 or display bugs
+    for close, hurdle in [(0, 0), (0, -3.2), (-1, 0), (29.25, -5.0)]:
+        body["stance"] = {"action": "等价格", "text": "等价格"}
+        body["stance_calc"] = {"price": hurdle, "valid_until": "2027-01-01"}
+        body["valuation_calc"]["close"] = close
+        body["valuation_calc"]["v2"]["support_below"] = hurdle
+        html = page(body)
+        assert "研究立场：<strong>等价格</strong>" in html
+        # Should never render price comparison snapshot when prices are zero or negative
+        assert "stance-snapshot" not in html

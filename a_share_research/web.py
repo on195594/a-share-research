@@ -107,6 +107,7 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 templates.env.globals["funnel_chart"] = charts.funnel
 templates.env.globals["citation_link"] = citation_link
 templates.env.globals["report_source_view"] = report_source_view
+templates.env.globals["stance_decision"] = reading.stance_decision
 conn = ThreadLocalConnectionProxy()
 
 

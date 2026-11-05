@@ -15,11 +15,19 @@
       {{ verdict_scale(body.verdict) }}
       <p class="conclusion" id="claim-summary-0" tabindex="-1">{% if body.verdict not in ["暂不值得", "需要谨慎", "值得继续研究"] %}研究判断：{% endif %}{{ body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
       {% if body.relative is mapping and body.relative.call %}<p class="relative-call">6 个月相对判断：{{ body.relative.call }}中证800全收益，把握 {{ body.relative.confidence }}%</p>{% endif %}
-      {% if body.stance is mapping and body.stance.action %}{% set sc = body.stance_calc or {} %}
+      {% if body.stance is mapping and body.stance.action %}{% set sc = body.stance_calc or {} %}{% set vc = body.valuation_calc or {} %}
+      {% set sd = stance_decision(body.stance, sc, vc) if stance_decision is defined else None %}
       <div class="stance" id="stance">
         <p class="relative-call">研究立场：<strong>{{ body.stance.action }}</strong>{% if body.stance.action == '等价格' and sc.price is number %}（期望回报门槛价 <span class="num">{{ '%.2f' | format(sc.price) }}</span> 元，有效至 {{ sc.valid_until }}）{% elif body.stance.action == '等证据' and body.stance.trigger %}{% set t = body.stance.trigger %}（{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}）{% endif %}</p>
+        {% if sd and sd.has_prices %}
+        <dl class="snapshot stance-snapshot" aria-label="立场价格与门槛对照">
+          <div><dt>报告收盘价</dt><dd class="num">{{ '%.2f' | format(sd.close) }}<small>元</small></dd></div>
+          <div><dt>期望回报门槛价</dt><dd class="num">{{ '%.2f' | format(sd.hurdle) }}<small>元</small></dd></div>
+          <div><dt>测算位置</dt><dd>{{ sd.zone or '区间倒置' }}{% if sd.annual_return is number %}<small class="num">· 年化 {{ sd.annual_return }}%</small>{% endif %}</dd></div>
+        </dl>
+        {% endif %}
         {% if body.stance.action == '现在分批' and body.stance.add_trigger %}{% set t = body.stance.add_trigger %}
-        <p class="small">加仓检查点（参考，不阻止首批）：{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}。达到才加后续批次；未达到则复核是否减仓。</p>
+        <p class="small stance-trigger">加仓检查点（参考，不阻止首批）：{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}。达到才加后续批次；未达到则复核是否减仓。</p>
         {% endif %}
         <p class="small">{{ body.stance.text }}</p>
         {{ cites(body.stance, rows, documents) }}
@@ -75,6 +83,7 @@
       {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点<small class="num">{{ content.checkpoints | length }}</small></a></li>{% endif %}
       <li><a href="#business">业务{% if content.business %}<small class="num">{{ content.business | length }}</small>{% endif %}</a></li>
       <li><a href="#financial">财务与走势</a></li>
+      {% if comparison and comparison.old %}<li><a href="#comparison">前后对照</a></li>{% endif %}
       {% if report.passed and body.valuation %}<li><a href="#valuation">情景测算</a></li>{% endif %}
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
@@ -92,7 +101,7 @@
     {% if feedback %}<p>核查原报告的{{ feedback_label }}</p>{% endif %}
     <p class="question">{{ feedback.text if feedback else (body.question or '未记录专门问题，以下为已保存的回答。') }}</p>
     {% if body.parent_report_id %}<p><a href="/reports/{{ body.parent_report_id }}">查看原报告</a></p>{% endif %}
-    {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。</p>{% endif %}
+    {% if body.prior %}<p>本次复核了<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，结论按本次证据独立给出。{% if comparison and comparison.old %}<a class="compare-shortcut" href="#comparison">查看前后变化对照 ↓</a>{% endif %}</p>{% endif %}
     {# A continuation states each old risk/checkpoint at the end of the answer; never fold those away. #}
     {{ items(content.answer or [], rows, "可核查的回答", documents, "answer", focus, limit=0 if body.prior else 4) }}
   </section>
