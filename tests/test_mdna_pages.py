@@ -36,3 +36,9 @@ def test_designed_report_with_number_first_contents_and_footers():
     # 紫金矿业 2025: contents list "34   管理层讨论与分析" in two columns, left pages print "3   Annual Report 2025",
     # and the unnumbered financial statements make up most of the PDF.
     assert _span("601899") == (34, 62)
+
+
+def test_red_chip_report_in_overseas_format_spans_business_and_financial_overview():
+    # 中国移动 2025: no 第X节 and no 管理层讨论与分析 section; the contents list title-first dotted entries
+    # 业务概览 ... 15, 财务概览 ... 17, 可持续发展报告 ... 22, and printed page = PDF page - 1.
+    assert _span("600941") == (16, 23)

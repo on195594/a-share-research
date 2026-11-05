@@ -297,6 +297,11 @@ LEADING_PAGE_NUMBER = re.compile(r"^(\d{1,3})\s{2,}\S")
 TOC_ENTRY = re.compile(r"(?<!\S)(\d{1,3})\s+([^\d\s]\S*)")
 
 
+DOTTED_TOC_ENTRY = re.compile(r"^\s*([^\d\s.…·][^.…·]*?)\s*[.…·]{3,}\s*(\d{1,3})\s*$", re.M)
+RED_CHIP_BUSINESS = re.compile(r"业务(?:概览|回顾)")
+RED_CHIP_FINANCE = re.compile(r"财务(?:概览|回顾)")
+
+
 def _toc_sections(doc: Document) -> list[tuple[str, int]]:
     """(title, printed page) per 第X节 entry of the table of contents, in order."""
     for page in doc.pages[:10]:
@@ -312,8 +317,12 @@ def _toc_sections(doc: Document) -> list[tuple[str, int]]:
         if len(entries) >= 5 and all(n is not None for _, n in entries):
             return [(title, n) for title, n in entries]
     for page in doc.pages[:10]:
-        if "目录" not in page:
+        if "目录" not in re.sub(r"\s+", "", page):
             continue
+        # Title-first dotted leaders, one per line: "业务概览 .......... 15".
+        entries = [(title, int(n)) for title, n in DOTTED_TOC_ENTRY.findall(page)]
+        if len(entries) >= 5 and [n for _, n in entries] == sorted(n for _, n in entries):
+            return entries
         # Columns interleave in reading order, so order entries by page number instead.
         entries = sorted({(int(n), title) for n, title in TOC_ENTRY.findall(page)})
         if len(entries) >= 5:
@@ -345,9 +354,15 @@ def _mdna_span_from_toc(doc: Document) -> tuple[int, int] | None:
     sections = _toc_sections(doc)
     offset = _page_offset(doc)
     at = next((i for i, (title, _) in enumerate(sections) if "管理层讨论与分析" in title), None)
-    if at is None or offset is None or at + 1 >= len(sections):
+    last = at
+    if at is None:
+        # Red-chip reports in their overseas format (e.g. 中国移动) split the MD&A into 业务概览 … 财务概览.
+        at = next((i for i, (title, _) in enumerate(sections) if RED_CHIP_BUSINESS.fullmatch(title)), None)
+        last = next((i for i, (title, _) in enumerate(sections)
+                     if at is not None and i >= at and RED_CHIP_FINANCE.fullmatch(title)), None)
+    if at is None or last is None or offset is None or last + 1 >= len(sections):
         return None
-    start, end = sections[at][1] + offset, sections[at + 1][1] + offset
+    start, end = sections[at][1] + offset, sections[last + 1][1] + offset
     return (start, end) if 1 <= start <= end <= len(doc.pages) else None
 
 
