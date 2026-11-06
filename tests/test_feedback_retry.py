@@ -163,7 +163,7 @@ def test_search_explains_fallback_and_null_legacy_request_renders(web):
     term = old['risks'][0]['text'][:12]
     html = web.research_library(request, content=term, page=1).body.decode()
     assert '最新正式报告' in html and '复核未通过' in html and '当前结果来自最近通过报告' in html
-    assert '不受上方公司查询限制' in html
+    assert 'id="search-query"' in html  # The current library uses one unified search box.
     # Captured old rows have JSON null, not SQL NULL, in request.
     assert web.report_page(request, 37).status_code == 200
 
@@ -220,3 +220,32 @@ def test_retry_button_names_what_it_retries_and_batch_task_stays_detached(web):
     web.conn.execute("UPDATE runs SET status='failed', request_id='batch-7-600519.SH' WHERE id=17")
     web.conn.execute("UPDATE reports SET passed=0,body=json_set(body, '$.facts', json('{}')) WHERE id=11")
     assert '不回填本批次' in web.report_page(request, 11).body.decode()
+
+
+def test_historical_report_links_newer_formal_even_when_it_failed(web):
+    request, _ = browser_request(web)
+    html = web.report_page(request, 37).body.decode()
+    assert '正在阅读历史报告' in html and '/reports/39' in html
+    assert '正在阅读历史报告' not in web.report_page(request, 39).body.decode()
+    web.conn.execute("UPDATE runs SET status='failed' WHERE id=(SELECT run_id FROM reports WHERE id=39)")
+    web.conn.execute('UPDATE reports SET passed=0 WHERE id=39')
+    assert '最新正式研究（复核未通过）' in web.report_page(request, 37).body.decode()
+
+
+def test_price_progress_is_not_research_progress(web):
+    request, _ = browser_request(web)
+    run = db.create_run(web.conn, '600519.SH', 'local-price-progress', kind='price', status='running')
+    db.update_run(web.conn, run, step='price', started_at=db.now())
+    html = web.run_page(request, run).body.decode()
+    assert '正在获取行情并计算价格参考' in html
+    assert 'aria-label="研究进度"' not in html and '撰写报告' not in html
+
+
+def test_library_scope_survives_new_query_and_clears_explicitly(web):
+    request, _ = browser_request(web)
+    html = web.research_library(request, q='现金流', history=True, scope='all', page=2).body.decode()
+    assert 'name="history" value="true"' in html and 'name="scope" value="all"' in html
+    assert 'name="page"' not in html
+    assert 'history=true' in html and 'scope=all' in html
+    cleared = web.research_library(request, q='', history=True, scope='all', page=1).body.decode()
+    assert 'name="history"' not in cleared and 'name="scope"' not in cleared

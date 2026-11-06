@@ -5,11 +5,14 @@
 <p><a href="/improvements">研究改进与方法核查</a></p>
 <p class="muted">搜索只读取已有研究，不会启动新任务。</p>
 <form method="get" action="/research-library#results" class="search" role="search" autocomplete="off" data-library-search>
+  {% if history %}<input type="hidden" name="history" value="true">{% endif %}
+  {% if whole_library %}<input type="hidden" name="scope" value="all">{% endif %}
   <label for="search-query">搜公司或研究内容</label>
   <div class="row"><input id="search-query" name="q" value="{{ q }}" maxlength="100" placeholder="紫金、601899、集采" enterkeyhint="search"><button class="btn" type="submit">搜索</button></div>
   <noscript><p class="hint">返回后浏览器可能保留未提交的文字，请以下方结果为准。<button type="reset" class="link">还原与本页结果一致的关键词</button></p></noscript>
 </form>
 <p class="hint">多个词用空格隔开，须全部出现；含公司名时只搜这家，如“紫金 现金流”。{% if q %}<a href="/research-library">清空查询</a>{% else %}留空查看全部。{% endif %}</p>
+{% if history or whole_library %}<p class="hint">当前范围：{{ '全库' if whole_library else '自动识别公司' }}{{ ' · 包括旧报告' if history else ' · 最近通过报告' }}。修改关键词后保留此范围；清空查询可重置。</p>{% endif %}
 <h2 id="results" tabindex="-1">{{ '“' ~ q ~ '”的结果' if q else '全部已有研究' }} · 第 {{ page }} 页</h2>
 {% if error %}<p role="alert" class="notice caution">{{ error }}</p>{% endif %}
 {% if scope_company %}<p class="hint">研究内容只搜了 {{ scope_company.name or scope_company.code }}。<a href="{{ all_url }}#results">改搜全库</a></p>{% endif %}

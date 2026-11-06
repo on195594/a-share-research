@@ -628,7 +628,10 @@ a.plain:hover { text-decoration-color: var(--accent); }
 
 /* ---------- Decision, Steps and Navigation Polish ---------- */
 .stance { margin: 12px 0 16px; }
-.stance-snapshot { margin: 8px 0 12px; }
+.stance-snapshot { margin: 8px 0 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+.stance-snapshot div:last-child { grid-column: auto; }
+.stance-snapshot dd { white-space: normal; overflow-wrap: anywhere; }
+.stance-snapshot dd:not(.num) small { display: block; margin-left: 0; }
 .stance-trigger { margin: 6px 0; color: var(--ink); }
 .compare-shortcut { display: inline-block; margin-left: 8px; color: var(--accent); text-underline-offset: 3px; }
 .compare-shortcut:hover { color: var(--accent-strong); }

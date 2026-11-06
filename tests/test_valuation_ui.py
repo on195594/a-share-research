@@ -9,7 +9,7 @@ from support.valuation import BODY, RECORD, ROWS, assumptions
 def page(body, *, passed=True):
     return render('report.html', report=RECORD | {'passed': passed}, body=body,
                   rows={r['id']: r for r in body['table']}, fin=[], market=[],
-                  comparison={'old': None})
+                  comparison={'old': None}, retry={'label': '重试原研究问题', 'note': ''})
 
 
 def calculated():
@@ -183,3 +183,20 @@ def test_page_renders_without_500_on_adversarial_stance_data():
         assert "研究立场：<strong>等价格</strong>" in html
         # Should never render price comparison snapshot when prices are zero or negative
         assert "stance-snapshot" not in html
+
+
+def test_valuation_versions_and_company_stance_keep_saved_values_distinct():
+    from a_share_research import research
+    body = calculated()
+    body['stance'] = {'action': '等价格', 'text': '期望回报尚未达到门槛。', 'cites': []}
+    body['stance_calc'] = research.stance_calc(body['stance'], body['valuation_calc'], body['market_date'])
+    html = page(body)
+    assert '保守／中性情景边界（v1）' in html and '概率加权期望回报（v2）' in html
+    assert '同为“中性区”不表示门槛价相同' in html
+    card = reading.card(RECORD, body)
+    full = ENV.get_template('_card.html').module.full_card(card)
+    assert '报告时点研究立场：等价格' in full and '未按现价更新' in full
+    assert body['market_date'] in full and f"{body['stance_calc']['price']:.2f}" in full
+    failed = reading.card(RECORD | {'passed': False}, body)
+    assert failed['stance'] is None
+    assert '报告时点研究立场' not in ENV.get_template('_card.html').module.full_card(failed)

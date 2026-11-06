@@ -87,6 +87,12 @@
   {% if c.verdict %}{{ verdict_scale(c.verdict) }}{% endif %}
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
   {{ cautions(c) }}
+  {% if c.stance %}<section class="card-section" aria-label="报告时点研究立场">
+    <p><strong>报告时点研究立场：{{ c.stance.action }}</strong></p>
+    <p class="card-note">报告日期 {{ c.created_at[:10] if c.created_at else '未记录' }} · 行情截至 {{ c.stance_market_date or '未记录' }}；这是已保存的判断，未按现价更新。</p>
+    {% if c.stance.has_prices %}<p>报告收盘价 {{ '%.2f'|format(c.stance.close) }} 元 · 期望回报门槛价 {{ '%.2f'|format(c.stance.hurdle) }} 元{% if c.stance.valid_until %}（原有效期至 {{ c.stance.valid_until }}）{% endif %}。</p>{% endif %}
+    <p class="card-note">“值得继续研究”等研究价值判断与行动立场分别阅读；下方技术价格参考另按其行情日期计算。<a href="/reports/{{ c.id }}#stance">查看立场依据与出处</a></p>
+  </section>{% endif %}
   {% if c.dims %}
   <section class="card-section" aria-labelledby="checkup-{{ c.code }}">
     <h2 class="card-label" id="checkup-{{ c.code }}">财务概览{% if c.period %} <span class="muted">{{ c.period }}累计 · 括号内为上年同期</span>{% endif %}</h2>

@@ -19,15 +19,18 @@
     <p class="muted">本次未生成参考区间，需补齐上述数据后重新研究。</p>
   {% elif calc.scenarios %}
     <p class="window">行情日 {{ calc.as_of }} · 退出时点 {{ calc.exit_date }} · 实际跨度 {{ number(calc.horizon, ' 年') }}</p>
+    <h3>保守／中性情景边界（v1）</h3>
     <p>按报告行情日收盘 {{ number(calc.close, ' 元') }}：<strong>{{ calc.zone or '区间倒置，暂不划分所处区域' }}</strong>。</p>
     <dl class="snapshot valuation-snapshot" aria-label="情景测算参考边界">
-      <div><dt>测算支持区上界</dt><dd class="num">{{ number(calc.zones.support_below) }}<small>元</small></dd></div>
-      <div><dt>测算透支区下界</dt><dd class="num">{{ number(calc.zones.stretched_above) }}<small>元</small></dd></div>
+      <div><dt>保守情景支持区上界</dt><dd class="num">{{ number(calc.zones.support_below) }}<small>元</small></dd></div>
+      <div><dt>中性情景透支区下界</dt><dd class="num">{{ number(calc.zones.stretched_above) }}<small>元</small></dd></div>
     </dl>
     {% if calc.zones.inverted %}<p class="notice caution">支持区上界不低于透支区下界，区间倒置，不能据此划分区域。</p>
     {% else %}<p class="muted small">不高于支持区上界为测算支持区；不低于透支区下界为测算透支区；两者之间为中性区。</p>{% endif %}
     <p class="muted small">支持区按保守情景、年化门槛 {{ percent(calc.r) }} 计算；透支区按中性情景、年化门槛 {{ percent(calc.r_low) }} 计算。</p>
     {% if calc.v2 %}
+    <h3>概率加权期望回报（v2）</h3>
+    <p class="hint">两组边界采用不同假设；同为“中性区”不表示门槛价相同。v1 的保守情景支持区上界与 v2 的期望回报门槛价应分别阅读。</p>
     <p>按三情景概率加权（{{ calc.v2.rule }}，与上方并行记分）：期望年化 <span class="num">{{ percent(calc.v2.annual_return) }}</span>，<strong>{{ calc.v2.zone or '区间倒置' }}</strong>；期望回报门槛价 <span class="num">{{ number(calc.v2.support_below, ' 元') }}</span>，透支价 <span class="num">{{ number(calc.v2.stretched_above, ' 元') }}</span>。</p>
     {% endif %}
 

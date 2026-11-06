@@ -206,3 +206,16 @@ def test_home_verdict_filter_binds_each_card_group_bucket():
 def test_failure_explanation_precedes_source_catalog():
     template = (TEMPLATES / 'report.html').read_text()
     assert template.index('复核意见：') < template.index('{% for key, source in documents.items() %}')
+
+
+def test_contextual_followup_preserves_risk_identity_and_escapes_source():
+    from support.continuation import BODY
+    risk = BODY[39]['risks'][0]
+    macro = ENV.get_template('_macros.html').module
+    html = macro.items([risk], {}, '风险', section='risks', followup=True)
+    assert 'data-followup-location="risks[0]"' in html and 'href="#more"' in html
+    assert 'data-followup-location' not in macro.items([risk], {}, '风险', section='risks')
+    # Marked text-only hostile variant; no model or investment output is generated.
+    hostile = dict(risk, text='"<script>alert(1)</script>')
+    safe = macro.items([hostile], {}, '风险', section='risks', followup=True)
+    assert '<script>' not in safe and '&lt;script&gt;' in safe

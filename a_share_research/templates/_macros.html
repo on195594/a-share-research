@@ -60,15 +60,15 @@
 {% endif %}
 {% endmacro %}
 
-{% macro item(entry, index, rows, sources, section, focus) %}
-  <li{% if section %} id="claim-{{ section }}-{{ index }}" tabindex="-1"{% endif %}><p>{{ entry.text }}</p>{% if entry.forecast is mapping %}{% set f = entry.forecast %}{% set r = rows.get(f.metric) or {} %}<p class="forecast">预测 · {{ r.label or f.metric }} <span class="date">{{ f.period }}</span>：<span class="num">{{ f.low }}–{{ f.high }}</span>{{ r.unit }}，把握 {{ f.confidence }}%</p>{% endif %}{{ cites(entry, rows, sources, focus == section ~ ':' ~ index) }}</li>
+{% macro item(entry, index, rows, sources, section, focus, followup=false) %}
+  <li{% if section %} id="claim-{{ section }}-{{ index }}" tabindex="-1"{% endif %}><p>{{ entry.text }}</p>{% if entry.forecast is mapping %}{% set f = entry.forecast %}{% set r = rows.get(f.metric) or {} %}<p class="forecast">预测 · {{ r.label or f.metric }} <span class="date">{{ f.period }}</span>：<span class="num">{{ f.low }}–{{ f.high }}</span>{{ r.unit }}，把握 {{ f.confidence }}%</p>{% endif %}{{ cites(entry, rows, sources, focus == section ~ ':' ~ index) }}{% if followup %}<a class="link" href="#more" data-followup-location="{{ section }}[{{ index }}]" data-followup-text="{{ entry.text }}">围绕这项{{ '风险' if section == 'risks' else '检查点' }}继续追问</a>{% endif %}</li>
 {% endmacro %}
 
 {# `limit` keeps the first entries in view and folds the rest; a focused claim opens the fold. #}
-{% macro items(list, rows, label, sources={}, section='', focus='', limit=0) %}
+{% macro items(list, rows, label, sources={}, section='', focus='', limit=0, followup=false) %}
 {% set shown = list[:limit] if limit and list | length > limit + 1 else list %}
 <ul class="items">
-{% for entry in shown %}{{ item(entry, loop.index0, rows, sources, section, focus) }}
+{% for entry in shown %}{{ item(entry, loop.index0, rows, sources, section, focus, followup) }}
 {% else %}
   <li class="muted">没有{{ label }}。</li>
 {% endfor %}
@@ -78,7 +78,7 @@
 {% set focused = focus.startswith(section ~ ':') and (focus.split(':')[1] | int(-1)) >= shown | length %}
 <details class="more"{% if focused %} open{% endif %}>
   <summary>展开其余 {{ rest | length }} 条</summary>
-  <ul class="items">{% for entry in rest %}{{ item(entry, shown | length + loop.index0, rows, sources, section, focus) }}{% endfor %}</ul>
+  <ul class="items">{% for entry in rest %}{{ item(entry, shown | length + loop.index0, rows, sources, section, focus, followup) }}{% endfor %}</ul>
 </details>
 {% endif %}
 {% endmacro %}

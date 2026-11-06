@@ -246,3 +246,21 @@ if (main) {
   if (document.readyState === "complete") start();
   else window.addEventListener("load", start, { once: true });
 }
+
+// Draft only: retain the saved parent form, require an explicit submit, never overwrite a draft.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest?.("[data-followup-location]");
+  const field = document.getElementById("followup");
+  const status = document.getElementById("followup-status");
+  if (!link || !field || !status) return;
+  event.preventDefault();
+  if (field.value.trim()) {
+    status.textContent = "已保留你正在编辑的问题；可修改后提交。";
+  } else {
+    const prefix = `请继续研究原报告 ${link.dataset.followupLocation}，哪些证据会改变判断，还需要核对什么？`;
+    const draft = `${prefix}\n原文：${link.dataset.followupText}`;
+    field.value = draft.length <= field.maxLength ? draft : prefix;
+    status.textContent = "已带入原报告条目。请检查、修改后点击继续追问。";
+  }
+  field.focus();
+});

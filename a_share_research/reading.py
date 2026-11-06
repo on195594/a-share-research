@@ -629,6 +629,8 @@ def card(report, body: dict, last_passed=None) -> dict:
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
             'open_questions': body.get('open_questions', []) if passed else [],
             'boundary': stances.on_boundary(body.get('valuation_calc')) if passed else None,
+            'stance': stance_decision(body.get('stance'), body.get('stance_calc'), body.get('valuation_calc')) if passed else None,
+            'stance_market_date': body.get('market_date') if passed else None,
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],
             'period': period_label, 'created_at': created_at, 'coverage': coverage,
             'market_date': day, 'last_passed': dict(last_passed) if last_passed else None,

@@ -12,6 +12,7 @@
     {% if improvement_id %}<p><a href="/improvements/{{ improvement_id }}">查看本次方法对照与核查结果</a></p>{% endif %}
     <p class="meta"><span class="code">{{ report.code }}</span> · <span class="date">报告生成于 {{ report.created_at[:16].replace("T", " ") }}</span></p>
     <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，不是公告日期）</p>
+    {% if newer_report %}<p class="notice caution" role="status">正在阅读历史报告，以下判断与价格属于本报告时点。<a href="/reports/{{ newer_report.id }}">查看 {{ newer_report.created_at[:10] }} 的最新正式研究（{{ '复核通过' if newer_report.passed else '复核未通过' }}）</a>。</p>{% endif %}
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
       {{ verdict_scale(body.verdict) }}
@@ -98,7 +99,7 @@
 
   <section id="risks" class="risks" tabindex="-1">
     <h2>主要风险与反证</h2>
-    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", focus) }}
+    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", focus, followup=purpose != 'diagnostic' and not replay_of) }}
     {% else %}<p class="muted">本报告未记录可列出的风险。</p>{% endif %}
   </section>
   {% if body.question or content.answer %}
@@ -138,7 +139,7 @@
   <section id="checkpoints" tabindex="-1">
     <h2>下期检查点</h2>
     <p class="muted">下一期披露时应观察的事项；出处只证明基期事实。标“预测”的是对下一期财务表数值的区间判断，披露后由程序记分。</p>
-    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus) }}
+    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus, followup=purpose != 'diagnostic' and not replay_of) }}
   </section>
   {% endif %}
   <section id="business">
@@ -236,7 +237,8 @@
       <input type="hidden" name="q" value="{{ report.code[:6] }}">
       <input type="hidden" name="parent_report_id" value="{{ report.id }}">
       <label for="followup">接下来想弄清什么？</label>
-      <textarea id="followup" name="question" rows="3" maxlength="4000" required></textarea>
+      <p id="followup-status" class="hint" role="status"></p>
+      <textarea id="followup" aria-describedby="followup-status" name="question" rows="3" maxlength="4000" required></textarea>
       <button class="btn" type="submit">继续追问</button>
     </form>
     <details>

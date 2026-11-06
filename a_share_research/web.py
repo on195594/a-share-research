@@ -284,12 +284,13 @@ def research_library(request: Request, q: str = "", content: str = "", history: 
     if not (session := current_session(request)):
         return login_required()
     q = q.strip() or content.strip()  # `content` is the former second search box; old links keep working.
-    whole_library = scope == "all"
+    whole_library = bool(q) and scope == "all"
+    history = bool(q) and history
     results = reading.library_results(conn, q, history=history, whole_library=whole_library, page=page)
     base = {"q": q} if q else {}
     current = base | ({"history": "true"} if q and history else {}) | ({"scope": "all"} if q and whole_library else {})
     toggled = {k: v for k, v in current.items() if k != "history"} | ({} if history else {"history": "true"})
-    return render(request, "research_library.html", session, q=q, history=history, page=page, **results,
+    return render(request, "research_library.html", session, q=q, history=history, whole_library=whole_library, page=page, **results,
                   history_url="/research-library?" + urlencode(toggled),
                   all_url="/research-library?" + urlencode(current | {"scope": "all"}),
                   previous_url="/research-library?" + urlencode(current | {"page": page - 1}),
@@ -440,6 +441,8 @@ def report_page(request: Request, report_id: int):
     run = reading.report_run(conn, row["run_id"])
     if not service.ready(run["status"], row["passed"]):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
+    latest = reading.latest_reports(conn, codes=[row['code']], include_checkpoint=False) if run['kind'] == 'research' else []
+    newer_report = latest[0] if latest and latest[0]['id'] > report_id else None
     body = json.loads(row["body"])
     feedback = (json.loads(run["request"] or "{}") or {}).get("feedback")
     feedback_label = ""
@@ -453,7 +456,7 @@ def report_page(request: Request, report_id: int):
     evidence = reading.evidence_context(body, row['coverage'])
     rows = {r["id"]: r for r in body["table"]}
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
-    return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"],
+    return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"], newer_report=newer_report,
                   improvement_id=((json.loads(run["request"] or "{}") or {}).get("source") or {}).get("evolution_id"),
                   source_view=report_source_view(body, (json.loads(run["material"] or "{}") or {}).get("data")),
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
