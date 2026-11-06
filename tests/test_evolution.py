@@ -202,3 +202,42 @@ def test_candidate_and_adopted_method_use_the_same_prompt_carrier(stored):
     assert candidate.prompt_block() == adopted.prompt_block()
     assert method_entry(method)["method"]["text"] == state["plan"]["method"]
     assert state["plan"]["scope"] not in candidate.prompt_block()
+
+
+REVIEW = json.loads(gzip.decompress((DATA / "evolution-review-path-20261106.json.gz").read_bytes()))
+REVIEW_REPORTS = {arm: entry["body"] for arm, entry in REVIEW["reports"].items()}
+
+
+def test_actual_review_nested_path_and_mutated_evidence():
+    result = evolution.validate_review_evidence(REVIEW["response"], REVIEW_REPORTS)
+    assert result["no_regression"] is False
+    ref = next(r for r in result["evidence"] if r["location"] == "valuation.rationale[0]")
+    body = REVIEW_REPORTS[ref["arm"]]
+    assert ref["quote"] in evolution._lookup(body, ref["location"])
+    assert evolution._lookup(body, ref["location"] + ".text") == evolution._lookup(body, ref["location"])
+    for location in ("valuation.rationale[999]", "valuation.rationale[-1]", "valuation.rationale[00]",
+                     "valuation.rationale[0].__class__", "valuation.rationale[0+0]", "valuation.rationale[0];exit()"):
+        assert evolution._lookup(body, location) == ""
+    wrong_location = deepcopy(result)
+    wrong_location["evidence"][-1]["location"] = "financial[0]"
+    with pytest.raises(ValueError, match="逐字原文"):
+        evolution.validate_review_evidence(wrong_location, REVIEW_REPORTS)
+    wrong_quote = deepcopy(result)
+    wrong_quote["evidence"][-1]["quote"] += "（此处为互变测试追加的非原文）"
+    with pytest.raises(ValueError, match="逐字原文"):
+        evolution.validate_review_evidence(wrong_quote, REVIEW_REPORTS)
+
+
+def test_saved_review_requires_exact_prompt_and_preserves_failed_judgment(stored):
+    root, state = registered(stored)
+    call_id = db.log_call(stored, root, "evolution_case_review", REVIEW["prompt"],
+                          response=json.dumps(REVIEW["response"], ensure_ascii=False))
+    count = stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0]
+    result, reused = evolution._saved_review(stored, root, REVIEW["prompt"])
+    assert reused == call_id and result["no_regression"] is False
+    assert evolution._saved_review(stored, root, REVIEW["prompt"] + "\n") == (None, None)
+    assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == count
+    assert evolution.decision(state["plan"], [result] * 3, adoption_blocked=True) == "rejected"
+    # Explicit protocol mutation: even all passing reviews cannot adopt across versions.
+    passing = result | {"no_regression": True}
+    assert evolution.decision(state["plan"], [passing] * 3, adoption_blocked=True) == "deferred"
