@@ -279,30 +279,21 @@ def logout(request: Request, csrf: str = Form("")):
 # ---------- pages ----------
 
 @app.get("/research-library")
-def research_library(request: Request, q: str = "", content: str = "", history: bool = False,
+def research_library(request: Request, q: str = "", content: str = "", history: bool = False, scope: str = "",
                      page: int = Query(1, ge=1, le=10000)):
     if not (session := current_session(request)):
         return login_required()
-    q, content = q.strip(), content.strip()
-    error, rows, hits, more = "", [], [], False
-    if content:
-        try:
-            hits, more = reading.search_items(conn, content, history=history, page=page)
-        except service.RequestError as exc:
-            error = str(exc)
-        if hits:
-            latest_by_code = {r["code"][:6]: r for r in reading.latest_reports(conn, include_checkpoint=False)}
-            hits = [hit | {"latest": latest_by_code.get(hit["code"][:6]), "label": reading.SEARCH_SECTIONS[hit["location"].split("[")[0]],
-                           "url": reading.item_link(hit["report_id"], hit["location"])} for hit in hits]
-    elif len(q) > 100:
-        error = "请将查询缩短到 100 个字符以内。"
-    else:
-        rows, more = reading.search_reports(conn, q, page)
-    params = {"content": content} | ({"history": "true"} if history else {}) if content else {"q": q} if q else {}
-    return render(request, "research_library.html", session, companies=rows, q=q, content=content, history=history,
-                  hits=hits, page=page, more=more,
-                  error=error, previous_url="/research-library?" + urlencode(params | {"page": page - 1}),
-                  next_url="/research-library?" + urlencode(params | {"page": page + 1}))
+    q = q.strip() or content.strip()  # `content` is the former second search box; old links keep working.
+    whole_library = scope == "all"
+    results = reading.library_results(conn, q, history=history, whole_library=whole_library, page=page)
+    base = {"q": q} if q else {}
+    current = base | ({"history": "true"} if q and history else {}) | ({"scope": "all"} if q and whole_library else {})
+    toggled = {k: v for k, v in current.items() if k != "history"} | ({} if history else {"history": "true"})
+    return render(request, "research_library.html", session, q=q, history=history, page=page, **results,
+                  history_url="/research-library?" + urlencode(toggled),
+                  all_url="/research-library?" + urlencode(current | {"scope": "all"}),
+                  previous_url="/research-library?" + urlencode(current | {"page": page - 1}),
+                  next_url="/research-library?" + urlencode(current | {"page": page + 1}))
 
 
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:

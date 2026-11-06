@@ -403,6 +403,48 @@ def item_link(report_id: int, location: str) -> str:
     return f"/reports/{report_id}?claim={match[1]}:{match[2]}#claim-{match[1]}-{match[2]}"
 
 
+def search_scope(conn, query: str) -> tuple | None:
+    """The one company a multi-word query names, with the words left to look for inside its reports.
+
+    Single characters and partial numbers never name a company: "铜 现金流" and "2025 下降" are content
+    queries even when some company's name or code happens to contain them.
+    """
+    terms = query.split()
+    if not 2 <= len(terms) <= SEARCH_MAX_TERMS:
+        return None
+    named, rest = {}, []
+    for term in terms:
+        rows = [] if len(term) < 2 or (term.isdigit() and len(term) != 6) else latest_reports(
+            conn, query=term, include_checkpoint=False, limit=2)
+        if len(rows) == 1:
+            named[rows[0]["code"][:6]] = rows[0]
+        else:
+            rest.append(term)
+    return (next(iter(named.values())), rest) if len(named) == 1 and rest else None
+
+
+def library_results(conn, query: str, *, history: bool = False, whole_library: bool = False, page: int = 1) -> dict:
+    """One research-library query: the companies it names and the report items containing it, paged together."""
+    companies, more = search_reports(conn, query, page)
+    results = {"companies": companies, "hits": [], "more": more, "scope_company": None, "error": ""}
+    if not query:
+        return results
+    scope = None if companies or whole_library else search_scope(conn, query)
+    if scope:
+        results["scope_company"] = scope[0]
+        results["companies"] = [scope[0]] if page == 1 else []
+    try:
+        hits, hits_more = search_items(conn, " ".join(scope[1]) if scope else query,
+                                       code=scope[0]["code"][:6] if scope else None, history=history, page=page)
+    except service.RequestError as exc:
+        return results | {"error": str(exc)}
+    if hits:
+        latest = {r["code"][:6]: r for r in latest_reports(conn, include_checkpoint=False)}
+        results["hits"] = [hit | {"latest": latest.get(hit["code"][:6]), "label": SEARCH_SECTIONS[hit["location"].split("[")[0]],
+                                  "url": item_link(hit["report_id"], hit["location"])} for hit in hits]
+    return results | {"more": more or hits_more}
+
+
 def prior_agenda(conn, body: dict) -> list[dict]:
     """prior_status with each old item's wording, resolved against the immutable prior report."""
     entries = body.get('prior_status') or []

@@ -175,7 +175,7 @@
 - FTS5 的 `unicode61` 不切分中文，`trigram` 查不了“集采”这样的两字词，都不适合中文短词。
 - 派生表还要处理同步与重建，当前规模没有收益。升级条件：生产库实测 P95 超过 1 秒再评估。
 
-**接口**：`reading.search_items()`，`GET /api/search?q=&code=&section=&history=&page=`（API 鉴权）；网页在研究库增加“搜研究内容”。
+**接口**：`reading.search_items()`，`GET /api/search?q=&code=&section=&history=&page=`（API 鉴权）；网页在研究库增加“搜研究内容”（11-06 与公司查询合并为一个搜索框：`reading.library_results()` 同一查询同时查公司和内容，多词且恰好点名一家公司时只在该公司内搜内容，可改搜全库；`/api/search` 不变）。
 
 - **匹配**：按空白切成 1–5 个词，全部出现（AND）；按字面匹配，`%`、`_` 不是通配符；总长不超过 100 字。
 - **范围**：通过复核、非重放、非纠错的研究报告；章节为 risks、checkpoints、answer、business、financial、stance、prior_status。纠错报告的 `methods` 继续走既有检索（含退役逻辑），不进入本接口。

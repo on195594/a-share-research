@@ -6,6 +6,7 @@ import pytest
 
 from a_share_research import db, reading, service
 from support.continuation import BODY, RECORDS, load
+from support.templates import ENV
 
 
 @pytest.fixture
@@ -110,6 +111,67 @@ def test_library_results_link_the_full_company_code_the_stock_route_expects():
     assert 'href="/stock/{{ hit.code }}"' in template
 
 
+def test_scope_needs_one_named_company_and_ignores_fragments(conn):
+    company, rest = reading.search_scope(conn, "东方电缆 现金流")
+    assert company["code"] == "603606.SH" and rest == ["现金流"]
+    company, rest = reading.search_scope(conn, "现金流 603606 下降")
+    assert company["code"] == "603606.SH" and rest == ["现金流", "下降"]
+    company, rest = reading.search_scope(conn, "东方电缆 603606 现金流")
+    assert company["code"] == "603606.SH" and rest == ["现金流"]
+    for query in ("东方电缆", "东方电缆 603606", "茅台 格力 现金流", "现金流 下降", "6036 现金流", "东 现金流", "1 2 3 4 5 东方电缆"):
+        assert reading.search_scope(conn, query) is None, query
+
+
+def test_library_names_a_scope_only_when_the_whole_query_names_no_company(conn):
+    scoped = reading.library_results(conn, "东方电缆 现金流")
+    assert scoped["scope_company"]["code"] == "603606.SH"
+    assert [c["code"] for c in scoped["companies"]] == ["603606.SH"]
+    assert scoped["hits"] and {h["code"] for h in scoped["hits"]} == {"603606.SH"}
+    assert all("现金流" in h["text"] for h in scoped["hits"])
+    # The escape link searches every company for both words instead; scoped hits needn't mention the name.
+    everywhere = reading.library_results(conn, "东方电缆 现金流", whole_library=True)
+    assert everywhere["scope_company"] is None and everywhere["companies"] == []
+    assert all("东方电缆" in h["text"] and "现金流" in h["text"] for h in everywhere["hits"])
+    assert len(everywhere["hits"]) < len(scoped["hits"])
+    second_page = reading.library_results(conn, "东方电缆 现金流", page=50)
+    assert second_page["scope_company"] and second_page["companies"] == [] and second_page["hits"] == []
+
+
+def test_library_answers_one_query_from_both_sides(conn):
+    named = reading.library_results(conn, "茅台")
+    assert [c["code"] for c in named["companies"]] == ["600519.SH"] and named["scope_company"] is None
+    word = "现金流"
+    content = reading.library_results(conn, word)
+    assert content["companies"] == [] and content["hits"]
+    hit = content["hits"][0]
+    assert hit["label"] in reading.SEARCH_SECTIONS.values() and hit["url"].startswith(f"/reports/{hit['report_id']}")
+    assert hit["latest"]["code"][:6] == hit["code"][:6]
+    browse = reading.library_results(conn, "")
+    assert len(browse["companies"]) == 3 and browse["hits"] == [] and not browse["error"]
+    too_many = reading.library_results(conn, "一 二 三 四 五 六")
+    assert "最多 5 个词" in too_many["error"] and too_many["hits"] == []
+
+
+def test_library_next_page_follows_content_hits_when_companies_run_out(conn):
+    first = reading.library_results(conn, "的", history=True)
+    assert first["companies"] == [] and len(first["hits"]) == reading.PAGE_SIZE and first["more"] is True
+    second = reading.library_results(conn, "的", history=True, page=2)
+    assert second["hits"] and {h["text"] for h in second["hits"]} != {h["text"] for h in first["hits"]}
+
+
+def _library_page(**context):
+    return ENV.get_template("research_library.html").render(page=1, more=False, **context)
+
+
+def test_library_page_has_one_box_and_explains_a_scope():
+    html = _library_page(q="东方电缆 现金流", companies=[], hits=[], history=False, history_url="/h", all_url="/all",
+                         scope_company={"name": "东方电缆", "code": "603606.SH"})
+    assert html.count('name="q"') == 1 and 'name="content"' not in html
+    assert "研究内容只搜了 东方电缆" in html and '<a href="/all#results">改搜全库</a>' in html
+    assert '<a href="/h#results">包括旧报告再查</a>' in html
+    assert "改搜全库" not in _library_page(q="现金流", companies=[], hits=[])
+
+
 def test_search_requires_an_api_session_and_returns_the_envelope(server):
     _, client, url, *_ = server
     assert client.get(url + "/api/search", params={"q": "现金流"}, headers={"Authorization": "Bearer invalid"}, timeout=3).status_code == 401
@@ -123,13 +185,13 @@ def test_latest_company_summary_excludes_feedback_report(conn):
     assert latest['id'] != 12  # captured feedback must not replace the formal stance
 
 
-@pytest.mark.parametrize('content', ['', '现金流'])
-def test_search_forms_and_pagination_target_visible_result_heading(content):
+@pytest.mark.parametrize('query', ['', '现金流'])
+def test_search_form_and_pagination_target_visible_result_heading(query):
     from support.templates import render
-    html = render('research_library.html', q='', content=content, history=False, page=2,
+    html = render('research_library.html', q=query, history=False, page=2,
                   hits=[], companies=[], error='查询需要缩短', more=True,
                   previous_url='/research-library?page=1', next_url='/research-library?page=3')
-    assert html.count('action="/research-library#results"') == 2
+    assert html.count('action="/research-library#results"') == 1
     assert html.count('id="results" tabindex="-1"') == 1
     assert html.index('id="results"') < html.index('role="alert"')
     assert 'href="/research-library?page=1#results"' in html
