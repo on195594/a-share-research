@@ -67,7 +67,7 @@
 {% if items %}<ul class="list">
 {% for entry in items %}<li><h2><a href="/improvements/{{ entry.id }}">{{ entry.plan.title if entry.plan and entry.plan.title else '研究改进 ' ~ entry.id }}</a></h2>
   <p><strong>{{ labels.get(entry.phase, entry.phase) }}</strong> · {{ entry.created_at[:16].replace('T', ' ') }}</p>
-  <p>{{ entry.reason or '正在检查已有报告的研究缺口。' }}</p></li>{% endfor %}
+  <p>{{ (entry.reason_excerpt or entry.reason or '正在检查已有报告的研究缺口。') | truncate(180, true, '…') }}</p></li>{% endfor %}
 </ul>{% else %}<p class="notice" role="status">还没有研究改进记录。后台在正式任务空闲时，检查已有订阅与候选的重复缺口。</p>{% endif %}
 <p><a href="/research-library">返回研究库</a></p>
 {% endif %}

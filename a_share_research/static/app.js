@@ -24,6 +24,12 @@ document.addEventListener("submit", (event) => {
 // query typed into that page before leaving. Run after native form restoration.
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) document.querySelectorAll("button[aria-busy]").forEach(release);
+  // Native fragments place new search results; focus without moving the page.
+  // Back/forward navigation belongs to the browser's scroll restoration.
+  if (!event.persisted && location.hash === "#results"
+      && performance.getEntriesByType("navigation")[0]?.type !== "back_forward") {
+    document.getElementById("results")?.focus({ preventScroll: true });
+  }
   setTimeout(() => {
     const query = document.querySelector('form[data-library-search] input[name="q"]');
     if (query) query.value = query.defaultValue;
@@ -60,6 +66,7 @@ function reveal() {
   } catch {
     return; // A malformed fragment names nothing; leave the rest of the page enhancements running.
   }
+  if (id === "results") return; // Native search anchor; never override history restoration.
   const target = id && document.getElementById(id);
   if (!target) return;
   for (let el = target; el; el = el.parentElement?.closest("details")) {

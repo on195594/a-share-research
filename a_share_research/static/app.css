@@ -253,7 +253,7 @@ th small { display: block; margin-left: 0; }
 .picks .tag { display: block; margin: 8px 0 0; }
 
 /* report section index */
-nav[aria-label="报告章节"], #batch-sections {
+nav[aria-label="报告章节"], #batch-sections, #company-sections {
   position: sticky; top: 0; z-index: 4;
   background: var(--bg);
   margin: 0 -20px 12px; padding: 2px 20px;

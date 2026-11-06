@@ -133,3 +133,15 @@ def test_moved_read_queries_use_captured_records_and_do_not_write(conn):
     assert reading.latest_batch(conn) is None and reading.batch_list(conn) == []
     assert reading.batch(conn, 1) is None and reading.latest_price(conn, run['code']) is None
     assert conn.total_changes == before
+
+
+def test_company_history_summaries_preserve_metadata_and_saved_series(conn):
+    full = reading.stock_reports(conn, '603606.SH')
+    summaries = reading.stock_reports(conn, '603606.SH', summaries=True)
+    assert [r['id'] for r in summaries] == [r['id'] for r in full]
+    for original, summary in zip(full, summaries):
+        assert 'body' not in summary.keys()
+        assert json.loads(summary['operating_series'] or 'null') == json.loads(original['body']).get('series')
+        for key in summary.keys():
+            if key != 'operating_series':
+                assert summary[key] == original[key]

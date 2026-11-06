@@ -276,3 +276,19 @@ def test_actual_large_review_projection_preserves_verified_values_and_rejects_mu
         row["values"][period] = str(float(row["values"][period]) + 1)
         with pytest.raises(ValueError, match="复算不符"):
             evolution.review_report(damaged)
+
+
+def test_web_summaries_match_full_experiments_without_loading_children(stored):
+    root, _ = registered(stored)
+    before = stored.total_changes
+    full = evolution.item(stored, root)
+    statements = []
+    stored.set_trace_callback(statements.append)
+    summaries = evolution.list_summaries(stored, limit=1)
+    stored.set_trace_callback(None)
+    assert len(summaries) == 1
+    for key in ('id', 'created_at', 'phase', 'plan', 'reason'):
+        assert summaries[0][key] == full.get(key)
+    assert not {'usage', 'cases', 'archived_runs'} & summaries[0].keys()
+    assert len(statements) == 1 and 'FROM calls' not in statements[0]
+    assert stored.total_changes == before

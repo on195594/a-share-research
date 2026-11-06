@@ -4,7 +4,14 @@
 {% from "_card.html" import full_card %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
-<section>
+<nav aria-label="公司章节" id="company-sections"><ul class="toc">
+  <li><a href="#card-{{ card.code }}">判断与风险</a></li>
+  {% if vitals %}<li><a href="#vitals">财务走势</a></li>{% endif %}
+  <li><a href="#records">研究记录 <small class="num">{{ reports | length }}</small></a></li>
+  <li><a href="#price">价格参考</a></li>
+</ul></nav>
+<p class="actions"><a class="btn" href="/reports/{{ card.id }}">阅读 {{ card.name or card.code }} 的完整报告</a></p>
+<div>
   {{ full_card(card, due) }}
   <div class="actions card-actions">
     <a class="btn" href="/reports/{{ card.id }}">阅读完整报告</a>
@@ -35,5 +42,5 @@
   </ul>
   {{ price_block(price, code, csrf, request_id) }}
   <div class="actions">{{ research_form(code[:6], csrf, request_id, "重新研究", cls="btn") }}</div>
-</section>
+</div>
 {% endblock %}

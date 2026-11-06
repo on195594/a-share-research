@@ -197,7 +197,7 @@ def login(request: Request):
 def improvements_page(request: Request):
     if not (session := current_session(request)):
         return login_required()
-    return render(request, "improvements.html", session, items=evolution.list_items(conn), item=None)
+    return render(request, "improvements.html", session, items=evolution.list_summaries(conn), item=None)
 
 
 @app.get("/improvements/{run_id}")
@@ -704,7 +704,7 @@ def api_revoke(request: Request):
 def stock_page(request: Request, code: str, report: int | None = None):
     if not (session := current_session(request)):
         return login_required()
-    reports = reading.stock_reports(conn, code)
+    reports = reading.stock_reports(conn, code, summaries=True)
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
     # Formal research heads the page; a feedback check or replay leads only when nothing else exists.
@@ -715,23 +715,31 @@ def stock_page(request: Request, code: str, report: int | None = None):
         return not_found(request, session, "这份报告不属于当前公司。")
     # The newest non-replay report with an operating series lends its vitals to the company page,
     # falling back to the newest non-replay report's saved T.* financial table when no series exists.
-    parsed = [(r, json.loads(r["body"])) for r in ordered]
-    latest = next(((r, v) for r, b in parsed if (v := charts.vitals(b))), None)
+    loaded = {}
+    def full(row):
+        if row['id'] not in loaded:
+            record = reading.report(conn, row['id'])
+            loaded[row['id']] = (record, json.loads(record['body']))
+        return loaded[row['id']]
+
+    latest = next(((r, v) for r in ordered if r['operating_series']
+                   and (v := charts.vitals({'series': json.loads(r['operating_series'])}))), None)
     if latest is None:
-        for r, b in parsed:
+        for r in ordered:
+            b = full(r)[1]
             t = [x for x in (b.get("table") or []) if isinstance(x, dict) and str(x.get("id", "")).startswith("T.")]
             if v := charts.vitals(b, t):
                 latest = (r, v)
                 break
     latest = latest or (None, None)
     before = next((r for r in ordered if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
-    card = reading.card(head, parsed[0][1], before) | {
+    card = reading.card(head, full(head)[1], before) | {
         "coverage": head["coverage"],
         "created_at": head["created_at"]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex, card=card,
                   due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   vitals=latest[1], vitals_report=latest[0],
-                  price=reading.latest_price(conn, code), comparison=reading.comparison(conn, selected),
+                  price=reading.latest_price(conn, code), comparison=reading.comparison(conn, full(selected)[0]),
                   selected=selected, track=charts.verdict_track(reports))
 
 

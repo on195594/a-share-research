@@ -597,6 +597,21 @@ def item(conn, run_id):
             **state, "reason_blocks": reason_blocks(state.get("reason") or ""), "cases": cases, "archived_runs": archived_runs, "usage": usage}
 
 
+def list_summaries(conn, limit=30):
+    """Web list only: preserve full experiment/usage detail in item and the public API."""
+    rows = conn.execute(f"SELECT id,created_at,identity FROM runs WHERE kind='diagnostic' AND {ROOT}"
+                        " ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    result = []
+    for row in rows:
+        state = _state(row)
+        reason = state.get('reason') or ''
+        excerpt = next((line.strip().replace('**', '').replace('`', '') for line in reason.splitlines()
+                        if line.strip() and not line.lstrip().startswith(('#', '|'))), reason)
+        result.append({'id': row['id'], 'created_at': row['created_at'], 'reason_excerpt': excerpt,
+                       **{key: state.get(key) for key in ('phase', 'plan', 'reason')}})
+    return result
+
+
 def list_items(conn, limit=30):
     ids = conn.execute(f"SELECT id FROM runs WHERE kind='diagnostic' AND {ROOT} ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [item(conn, row[0]) for row in ids]

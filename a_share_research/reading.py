@@ -732,9 +732,12 @@ def api_reports(conn, code: str):
         " ORDER BY r.id DESC LIMIT 100", (code,)).fetchall()
 
 
-def stock_reports(conn, code: str):
+def stock_reports(conn, code: str, *, summaries: bool = False):
+    # History needs metadata and saved series, not every report's full evidence body.
+    columns = ("r.id,r.run_id,r.code,r.name,r.created_at,r.period,r.passed,r.verdict,r.coverage,"
+               "json_extract(r.body, '$.series') AS operating_series" if summaries else "r.*")
     return conn.execute(
-        "SELECT r.*, u.replay_of AS replay_of,"
+        f"SELECT {columns}, u.replay_of AS replay_of,"
         " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
         " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"

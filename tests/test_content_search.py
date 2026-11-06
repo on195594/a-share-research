@@ -121,3 +121,16 @@ def test_search_requires_an_api_session_and_returns_the_envelope(server):
 def test_latest_company_summary_excludes_feedback_report(conn):
     latest = reading.latest_reports(conn, code_prefix='600519')[0]
     assert latest['id'] != 12  # captured feedback must not replace the formal stance
+
+
+@pytest.mark.parametrize('content', ['', '现金流'])
+def test_search_forms_and_pagination_target_visible_result_heading(content):
+    from support.templates import render
+    html = render('research_library.html', q='', content=content, history=False, page=2,
+                  hits=[], companies=[], error='查询需要缩短', more=True,
+                  previous_url='/research-library?page=1', next_url='/research-library?page=3')
+    assert html.count('action="/research-library#results"') == 2
+    assert html.count('id="results" tabindex="-1"') == 1
+    assert html.index('id="results"') < html.index('role="alert"')
+    assert 'href="/research-library?page=1#results"' in html
+    assert 'href="/research-library?page=3#results"' in html
