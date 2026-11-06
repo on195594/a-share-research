@@ -192,3 +192,55 @@ def test_parenthesized_amount_is_negative_but_note_numbers_keep_either_sign():
     assert signed_numbers("(18,271,433,398.44)") == [Decimal("-18271433398.44")]
     assert signed_numbers("（4,517,748,687.12）") == [Decimal("-4517748687.12")]
     assert set(signed_numbers("见附注七(12)")) >= {Decimal(12), Decimal(-12)}
+
+
+def test_split_calculation_survives_storage_citations_and_chaining():
+    from a_share_research.evidence import citation_errors
+    from support.split_numbers import CITE, material
+    from support.reports import report
+    m = material()
+    operands = [CITE | {'value': value, 'unit': '元'} for value in ('2682208991.65', '2740768580.00')]
+    row = calculate(m.table, '资产组差额', 'difference', *operands, material=m)
+    m.table.append(row)
+    restored = Material.from_snapshot(json.loads(json.dumps(m.snapshot())))
+    stored = restored.table[-1]
+    for actual, expected in zip(stored['calculation']['inputs'], operands):
+        assert all(actual[key] == expected[key] for key in ('source', 'page', 'quote', 'value'))
+    assert citation_errors([{'ref': row['id']}], restored.source_registry(), restored.table) == []
+    assert citation_errors(stored['calculation']['inputs'], restored.source_registry(), restored.table) == []
+    assert checking.check(report(financial=[{'text': '账面价值2,682,208,991.65元，可收回金额2,740,768,580.00元。',
+                                            'cites': [{'ref': row['id']}]}]), restored) == []
+    chained = calculate(restored.table, '复算差额', 'difference', {'ref': row['id']}, {'ref': row['id']}, material=restored)
+    assert Decimal(chained['exact_values']['result']) == 0
+
+
+def test_calculate_all_captured_split_shapes():
+    from support.split_numbers import DATA, material
+    m = material()
+    for sample in DATA['samples']:
+        operand = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail'],
+                   'value': (sample['head'] + sample['tail']).replace(',', ''), 'unit': '元'}
+        row = calculate(m.table, '原数复算', 'difference', operand, operand, material=m)
+        assert Decimal(row['exact_values']['result']) == 0
+
+
+def test_calculate_split_mutations_are_rejected():
+    from support.split_numbers import CITE, mutations, material
+    m = material()
+    valid = CITE | {'value': '2682208991.65', 'unit': '元'}
+    for cite, value in mutations():
+        with pytest.raises(ValueError):
+            calculate(m.table, '错误原数', 'difference', cite | {'value': value, 'unit': '元'}, valid, material=m)
+
+
+def test_calculate_keeps_the_sign_of_a_split_amount():
+    from support.split_numbers import DATA, material
+    m = material()
+    for sample in DATA['negative']:
+        operand = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail'], 'unit': '元'}
+        row = calculate(m.table, '原数复算', 'difference', operand | {'value': sample['value']},
+                        operand | {'value': sample['value']}, material=m)
+        assert Decimal(row['exact_values']['result']) == 0
+        with pytest.raises(ValueError):
+            calculate(m.table, '错误符号', 'difference', operand | {'value': sample['value'].lstrip('-')},
+                      operand | {'value': sample['value']}, material=m)

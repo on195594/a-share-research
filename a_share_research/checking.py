@@ -94,31 +94,6 @@ def _checked_figures(text: str, material: Material, cites=()) -> list[tuple[floa
     return _numbers(_without_codes(text, material))
 
 
-# pdftotext breaks some table amounts across lines ("24,213,317." / "52", or "5,145,019,390" / ".17").
-SPLIT_NUMBER = re.compile(r"(?<![\d.,])(\d[\d,]*)(?:\.[ \t]*\n\s*(\d+)|[ \t]*\n\s*\.(\d+))(?![\d.,])")
-
-
-# A quote that carries one of those halves: "317." with no decimals, or ".17" with no whole part.
-SPLIT_HALF = re.compile(r"\d\.(?!\d)|(?<![\d.])\.\d")
-
-
-def _split_numbers(cite: dict, registry: dict) -> list[float]:
-    """Rejoin amounts split across lines on the quoted pages, only when both halves appear in the quote."""
-    pages = evidence.quote_match(cite, registry)
-    if not pages:
-        return []
-    quote, source = str(cite["quote"]), registry[cite.get("source", "D0")]
-    values = []
-    for n in pages:
-        for field in ("raw_pages", "pages"):
-            for m in SPLIT_NUMBER.finditer(source[field].get(n, "")):
-                whole, fraction = m[1], m[2] or m[3]
-                if (re.search(rf"(?<![\d,]){re.escape(whole)}(?![\d,])", quote)
-                        and re.search(rf"(?<![\d,]){fraction}(?!\d)", quote)):
-                    values.append(float(f"{whole.replace(',', '')}.{fraction}"))
-    return values
-
-
 def _assumed(row: dict) -> bool:
     return bool((row.get("calculation") or {}).get("assumptions"))
 
@@ -147,9 +122,8 @@ def _candidates(cites: list[dict], material: Material, *, facts_only=False) -> l
                 values += [float(i["value"]) for i in calc.get("assumptions", []) if "value" in i]
         elif "quote" in cite:
             values += [v for v, _ in _numbers(cite["quote"])]
-            if SPLIT_HALF.search(str(cite["quote"])):
-                registry = registry or material.source_registry()
-                values += _split_numbers(cite, registry)
+            registry = registry or material.source_registry()
+            values += [float(v) for v in evidence.rejoined_numbers(cite, registry)]
     return values
 
 

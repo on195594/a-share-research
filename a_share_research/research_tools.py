@@ -154,7 +154,8 @@ def _operand(side: dict, rows: dict, material) -> dict:
             num = Decimal(raw)
         except ArithmeticError as exc:
             raise ValueError("计算输入必须是有限数字") from exc
-        tokens = evidence.signed_numbers(str(side["quote"]))
+        tokens = (evidence.signed_numbers(str(side["quote"]))
+                  + evidence.rejoined_numbers(side, material.source_registry()))
         if not num.is_finite() or not any(num == t and num.as_tuple().exponent == t.as_tuple().exponent for t in tokens):
             raise ValueError("计算输入的数值（含正负号与小数位）须与所引原文中的原数完全一致")
         source = str(side.get("source") or "D0")

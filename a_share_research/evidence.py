@@ -186,6 +186,46 @@ def quote_match(cite, registry):
     return None
 
 
+# pdftotext breaks table amounts across lines. At the decimal point the fraction length is free
+# ("24,213,317." / "52", "5,145,019,390" / ".17") and either layer may carry the break.
+SPLIT_AT_POINT = re.compile(r"(?<![\d.,])([-−]?)(\d[\d,]*)(?:\.[ \t]*\n\s*(\d+)|[ \t]*\n\s*\.(\d+))(?![\d.,])")
+# Anywhere else ("2,682,208,99" / "1.65") only a grouped two-decimal amount counts, read from the raw
+# layer where the halves are adjacent. A head without a comma is too often a note number or table
+# index sitting above a complete amount ("5" / "2,376,681.61").
+AMOUNT = re.compile(r"\d{1,3}(?:,\d{3})+\.\d{2}")
+SPLIT_HEAD = re.compile(r"(?:^|(?<=\s))([-−]?)(\d[\d.]*,[\d,.]*)$")
+SPLIT_TAIL = re.compile(r"^\d[\d,.]*(?=\s|$)")
+
+
+def _signed_amount(sign: str, digits: str) -> Decimal:
+    return Decimal(("-" if sign else "") + digits.replace(",", ""))
+
+
+def rejoined_numbers(cite: dict, registry: dict) -> list[Decimal]:
+    """Exact amounts split across lines on the matched pages, only when the quote holds both halves."""
+    pages = quote_match(cite, registry)
+    if not pages:
+        return []
+    source, quote = registry[cite.get("source", "D0")], str(cite["quote"])
+    values = []
+    for page in pages:
+        for field in ("raw_pages", "pages"):
+            for m in SPLIT_AT_POINT.finditer(source[field].get(page, "")):
+                whole, fraction = m[2], m[3] or m[4]
+                if (re.search(rf"(?<![\d,]){re.escape(whole)}(?![\d,])", quote)
+                        and re.search(rf"(?<![\d,]){fraction}(?!\d)", quote)):
+                    values.append(_signed_amount(m[1], f"{whole}.{fraction}"))
+        lines = [line.strip() for line in source["raw_pages"].get(page, "").splitlines()]
+        for above, below in zip(lines, lines[1:]):
+            head, tail = SPLIT_HEAD.search(above), SPLIT_TAIL.match(below)
+            if not head or not tail or AMOUNT.fullmatch(head[2]) or not AMOUNT.fullmatch(head[2] + tail[0]):
+                continue
+            if all(re.search(rf"(?<![\d.,+−-]){re.escape(half)}(?![\d.,])", quote)
+                   for half in (head[1] + head[2], tail[0])):
+                values.append(_signed_amount(head[1], head[2] + tail[0]))
+    return values
+
+
 def _quote_error(cite, source):
     """Say which part of an unmatched quote citation to fix, as tool errors do."""
     source_id, page, quote = cite.get("source", "D0"), cite.get("page"), cite.get("quote")

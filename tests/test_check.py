@@ -227,3 +227,50 @@ def test_table_amounts_split_across_lines_are_rejoined_from_the_quoted_page():
     first_line = {"page": SPLIT["page"], "quote": SPLIT["quote"].split("\n")[0]}
     bad = report(financial=[{"text": "存货跌价准备合计24,213,317.52元。", "cites": [first_line]}])
     assert [p["where"] for p in check(bad, split_material())] == ["financial[0]"]
+
+
+def test_run154_split_amounts_and_yuan_scaling():
+    from support.split_numbers import RUN, CITE, material
+    for text in (RUN['text'], '账面价值2,682,208,991.65元，可收回金额2,740,768,580.00元。',
+                 '账面价值26.8221亿元，可收回金额27.4077亿元。'):
+        problems = check(report(risks=[{'text': text, 'cites': [CITE]}]), material())
+        # The exact captured paragraph also cites other pages not needed by this fixture.
+        assert not [p for p in problems if '数字 2.68221e+09' in p['problem']
+                    or '数字 2.74077e+09' in p['problem']]
+        if text != RUN['text']:
+            assert problems == []
+
+
+def test_all_captured_split_shapes():
+    from support.split_numbers import DATA, material
+    for sample in DATA['samples']:
+        cite = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail']}
+        text = '金额' + sample['head'] + sample['tail'] + '元。'
+        assert check(report(financial=[{'text': text, 'cites': [cite]}]), material()) == []
+
+
+def test_split_amount_mutations_are_rejected():
+    from decimal import Decimal
+    from a_share_research.evidence import rejoined_numbers
+    from support.split_numbers import mutations, material
+    for cite, value in mutations():
+        problems = check(report(financial=[{'text': f'金额{value}元。', 'cites': [cite]}]), material())
+        assert problems, (cite, value)
+        assert Decimal(value) not in rejoined_numbers(cite, material().source_registry())
+
+
+def test_negative_split_amounts_are_supported():
+    from support.split_numbers import DATA, material
+    for sample in DATA['negative']:
+        cite = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail']}
+        assert check(report(financial=[{'text': f"金额{sample['head']}{sample['tail']}元。", 'cites': [cite]}]), material()) == []
+
+
+def test_note_number_above_an_amount_is_not_part_of_it():
+    # Captured: "5" and "0" both sit above "2,376,681.61"; they are table indexes, not leading digits.
+    from support.split_numbers import DATA, material
+    sample = DATA['no_comma_head']
+    cite = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail']}
+    bad = report(financial=[{'text': f"金额{float(sample['value']):,.2f}元。", 'cites': [cite]}])
+    assert [p['where'] for p in check(bad, material())] == ['financial[0]']
+
