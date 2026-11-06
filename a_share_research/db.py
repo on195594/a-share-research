@@ -16,7 +16,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY,
     request_id TEXT UNIQUE,
-    kind TEXT NOT NULL DEFAULT 'research',  -- research / price
+    kind TEXT NOT NULL DEFAULT 'research',  -- research / price / diagnostic (diagnostic never counts as formal research)
     code TEXT NOT NULL,
     name TEXT,
     status TEXT NOT NULL DEFAULT 'queued',  -- queued / running / done / failed

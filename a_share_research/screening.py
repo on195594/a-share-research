@@ -225,7 +225,7 @@ def reusable_report(conn, code: str, since: str):
     return conn.execute(
         "SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.code = ? AND r.passed = 1 AND u.status = 'done' AND r.created_at >= ?"
-        " AND u.replay_of IS NULL"
+        " AND u.kind = 'research' AND u.replay_of IS NULL"
         # A continuation's answer is about its earlier report, not the batch question.
         " AND json_type(r.body, '$.prior') IS NOT 'object' ORDER BY r.id DESC LIMIT 1",
         (code, since),

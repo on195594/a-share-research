@@ -306,7 +306,7 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
     Search matches any historical name/code literally; source counts exclude replays.
     Filters apply before selecting the newest report, including passed/date constraints.
     """
-    where, params = ["u.replay_of IS NULL"], []
+    where, params = ["u.kind = 'research'", "u.replay_of IS NULL"], []
     if codes is not None:
         if not codes:
             return []
@@ -715,7 +715,7 @@ def api_run(conn, run_id: int):
 
 def api_reports(conn, code: str):
     return conn.execute("SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, u.status"
-        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE substr(r.code, 1, 6) = ?"
+        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE substr(r.code, 1, 6) = ? AND u.kind = 'research'"
         " ORDER BY r.id DESC LIMIT 100", (code,)).fetchall()
 
 
@@ -726,7 +726,7 @@ def stock_reports(conn, code: str):
         " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"
         " json_extract(r.body, '$.prior.report_id') AS prior_report_id FROM reports r"
-        " JOIN runs u ON u.id = r.run_id WHERE r.code = ? ORDER BY r.id DESC", (code,),
+        " JOIN runs u ON u.id = r.run_id WHERE r.code = ? AND u.kind = 'research' ORDER BY r.id DESC", (code,),
     ).fetchall()
 
 

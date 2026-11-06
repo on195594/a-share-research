@@ -28,13 +28,15 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     question = question.strip()
     if parent_report_id is not None:
         parent = conn.execute(
-            "SELECT r.code, r.name, r.passed, r.body, u.status FROM reports r"
+            "SELECT r.code, r.name, r.passed, r.body, u.status, u.kind FROM reports r"
             " JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (parent_report_id,),
         ).fetchone()
         if parent is None:
             raise RequestError("原报告不存在", 404)
         if not ready(parent["status"], parent["passed"]):
             raise RequestError("报告尚未就绪或状态不一致", 409)
+        if parent["kind"] != "research":
+            raise RequestError("诊断结果不能作为正式研究的追问或纠错基础", 409)
         code = code or parent["code"][:6]
         name = name or parent["name"]
         if parent["code"][:6] != code:
@@ -65,6 +67,26 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
         return row["id"]
     previous = conn.execute("SELECT id, kind, code, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
     if previous["kind"] != "research" or previous["code"][:6] != code or previous["request"] != payload:
+        raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
+    return previous["id"]
+
+
+def submit_diagnostic(conn, code: str, request_id: str, *, question: str, source: dict,
+                      parent_report_id: int | None = None) -> int:
+    """Queue a trusted internal diagnostic; no HTTP route reaches this, so callers cannot relabel formal research."""
+    if not re.fullmatch(r"\d{6}", code) or not 1 <= len(request_id) <= 128 or not question.strip():
+        raise RequestError("诊断需要 6 位公司代码、1–128 字请求编号与问题")
+    payload = json.dumps({"question": question.strip(), "parent_report_id": parent_report_id, "feedback": None,
+                          "source": source}, ensure_ascii=False, sort_keys=True)
+    row = conn.execute(
+        "INSERT INTO runs (request_id, kind, code, status, created_at, request)"
+        " VALUES (?, 'diagnostic', ?, 'queued', ?, ?) ON CONFLICT(request_id) DO NOTHING RETURNING id",
+        (request_id, code, db.now(), payload),
+    ).fetchone()
+    if row:
+        return row["id"]
+    previous = conn.execute("SELECT id, kind, code, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+    if previous["kind"] != "diagnostic" or previous["code"][:6] != code or previous["request"] != payload:
         raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
     return previous["id"]
 
@@ -111,7 +133,7 @@ def _table_periods(body: dict) -> list[str]:
 def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = False) -> dict:
     # One SELECT gives a consistent task/report snapshot while a worker is saving a result.
     row = conn.execute(
-        "SELECT r.*, u.status, u.error, u.identity, u.material, u.request,"
+        "SELECT r.*, u.kind AS purpose, u.status, u.error, u.identity, u.material, u.request,"
         " (SELECT json_group_array(identity) FROM calls WHERE run_id = r.run_id) AS call_identities FROM reports r"
         " JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (report_id,),
     ).fetchone()
@@ -138,7 +160,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "report": body if row["passed"] else {"facts": body.get("facts", {}),
                                                    "facts_reviewed": body.get("facts_reviewed"),
                                                    "problems": body.get("problems", [])},
-            "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
+            "purpose": row["purpose"], "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
             "model_calls": [{key: identity.get(key) for key in
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}
                             if (identity := json.loads(value or "null")) else None
@@ -299,9 +321,9 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
     if request_id is not None and not 1 <= len(request_id) <= 128:
         raise RequestError("请求编号须为 1–128 字")
     field, value = ("request_id", request_id) if request_id is not None else ("id", run_id)
-    row = conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
+    row = conn.execute("SELECT u.id, u.kind, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
                        " u.material, u.identity, r.id AS report_id, r.body AS report_body FROM runs u LEFT JOIN reports r ON r.run_id = u.id"
-                       f" WHERE u.{field} = ? AND u.kind = 'research'", (value,)).fetchone()
+                       f" WHERE u.{field} = ? AND u.kind IN ('research', 'diagnostic')", (value,)).fetchone()
     if row is None:
         raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
     body = json.loads(row["report_body"]) if row["report_body"] else {}

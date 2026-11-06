@@ -29,6 +29,17 @@ def recover(conn) -> None:
                               error=AUTO_RESUME_ERROR)
 
 
+def next_run(conn):
+    """A candidate batch queues 20 research runs; the owner's own submissions go ahead of them."""
+    return conn.execute("SELECT id, kind FROM runs WHERE status = 'queued' AND kind != 'diagnostic'"
+                        " ORDER BY request_id LIKE 'batch-%', id LIMIT 1").fetchone()
+
+
+def next_diagnostic(conn):
+    """Diagnostics run only after research, scans and batch steps found nothing to do."""
+    return conn.execute("SELECT id FROM runs WHERE status = 'queued' AND kind = 'diagnostic' ORDER BY id LIMIT 1").fetchone()
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
@@ -45,9 +56,7 @@ def main() -> None:
     scans.recover(conn)
     log.info("worker ready")
     while True:
-        # A candidate batch queues 20 research runs; the owner's own submissions go ahead of them.
-        row = conn.execute("SELECT id, kind FROM runs WHERE status = 'queued'"
-                           " ORDER BY request_id LIKE 'batch-%', id LIMIT 1").fetchone()
+        row = next_run(conn)
         if row is None:
             scan = conn.execute("SELECT id FROM scans WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if scan:
@@ -55,6 +64,9 @@ def main() -> None:
                 continue
             # Batch steps run only when no single-company task is waiting.
             if not screening.tick(conn):
+                if diagnostic := next_diagnostic(conn):
+                    research.execute(conn, diagnostic["id"])
+                    continue
                 try:
                     consensus_backfill.tick()
                 except Exception:

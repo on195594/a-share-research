@@ -14,7 +14,7 @@ from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
 from a_share_research.checking import SECTIONS, check
 from a_share_research.prompts import RULES, output_schema, parse_json
-from a_share_research.research_tools import Acquisition, explore
+from a_share_research.research_tools import Acquisition, active_methods_digest, explore
 
 log = logging.getLogger(__name__)
 
@@ -315,7 +315,7 @@ def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool
 def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     parents = conn.execute(
         "SELECT r.id, r.body, r.passed, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.code = ? AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
+        " WHERE r.code = ? AND u.kind = 'research' AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
         " AND json_type(u.request, '$.feedback') = 'object')) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
         (code, parent_id, parent_id),
     ).fetchall()
@@ -360,7 +360,7 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
     """
     row = conn.execute(
         "SELECT r.id, r.body, r.created_at, r.coverage FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.code = ? AND r.run_id < ? AND r.passed = 1 AND u.status = 'done'"
+        " WHERE r.code = ? AND r.run_id < ? AND r.passed = 1 AND u.status = 'done' AND u.kind = 'research'"
         " AND u.replay_of IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
         " ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
@@ -481,7 +481,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     identity: dict = {}
 
     try:
-        identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
+        identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None,
+                                                    "methods_sha256": active_methods_digest(conn)}
         db.update_run(conn, run_id, identity=json.dumps(identity))
         material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
         if material.code[:6] != code[:6] or material.doc.code != material.code:

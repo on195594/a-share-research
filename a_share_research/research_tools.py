@@ -1,5 +1,6 @@
 """Finite research tools and a pi-native exploration loop in the existing worker."""
 
+import hashlib
 import json
 import logging
 import re
@@ -74,23 +75,34 @@ OPERATION_NAMES = {"difference": "差额", "sum": "合计", "growth_pct": "相�
                    "multiply": "乘积", "annual_return": "持有期复合年化回报"}
 
 
+# Shortcut: scan existing report JSON; add an index only when measured history size needs it.
+ACTIVE_METHODS = (
+    "SELECT r.id, r.code, r.created_at, r.body, m.key, m.value FROM reports r"
+    " JOIN runs u ON u.id = r.run_id JOIN json_each(r.body, '$.methods') m"
+    " WHERE r.passed = 1 AND u.status = 'done' AND u.kind = 'research'"
+    " AND json_type(u.request, '$.feedback') = 'object'"
+    " AND json_type(r.body, '$.methods') = 'array'"
+    " AND NOT EXISTS (SELECT 1 FROM reports newer JOIN runs n ON n.id = newer.run_id"
+    " WHERE newer.passed = 1 AND n.status = 'done' AND n.kind = 'research'"
+    " AND json_type(newer.body, '$.methods') = 'array'"
+    " AND json_extract(n.request, '$.parent_report_id') = r.id"
+    " AND json_extract(n.request, '$.feedback.location') = 'methods[' || m.key || ']')"
+)
+
+
+def active_methods_digest(conn) -> str:
+    """Identify the method set a run could retrieve; method changes do not alter the application hash."""
+    rows = conn.execute(f"{ACTIVE_METHODS} ORDER BY r.id, m.key").fetchall()
+    payload = [[row["id"], row["key"], row["value"]] for row in rows]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+
+
 def research_methods(conn, query: str) -> list[dict]:
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 80:
         raise ValueError("方法检索关键词须为 1–80 字")
     terms = query.split()
     matches = " OR ".join("instr(json_extract(m.value, '$.text'), ?) > 0" for _ in terms)
-    # shortcut: scan existing report JSON; add an index only when measured history size needs it.
-    rows = conn.execute(
-        "SELECT r.id, r.code, r.created_at, r.body, m.key, m.value FROM reports r"
-        " JOIN runs u ON u.id = r.run_id JOIN json_each(r.body, '$.methods') m"
-        " WHERE r.passed = 1 AND u.status = 'done' AND json_type(u.request, '$.feedback') = 'object'"
-        " AND json_type(r.body, '$.methods') = 'array'"
-        " AND NOT EXISTS (SELECT 1 FROM reports newer JOIN runs n ON n.id = newer.run_id"
-        " WHERE newer.passed = 1 AND n.status = 'done' AND json_type(newer.body, '$.methods') = 'array'"
-        " AND json_extract(n.request, '$.parent_report_id') = r.id"
-        " AND json_extract(n.request, '$.feedback.location') = 'methods[' || m.key || ']')"
-        f" AND ({matches}) ORDER BY r.id DESC, m.key LIMIT 5", terms,
-    ).fetchall()
+    rows = conn.execute(f"{ACTIVE_METHODS} AND ({matches}) ORDER BY r.id DESC, m.key LIMIT 5", terms).fetchall()
     found = []
     for row in rows:
         body, method = json.loads(row["body"]), json.loads(row["value"])
