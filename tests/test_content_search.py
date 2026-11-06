@@ -100,6 +100,96 @@ def test_invalid_queries_are_refused_with_a_clear_error(conn, query, options):
         reading.search_items(conn, query, **options)
 
 
+def test_body_reads_stop_after_enough_hits(conn, monkeypatch):
+    monkeypatch.setattr(reading, "SEARCH_REPORT_BATCH_SIZE", 1)
+    queries = []
+    conn.set_trace_callback(queries.append)
+    try:
+        hits, more = reading.search_items(conn, "的", history=True, page_size=1)
+    finally:
+        conn.set_trace_callback(None)
+    body_reads = [q for q in queries if q.startswith("SELECT id, json_extract(body,")]
+    assert len(hits) == 1 and more
+    assert len(body_reads) == 1
+    assert "json_extract(b.body" not in queries[0]
+
+
+@pytest.mark.parametrize("query", ["的", "现金流", "不存在的搜索词XYZ"])
+@pytest.mark.parametrize("history", [False, True])
+def test_batch_boundaries_preserve_results_and_pagination(conn, monkeypatch, query, history):
+    monkeypatch.setattr(reading, "SEARCH_REPORT_BATCH_SIZE", 1000)
+    expected = [reading.search_items(conn, query, history=history, page=p, page_size=3)
+                for p in (1, 2, 10)]
+    monkeypatch.setattr(reading, "SEARCH_REPORT_BATCH_SIZE", 1)
+    assert [reading.search_items(conn, query, history=history, page=p, page_size=3)
+            for p in (1, 2, 10)] == expected
+
+
+def test_library_only_fetches_missing_hit_companies(conn, monkeypatch):
+    original = reading.latest_reports
+    calls = []
+
+    def tracked(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(reading, "latest_reports", tracked)
+    scoped = reading.library_results(conn, "东方电缆 现金流")
+    assert scoped["hits"]
+    # Company recognition already supplied the latest row; no enrichment query is needed.
+    assert not any("codes" in call for call in calls)
+    assert all(call.get("query") for call in calls)
+    assert all(hit["latest"]["checkpoint"] is None for hit in scoped["hits"])
+    calls.clear()
+    found = reading.library_results(conn, "现金流")
+    enrichment = [call for call in calls if "codes" in call]
+    assert len(enrichment) == 1
+    assert set(enrichment[0]["codes"]) == {hit["code"] for hit in found["hits"]}
+
+
+@pytest.mark.parametrize("history", [False, True])
+def test_latest_metadata_includes_other_code_formats(conn, history):
+    conn.execute("UPDATE reports SET code = '603606.SH' WHERE substr(code,1,6) = '603606'")
+    conn.execute("UPDATE reports SET code = '603606', passed = 0 WHERE id = 39")
+    result = reading.library_results(conn, text_of(37)[:14], history=history)
+    hits = [hit for hit in result["hits"] if hit["code"].startswith("603606")]
+    assert hits
+    assert all(hit["latest"]["id"] == 39 and not hit["latest"]["passed"] for hit in hits)
+
+
+def test_stale_known_metadata_is_refreshed(conn, monkeypatch):
+    body = json.loads(conn.execute("SELECT body FROM reports WHERE id = 39").fetchone()["body"])
+    body["stance"] = {"text": "东方电缆新增通过报告"}
+    conn.execute("UPDATE reports SET body = ? WHERE id = 39", (json.dumps(body, ensure_ascii=False),))
+    original = reading.search_reports
+
+    def stale(*args, **kwargs):
+        rows, more = original(*args, **kwargs)
+        return [dict(row) | {"id": 37, "passed": 0} for row in rows], more
+
+    monkeypatch.setattr(reading, "search_reports", stale)
+    result = reading.library_results(conn, "东方电缆")
+    assert result["hits"]
+    assert all(hit["latest"]["id"] >= hit["report_id"] for hit in result["hits"])
+
+
+def test_missing_batch_body_is_skipped(conn):
+    class MissingBodyConnection:
+        def execute(self, sql, params=()):
+            if sql.startswith("SELECT id, json_extract(body,"):
+                # Simulate a report deleted between metadata and body reads.
+                return iter(())
+            return conn.execute(sql, params)
+
+    assert reading.search_items(MissingBodyConnection(), "的", history=True) == ([], False)
+
+
+def test_latest_metadata_has_uniform_mapping_type(conn):
+    results = [reading.library_results(conn, query) for query in ("现金流", "东方电缆 现金流")]
+    assert all(result["hits"] for result in results)
+    assert all(isinstance(hit["latest"], dict) for result in results for hit in result["hits"])
+
+
 def test_item_link_points_at_the_claim_or_the_stance():
     assert reading.item_link(7, "risks[2]") == "/reports/7?claim=risks:2#claim-risks-2"
     assert reading.item_link(7, "stance") == "/reports/7#stance"

@@ -348,6 +348,7 @@ SEARCH_SECTIONS = {'risks': '风险与反证', 'checkpoints': '下期检查点',
                    'financial': '财务', 'stance': '研究立场', 'prior_status': '旧议程状态'}
 SEARCH_MAX_TERMS = 5
 SEARCH_MAX_LENGTH = 100
+SEARCH_REPORT_BATCH_SIZE = 8
 
 
 def search_items(conn, query: str, *, code: str | None = None, section: str | None = None, history: bool = False,
@@ -366,30 +367,42 @@ def search_items(conn, query: str, *, code: str | None = None, section: str | No
         raise service.RequestError("公司代码必须为六位数字")
     if section is not None and section not in SEARCH_SECTIONS:
         raise service.RequestError("章节仅限：" + "、".join(SEARCH_SECTIONS))
-    # Fixed names only; json_extract with several paths parses each body once and returns just the prose.
+    # Select lightweight metadata first: extracting JSON before sorting/fetchall would parse every
+    # candidate even when the first few reports already fill the requested page.
     paths = ", ".join("'$.stance.text'" if name == "stance" else f"'$.{name}'" for name in SEARCH_SECTIONS)
     rows = conn.execute(
-        "SELECT c.id, c.code, c.name, c.created_at, c.coverage, json_extract(b.body, " + paths + ") AS found FROM ("
+        "SELECT c.id, c.code, c.name, c.created_at, c.coverage FROM ("
         " SELECT r.id, r.code, r.name, r.created_at, r.coverage, ROW_NUMBER() OVER ("
         "  PARTITION BY substr(r.code, 1, 6) ORDER BY r.created_at DESC, r.id DESC) AS position"
         " FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.passed = 1 AND u.status = 'done' AND u.kind = 'research' AND u.replay_of IS NULL"
         " AND json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL"
-        " AND (? IS NULL OR substr(r.code, 1, 6) = ?)) c JOIN reports b ON b.id = c.id"
+        " AND (? IS NULL OR substr(r.code, 1, 6) = ?)) c"
         " WHERE (? OR c.position = 1) ORDER BY c.created_at DESC, c.id DESC",
         (code, code, int(history)),
     ).fetchall()
     wanted, matched = (page - 1) * page_size + page_size + 1, []
-    for row in rows:
-        for name, value in zip(SEARCH_SECTIONS, json.loads(row['found'])):
-            if not value or section not in (None, name):
+    for offset in range(0, len(rows), SEARCH_REPORT_BATCH_SIZE):
+        batch = rows[offset:offset + SEARCH_REPORT_BATCH_SIZE]
+        bodies = {row['id']: row['found'] for row in conn.execute(
+            "SELECT id, json_extract(body, " + paths + ") AS found FROM reports WHERE id IN ("
+            + ",".join("?" for _ in batch) + ")", [row['id'] for row in batch])}
+        # IN does not guarantee order; retain the metadata query's stable report order.
+        for row in batch:
+            found = bodies.get(row['id'])
+            if found is None:  # A maintenance deletion may occur between autocommit reads.
                 continue
-            entries = [(name, value)] if name == 'stance' else [(f"{name}[{i}]", item['text']) for i, item in enumerate(value)]
-            for location, text in entries:
-                if all(term in text.casefold() for term in terms):
-                    matched.append({'report_id': row['id'], 'code': row['code'], 'name': row['name'],
-                                    'created_at': row['created_at'], 'period': row['coverage'],
-                                    'location': location, 'text': text})
+            for name, value in zip(SEARCH_SECTIONS, json.loads(found)):
+                if not value or section not in (None, name):
+                    continue
+                entries = [(name, value)] if name == 'stance' else [(f"{name}[{i}]", item['text']) for i, item in enumerate(value)]
+                for location, text in entries:
+                    if all(term in text.casefold() for term in terms):
+                        matched.append({'report_id': row['id'], 'code': row['code'], 'name': row['name'],
+                                        'created_at': row['created_at'], 'period': row['coverage'],
+                                        'location': location, 'text': text})
+            if len(matched) >= wanted:
+                break
         if len(matched) >= wanted:
             break
     start = (page - 1) * page_size
@@ -440,7 +453,28 @@ def library_results(conn, query: str, *, history: bool = False, whole_library: b
     except service.RequestError as exc:
         return results | {"error": str(exc)}
     if hits:
-        latest = {r["code"][:6]: r for r in latest_reports(conn, include_checkpoint=False)}
+        known = {r["code"]: dict(r) | {"checkpoint": None}
+                 for r in list(companies) + ([scope[0]] if scope else [])}
+        prefixes = sorted({hit["code"][:6] for hit in hits})
+        # Discover alternate stored code formats without reading report bodies. The high-water
+        # ID also prevents reusing metadata superseded since the company query. Replays/feedback
+        # can cause an extra refresh, but latest_reports still applies the eligibility rules.
+        versions = conn.execute(
+            "SELECT code, MAX(id) AS id FROM reports WHERE substr(code, 1, 6) IN ("
+            + ",".join("?" for _ in prefixes) + ") GROUP BY code", prefixes).fetchall()
+        reusable, missing_codes = [], []
+        for row in versions:
+            cached = known.get(row["code"])
+            if cached is not None and cached["id"] == row["id"]:
+                reusable.append(cached)
+            else:
+                missing_codes.append(row["code"])
+        refreshed = latest_reports(conn, codes=missing_codes, include_checkpoint=False) if missing_codes else []
+        latest = {}
+        for row in reusable + list(refreshed):
+            prefix = row["code"][:6]
+            if prefix not in latest or row["id"] > latest[prefix]["id"]:
+                latest[prefix] = dict(row)
         results["hits"] = [hit | {"latest": latest.get(hit["code"][:6]), "label": SEARCH_SECTIONS[hit["location"].split("[")[0]],
                                   "url": item_link(hit["report_id"], hit["location"])} for hit in hits]
     return results | {"more": more or hits_more}
