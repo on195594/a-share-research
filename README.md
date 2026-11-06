@@ -55,6 +55,8 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 本机开发改用开发库及 `.env.web.dev`。Playwright 直接使用 `browser.newContext({storageState: '/tmp/实际目录/state.json'})`；无需动态导入文件模块、打印令牌或手写会话 SQL。验收后通过页面“退出”撤销该会话，再删除本次临时文件。原有令牌输出和 `--agent` 接口仍保留，`--agent` 不与浏览器文件输出混用。
 
+临时实例关闭后再整理证据。SQLite 使用 backup API 保存一致快照，不把使用中的数据库与 WAL/SHM 分别复制当作最终快照；截图、日志与试验输入归档到仓库外证据目录，核对文件哈希后删除本次临时副本。检查宿主开发进程时使用宿主进程视图，不能因沙箱内 `ps` 不可见就判断进程退出。
+
 ## 报告阅读
 
 研究员可自主调用 `commodities(exchange)` 查 SHFE/DCE/CZCE/INE/GFEX 品种代码，`commodity(code)` 取主力连续收盘及 20/60/120 个交易日变化，`macro(series, count=12)` 取 `pmi/money/financing/lpr/shibor/cpi/ppi` 最近 1–24 期。原始 `X.*` 与计算 `C.*` 行随报告 table 保存，均可按 `{ref, period}` 引用，API 与网页同源；期货换月未复权，不能当作现货或投资收益。外部条件接口按上海日期缓存当日快照；LPR 上游每小时一次。新闻接口因账号权限暂不可用。
@@ -213,6 +215,8 @@ worker 启动时先离线预检 Node、Pi 安装目录、模型存储、所配�
 发布复用以下固定入口。先按改动范围完成一次必要验证；同一应用源码与依赖已有通过结果时直接沿用，不因进入发布阶段再跑全集。纯文档更新只提交推送。当前版本、证据和回退只更新[实施计划](docs/implementation-plan.md#当前部署)，产品与能力文档不重复维护上线状态。
 
 从已提交、已推送的 main 构建两份版本化镜像。Git 归档直接作为 Docker 上下文，无临时解压或权限修补脚本；源码可读权限在 Dockerfile 中固定：
+
+发布工具要求目标提交同时等于 `HEAD` 与 `origin/main`。测试后若又提交了纯文档，以当前 HEAD 构建并发布；确认应用源码与依赖未变即可沿用原测试，不拿较早的应用提交号直接调用发布工具。构建和切换之间不再提交新版本。
 
 ```bash
 set -o pipefail
