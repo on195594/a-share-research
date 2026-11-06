@@ -264,8 +264,9 @@
     <a class="btn secondary" href="/stock/{{ report.code }}">公司档案</a>
     {% if purpose != 'diagnostic' and not replay_of %}
       {% if report.passed %}{{ research_form(report.code[:6], csrf, request_id, "重新研究") }}
-      {% elif not feedback_retry %}<form method="post" action="/runs/{{ report.run_id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">重试原研究问题</button></form>{% endif %}
+      {% elif not feedback_retry %}<form method="post" action="/runs/{{ report.run_id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ retry.label }}</button></form>{% endif %}
     {% endif %}
   </div>
+  {% if purpose != 'diagnostic' and not replay_of and not report.passed and not feedback_retry and retry.note %}<p class="hint">{{ retry.note }}</p>{% endif %}
 </article>
 {% endblock %}

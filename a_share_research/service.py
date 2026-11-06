@@ -124,6 +124,16 @@ def retry_feedback(conn, run_id: int, request_id: str) -> int:
     return submit(conn, run['code'], request_id, **payload)
 
 
+def retry_view(run) -> dict:
+    """What the retry button says; a batch stays linked to the failed run, so its retry stands alone."""
+    if run['kind'] == 'price':
+        label = '重试价格参考'
+    else:
+        label = '重试原研究问题' if (json.loads(run['request'] or '{}') or {}).get('question') else '重新运行这次研究'
+    note = '重试会新建独立任务，结果不回填本批次，该候选在批次中仍显示失败、不可选；调用上限按普通研究计算。'
+    return {'label': label, 'note': note if (run['request_id'] or '').startswith('batch-') else None}
+
+
 def retry_run(conn, run_id: int) -> int:
     """Retry the saved task once, even across refreshed pages or concurrent clicks."""
     run = conn.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()

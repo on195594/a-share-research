@@ -584,13 +584,13 @@ def item(conn, run_id):
                       "usage": [json.loads(c["usage"]) for c in calls if c["usage"]]})
     cases = []
     for record in state.get("cases", []):
-        child = conn.execute("SELECT u.status,u.code,COALESCE(u.name,r.name) AS name,u.error,u.request,r.body,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (record["run_id"],)).fetchone()
-        cases.append(record | {key: child[key] for key in ("status", "code", "name", "report_id", "passed")})
+        child = conn.execute("SELECT u.status,u.code,COALESCE(u.name,r.name) AS name,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (record["run_id"],)).fetchone()
+        cases.append(record | dict(child))
     archived_runs = []
     for target in state.get("archived_runs", []):
         child = conn.execute("SELECT u.status,u.code,COALESCE(u.name,r.name) AS name,u.error,u.request,r.body,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (target,)).fetchone()
-        payload = json.loads(child['request'] or '{}')
-        body = json.loads(child['body'] or '{}')
+        payload = json.loads(child['request'] or '{}') or {}  # Older rows may hold JSON null.
+        body = json.loads(child['body'] or '{}') or {}
         archived_runs.append({"run_id": target, **{key: child[key] for key in ("status", "code", "name", "error", "report_id", "passed")}, "question": payload.get('question'),
                               "source": payload.get('source') or {}, "problems": body.get('problems') or []})
     return {"id": run_id, "status": row["status"], "created_at": row["created_at"], "finished_at": row["finished_at"],

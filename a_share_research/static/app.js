@@ -178,9 +178,9 @@ if (main) {
   connection.className = "hint connection-status";
   connection.setAttribute("role", "status");
   main.before(connection);
-  const connectionStatus = (ok) => {
-    main.dataset.disconnected = ok ? "false" : "true";
-    connection.textContent = `${ok ? "连接正常" : "连接中断或响应异常，正在重连；进度与计时暂停更新"} · 最后同步 ${lastSync.toLocaleTimeString()}`;
+  // A live region: speaks only when the state changes, and stays empty while polling is healthy.
+  const showConnection = (text) => {
+    if (connection.textContent !== text) connection.textContent = text;
   };
   const focusable = () => [...main.querySelectorAll("a, button, summary, input, select, textarea")];
 
@@ -215,10 +215,12 @@ if (main) {
       if (res.redirected || !next.hasAttribute("data-refresh")) return location.reload();
       const recovered = main.dataset.disconnected === "true";
       lastSync = new Date();
-      connectionStatus(true);
+      main.dataset.disconnected = "false";
+      showConnection(recovered ? `连接已恢复 · 最后同步 ${lastSync.toLocaleTimeString()}` : "");
       if (recovered || next.dataset.key !== main.dataset.key) swap(doc, next);
     } catch (error) {
-      connectionStatus(false);
+      main.dataset.disconnected = "true";
+      showConnection(`连接中断或响应异常，正在重连；进度与计时暂停更新 · 最后同步 ${lastSync.toLocaleTimeString()}`);
       console.debug("progress poll failed", error);
     } finally {
       clearTimeout(timeout);
@@ -228,7 +230,6 @@ if (main) {
   }
 
   const start = () => {
-    connectionStatus(true);
     window.stop();
     tick();
     setInterval(tick, 1000);

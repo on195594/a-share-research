@@ -40,13 +40,14 @@
     {% if diagnostics and diagnostics.failure %}
     <p>停止阶段：{{ steps.get(diagnostics.failure.stage, '程序检查与保存') }}。{{ {'out_of_scope': '不在研究范围内', 'source_input': '来源输入未完成或存在冲突', 'model_error': '模型调用未完成', 'run_limit': '达到本次运行上限', 'pipeline_error': '处理阶段异常'}.get(diagnostics.failure.category, '流程未完成') }}；不会自动重试。</p>
     {% if diagnostics.problems %}<details><summary>中断前仍未解决的核查意见</summary><ul>{% for issue in diagnostics.problems %}<li>{{ issue.problem }}</li>{% endfor %}</ul></details>{% endif %}
-    <p>先核对已保存材料与阶段日志；不要直接重复提交整项研究。</p>
+    <p>先核对已保存材料与阶段日志，确认失败原因后再决定是否重试。</p>
     {% endif %}
     {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{% endif %}
+    {% if retry.note %}<p class="hint">{{ retry.note }}</p>{% endif %}
     <div class="actions">
       {% if feedback_retry %}{{ feedback_retry_form(run.id, csrf, request_id) }}
       {% elif run.kind in ('research', 'price') and not run.replay_of %}
-      <form method="post" action="/runs/{{ run.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ '重试价格参考' if run.kind == 'price' else '重试原研究问题' }}</button></form>{% endif %}
+      <form method="post" action="/runs/{{ run.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ retry.label }}</button></form>{% endif %}
       <a class="link" href="/">返回首页</a>
     </div>
   {% endif %}

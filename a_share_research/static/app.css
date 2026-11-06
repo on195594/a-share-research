@@ -121,6 +121,7 @@ form.inline { display: inline; margin: 0; }
 .search input:focus, .search textarea:focus, .search select:focus { border-color: var(--accent); }
 .items > li > p { overflow-wrap: anywhere; }
 .hint { color: var(--muted); font-size: 14px; margin-top: 8px; }
+.connection-status:empty { margin-top: 0; }
 .choices { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* notices */

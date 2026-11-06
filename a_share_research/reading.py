@@ -1,12 +1,13 @@
 """Read-only discovery and explicit report comparisons; never submits research."""
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
 from a_share_research import charts, db, service, stance as stances
 
 PAGE_SIZE = 20
+RECENT_FAILURE_DAYS = 30
 
 
 def stance_decision(stance: dict | None, stance_calc: dict | None, valuation_calc: dict | None) -> dict | None:
@@ -645,13 +646,17 @@ def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
 
 
 def active_runs(conn) -> list:
+    """Queued and running tasks, plus recent failures nobody has retried or asked again."""
+    since = (datetime.now(db.SHANGHAI) - timedelta(days=RECENT_FAILURE_DAYS)).isoformat(timespec="seconds")
     return conn.execute(
         "SELECT id, code, name, status, step FROM runs u WHERE kind IN ('research', 'price')"
-        " AND (status IN ('queued', 'running') OR (status = 'failed' AND replay_of IS NULL"
+        " AND (status IN ('queued', 'running') OR (status = 'failed' AND replay_of IS NULL AND created_at >= ?"
         " AND COALESCE(request_id, '') NOT LIKE 'batch-%'"
         " AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.run_id=u.id)"
-        " AND NOT EXISTS (SELECT 1 FROM runs retry WHERE retry.request_id='web-retry:' || u.id)))"
-        " ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END, id DESC LIMIT 30"
+        " AND NOT EXISTS (SELECT 1 FROM runs newer WHERE newer.request_id='web-retry:' || u.id"
+        " OR (newer.id > u.id AND newer.kind = u.kind AND substr(newer.code, 1, 6) = substr(u.code, 1, 6)"
+        " AND newer.request IS u.request))))"
+        " ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END, id DESC LIMIT 30", (since,)
     ).fetchall()
 
 
@@ -672,7 +677,7 @@ def latest_batch(conn):
 
 def run(conn, run_id: int):
     return conn.execute(
-        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, replay_of FROM runs WHERE id = ?",
+        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, request_id, replay_of FROM runs WHERE id = ?",
         (run_id,),
     ).fetchone()
 
@@ -696,7 +701,7 @@ def report(conn, report_id: int):
 
 
 def report_run(conn, run_id: int):
-    return conn.execute("SELECT kind, status, request, identity, replay_of, material FROM runs WHERE id = ?", (run_id,)).fetchone()
+    return conn.execute("SELECT kind, status, request, request_id, identity, replay_of, material FROM runs WHERE id = ?", (run_id,)).fetchone()
 
 
 def followups(conn, code: str, report_id: int):

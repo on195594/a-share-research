@@ -144,6 +144,12 @@ def test_archived_rejection_is_idempotent_history_and_never_adopted(stored):
     assert NOTE['diagnostic_runs'][0]['code'] in html
     assert 'E2' in html and '缺口变窄' in html and '<th scope="col">判据</th>' in html
     assert '未保存逐家公司结构化判据' in html
+    # Older captured rows hold JSON null, not SQL NULL, in request.
+    variant = NOTE['diagnostic_runs'][0]['id']
+    saved = stored.execute('SELECT request FROM runs WHERE id=?', (variant,)).fetchone()[0]
+    stored.execute("UPDATE runs SET request='null' WHERE id=?", (variant,))
+    assert evolution.item(stored, archived)['archived_runs'][0]['source'] == {}
+    stored.execute('UPDATE runs SET request=? WHERE id=?', (saved, variant))
     assert evolution.active_methods(stored) == []
     root = evolution.discover(stored)
     history = evolution.item(stored, root)["history"]

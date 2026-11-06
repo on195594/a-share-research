@@ -290,9 +290,10 @@ def research_library(request: Request, q: str = "", content: str = "", history: 
             hits, more = reading.search_items(conn, content, history=history, page=page)
         except service.RequestError as exc:
             error = str(exc)
-        latest_by_code = {r["code"][:6]: r for r in reading.latest_reports(conn)}
-        hits = [hit | {"latest": latest_by_code.get(hit["code"][:6]), "label": reading.SEARCH_SECTIONS[hit["location"].split("[")[0]],
-                       "url": reading.item_link(hit["report_id"], hit["location"])} for hit in hits]
+        if hits:
+            latest_by_code = {r["code"][:6]: r for r in reading.latest_reports(conn, include_checkpoint=False)}
+            hits = [hit | {"latest": latest_by_code.get(hit["code"][:6]), "label": reading.SEARCH_SECTIONS[hit["location"].split("[")[0]],
+                           "url": reading.item_link(hit["report_id"], hit["location"])} for hit in hits]
     elif len(q) > 100:
         error = "请将查询缩短到 100 个字符以内。"
     else:
@@ -401,6 +402,7 @@ def run_page(request: Request, run_id: int):
                   diagnostics=service.run_view(conn, run_id=run_id)["diagnostics"]
                   if run["kind"] in ("research", "diagnostic") and run["status"] == "failed" else None,
                   feedback_retry=service.feedback_retry_payload(run) is not None,
+                  retry=service.retry_view(run),
                   request_id=uuid.uuid4().hex)
 
 
@@ -467,6 +469,7 @@ def report_page(request: Request, report_id: int):
                   figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,
+                  retry=service.retry_view(run),
                   feedback=feedback, feedback_label=feedback_label, comparison=reading.comparison(conn, row),
                   replay_of=body.get("replay_of") or run["replay_of"],
                   rows=rows, request_id=uuid.uuid4().hex,
@@ -704,13 +707,14 @@ def stock_page(request: Request, code: str, report: int | None = None):
     reports = reading.stock_reports(conn, code)
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")
-    head = next((r for r in reports if not r['replay_of']), reports[0])
+    # Formal research heads the page; a feedback check or replay leads only when nothing else exists.
+    ordered = sorted(reports, key=lambda r: (bool(r["replay_of"]), bool(r["feedback_text"])))
+    head = ordered[0]
     selected = next((r for r in reports if r['id'] == report), None) if report is not None else head
     if selected is None:
         return not_found(request, session, "这份报告不属于当前公司。")
     # The newest non-replay report with an operating series lends its vitals to the company page,
     # falling back to the newest non-replay report's saved T.* financial table when no series exists.
-    ordered = [r for r in reports if not r["replay_of"]] + [r for r in reports if r["replay_of"]]
     parsed = [(r, json.loads(r["body"])) for r in ordered]
     latest = next(((r, v) for r, b in parsed if (v := charts.vitals(b))), None)
     if latest is None:
@@ -720,7 +724,7 @@ def stock_page(request: Request, code: str, report: int | None = None):
                 latest = (r, v)
                 break
     latest = latest or (None, None)
-    before = next((r for r in reports if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
+    before = next((r for r in ordered if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
     card = reading.card(head, parsed[0][1], before) | {
         "coverage": head["coverage"],
         "created_at": head["created_at"]}

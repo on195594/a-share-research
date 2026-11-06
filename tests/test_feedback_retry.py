@@ -2,6 +2,7 @@
 import importlib
 import json
 import sys
+from datetime import datetime, timedelta
 
 import pytest
 from starlette.requests import Request
@@ -165,3 +166,57 @@ def test_search_explains_fallback_and_null_legacy_request_renders(web):
     assert '不受上方公司查询限制' in html
     # Captured old rows have JSON null, not SQL NULL, in request.
     assert web.report_page(request, 37).status_code == 200
+
+
+def test_failed_task_leaves_home_list_once_asked_again_or_stale(web):
+    ids = lambda: [r['id'] for r in reading.active_runs(web.conn)]
+    fail = lambda run: web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (run,))
+    # A feedback retry takes a fresh form request id, so only its saved request identifies it.
+    feedback = service.submit(web.conn, '600519', 'feedback-failure', parent_report_id=11,
+                              feedback={'location': 'summary', 'text': '核查一下'})
+    fail(feedback)
+    assert feedback in ids()
+    fail(service.retry_feedback(web.conn, feedback, 'form-request-id'))
+    assert feedback not in ids()
+    # The ordinary research form takes a fresh request id too.
+    plain = service.submit(web.conn, '600519', 'plain-failure')
+    fail(plain)
+    assert plain in ids()
+    service.submit(web.conn, '600519.SH', 'asked-again')
+    assert plain not in ids()
+    # A different question does not answer the failed one.
+    question = service.submit(web.conn, '600519', 'question-failure', question='现金流是否一致？')
+    fail(question)
+    fail(service.submit(web.conn, '600519', 'other-company-question', question='分红是否持续？'))
+    assert question in ids()
+    # Same question for another company is not a retry either.
+    other = service.submit(web.conn, '603606', 'other-company', question='现金流是否一致？')
+    assert question in ids() and other in ids()
+    web.conn.execute("UPDATE runs SET created_at=? WHERE id=?",
+                     ((datetime.now(db.SHANGHAI) - timedelta(days=reading.RECENT_FAILURE_DAYS + 1)).isoformat(timespec='seconds'), question))
+    assert question not in ids()
+
+
+def test_company_page_heads_formal_research_not_feedback(web):
+    request, _ = browser_request(web)
+    newest = next(r for r in reading.stock_reports(web.conn, '600519.SH') if not r['replay_of'])
+    assert newest['id'] == 12 and newest['feedback_text']
+    html = web.stock_page(request, '600519.SH').body.decode()
+    assert 'href="/reports/11">阅读完整报告' in html
+    # The feedback report stays reachable and can still be selected explicitly.
+    assert '/reports/12' in html and web.stock_page(request, '600519.SH', report=12).status_code == 200
+
+
+def test_retry_button_names_what_it_retries_and_batch_task_stays_detached(web):
+    request, _ = browser_request(web)
+    plain = service.submit(web.conn, '600519', 'plain-label')
+    web.conn.execute("UPDATE runs SET status='failed', error='失败状态变体' WHERE id=?", (plain,))
+    html = web.run_page(request, plain).body.decode()
+    assert '重新运行这次研究' in html and '重试原研究问题' not in html and '不回填本批次' not in html
+    batch = service.submit(web.conn, '600519', 'batch-7-600519', question='现金流是否一致？')
+    web.conn.execute("UPDATE runs SET status='failed', error='失败状态变体' WHERE id=?", (batch,))
+    html = web.run_page(request, batch).body.decode()
+    assert '重试原研究问题' in html and '不回填本批次' in html
+    web.conn.execute("UPDATE runs SET status='failed', request_id='batch-7-600519.SH' WHERE id=17")
+    web.conn.execute("UPDATE reports SET passed=0,body=json_set(body, '$.facts', json('{}')) WHERE id=11")
+    assert '不回填本批次' in web.report_page(request, 11).body.decode()
