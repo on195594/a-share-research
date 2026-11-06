@@ -347,6 +347,7 @@ def search_reports(conn, query: str, page: int = 1, *, page_size: int = PAGE_SIZ
 SEARCH_SECTIONS = {'risks': '风险与反证', 'checkpoints': '下期检查点', 'answer': '问题回答', 'business': '业务',
                    'financial': '财务', 'stance': '研究立场', 'prior_status': '旧议程状态'}
 SEARCH_MAX_TERMS = 5
+SEARCH_MAX_LENGTH = 100
 
 
 def search_items(conn, query: str, *, code: str | None = None, section: str | None = None, history: bool = False,
@@ -359,8 +360,8 @@ def search_items(conn, query: str, *, code: str | None = None, section: str | No
     """
     query = query.strip()
     terms = [term.casefold() for term in query.split()]
-    if not terms or len(query) > 100 or len(terms) > SEARCH_MAX_TERMS:
-        raise service.RequestError(f"查询须为 1–100 字、最多 {SEARCH_MAX_TERMS} 个词")
+    if not terms or len(query) > SEARCH_MAX_LENGTH or len(terms) > SEARCH_MAX_TERMS:
+        raise service.RequestError(f"查询须为 1–{SEARCH_MAX_LENGTH} 字、最多 {SEARCH_MAX_TERMS} 个词")
     if code is not None and not re.fullmatch(r"\d{6}", code):
         raise service.RequestError("公司代码必须为六位数字")
     if section is not None and section not in SEARCH_SECTIONS:
@@ -410,7 +411,7 @@ def search_scope(conn, query: str) -> tuple | None:
     queries even when some company's name or code happens to contain them.
     """
     terms = query.split()
-    if not 2 <= len(terms) <= SEARCH_MAX_TERMS:
+    if len(query) > SEARCH_MAX_LENGTH or not 2 <= len(terms) <= SEARCH_MAX_TERMS:
         return None
     named, rest = {}, []
     for term in terms:

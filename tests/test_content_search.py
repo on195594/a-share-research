@@ -122,6 +122,15 @@ def test_scope_needs_one_named_company_and_ignores_fragments(conn):
         assert reading.search_scope(conn, query) is None, query
 
 
+def test_overlong_query_is_refused_before_a_company_name_can_shorten_it(conn):
+    for query in ("东方电缆 " + "a" * 96, "东方电缆 " + "a" * 101):
+        assert len(query) > 100 and reading.search_scope(conn, query) is None
+        refused = reading.library_results(conn, query)
+        assert "1–100 字" in refused["error"]
+        assert refused["scope_company"] is None and refused["companies"] == [] and refused["hits"] == []
+    assert reading.search_scope(conn, "东方电缆 " + "a" * 95)[1] == ["a" * 95]  # exactly 100 still scopes
+
+
 def test_library_names_a_scope_only_when_the_whole_query_names_no_company(conn):
     scoped = reading.library_results(conn, "东方电缆 现金流")
     assert scoped["scope_company"]["code"] == "603606.SH"
