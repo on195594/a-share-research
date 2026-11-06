@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-11-05。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
+更新：2026-11-06。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
 
 ## 工作包与状态
 
@@ -29,7 +29,7 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 | 步骤 | 到期 | 状态 | 证据 | 备注 |
 |---|---|---|---|---|
-| K7a 运行/读取契约 | 2026-11-06 | 进行中 | `dbc7dda` | 待随下次发布上线 |
+| K7a 运行/读取契约 | 2026-11-06 | 已交付 | `dbc7dda` | 2026-11-06 随 `68fcb06` 上线 |
 | K7b 主动方法闭环 | 2026-11-20 | 进行中 | — | 首轮缺口统计 70 份 389 条 |
 | 月批保护与 12-01 验收 | 2026-12-04 | 未开始 | — | 11-29 起不发布、不切 worker |
 | 披露触发与证伪机械化 | 2026-12-20 | 未开始 | — | 业绩预告季前上线 |
@@ -54,7 +54,9 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `4c0e67d`** 于 2026-11-05 23:30 按固定入口发布（所有者本会话明确“提交推送并上线发布”）：网页 `reading.card()` 投影完整 `open_questions`，边界复用 `stances.on_boundary()`；首页摘要卡与公司完整版卡共用小型警示宏，限制在结论后直接展示，不截断、不折叠。未合并网页/API出口或增加框架、审核状态。Skills 已配对激活 **0.1.41 `86170bf`**，修正缺除权日且登记日等于收益起点时的确定收益误报；同日窗口与已知除权日语义不变，详见其 operations。Research 沿用相同内容的定向 91 passed；Skills 本地完整检查 1775 passed / 11 skipped，托管 CI `42055914534` 成功后才激活。发布工具空闲、备份、业务表指纹、worker Pi 离线预检与完整性巡检均通过（104 份报告、915 次调用、0 问题）。真实鉴权公网浏览器查看 1280px 首页：21 张卡中紫金、伊利显示边界；390px 紫金公司页警示可读且不折叠，东方电缆正常对照不误报，失败报告仍不展示判断，无横向溢出。当前生产报告没有 `open_questions`，该分支复用既有真实复核问题与估值捕获样本受控组合回归，不伪造生产报告；临时会话已退出、核对撤销并删除私有状态文件。已安装 31 个 runtime 模块与源码一致，3 个 CLI help 及四组收益纯函数边界检查通过；账户 schema、10 行持仓和 37 行事件指纹不变。无付费研究、通知、交易、schema、配置、政策或调度变更。发布证据 `deploy-4c0e67d-20261105-232943/`；安装与账户证据 `~/.local/share/a-stock-agent/deployments/p2-0.1.41-20261105-232711/`；浏览器与回归证据 `~/.hermes/projects/codex-p2-fix-20261105/`。备份 `~/a-share-research-data/backup-pre-4c0e67d-20261105-232946.db`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `68fcb06`** 于 2026-11-06 10:17 按固定入口发布（常设例行发布授权）：K7a 诊断任务隔离与方法集摘要（应用代码 `dbc7dda`，其后只有文档提交）。`runs.kind='diagnostic'` 不进入正式读取、记分和方法通道，只在 worker 空闲分支运行，仅内部函数可提交；研究身份新增 `methods_sha256`。无迁移、配置或页面改动。验证：7 项隔离测试、12/12 互变、受影响模块 249 项回归；发布工具空闲检查与完整性巡检 0 问题；真实浏览器手机尺寸走首页、公司页 `603606.SH`、接续报告 113、普通报告 103 均正常；真实 Bearer 调用 `/api/search`、`/api/reports`、`/api/reports/113` 与 `/api/runs/139` 正常。未验证：生产尚无诊断任务（调用方随 K7b 交付）。证据 `deploy-68fcb06-20261106-101542/`。
+
+上一版 **Research `4c0e67d`** 于 2026-11-05 23:30 按固定入口发布（所有者本会话明确“提交推送并上线发布”）：网页 `reading.card()` 投影完整 `open_questions`，边界复用 `stances.on_boundary()`；首页摘要卡与公司完整版卡共用小型警示宏，限制在结论后直接展示，不截断、不折叠。未合并网页/API出口或增加框架、审核状态。Skills 已配对激活 **0.1.41 `86170bf`**，修正缺除权日且登记日等于收益起点时的确定收益误报；同日窗口与已知除权日语义不变，详见其 operations。Research 沿用相同内容的定向 91 passed；Skills 本地完整检查 1775 passed / 11 skipped，托管 CI `42055914534` 成功后才激活。发布工具空闲、备份、业务表指纹、worker Pi 离线预检与完整性巡检均通过（104 份报告、915 次调用、0 问题）。真实鉴权公网浏览器查看 1280px 首页：21 张卡中紫金、伊利显示边界；390px 紫金公司页警示可读且不折叠，东方电缆正常对照不误报，失败报告仍不展示判断，无横向溢出。当前生产报告没有 `open_questions`，该分支复用既有真实复核问题与估值捕获样本受控组合回归，不伪造生产报告；临时会话已退出、核对撤销并删除私有状态文件。已安装 31 个 runtime 模块与源码一致，3 个 CLI help 及四组收益纯函数边界检查通过；账户 schema、10 行持仓和 37 行事件指纹不变。无付费研究、通知、交易、schema、配置、政策或调度变更。发布证据 `deploy-4c0e67d-20261105-232943/`；安装与账户证据 `~/.local/share/a-stock-agent/deployments/p2-0.1.41-20261105-232711/`；浏览器与回归证据 `~/.hermes/projects/codex-p2-fix-20261105/`。备份 `~/a-share-research-data/backup-pre-4c0e67d-20261105-232946.db`。
 
 上一版 **Research `b8490e7`** 于 2026-11-05 22:06 按固定入口发布（所有者本会话明确“批准发布”）：公司卡片原样投影 `open_questions`；冻结估值保留 close、v2 门槛与 boundary，滚动估值另给当前 boundary，均复用既有 ±5% 规则。Skills 已配对激活 0.1.40 `a50f5e6`，提醒正文与 evidence 保留边界及未答问题，详见其 operations；不改机会资格、首批、账户门禁或 W1。Research 定向回归 142 passed，Skills 标准完整检查 1772 passed / 11 skipped，均沿用候选结果，落地源码与已测内容散列一致。发布工具空闲、备份、业务表指纹、worker Pi 离线预检与完整性巡检通过；真实鉴权 cards GET 的 8 张卡均保留新字段，正常 compact 报告 GET 通过；公网浏览器登录页正常，页面模板未变。已安装 Skills 对真实 monitor-v1 校验通过，现有账户/资料缺口仍保持阻断；安装态离线重放 4 条边界机会及 3 组未答问题通过，不冒称线上正向警示已实际投递。无模型研究、通知、账户写入、schema、配置或政策改动。发布证据 `deploy-b8490e7-risk-warning-20261105-2203/`；跨项目激活/实时快照证据 `~/.local/share/a-stock-agent/deployments/risk-warning-0.1.40-20261105-2203/`。备份 `~/a-share-research-data/backup-pre-b8490e7-20261105-220530.db`。
 
@@ -121,7 +123,23 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 - K7 进度：no-agent 任务 `6b6ecd1783ea`（每周一 09:03 `cron/a-share-k7-progress.sh`）读取上方里程碑表、生产镜像与只读业务库，推送已交付、逾期和近期到期项；不跑模型、不写数据。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：回到 `e85b4ad`（应用代码即 `b8490e7`）用两服务的 `rollback-4c0e67d`（原镜像 ID 见本次 manifest）；无业务库迁移，只回退镜像，不恢复数据库。Skills 可独立恢复 0.1.40 的三个 CLI 目标，Skill 文字本次未变，路径见其 operations。更早回退：回到 `9224ca1`（应用代码即 `7527886`）用两服务的 `rollback-b8490e7`（原镜像 ID 见本次发布 manifest）；只回退镜像，不恢复数据库。若同时回退 Skills，须恢复其匹配 runtime/Skill 内容，资料见 Skills operations。更早回退：回到 `650cb75`（应用代码即 `9fb28b9`）用两服务的 `rollback-7527886`（web `4401827a…cbe98c`、worker `e4349388…bcc8fe17f`）；无业务库迁移，只回退镜像，不恢复数据库。更早回退：回到 `6b65fa9`（应用代码即 `db9f6f2`）用两服务的 `rollback-9fb28b9`（web `402f1f91…3af`、worker `6298af83…cca`）；无业务库迁移，只回退镜像，不恢复数据库；回退后已生成的 `prior_status` 字段保留在报告正文里，旧页面不显示。更早回退：回到 `1cea26a`（应用代码即 `c2f78b4`）用两服务的 `rollback-db9f6f2`（web `f0f30853…ab8`、worker `8f385de0…fb1`）；无业务库迁移，只回退镜像，不恢复数据库。更早回退：回到 `b9a7c45`（应用代码即 `37838e7`）用两服务的 `rollback-c2f78b4`（web `1188aeef…a1`、worker `2db7dd43…3c`）；无业务库迁移，只回退镜像，不恢复数据库。更早回退：回到 `b540ebf`（应用代码即 `0c47a12`）用两服务的 `rollback-37838e7`（web `909b39f1…27ac`、worker `b1aad7cf…d9b`）；无业务库迁移，只回退镜像，不恢复数据库。更早回退：回到 `627f38d`（应用代码即 `8b0091a`）用两服务的 `rollback-0c47a12`（web `cd7d85d9…ce5d`、worker `ff15a070…b935`）；无业务库迁移，只回退镜像，不恢复数据库。更早回退：回到 `fa97ecb` 用两服务的 `rollback-8b0091a`（web `6fed396f…5204`、worker `7b8943e9…ca04`）；无业务库迁移，只回退镜像，不恢复数据库。更早回退：回到 `0f623af` 用两服务的 `rollback-fa97ecb`（web `b7b91b8d…8d01`、worker `80a829ce…5377`）；无业务库迁移，只回退镜像。更早回退：回到 `e478bc4` 用两服务的 `rollback-0f623af`（web `e4b44d38…f315`、worker `b52f0040…cec8`）；无业务库迁移，只回退镜像。更早回退：回到 `b7d4022` 用两服务的 `rollback-e478bc4`（web `bc2962f5…0664`、worker `818f7044…23da`）；无业务库迁移，只回退镜像。更早回退：回到 `724e2d9` 用两服务的 `rollback-b7d4022`（web `1e095c29…3419`、worker `570358f6…b0e2`）；无业务库迁移，只回退镜像。更早回退：回到 `5975d0e` 用两服务的 `rollback-724e2d9`（web `1ab04add…5926`、worker `b233e46b…5647`）；无业务库迁移，只回退镜像。更早回退：回到 `a96258a` 用两服务的 `rollback-5975d0e`（web `71f2c594…39c2`、worker `3057b034…0bc7`）；无业务库迁移，只回退镜像。更早回退：回到 `c7b0862` 用两服务的 `rollback-a96258a`（web `061db237…04f4`、worker `f4c60d15…520f`）；无业务库迁移，只回退镜像。更早回退：回到 `e0feed0` 用两服务的 `rollback-c7b0862`（web `f192c2d1…8909`、worker `de0ed055…9080`）；无业务库迁移，只回退镜像，新报告中的 `valuation_v2` 计算行旧镜像按普通计算行展示。更早回退：回到 `1a42c24` 用两服务的 `rollback-e0feed0`（web `01310f3d…5903`、worker `83088b2f…3c10`）；无业务库迁移，只回退镜像。更早回退：回到 `2fdf709` 用两服务的 `rollback-1a42c24`；无业务库迁移，只回退镜像。更早回退：回到 `f65904e` 用两服务的 `rollback-2fdf709`（web `918b6bd4…69bf`、worker `9ef60ad1…5a22`）；无业务库迁移，只回退镜像。更早回退：回到 `28f34c6` 用两服务的 `rollback-f65904e`（web `4eefda5f…a5fd`、worker `c8400d2f…d5`）；无业务库迁移，只回退镜像，新报告中的 `stance` / `valuation.v2` 字段旧镜像忽略。更早回退：回到 `fea5a75`（Lib 0.10.2）用两服务的 `rollback-28f34c6`（web `179cc6ad…b467`、worker `7a0eeac1…c8d5`）；无业务库迁移，只回退镜像。更早回退：回到 `3227f63`（Lib 0.10.0）用两服务的 `rollback-fea5a75`（web `8c51ffd0…0ab3`、worker `8b85e29b…95dd`）；无业务库迁移，只回退镜像、保留缓存。更早回退：回到 `0b50486`（Lib 0.10.0）用两服务的 `rollback-3227f63`（web `ef2672a5…62cb`、worker `7af8464b…be25`）；更早回退：回到 `b8d4e54`（Lib 0.10.0）用两服务的 `rollback-0b50486`（web `6a1bee7f…2279`、worker `5e7e1787…7d03`）；应用回退不恢复数据库。更早回退：回到 `cb569ad`（Lib 0.9.0）用 `rollback-cb569ad`（`9c654a90…3238`、`45396428…94de`）；`a-share-research-web:rollback-cfcbc3d`、`a-share-research-worker:rollback-cfcbc3d` 即 `7a8bbdd`（`6fa9534c…05a6`、`427aacab…dd30`）；回到 `c2d212f` 用 `rollback-7a8bbdd`（`93e34595…1a05599`、`548a6346…a44028`）；回到 `598183c` 用 `rollback-c2d212f`（`c862f650…e1b`、`64fcdb76…57f`）；回到 `ef07ecf` 用 `rollback-598183c`（`ea229691…b5c14`、`a7910fe6…bd4e`）；回到 `3ff0e86`（恢复守护）用 `rollback-ef07ecf`（`450e53af…c6ed93`、`7428cd00…e1e8f9`）；回到 `3873ab9` 用 `rollback-3ff0e86`；回到 `d15af17` 用 `rollback-3873ab9`（`0ec764b5…3d19`、`a717923a…3833552`，回退后暂停 `2c0e2f798501`，旧镜像无 `--hypotheses`）；回到 `cd6c388` 用 `rollback-d15af17`（`3455488c…6688`、`a389050c…655c`，先暂停两项顾问任务）。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：回到 `4c0e67d` 用两服务的 `rollback-68fcb06`（web `6d44809c`、worker `b52cd59f`）；K7a 无业务库迁移，只回退镜像，不恢复数据库。回退前确认没有排队的诊断任务：旧 worker 不认识 `diagnostic`，且会按旧逻辑读取其结果。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+
+本机实际保留的更早镜像（2026-11-06 逐个核对，均无业务库迁移，只回退镜像；代码提交是该镜像对应的应用版本）：
+
+| 镜像标签（web / worker 同名） | 回到版本 | web | worker |
+|---|---|---|---|
+| `rollback-4c0e67d` | `b8490e7`（文档版 `e85b4ad`） | `1b4d3a2b` | `aca35ef1` |
+| `rollback-b8490e7` | `7527886`（文档版 `9224ca1`） | `f2cb5830` | `9e37ed34` |
+| `rollback-7527886` | `9fb28b9`（文档版 `650cb75`） | `4401827a` | `e4349388` |
+| `rollback-9fb28b9` | `db9f6f2`（文档版 `6b65fa9`） | `402f1f91` | `6298af83` |
+| `rollback-db9f6f2` | `c2f78b4`（文档版 `1cea26a`） | `f0f30853` | `8f385de0` |
+| `rollback-c2f78b4` | `37838e7`（文档版 `b9a7c45`） | `1188aeef` | `2db7dd43` |
+| `rollback-37838e7` | `0c47a12`（文档版 `b540ebf`） | `909b39f1` | `b1aad7cf` |
+| `rollback-0c47a12` | `8b0091a`（文档版 `627f38d`） | `cd7d85d9` | `ff15a070` |
+| `rollback-8b0091a` | `fa97ecb` | `6fed396f` | `7b8943e9` |
+
+更早版本的标签已不在本机，不能直接回退，历史说明见 `git show 68fcb06:docs/implementation-plan.md`。若同时回退 Skills，须恢复其匹配 runtime 与 Skill 内容，见其 operations。
 
 **更早发布**：`598183c`（含 `ef07ecf`）的完整记录见 `git show b17a067:docs/implementation-plan.md`；`cd6c388` 见 `git show 33452d4:docs/implementation-plan.md`，再早各次沿其「更早发布」链接追溯。
 
