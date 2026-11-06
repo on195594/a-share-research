@@ -14,7 +14,7 @@ from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
 from a_share_research.checking import SECTIONS, check
 from a_share_research.prompts import RULES, output_schema, parse_json
-from a_share_research.research_tools import Acquisition, active_methods_digest, explore
+from a_share_research.research_tools import Acquisition, active_methods_digest, explore, method_catalog, method_entry
 
 log = logging.getLogger(__name__)
 
@@ -474,6 +474,7 @@ def stance_calc(stance: dict, calc: dict | None, market_date: str) -> dict:
 
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
+    from a_share_research import evolution
     run = conn.execute("SELECT code, request, request_id, started_at FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
     db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now())
@@ -481,10 +482,11 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     identity: dict = {}
 
     try:
-        identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None,
-                                                    "methods_sha256": active_methods_digest(conn)}
+        identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
         db.update_run(conn, run_id, identity=json.dumps(identity))
-        material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
+        experiment = evolution.prepare_material(conn, request) if replay_of is None else None
+        material = (replay_material(conn, replay_of) if replay_of is not None
+                    else experiment if experiment is not None else gather(code))
         if material.code[:6] != code[:6] or material.doc.code != material.code:
             raise ResearchError("重放材料与目标公司不一致")
         if replay_of is None:
@@ -498,6 +500,19 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                     material.extra["prior"] = prior
                     if not material.extra["question"]:
                         material.extra["question"] = prior_question(prior)
+            cutoff = run["started_at"] or conn.execute("SELECT started_at FROM runs WHERE id=?", (run_id,)).fetchone()[0]
+            if experiment is not None:
+                root = conn.execute("SELECT created_at FROM runs WHERE id=?", (request["source"]["evolution_id"],)).fetchone()
+                cutoff = root["created_at"]
+            elif batch := re.fullmatch(r"batch-(\d+)-.+", run["request_id"] or ""):
+                frozen = conn.execute("SELECT created_at FROM batches WHERE id=?", (int(batch[1]),)).fetchone()
+                if frozen:
+                    cutoff = frozen["created_at"]
+            material.extra["method_catalog"] = method_catalog(conn, before=cutoff)
+            if candidate := material.extra.get("experimental_method"):
+                material.extra["method_catalog"].insert(0, method_entry(candidate))
+        identity["methods_sha256"] = active_methods_digest(conn, catalog=material.extra.get("method_catalog", []))
+        db.update_run(conn, run_id, identity=json.dumps(identity))
         db.update_run(conn, run_id, code=material.code, name=material.name)
         db.save_material(conn, run_id, material.snapshot())
         runner.material = material

@@ -40,3 +40,39 @@ def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server):
     status = client.get(f'{url}/api/batches/monthly/{month}', timeout=2).json()
     assert status['batch']['status'] == 'frozen' and status['batch']['id'] == ident
     assert conn.execute('SELECT COUNT(*) FROM batches').fetchone()[0] == 1
+
+
+def test_improvements_are_authenticated_read_only_and_diagnostic(server):
+    import json
+    from pathlib import Path
+    from a_share_research import evolution, service
+    conn, client, url, *_ = server
+    captured = json.loads((Path(__file__).parent / 'data/evolution-note-plan-20261106.json').read_text())
+    original = captured['diagnostic_runs'][0]
+    keys = tuple(original)
+    conn.execute(f"INSERT INTO runs({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", tuple(original.values()))
+    source_hash = evolution.digest(captured)
+    root = evolution.record_archived_rejection(conn, title='半年报附注基线', method=captured['method'],
+                 reason='E2、E4 未通过，保留原拒绝结论。', source_sha256=source_hash,
+                 source_label='k7b-note-baseline-20261106', case_run_ids=[original['id']])
+    before = conn.total_changes
+    for path in ('/api/improvements', f'/api/improvements/{root}'):
+        assert client.get(url + path, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
+    listing = client.get(url + '/api/improvements', timeout=3).json()['items']
+    detail = client.get(url + f'/api/improvements/{root}', timeout=3).json()['item']
+    assert listing[0] == detail and detail['phase'] == 'rejected'
+    assert client.get(url + '/api/improvements/999999', timeout=3).status_code == 404
+    run = client.get(url + '/api/request', params={'request_id': conn.execute('SELECT request_id FROM runs WHERE id=?', (root,)).fetchone()[0]}, timeout=3).json()
+    assert run['kind'] == 'diagnostic' and run['improvement_id'] == root
+    assert run['budget']['model_call_limit'] is None
+    assert service.run_budget(conn)['model_call_limit'] == 30
+    assert conn.total_changes == before
+    assert evolution.active_methods(conn) == []
+    browser = requests.Session()
+    browser.trust_env = False
+    assert browser.get(url + '/improvements', allow_redirects=False, timeout=3).status_code == 303
+    assert browser.post(url + '/auth/dev', headers={'Origin': url}, timeout=3).status_code == 200
+    page = browser.get(url + f'/improvements/{root}', timeout=3)
+    assert page.status_code == 200 and '半年报附注基线' in page.text and '已拒绝' in page.text
+    assert browser.get(url + f'/runs/{root}', allow_redirects=False, timeout=3).headers['location'] == f'/improvements/{root}'
+    browser.close()

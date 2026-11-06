@@ -9,6 +9,7 @@
   <header class="stub">
     <h1>{{ report.name }}</h1>
     {% if purpose == 'diagnostic' %}<p class="notice" role="status">研究诊断 · 用于核查研究方法，正式投资报告与记分保持原记录。</p>{% endif %}
+    {% if improvement_id %}<p><a href="/improvements/{{ improvement_id }}">查看本次方法对照与核查结果</a></p>{% endif %}
     <p class="meta"><span class="code">{{ report.code }}</span> · <span class="date">报告生成于 {{ report.created_at[:16].replace("T", " ") }}</span></p>
     <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，不是公告日期）</p>
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
@@ -206,7 +207,7 @@
   {% if body.methods_used %}
   <details>
     <summary>参考过的历史方法</summary>
-    {% for entry in body.methods_used %}<p>{{ entry.method.text }} <a href="/reports/{{ entry.report_id }}">查看来源报告</a></p>{% endfor %}
+    {% for entry in body.methods_used %}<p>{{ entry.method.text }} {% if entry.evolution_id %}<a href="/improvements/{{ entry.evolution_id }}">查看方法核查</a>{% else %}<a href="/reports/{{ entry.report_id }}">查看来源报告</a>{% endif %}</p>{% endfor %}
   </details>
   {% endif %}
 

@@ -712,7 +712,7 @@ def request_run(conn, request_id: str):
 
 
 def api_run(conn, run_id: int):
-    return conn.execute("SELECT u.id, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
+    return conn.execute("SELECT u.id, u.kind, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
         " r.id AS report_id FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?", (run_id,)).fetchone()
 
 

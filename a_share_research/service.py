@@ -253,6 +253,13 @@ def company_cards(conn: sqlite3.Connection) -> dict:
 
 def run_budget(conn, run_id: int | None = None) -> dict:
     count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
+    controller = conn.execute("SELECT 1 FROM runs WHERE id=? AND kind='diagnostic'"
+                              " AND json_extract(request,'$.source.event')='evolution'", (run_id,)).fetchone()
+    if controller:
+        return {"model_call_limit": None, "model_calls_recorded": count, "run_id": run_id,
+                "scope": "method_experiment", "limit_kind": "per_stage_loop_guard", "cost": None,
+                "cost_status": "unavailable", "automatic_paid_restart": False,
+                "note": "实验分阶段记录调用；阶段失败最多重试一次，案例不追加抽样。各诊断研究仍受单次研究上限约束。"}
     return {"model_call_limit": MAX_CALLS, "model_calls_recorded": count, "run_id": run_id,
             "scope": "run" if run_id is not None else "configuration",
             "limit_kind": "loop_guard_not_money_cap", "cost": None, "cost_status": "unavailable",
@@ -322,7 +329,7 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
         raise RequestError("请求编号须为 1–128 字")
     field, value = ("request_id", request_id) if request_id is not None else ("id", run_id)
     row = conn.execute("SELECT u.id, u.kind, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
-                       " u.material, u.identity, r.id AS report_id, r.body AS report_body FROM runs u LEFT JOIN reports r ON r.run_id = u.id"
+                       " u.material, u.identity, u.request, r.id AS report_id, r.body AS report_body FROM runs u LEFT JOIN reports r ON r.run_id = u.id"
                        f" WHERE u.{field} = ? AND u.kind IN ('research', 'diagnostic')", (value,)).fetchone()
     if row is None:
         raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
@@ -333,7 +340,11 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
     for key in ("failure", "review_audit", "stop_reasons"):
         if key not in body and key in metadata | extra:
             body[key] = (extra | metadata)[key]
-    public = {key: row[key] for key in row.keys() if key not in {"report_body", "material", "identity"}}
+    public = {key: row[key] for key in row.keys() if key not in {"report_body", "material", "identity", "request"}}
+    source = (json.loads(row["request"] or "{}") or {}).get("source") or {}
+    if source.get("event") in ("evolution", "evolution_case"):
+        public["improvement_id"] = row["id"] if source["event"] == "evolution" else source["evolution_id"]
+        public["improvement_phase"] = (metadata.get("evolution") or {}).get("phase")
     return {"version": VERSION, **public,
             "budget": run_budget(conn, row["id"]),
             "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),

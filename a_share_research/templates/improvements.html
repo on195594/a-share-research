@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% set labels = {'plan':'归因与候选', 'plan_review':'核查实验设计', 'cases':'运行真实对照', 'case_review':'独立核查结果', 'adopted':'已采用', 'rejected':'已拒绝', 'deferred':'已暂缓'} %}
+{% block title %}研究改进 · 个股研究{% endblock %}
+{% block main %}
+{% if item %}
+<article class="report">
+  <header>
+    <h1>{{ item.plan.title if item.plan and item.plan.title else '研究改进' }}</h1>
+    <p><strong>{{ labels.get(item.phase, item.phase) }}</strong> · <time>{{ item.created_at[:16].replace('T', ' ') }}</time></p>
+    {% if item.phase in ['adopted','rejected','deferred'] %}<p>{{ item.reason }}</p>
+    {% elif item.plan and item.plan.cases %}<p>已登记 {{ item.plan.cases|length }} 家公司、各一组真实对照。已创建 {{ item.cases|length }} 项诊断任务。</p>
+    {% else %}<p>正在核查已有报告中的重复缺口。</p>{% endif %}
+    {% if item.error %}<p class="notice caution" role="status">{{ item.error }}{% if item.retry_at %}下次重试不早于 {{ item.retry_at[:16].replace('T', ' ') }}。{% endif %}</p>{% endif %}
+    {% if item.phase not in ['adopted','rejected','deferred'] %}<p class="hint">在正式研究与候选批次空闲时继续；刷新本页查看进展。</p>{% endif %}
+    {% if item.phase == 'adopted' %}<p>方法已进入后续研究；在途批次沿用创建时的方法集。适用性与事实仍在每份报告中重新核查。</p>{% endif %}
+  </header>
+  {% if item.plan and item.plan.method %}
+  <section><h2>候选方法与判断目标</h2>
+    <p>{{ item.plan.method }}</p>{% if item.plan.benefit %}<p>改善目标：{{ item.plan.benefit }}</p>{% endif %}
+    {% if item.plan.scope or item.plan_review %}<details><summary>适用边界与实验设计核查</summary>
+      {% if item.plan.scope %}<p>{{ item.plan.scope }}</p>{% endif %}
+      {% if item.plan_review %}<p>设计核查：{{ item.plan_review.reason }}</p>{% endif %}
+    </details>{% endif %}
+  </section>
+  {% if not item.archived %}<section><h2>事前判据与真实对照</h2>
+    <p class="hint">两组从同一份已存材料开始，均可继续探索。每家每组一次；更多引用或立场变化本身不算改善。</p>
+    {% for case in item.plan.cases %}{% set index = loop.index0 %}
+    <section>
+      <h3>{{ '受影响案例' if case.role == 'affected' else '正常案例' }} · <a href="/reports/{{ case.report_id }}">原报告 {{ case.report_id }}</a></h3>
+      <p>{{ case.reason }}</p><p>运行前判据：{{ case.criterion }}</p>
+      <ul class="list">{% for run in item.cases if run.case_index == index %}
+        <li>{{ '对照' if run.arm == 'baseline' else '候选' }} · <a href="{{ '/reports/' ~ run.report_id if run.report_id else '/runs/' ~ run.run_id }}">{{ '诊断报告 ' ~ run.report_id if run.report_id else '诊断任务 ' ~ run.run_id }}</a> · {{ {'queued':'排队中','running':'进行中','done':'已完成','failed':'未完成'}.get(run.status, run.status) }}</li>
+      {% endfor %}</ul>
+      {% if item.reviews and index < item.reviews|length %}{% set review = item.reviews[index] %}
+      <p><strong>{{ '达到判据' if review.criterion_met else '未达到判据' }}</strong> · {{ review.reason }}</p>
+      <p class="small">依据核验：{{ '通过' if review.grounded else '未通过' }}；无回退：{{ '通过' if review.no_regression else '未通过' }}；方法实际采用：{{ '独立核查确认' if review.method_used else '未确认' }}。</p>
+      {% if review.evidence %}<details><summary>核查引用</summary>{% for ref in review.evidence %}<p>{{ '对照' if ref.arm == 'baseline' else '候选' }} · {{ ref.location }}</p><blockquote>{{ ref.quote }}</blockquote>{% endfor %}</details>{% endif %}
+      {% endif %}
+    </section>{% endfor %}
+  </section>{% endif %}
+  {% endif %}
+  {% if item.archived %}<section><h2>历史实验记录</h2>
+    <p>{{ item.archive.source_label }}</p>
+    <ul class="list">{% for run in item.archived_runs %}<li><a href="{{ '/reports/' ~ run.report_id if run.report_id else '/runs/' ~ run.run_id }}">{{ '诊断报告 ' ~ run.report_id if run.report_id else '诊断任务 ' ~ run.run_id }}</a> · {{ {'done':'已完成','failed':'未完成'}.get(run.status, run.status) }}</li>{% endfor %}</ul>
+    <p class="hint">原判据与拒绝结论保留，未重新运行。</p>
+  </section>{% endif %}
+  <details><summary>来源报告与原缺口</summary>
+    {% for source in item.sources %}<h3><a href="/reports/{{ source.report_id }}">{{ source.name or source.code }} · 报告 {{ source.report_id }}</a></h3>
+    <ul>{% for gap in source.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% endfor %}
+  </details>
+  <section><h2>已记录用量</h2>
+    <p>模型调用 {{ item.usage|sum(attribute='calls') }} 次；记录的模型耗时 {{ '%.0f'|format(item.usage|sum(attribute='seconds')) }} 秒；缺少用量记录 {{ item.usage|sum(attribute='missing_usage') }} 次。</p>
+    <p class="hint">实际费用未核实。上述为方法实验与核查用量，投资效果仍按原判断记分观察。</p>
+  </section>
+  <p><a href="/improvements">全部研究改进</a></p>
+</article>
+{% else %}
+<h1>研究改进</h1>
+<p>查看重复缺口的归因、方法对照和采用／拒绝理由。诊断结果单独保留，正式报告与记分沿用原记录。</p>
+{% if items %}<ul class="list">
+{% for entry in items %}<li><h2><a href="/improvements/{{ entry.id }}">{{ entry.plan.title if entry.plan and entry.plan.title else '研究改进 ' ~ entry.id }}</a></h2>
+  <p><strong>{{ labels.get(entry.phase, entry.phase) }}</strong> · {{ entry.created_at[:16].replace('T', ' ') }}</p>
+  <p>{{ entry.reason or '正在检查已有报告的研究缺口。' }}</p></li>{% endfor %}
+</ul>{% else %}<p class="notice" role="status">还没有研究改进记录。后台在正式任务空闲时，检查已有订阅与候选的重复缺口。</p>{% endif %}
+<p><a href="/research-library">返回研究库</a></p>
+{% endif %}
+{% endblock %}

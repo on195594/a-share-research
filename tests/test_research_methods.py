@@ -6,7 +6,7 @@ from pathlib import Path
 from a_share_research import db, service
 from a_share_research.checking import check
 from a_share_research.research import _research_context
-from a_share_research.research_tools import research_methods
+from a_share_research.research_tools import active_methods_digest, method_catalog, research_methods, ResearchTools
 from support.reports import MATERIAL, report
 
 CAPTURED = json.loads((Path(__file__).parent / "data/research-methods.json").read_text())["reports"]
@@ -21,6 +21,8 @@ def test_only_completed_revision_replaces_the_target_method(tmp_path):
                      (row["id"], row["run_id"], row["code"], row["period"], row["passed"],
                       json.dumps(row["body"]), row["created_at"]))
     original = conn.execute("SELECT body FROM reports WHERE id=11").fetchone()[0]
+    frozen = method_catalog(conn, before=CAPTURED[0]["created_at"])
+    frozen_digest = active_methods_digest(conn, catalog=frozen)
     for status in ("running", "failed", "done"):
         db.update_run(conn, 18, status=status)
         found = research_methods(conn, "现金流 口径")
@@ -34,6 +36,17 @@ def test_only_completed_revision_replaces_the_target_method(tmp_path):
     assert all(not entry["claims_to_recheck"].get("methods") for entry in _research_context(conn, "600519.SH", None))
     assert _research_context(conn, "600519.SH", 12)[0]["claims_to_recheck"]["methods"] == CAPTURED[1]["body"]["methods"]
     assert research_methods(conn, "no matching research method") == []
+    # A later method correction cannot change the catalog available to an already-started batch/run.
+    from copy import deepcopy
+    material = deepcopy(MATERIAL)
+    material.extra["method_catalog"] = frozen
+    retrieved = ResearchTools(material, conn).research_methods("现金流 口径")
+    assert (11, "methods[0]") in {(r["report_id"], r["location"]) for r in retrieved}
+    assert all(r["report_id"] != 12 for r in retrieved)
+    assert material.extra["methods_used"] == retrieved
+    assert active_methods_digest(conn, catalog=frozen) == frozen_digest
+    assert active_methods_digest(conn) != frozen_digest
+    assert method_catalog(conn, before=CAPTURED[0]["created_at"]) == frozen
     feedback_id = service.submit(conn, "600519", "method-review", parent_report_id=12,
                                  feedback={"location": "methods[0]", "text": CAPTURED[1]["request"]["feedback"]["text"]})
     assert feedback_id > 18

@@ -90,19 +90,14 @@ ACTIVE_METHODS = (
 )
 
 
-def active_methods_digest(conn) -> str:
-    """Identify the method set a run could retrieve; method changes do not alter the application hash."""
-    rows = conn.execute(f"{ACTIVE_METHODS} ORDER BY r.id, m.key").fetchall()
-    payload = [[row["id"], row["key"], row["value"]] for row in rows]
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
-
-
-def research_methods(conn, query: str) -> list[dict]:
-    if not isinstance(query, str) or not 1 <= len(query.strip()) <= 80:
-        raise ValueError("方法检索关键词须为 1–80 字")
-    terms = query.split()
-    matches = " OR ".join("instr(json_extract(m.value, '$.text'), ?) > 0" for _ in terms)
-    rows = conn.execute(f"{ACTIVE_METHODS} AND ({matches}) ORDER BY r.id DESC, m.key LIMIT 5", terms).fetchall()
+def method_catalog(conn, *, before=None) -> list[dict]:
+    """Freeze retrievable methods at a run/batch boundary, including later supersessions."""
+    from a_share_research import evolution
+    sql = ACTIVE_METHODS.replace(
+        " AND json_extract(n.request, '$.parent_report_id') = r.id",
+        " AND (? IS NULL OR newer.created_at <= ?) AND json_extract(n.request, '$.parent_report_id') = r.id")
+    rows = conn.execute(sql + " AND (? IS NULL OR r.created_at <= ?) ORDER BY r.id DESC, m.key",
+                        (before, before, before, before)).fetchall()
     found = []
     for row in rows:
         body, method = json.loads(row["body"]), json.loads(row["value"])
@@ -113,7 +108,28 @@ def research_methods(conn, query: str) -> list[dict]:
                                   for c in method["cites"] if "ref" not in c},
                       "table": [r for r in body.get("table", [])
                                 if r["id"] in {c.get("ref") for c in method["cites"]}]})
-    return found
+    return [method_entry(m) for m in evolution.active_methods(conn, before=before)] + found
+
+
+def method_entry(method: dict) -> dict:
+    return {"evolution_id": method["evolution_id"], "method_id": method.get("method_id"),
+            "created_at": method.get("adopted_at"),
+            "method": {"text": method["text"], "cites": []},
+            "sources": {}, "table": []}
+
+
+def active_methods_digest(conn, *, catalog=None) -> str:
+    """Hash the exact frozen catalog, shared by exploration and method retrieval."""
+    if catalog is None:
+        catalog = method_catalog(conn)
+    return hashlib.sha256(json.dumps(catalog, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def research_methods(conn, query: str, *, catalog=None) -> list[dict]:
+    if not isinstance(query, str) or not 1 <= len(query.strip()) <= 80:
+        raise ValueError("方法检索关键词须为 1–80 字")
+    methods = method_catalog(conn) if catalog is None else catalog
+    return [method for method in methods if any(term in method["method"]["text"] for term in query.split())][:5]
 
 
 def _operand(side: dict, rows: dict, material) -> dict:
@@ -412,7 +428,7 @@ class ResearchTools:
         return {"documents": found, "coverage": coverage}
 
     def research_methods(self, query: str):
-        found = research_methods(self.conn, query)
+        found = research_methods(self.conn, query, catalog=self.material.extra.get("method_catalog"))
         used = self.material.extra.setdefault("methods_used", [])
         for method in found:
             if method not in used:
