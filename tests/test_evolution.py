@@ -241,3 +241,25 @@ def test_saved_review_requires_exact_prompt_and_preserves_failed_judgment(stored
     # Explicit protocol mutation: even all passing reviews cannot adopt across versions.
     passing = result | {"no_regression": True}
     assert evolution.decision(state["plan"], [passing] * 3, adoption_blocked=True) == "deferred"
+
+
+def test_actual_large_review_projection_preserves_verified_values_and_rejects_mutation():
+    captured = json.loads(gzip.decompress((DATA / "evolution-large-review-20261106.json.gz").read_bytes()))
+    for body in captured["reports"].values():
+        original = deepcopy(body)
+        projected = evolution.review_report(body)
+        assert body == original
+        assert "series" not in projected
+        assert len(json.dumps(projected, ensure_ascii=False).encode()) < len(json.dumps(body, ensure_ascii=False).encode()) / 4
+        for old, new in zip(body["table"], projected["table"]):
+            assert {k: v for k, v in old.items() if k != "source"} == {k: v for k, v in new.items() if k != "source"}
+            if old.get("source", {}).get("api") == "industry_constituents":
+                assert new["source"] == {k: v for k, v in old["source"].items() if k not in ("dataset", "eligible", "sessions", "members")}
+            else:
+                assert old == new
+        damaged = deepcopy(body)
+        row = next(r for r in damaged["table"] if r.get("source", {}).get("api") == "industry_constituents")
+        period = next(iter(row["values"]))
+        row["values"][period] = str(float(row["values"][period]) + 1)
+        with pytest.raises(ValueError, match="复算不符"):
+            evolution.review_report(damaged)

@@ -321,6 +321,18 @@ def prepare_material(conn, request):
     return material
 
 
+def review_report(body):
+    """Recompute industry aggregates before projecting their retained replay inputs."""
+    from a_share_research.industry import validate_rows
+    table = body.get("table", [])
+    validate_rows(table, table)
+    projected = [{**row, "source": {k: v for k, v in row["source"].items()
+                  if k not in ("dataset", "eligible", "sessions", "members")}}
+                 if row.get("source", {}).get("api") == "industry_constituents" else row
+                 for row in table]
+    return {k: v for k, v in body.items() if k != "series"} | {"table": projected}
+
+
 def _case_bundle(conn, record):
     """Official pages around every saved citation, plus exact table/calculation inputs."""
     row = conn.execute("SELECT u.status,u.error,u.material,u.identity,r.id AS report_id,r.body,r.passed"
@@ -328,7 +340,8 @@ def _case_bundle(conn, record):
     result = dict(record) | {"status": row["status"], "report_id": row["report_id"], "passed": row["passed"]}
     if row["body"]:
         body = json.loads(row["body"])
-        result["report"] = body
+        result["report"] = review_report(body)
+        result["table_validation"] = "行业派生已用留存完整输入程序复算；模型侧省略行业重放dataset/eligible/sessions/members及重复图表series，所有行值、公式和计算引用保留。完整输入仍在原报告和材料中。"
         material = replay_material(conn, record["run_id"])
         pages = {}
         def walk(value):
