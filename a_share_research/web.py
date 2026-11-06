@@ -26,6 +26,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
 from a_share_research import charts, db, batches, companies as company_data, evolution, service, reading
+from a_share_research import stock_codes
 from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
@@ -308,8 +309,9 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     companies = [r for r in latest if r["own"]]
     pending, pending_more = reading.pending_reviews(conn)
     if companies:
-        passed_before = {r["code"]: r for r in reading.latest_reports(
-            conn, codes=[c["code"] for c in companies], passed=True, include_checkpoint=False)}
+        passed_before = {key: r for r in reading.latest_reports(
+            conn, codes=[c["code"] for c in companies], passed=True, include_checkpoint=False)
+            for key in (r["code"], r["code"][:6])}
         cards = reading.report_cards(conn, companies, passed_before)
     else:
         cards = []
@@ -698,6 +700,10 @@ def api_revoke(request: Request):
 def stock_page(request: Request, code: str, report: int | None = None):
     if not (session := current_session(request)):
         return login_required()
+    try:
+        stock_codes.normalize_key(code)
+    except ValueError:
+        return not_found(request, session, "公司代码不存在。")
     reports = reading.stock_reports(conn, code, summaries=True)
     if not reports:
         return not_found(request, session, "还没有研究过这家公司。")

@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
 from a_share_research import charts, db, service, stance as stances
+from a_share_research import stock_codes
 
 PAGE_SIZE = 20
 RECENT_FAILURE_DAYS = 30
@@ -312,22 +313,25 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
     if codes is not None:
         if not codes:
             return []
-        where.append(f"p.code IN ({','.join('?' for _ in codes)})")
+        prefixes = [c[:6] for c in codes if len(c) >= 6]
+        where.append(f"(p.code IN ({','.join('?' for _ in codes)})"
+                     f" OR substr(p.code, 1, 6) IN ({','.join('?' for _ in prefixes)}))")
         params.extend(codes)
+        params.extend(prefixes)
     if passed:
         where.append("p.passed = 1")
     if since is not None:
         where.append("p.created_at >= ?")
         params.append(since)
     if code_prefix is not None:
-        where.append("p.code LIKE ?")
-        params.append(code_prefix[:6] + ".%")
+        where.append("(p.code = ? OR p.code LIKE ?)")
+        params.extend((code_prefix[:6], code_prefix[:6] + ".%"))
     checkpoint = "json_extract(r.body, '$.checkpoints[0].text')" if include_checkpoint else "NULL"
     return conn.execute(
         "WITH latest AS (SELECT p.code, MAX(p.id) AS id,"
         " SUM(COALESCE(u.request_id, '') NOT LIKE 'batch-%') AS own"
         " FROM reports p JOIN runs u ON u.id = p.run_id WHERE " + " AND ".join(where) +
-        " GROUP BY p.code HAVING MAX(instr(lower(COALESCE(p.name, '')), lower(?)) > 0"
+        " GROUP BY substr(p.code, 1, 6) HAVING MAX(instr(lower(COALESCE(p.name, '')), lower(?)) > 0"
         " OR instr(lower(p.code), lower(?)) > 0)),"
         " selected AS (SELECT * FROM latest ORDER BY id DESC LIMIT ? OFFSET ?)"
         " SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, s.own,"
@@ -515,7 +519,8 @@ def report_bodies(conn, ids: list[int]) -> dict:
 def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
     """Compact home-page cards; a failed report also links the company's last passed one."""
     bodies = report_bodies(conn, [report['id'] for report in reports])
-    return [card(r, bodies[r['id']], None if r['passed'] else passed_before.get(r['code']))
+    return [card(r, bodies[r['id']], None if r['passed'] else
+                 (passed_before.get(r['code']) or passed_before.get(r['code'][:6])))
             | {'from_batch': r['from_batch']} for r in reports]
 
 
@@ -740,7 +745,14 @@ def active_runs(conn) -> list:
 
 
 def latest_price(conn, code: str) -> dict | None:
-    row = conn.execute("SELECT body FROM prices WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+    try:
+        key = stock_codes.normalize_key(code)
+    except ValueError:
+        return None
+    row = conn.execute(
+        "SELECT body FROM prices WHERE (code = ? OR substr(code, 1, 6) = ?) ORDER BY id DESC LIMIT 1",
+        (code, key),
+    ).fetchone()
     if row is None:
         return None
     body = json.loads(row["body"])
@@ -812,6 +824,10 @@ def api_reports(conn, code: str):
 
 
 def stock_reports(conn, code: str, *, summaries: bool = False):
+    try:
+        key = stock_codes.normalize_key(code)
+    except ValueError:
+        return []
     # History needs metadata and saved series, not every report's full evidence body.
     columns = ("r.id,r.run_id,r.code,r.name,r.created_at,r.period,r.passed,r.verdict,r.coverage,"
                "json_extract(r.body, '$.series') AS operating_series" if summaries else "r.*")
@@ -821,7 +837,8 @@ def stock_reports(conn, code: str, *, summaries: bool = False):
         " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"
         " json_extract(r.body, '$.prior.report_id') AS prior_report_id FROM reports r"
-        " JOIN runs u ON u.id = r.run_id WHERE r.code = ? AND u.kind = 'research' ORDER BY r.id DESC", (code,),
+        " JOIN runs u ON u.id = r.run_id WHERE (r.code = ? OR substr(r.code, 1, 6) = ?)"
+        " AND u.kind = 'research' ORDER BY r.id DESC", (code, key),
     ).fetchall()
 
 

@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime
 
 from a_share_research import batches, db, stance as stances
+from a_share_research import stock_codes
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
@@ -501,7 +502,15 @@ def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "ow
 
 
 def submit_price(conn, code: str, request_id: str) -> int:
-    report = conn.execute("SELECT name FROM reports WHERE code = ? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+    try:
+        key = stock_codes.normalize_key(code)
+    except ValueError as exc:
+        raise RequestError("需要6位数字或带合法交易所后缀的股票代码", 400) from exc
+    report = conn.execute(
+        "SELECT code, name FROM reports WHERE (code = ? OR substr(code, 1, 6) = ?) ORDER BY id DESC LIMIT 1",
+        (code, key),
+    ).fetchone()
     if report is None:
         raise RequestError("请先研究这家公司。", 404)
-    return db.create_run(conn, code, request_id or None, kind="price", name=report["name"])
+    run_code = report["code"] if "." in report["code"] else stock_codes.infer_ts_code(code)
+    return db.create_run(conn, run_code, request_id or None, kind="price", name=report["name"])
