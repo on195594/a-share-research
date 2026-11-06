@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import date
 
 from a_share_research import db, model, sources, evidence, stance as stances, valuation
-from a_share_research.service import MAX_CALLS
+from a_share_research.service import MAX_CALLS, research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
 from a_share_research.checking import SECTIONS, check
@@ -28,7 +28,7 @@ class ModelStageError(Exception):
 class Runner:
     def __init__(self, conn, run_id: int, *, max_calls: int = MAX_CALLS):
         self.conn, self.run_id, self.calls = conn, run_id, 0
-        self.max_calls = min(max_calls, MAX_CALLS)
+        self.max_calls = min(max_calls, research_call_limit(conn, run_id))
         self.deadline = time.monotonic() + 1800
         self.stage = "gather"
         self.chain = None  # (call id, full prompt) of the last tool-loop round, so the next stores only its additions
@@ -426,6 +426,10 @@ def revise(runner, material, report, ledger, *, acquisition=None):
         else:
             problems += ledger.pending()
         if not problems or attempt == 2:
+            break
+        # A repair needs one writer call and up to two independent-review calls.
+        # Keep the unresolved draft rather than start a repair we cannot verify.
+        if runner.max_calls - runner.calls < 3:
             break
         ledger.protect_risks(report)
         report = repair(runner, material, report, problems, acquisition=acquisition)

@@ -506,6 +506,39 @@ def test_rereading_gathered_mdna_page_is_not_a_conflict_but_other_text_is(tmp_pa
     conn.close()
 
 
+@pytest.mark.parametrize('used, expected_repairs', [(18, 0), (17, 1)])
+def test_monthly_repair_leaves_room_for_review(session, monkeypatch, used, expected_repairs):
+    runner, material, acquisition = session
+    runner.max_calls, runner.calls = 21, used
+    problem = {'where': 'summary', 'problem': '仍需核验', 'type': 'claim'}
+    repairs = []
+    monkeypatch.setattr(research, 'check', lambda *args: [])
+
+    def review(*args):
+        runner.calls += 1
+        return [problem]
+
+    def repair(*args, **kwargs):
+        repairs.append(1)
+        runner.calls += 1
+        return report()
+
+    monkeypatch.setattr(research, 'review', review)
+    monkeypatch.setattr(research, 'repair', repair)
+    result, problems, reviewed = research.revise(runner, material, report(), ReviewLedger(), acquisition=acquisition)
+    assert result and problems == [problem] and reviewed
+    assert len(repairs) == expected_repairs and runner.calls <= 21
+
+
+def test_monthly_acquisition_reserves_writer_and_review_calls(session):
+    runner, material, acquisition = session
+    runner.max_calls, runner.calls = 21, 18
+    runner.responses = [report()]
+    assert acquisition.write('额度内收尾', 'explore') == report()
+    assert runner.offered == [[]] and runner.calls == 19
+    assert runner.max_calls - runner.calls == 2
+
+
 def test_round_guard_stops_before_the_model_call_guard_fails_the_run():
     # round_limit ends exploration gracefully; MAX_CALLS raises and fails the whole research run.
     # Review and two repairs still need model calls after the last evidence round.

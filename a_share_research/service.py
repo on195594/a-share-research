@@ -10,7 +10,8 @@ from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
 VERSION = "research-v1"
-MAX_CALLS = 30  # Must stay above ROUND_LIMIT plus review and writing calls. Loop guard, not a cost limit; shared with the worker.
+MAX_CALLS = 30  # Default research loop guard, not a money cap.
+MONTHLY_MAX_CALLS = 21  # Owner-authorized automatic batch: 30 companies * 21 + 6 = 636.
 
 
 class RequestError(ValueError):
@@ -251,6 +252,21 @@ def company_cards(conn: sqlite3.Connection) -> dict:
     return {'version': VERSION, 'cards': cards, 'missing': missing}
 
 
+def is_monthly_research(conn, run_id: int | None) -> bool:
+    # Queued/gathering runs have six digits; gathered runs include the exchange suffix.
+    return conn.execute(
+        "SELECT 1 FROM runs r JOIN batches b ON r.request_id IN ("
+        "'batch-' || b.id || '-' || substr(r.code, 1, 6), "
+        "'batch-' || b.id || '-' || substr(r.code, 1, 6) || '.SH', "
+        "'batch-' || b.id || '-' || substr(r.code, 1, 6) || '.SZ', "
+        "'batch-' || b.id || '-' || substr(r.code, 1, 6) || '.BJ') "
+        "WHERE r.id = ? AND b.request_id LIKE 'monthly:%'", (run_id,)).fetchone() is not None
+
+
+def research_call_limit(conn, run_id: int | None = None) -> int:
+    return MONTHLY_MAX_CALLS if is_monthly_research(conn, run_id) else MAX_CALLS
+
+
 def run_budget(conn, run_id: int | None = None) -> dict:
     count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
     controller = conn.execute("SELECT 1 FROM runs WHERE id=? AND kind='diagnostic'"
@@ -260,7 +276,7 @@ def run_budget(conn, run_id: int | None = None) -> dict:
                 "scope": "method_experiment", "limit_kind": "per_stage_loop_guard", "cost": None,
                 "cost_status": "unavailable", "automatic_paid_restart": False,
                 "note": "实验分阶段记录调用；阶段失败最多重试一次，案例不追加抽样。各诊断研究仍受单次研究上限约束。"}
-    return {"model_call_limit": MAX_CALLS, "model_calls_recorded": count, "run_id": run_id,
+    return {"model_call_limit": research_call_limit(conn, run_id), "model_calls_recorded": count, "run_id": run_id,
             "scope": "run" if run_id is not None else "configuration",
             "limit_kind": "loop_guard_not_money_cap", "cost": None, "cost_status": "unavailable",
             "automatic_paid_restart": False,
