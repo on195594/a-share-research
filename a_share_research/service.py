@@ -10,7 +10,7 @@ from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
 VERSION = "research-v1"
-MAX_CALLS = 21  # Loop guard, not a cost limit; shared with the worker.
+MAX_CALLS = 30  # Must stay above ROUND_LIMIT plus review and writing calls. Loop guard, not a cost limit; shared with the worker.
 
 
 class RequestError(ValueError):

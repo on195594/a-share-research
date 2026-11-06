@@ -260,3 +260,47 @@ def test_coverage_check_reports_all_mismatches_in_one_query(tmp_path):
         for r in sorted(RECORDS, key=lambda r: r['report']['id'])]
     assert len([s for s in statements if "json_each" in s]) == 1
     conn.close()
+
+
+@pytest.mark.parametrize("mode", ["-layout", "-raw"])
+def test_h_share_chinese_survives_and_pre_language_pack_cache_is_rebuilt(tmp_path, mode):
+    # Real one-page China Shenhua H-share announcement; Adobe-GB1 needs poppler-data.
+    payload = (PDF.parent / "601088-h-share-announcement.pdf").read_bytes()
+    sha = hashlib.sha256(payload).hexdigest()
+    assert sha == "7f6218e0159310515c3a7fb096b30cbcec82dcabecf4182713aac55fc938046e"
+    pdf = sources.store_pdf(tmp_path, payload, sha)
+    pages = sources._pages(pdf, sha, mode)
+    assert len(pages) == 1 and "中國神華能源股份有限公司" in pages[0]
+    cache = pdf.with_suffix(f".{mode.lstrip('-')}.json")
+    saved = json.loads(cache.read_text())
+    assert "; poppler-data " in saved["extractor"]
+    saved["extractor"] = saved["extractor"].split("; poppler-data ")[0]
+    cache.write_text(json.dumps(saved, ensure_ascii=False))
+    assert sources._pages(pdf, sha, mode) == pages
+    assert json.loads(cache.read_text())["extractor"] == sources.extractor()
+
+
+@pytest.mark.parametrize("failure", ["missing", "empty", "unavailable"])
+def test_extractor_requires_poppler_data(monkeypatch, failure):
+    import subprocess
+
+    run = subprocess.run
+
+    def query(args, **kwargs):
+        if args[0] == "dpkg-query":
+            assert args == ["dpkg-query", "-W", "-f=${Version}", "poppler-data"]
+            if failure == "missing":
+                raise subprocess.CalledProcessError(1, args, stderr="no packages found matching poppler-data")
+            if failure == "unavailable":
+                raise FileNotFoundError("dpkg-query")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return run(args, **kwargs)
+
+    # Inject only a package-query failure; PDF extraction and financial data stay real.
+    sources.extractor.cache_clear()
+    monkeypatch.setattr(sources.subprocess, "run", query)
+    try:
+        with pytest.raises(sources.SourceError, match="poppler-data"):
+            sources.extractor()
+    finally:
+        sources.extractor.cache_clear()

@@ -504,3 +504,9 @@ def test_rereading_gathered_mdna_page_is_not_a_conflict_but_other_text_is(tmp_pa
         acquisition.tool_result(read(17), 'repair')
     assert material.pages[17] == pages[17]
     conn.close()
+
+
+def test_round_guard_stops_before_the_model_call_guard_fails_the_run():
+    # round_limit ends exploration gracefully; MAX_CALLS raises and fails the whole research run.
+    # Review and two repairs still need model calls after the last evidence round.
+    assert research.MAX_CALLS >= ROUND_LIMIT + 6

@@ -26,6 +26,9 @@ from a_share_research.companies import CNINFO, SESSION, SourceError, company
 
 log = logging.getLogger(__name__)
 KINDS = {"年度报告": "12-31", "半年度报告": "06-30", "一季度报告": "03-31", "三季度报告": "09-30"}
+ANNOUNCEMENT_PAGE_SIZE = 30
+# 150 rows hold the busiest 180-day catalog seen (300750: 107); 300 would cost ~71k prompt chars per search.
+ANNOUNCEMENT_MAX_PAGES = 5
 PDF_PATH = re.compile(r"finalpage/\d{4}-\d{2}-\d{2}/\d+\.PDF", re.IGNORECASE)
 TITLE_RE = re.compile(r"([0-9]{4})\s*年?\s*(半年度报告|年度报告|第?[一三]季度报告)")
 
@@ -285,7 +288,7 @@ def _query_announcements(code: str, days: int, query: str, category: str, max_pa
     rows = []
     for page in range(1, max_pages + 1):
         response = SESSION.post(f"{CNINFO}/hisAnnouncement/query", timeout=30, data={
-            "stock": f"{code[:6]},{org['orgId']}", "tabName": "fulltext", "pageSize": "30",
+            "stock": f"{code[:6]},{org['orgId']}", "tabName": "fulltext", "pageSize": str(ANNOUNCEMENT_PAGE_SIZE),
             "pageNum": str(page), "column": "", "plate": "", "searchkey": query, "secid": "",
             "category": category,
             "seDate": f"{end - timedelta(days=days)}~{end}", "sortName": "", "sortType": "",
@@ -340,7 +343,7 @@ def announcements(code: str, query: str = "", days: int = 180) -> tuple[list[Doc
     """Search recent official announcements, including forecasts, flash reports and events."""
     if not isinstance(query, str) or len(query) > 40 or type(days) is not int or not 1 <= days <= 550:
         raise ValueError("公告关键词最多 40 字；回看范围为 1–550 天")
-    rows, coverage = _query_announcements(code, days, query, "", 3)
+    rows, coverage = _query_announcements(code, days, query, "", ANNOUNCEMENT_MAX_PAGES)
     docs = [doc for raw in rows if (doc := announcement_document(raw, code)) is not None]
     return sorted(docs, key=lambda d: d.announced, reverse=True), coverage
 
@@ -376,9 +379,16 @@ def store_pdf(directory: Path, payload: bytes, sha: str) -> Path:
 
 @cache
 def extractor() -> str:
-    """The pdftotext version line; cached page text is only reused from the same extractor."""
+    """Bind page caches to both the extractor and its CJK mapping package."""
     out = subprocess.run(["pdftotext", "-v"], capture_output=True, text=True, check=True, timeout=10)
-    return (out.stderr or out.stdout).splitlines()[0].strip()
+    try:
+        package = subprocess.run(["dpkg-query", "-W", "-f=${Version}", "poppler-data"],
+                                 capture_output=True, text=True, check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SourceError("无法确认 poppler-data 版本；请安装 poppler-data，缺少该包会导致 PDF 中文静默丢失") from exc
+    if not package.stdout.strip():
+        raise SourceError("缺少 poppler-data 版本；请安装 poppler-data，避免 PDF 中文静默丢失")
+    return f"{(out.stderr or out.stdout).splitlines()[0].strip()}; poppler-data {package.stdout.strip()}"
 
 
 def _pages(pdf: Path, sha: str, mode: str) -> list[str]:
