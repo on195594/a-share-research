@@ -123,7 +123,7 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 - K7 进度：no-agent 任务 `6b6ecd1783ea`（每周一 09:03 `cron/a-share-k7-progress.sh`）读取上方里程碑表、生产镜像与只读业务库，推送已交付、逾期和近期到期项；不跑模型、不写数据。
 - 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
-**直接回退**：回到 `4c0e67d` 用两服务的 `rollback-68fcb06`（web `6d44809c`、worker `b52cd59f`）；K7a 无业务库迁移，只回退镜像，不恢复数据库。回退前确认没有排队的诊断任务：旧 worker 不认识 `diagnostic`，且会按旧逻辑读取其结果。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
+**直接回退**：回到 `4c0e67d` 用两服务的 `rollback-68fcb06`（web `6d44809c`、worker `b52cd59f`）；K7a 无业务库迁移，只回退镜像，不恢复数据库。回退前确认没有排队或已完成的诊断任务：旧 worker 会把排队的 `diagnostic` 当普通研究执行，旧读取路径不过滤用途，其结果会混入正式研究。标回对应 `:latest` 后执行 `docker compose up -d --no-build --no-deps web worker`。
 
 本机实际保留的更早镜像（2026-11-06 逐个核对，均无业务库迁移，只回退镜像；代码提交是该镜像对应的应用版本）：
 
