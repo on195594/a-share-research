@@ -124,6 +124,25 @@ def retry_feedback(conn, run_id: int, request_id: str) -> int:
     return submit(conn, run['code'], request_id, **payload)
 
 
+def retry_run(conn, run_id: int) -> int:
+    """Retry the saved task once, even across refreshed pages or concurrent clicks."""
+    run = conn.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+    if run is None:
+        raise RequestError('任务不存在', 404)
+    if run['status'] != 'failed' or run['replay_of'] is not None or run['kind'] not in ('research', 'price'):
+        raise RequestError('仅支持重试已失败的研究或价格参考', 409)
+    key = f'web-retry:{run_id}'
+    with db.transaction(conn):
+        if run['kind'] == 'price':
+            previous = conn.execute('SELECT id, kind, code FROM runs WHERE request_id=?', (key,)).fetchone()
+            if previous and (previous['kind'] != 'price' or previous['code'] != run['code']):
+                raise RequestError('重试编号已用于不同任务', 409)
+            return submit_price(conn, run['code'], key)
+        payload = json.loads(run['request'] or '{}') or {}
+        return submit(conn, run['code'], key, name=run['name'], question=payload.get('question') or '',
+                      parent_report_id=payload.get('parent_report_id'), feedback=payload.get('feedback'))
+
+
 def _table_periods(body: dict) -> list[str]:
     rows = body.get("table")
     return sorted({p for row in (rows if isinstance(rows, list) else [])

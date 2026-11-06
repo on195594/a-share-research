@@ -24,7 +24,7 @@ def test_literal_search_name_code_empty_unknown_and_pagination(conn):
     before = conn.total_changes
     for q in ('茅台', '600519', '600519.sh'):
         rows, more = reading.search_reports(conn, q)
-        assert [r['id'] for r in rows] == [12] and not more
+        assert [r['id'] for r in rows] == [11] and not more
         assert rows[0]['coverage'] == '2026-06-30'
         assert 'body' not in rows[0].keys()
     for q in ('不存在的公司', '%', '_', "' OR 1=1 --", '<script>'):
@@ -32,7 +32,7 @@ def test_literal_search_name_code_empty_unknown_and_pagination(conn):
     first, more = reading.search_reports(conn, '', page_size=2)
     second, last = reading.search_reports(conn, '', 2, page_size=2)
     assert more and not last
-    assert [r['id'] for r in first + second] == [39, 25, 12]
+    assert [r['id'] for r in first + second] == [39, 25, 11]
     assert reading.search_reports(conn, '', 3, page_size=2) == ([], False)
     assert conn.total_changes == before
 
@@ -102,9 +102,9 @@ def test_reverse_link_uses_real_continuation_question_from_report_body(conn):
 
 def test_latest_reports_filters_before_grouping_and_bounds_company_scope(conn):
     before = conn.total_changes
-    assert [r['id'] for r in reading.latest_reports(conn)] == [39, 25, 12]
+    assert [r['id'] for r in reading.latest_reports(conn)] == [39, 25, 11]
     assert reading.latest_reports(conn, codes=[]) == []
-    assert [r['id'] for r in reading.latest_reports(conn, codes=['600519.SH'])] == [12]
+    assert [r['id'] for r in reading.latest_reports(conn, codes=['600519.SH'])] == [11]
     assert [r['id'] for r in reading.latest_reports(conn, code_prefix='603606', passed=True,
                                                   since='2026-10-20', limit=1)] == [39]
     assert reading.latest_reports(conn, since='2026-10-31') == []

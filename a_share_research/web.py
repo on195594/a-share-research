@@ -290,7 +290,8 @@ def research_library(request: Request, q: str = "", content: str = "", history: 
             hits, more = reading.search_items(conn, content, history=history, page=page)
         except service.RequestError as exc:
             error = str(exc)
-        hits = [hit | {"label": reading.SEARCH_SECTIONS[hit["location"].split("[")[0]],
+        latest_by_code = {r["code"][:6]: r for r in reading.latest_reports(conn)}
+        hits = [hit | {"latest": latest_by_code.get(hit["code"][:6]), "label": reading.SEARCH_SECTIONS[hit["location"].split("[")[0]],
                        "url": reading.item_link(hit["report_id"], hit["location"])} for hit in hits]
     elif len(q) > 100:
         error = "请将查询缩短到 100 个字符以内。"
@@ -396,11 +397,24 @@ def run_page(request: Request, run_id: int):
     # Same order as the worker: running first, then owner submissions, then batch research.
     ahead = reading.queue_ahead(conn, run_id)[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
-                  improvement_id=(json.loads(run["request"] or "{}").get("source") or {}).get("evolution_id"),
+                  improvement_id=((json.loads(run["request"] or "{}") or {}).get("source") or {}).get("evolution_id"),
                   diagnostics=service.run_view(conn, run_id=run_id)["diagnostics"]
                   if run["kind"] in ("research", "diagnostic") and run["status"] == "failed" else None,
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   request_id=uuid.uuid4().hex)
+
+
+@app.post('/runs/{run_id}/retry')
+def retry_run(request: Request, run_id: int, csrf: str = Form('')):
+    if not (session := current_session(request)):
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, '页面已过期', '请返回任务页面重新提交。', 403)
+    try:
+        next_run = service.retry_run(conn, run_id)
+    except service.RequestError as exc:
+        return message(request, session, '无法重试', str(exc), exc.status)
+    return RedirectResponse(f'/runs/{next_run}', status_code=303)
 
 
 @app.post('/runs/{run_id}/retry-feedback')
@@ -447,7 +461,7 @@ def report_page(request: Request, report_id: int):
     rows = {r["id"]: r for r in body["table"]}
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"],
-                  improvement_id=(json.loads(run["request"] or "{}").get("source") or {}).get("evolution_id"),
+                  improvement_id=((json.loads(run["request"] or "{}") or {}).get("source") or {}).get("evolution_id"),
                   source_view=report_source_view(body, (json.loads(run["material"] or "{}") or {}).get("data")),
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
                   figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),

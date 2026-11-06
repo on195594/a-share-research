@@ -45,7 +45,8 @@
     {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{% endif %}
     <div class="actions">
       {% if feedback_retry %}{{ feedback_retry_form(run.id, csrf, request_id) }}
-      {% elif run.kind != 'diagnostic' %}{{ research_form(run.code[:6], csrf, request_id, "重新研究", cls="btn") }}{% endif %}
+      {% elif run.kind in ('research', 'price') and not run.replay_of %}
+      <form method="post" action="/runs/{{ run.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ '重试价格参考' if run.kind == 'price' else '重试原研究问题' }}</button></form>{% endif %}
       <a class="link" href="/">返回首页</a>
     </div>
   {% endif %}

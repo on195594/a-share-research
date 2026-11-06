@@ -62,7 +62,7 @@
     <tbody>
     {% for r in batch.q20 %}
       <tr class="{{ 'picked' if r.code in l5 }}">
-        <th scope="row"><span class="rank">{{ loop.index }}</span>{% if r.report_id %}<a href="/reports/{{ r.report_id }}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}
+        <th scope="row"><span class="rank">{{ loop.index }}</span>{% if r.report_id %}<a href="/reports/{{ r.report_id }}">{{ r.name }}</a>{% elif r.run_id %}<a href="/runs/{{ r.run_id }}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}
           <small>{{ "%.2f" | format(r.score) }}{% if r.code in l5 %} · <b>选定</b>{% endif %}{% if r.code in q5 %} · {{ mechanical_short }}{% endif %}</small>
           {% set notes = (["行业样本少"] if r.small_group else []) + (["60日跌超30%"] if r.drawdown else []) + (["利润跳升且低PE"] if r.windfall else []) %}
           {% if notes %}<a class="matrix-flag" href="#{{ prefix }}cand-{{ r.code }}">{{ notes | join(" · ") }}</a>{% endif %}</th>
@@ -148,7 +148,7 @@
         {% elif r.research_status in ("queued", "running") %}<span class="muted">研究{{ "排队中" if r.research_status == "queued" else "进行中" }}</span>
         {% elif r.report_id and r.verdict %}<a href="/reports/{{ r.report_id }}">{{ r.name }}：{{ r.verdict }}</a>{% if r.reused %} <span class="muted">· 沿用近期报告</span>{% endif %}
         {% elif r.report_id %}<a href="/reports/{{ r.report_id }}">{{ r.name }}：复核未通过</a> <span class="muted">· 不可选</span>
-        {% elif r.research_status == "failed" %}<span class="flag">研究失败</span> <span class="muted">{{ r.research_error }} · 不可选</span>
+        {% elif r.research_status == "failed" %}<span class="flag">研究失败</span> <span class="muted">{{ r.research_error }} · 不可选</span>{% if r.run_id %} <a href="/runs/{{ r.run_id }}">查看失败详情</a>{% endif %}
         {% elif r.run_id %}<a href="/runs/{{ r.run_id }}">查看 {{ r.name }} 的研究</a>{% endif %}
       </p>
     </li>

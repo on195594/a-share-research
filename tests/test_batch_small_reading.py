@@ -69,3 +69,13 @@ def test_unlinked_small_candidates_wait_without_query_or_finished_count():
     assert '等待大市值组研究完成后排队' in html
     small_matrix = html.split('id="small-candidates"', 1)[1].split('</table>', 1)[0]
     assert '未通过复核或研究失败' not in small_matrix
+
+
+def test_failed_task_remains_linked_without_report():
+    captured = json.loads((ROOT / 'tests/data/batch-candidate-matrix.json').read_text())
+    row = dict(captured['rows'][0], research_status='failed', report_id=None, verdict=None,
+               run_id=987, research_error='失败状态变体')
+    html = render_two_pools([row], status='researching')
+    small_matrix = html.split('id="small-candidates"', 1)[1].split('</table>', 1)[0]
+    assert 'href="/runs/987"' in small_matrix
+    assert 'href="/runs/987">查看失败详情' in html

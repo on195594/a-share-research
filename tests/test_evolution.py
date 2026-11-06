@@ -137,6 +137,13 @@ def test_archived_rejection_is_idempotent_history_and_never_adopted(stored):
     assert evolution.record_archived_rejection(stored, **args) == archived
     assert evolution.item(stored, archived)["phase"] == "rejected"
     assert evolution.item(stored, archived)["archived"] is True
+    from support.templates import ENV
+    detail = evolution.item(stored, archived)
+    html = ENV.get_template('improvements.html').render(item=detail, items=[])
+    assert '分组：对照' in html and '研究问题</summary>' in html
+    assert NOTE['diagnostic_runs'][0]['code'] in html
+    assert 'E2' in html and '缺口变窄' in html and '<th scope="col">判据</th>' in html
+    assert '未保存逐家公司结构化判据' in html
     assert evolution.active_methods(stored) == []
     root = evolution.discover(stored)
     history = evolution.item(stored, root)["history"]

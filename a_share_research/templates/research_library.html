@@ -11,11 +11,11 @@
 </form>
 <p class="hint">留空查看全部。每页最多 20 家，按最新报告排序。<a href="/research-library">清空查询</a></p>
 <form method="get" action="/research-library" class="search" role="search" autocomplete="off">
-  <label for="content-query">搜研究内容</label>
+  <label for="content-query">搜全库研究内容</label>
   <div class="row"><input id="content-query" name="content" value="{{ content }}" maxlength="100" placeholder="例如：集采 或 现金流 下降" enterkeyhint="search"><button class="btn" type="submit">搜索</button></div>
   <label class="check"><input type="checkbox" name="history" value="true"{% if history %} checked{% endif %}> 包括每家公司的旧报告</label>
 </form>
-<p class="hint">在风险、检查点、回答、业务、财务、立场和旧议程状态里找，空格分隔的词须全部出现。默认只看每家公司最新一份。结果是线索，以所在报告的出处为准。</p>
+<p class="hint">在风险、检查点、回答、业务、财务、立场和旧议程状态里找，空格分隔的词须全部出现。全库检索，不受上方公司查询限制；默认只看每家公司最近通过复核的正式报告，不含反馈核查。结果是线索，以所在报告的出处为准。</p>
 {% if error %}<p role="alert" class="notice caution">{{ error }}</p>{% endif %}
 {% if content %}
 <h2 id="results" tabindex="-1">内容“{{ content }}”{{ '（含旧报告）' if history }} · 第 {{ page }} 页</h2>
@@ -24,6 +24,7 @@
 {% for hit in hits %}
 <li>
   <a class="company" href="/stock/{{ hit.code }}"><strong>{{ hit.name or hit.code }}</strong> <span class="code">{{ hit.code }}</span></a>
+  {% if hit.latest and not hit.latest.passed and hit.latest.id != hit.report_id %}<p class="notice caution">最新正式报告 <a href="/reports/{{ hit.latest.id }}">{{ hit.latest.created_at[:10] }} · 复核未通过</a>；当前结果来自{{ '历史通过报告' if history else '最近通过报告' }}。</p>{% endif %}
   <p>{{ hit.text }}</p>
   <p class="small"><a href="{{ hit.url }}">{{ hit.label }}</a> · <span class="date">资料至 {{ hit.period or '未记录' }}</span> · <span class="date">研究于 {{ hit.created_at[:10] }}</span></p>
 </li>

@@ -89,7 +89,7 @@ def test_retry_rejects_ordinary_completed_replay_and_incomplete_records(web):
     request, _ = browser_request(web)
     web.conn.execute('DELETE FROM reports WHERE id=11')
     html = web.run_page(request, 17).body.decode()
-    assert 'action="/research"' in html and '/retry-feedback' not in html
+    assert 'action="/runs/17/retry"' in html and '/retry-feedback' not in html
     web.conn.execute("UPDATE runs SET status='failed',identity=? WHERE id=18", (json.dumps({'replay_of': 18}),))
     with pytest.raises(service.RequestError): service.retry_feedback(web.conn, 18, 'replay')
     web.conn.execute("UPDATE runs SET identity=NULL,request=json_remove(request, '$.feedback') WHERE id=18")
@@ -116,3 +116,52 @@ def test_gap_disclosure_and_native_source_navigation():
         assert '本报告记录的缺口' in html
         assert f'id="{opened}" tabindex="-1" open' in html
         assert '?scope=1#research-scope' in html and '?evidence=1#evidence' in html
+
+
+def test_retry_keeps_followup_and_price_kind_and_is_idempotent(web):
+    request, csrf = browser_request(web)
+    followup = service.submit(web.conn, '600519', 'followup-failure', question='现金流是否一致？', parent_report_id=11)
+    web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (followup,))
+    assert followup in [r['id'] for r in reading.followups(web.conn, '600519.SH', 11)]
+    assert followup in [r['id'] for r in reading.active_runs(web.conn)]
+    before = web.conn.total_changes
+    assert web.retry_run(request, followup, csrf='invalid').status_code == 403
+    assert web.conn.total_changes == before
+    response = web.retry_run(request, followup, csrf=csrf)
+    retry = int(response.headers['location'].split('/')[-1])
+    assert web.retry_run(request, followup, csrf=csrf).headers['location'] == response.headers['location']
+    original = web.conn.execute('SELECT request FROM runs WHERE id=?', (followup,)).fetchone()[0]
+    assert web.conn.execute('SELECT request FROM runs WHERE id=?', (retry,)).fetchone()[0] == original
+    assert followup not in [r['id'] for r in reading.active_runs(web.conn)]
+    price = db.create_run(web.conn, '600519.SH', 'price-failed', kind='price', status='failed')
+    html = web.run_page(request, price).body.decode()
+    assert '重试价格参考' in html and 'action="/research"' not in html
+    new_price = service.retry_run(web.conn, price)
+    assert service.retry_run(web.conn, price) == new_price
+    assert web.conn.execute('SELECT kind FROM runs WHERE id=?', (new_price,)).fetchone()[0] == 'price'
+    with pytest.raises(service.RequestError):
+        service.retry_run(web.conn, new_price)
+
+
+def test_failed_followup_report_retries_saved_question(web):
+    request, _ = browser_request(web)
+    # Captured report with only its task state changed to failed for the UI branch.
+    web.conn.execute("UPDATE runs SET status='failed' WHERE id=17")
+    web.conn.execute("UPDATE reports SET passed=0,body=json_set(body, '$.facts', json('{}')) WHERE id=11")
+    html = web.report_page(request, 11).body.decode()
+    assert 'action="/runs/17/retry"' in html
+    assert '重新研究</button>' not in html
+
+
+def test_search_explains_fallback_and_null_legacy_request_renders(web):
+    request, _ = browser_request(web)
+    report = web.conn.execute('SELECT run_id FROM reports WHERE id=39').fetchone()
+    web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (report['run_id'],))
+    web.conn.execute('UPDATE reports SET passed=0 WHERE id=39')
+    old = json.loads(web.conn.execute('SELECT body FROM reports WHERE id=37').fetchone()[0])
+    term = old['risks'][0]['text'][:12]
+    html = web.research_library(request, content=term, page=1).body.decode()
+    assert '最新正式报告' in html and '复核未通过' in html and '当前结果来自最近通过报告' in html
+    assert '不受上方公司查询限制' in html
+    # Captured old rows have JSON null, not SQL NULL, in request.
+    assert web.report_page(request, 37).status_code == 200

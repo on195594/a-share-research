@@ -63,11 +63,11 @@
 {% endif %}
 {% if active %}
 <div class="active-runs">
-  <h3>进行中</h3>
+  <h3>进行中与近期未完成任务</h3>
   <ul class="list">
   {% for r in active %}
     <li><a href="/runs/{{ r.id }}">{{ r.name or r.code }}</a>
-      <span class="muted">{{ steps.get(r.step, "排队中") if r.status == "running" else "排队中" }}</span></li>
+      <span class="muted">{{ steps.get(r.step, "排队中") if r.status == "running" else ("未完成 · 查看原因" if r.status == "failed" else "排队中") }}</span></li>
   {% endfor %}
   </ul>
 </div>

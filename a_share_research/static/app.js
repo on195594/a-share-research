@@ -155,6 +155,7 @@ if (tocLinks.length && "IntersectionObserver" in window) {
 // Elapsed timers count locally between server updates.
 function tick() {
   for (const el of document.querySelectorAll("[data-elapsed]")) {
+    if (el.closest('main[data-disconnected="true"]')) continue;
     el.dataset.since ??= String(Date.now() - Number(el.dataset.elapsed) * 1000);
     const seconds = Math.floor((Date.now() - Number(el.dataset.since)) / 1000);
     el.textContent = `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
@@ -172,6 +173,15 @@ if (main) {
   const every = Number(main.dataset.refresh) * 1000;
   let timer;
   let inflight = false;
+  let lastSync = new Date();
+  const connection = document.createElement("p");
+  connection.className = "hint connection-status";
+  connection.setAttribute("role", "status");
+  main.before(connection);
+  const connectionStatus = (ok) => {
+    main.dataset.disconnected = ok ? "false" : "true";
+    connection.textContent = `${ok ? "连接正常" : "连接中断或响应异常，正在重连；进度与计时暂停更新"} · 最后同步 ${lastSync.toLocaleTimeString()}`;
+  };
   const focusable = () => [...main.querySelectorAll("a, button, summary, input, select, textarea")];
 
   const swap = (doc, next) => {
@@ -194,26 +204,31 @@ if (main) {
   async function poll() {
     if (inflight) return;
     inflight = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
     try {
-      const res = await fetch(location.href, { cache: "no-store", headers: { accept: "text/html" } });
-      if (res.ok) {
-        const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-        const next = doc.querySelector("main");
-        // Finished, redirected (report ready, session expired) or no longer in progress:
-        // let the browser navigate for real, including any fragment in the redirect.
-        if (res.redirected || !next?.hasAttribute("data-refresh")) return location.reload();
-        if (next.dataset.key !== main.dataset.key) swap(doc, next);
-      }
+      const res = await fetch(location.href, { cache: "no-store", signal: controller.signal, headers: { accept: "text/html" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const next = doc.querySelector("main");
+      if (!next) throw new Error("Missing page content");
+      if (res.redirected || !next.hasAttribute("data-refresh")) return location.reload();
+      const recovered = main.dataset.disconnected === "true";
+      lastSync = new Date();
+      connectionStatus(true);
+      if (recovered || next.dataset.key !== main.dataset.key) swap(doc, next);
     } catch (error) {
-      // A dropped connection on a phone is expected; the next round retries.
+      connectionStatus(false);
       console.debug("progress poll failed", error);
     } finally {
+      clearTimeout(timeout);
       inflight = false;
     }
     schedule();
   }
 
   const start = () => {
+    connectionStatus(true);
     window.stop();
     tick();
     setInterval(tick, 1000);

@@ -201,3 +201,8 @@ def test_home_verdict_filter_binds_each_card_group_bucket():
     assert 'class="card-group" data-verdict="{{ label }}"' in home_tpl
     assert 'selectattr("bucket", "equalto", label)' in home_tpl
     assert 'role="status" aria-live="polite" data-filter-status' in home_tpl
+
+
+def test_failure_explanation_precedes_source_catalog():
+    template = (TEMPLATES / 'report.html').read_text()
+    assert template.index('复核意见：') < template.index('{% for key, source in documents.items() %}')

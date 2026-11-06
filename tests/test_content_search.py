@@ -116,3 +116,8 @@ def test_search_requires_an_api_session_and_returns_the_envelope(server):
     found = client.get(url + "/api/search", params={"q": "现金流"}, timeout=3)
     assert found.status_code == 200 and set(found.json()) == {"version", "items", "page", "more"}
     assert client.get(url + "/api/search", params={"q": " "}, timeout=3).status_code == 422
+
+
+def test_latest_company_summary_excludes_feedback_report(conn):
+    latest = reading.latest_reports(conn, code_prefix='600519')[0]
+    assert latest['id'] != 12  # captured feedback must not replace the formal stance

@@ -7,7 +7,9 @@
   <header>
     <h1>{{ item.plan.title if item.plan and item.plan.title else '研究改进' }}</h1>
     <p><strong>{{ labels.get(item.phase, item.phase) }}</strong> · <time>{{ item.created_at[:16].replace('T', ' ') }}</time></p>
-    {% if item.phase in ['adopted','rejected','deferred'] %}<p>{{ item.reason }}</p>
+    {% if item.phase in ['adopted','rejected','deferred'] %}{% for block in item.reason_blocks %}
+      {% if block.header %}<p class="hint">表格可左右滑动查看完整依据。</p><div class="table-wrap"><table><thead><tr>{% for cell in block.header %}<th scope="col">{{ cell }}</th>{% endfor %}</tr></thead><tbody>{% for row in block.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+      {% else %}<p>{{ block.text }}</p>{% endif %}{% endfor %}
     {% elif item.plan and item.plan.cases %}<p>已登记 {{ item.plan.cases|length }} 家公司、各一组真实对照。已创建 {{ item.cases|length }} 项诊断任务。</p>
     {% else %}<p>正在核查已有报告中的重复缺口。</p>{% endif %}
     {% if item.error %}<p class="notice caution" role="status">{{ item.error }}{% if item.retry_at %}下次重试不早于 {{ item.retry_at[:16].replace('T', ' ') }}。{% endif %}</p>{% endif %}
@@ -29,7 +31,7 @@
       <h3>{{ '受影响案例' if case.role == 'affected' else '正常案例' }} · <a href="/reports/{{ case.report_id }}">原报告 {{ case.report_id }}</a></h3>
       <p>{{ case.reason }}</p><p>运行前判据：{{ case.criterion }}</p>
       <ul class="list">{% for run in item.cases if run.case_index == index %}
-        <li>{{ '对照' if run.arm == 'baseline' else '候选' }} · <a href="{{ '/reports/' ~ run.report_id if run.report_id else '/runs/' ~ run.run_id }}">{{ '诊断报告 ' ~ run.report_id if run.report_id else '诊断任务 ' ~ run.run_id }}</a> · {{ {'queued':'排队中','running':'进行中','done':'已完成','failed':'未完成'}.get(run.status, run.status) }}</li>
+        <li>{{ run.name or run.code }} · {{ '对照' if run.arm == 'baseline' else '候选' }} · <a href="{{ '/reports/' ~ run.report_id if run.report_id else '/runs/' ~ run.run_id }}">{{ '诊断报告 ' ~ run.report_id if run.report_id else '诊断任务 ' ~ run.run_id }}</a> · {{ {'queued':'排队中','running':'进行中','done':'已完成','failed':'未完成'}.get(run.status, run.status) }}</li>
       {% endfor %}</ul>
       {% if item.reviews and index < item.reviews|length %}{% set review = item.reviews[index] %}
       <p><strong>{{ '达到判据' if review.criterion_met else '未达到判据' }}</strong> · {{ review.reason }}</p>
@@ -41,8 +43,13 @@
   {% endif %}
   {% if item.archived %}<section><h2>历史实验记录</h2>
     <p>{{ item.archive.source_label }}</p>
-    <ul class="list">{% for run in item.archived_runs %}<li><a href="{{ '/reports/' ~ run.report_id if run.report_id else '/runs/' ~ run.run_id }}">{{ '诊断报告 ' ~ run.report_id if run.report_id else '诊断任务 ' ~ run.run_id }}</a> · {{ {'done':'已完成','failed':'未完成'}.get(run.status, run.status) }}</li>{% endfor %}</ul>
-    <p class="hint">原判据与拒绝结论保留，未重新运行。</p>
+    <ul class="list">{% for run in item.archived_runs %}<li><h3>{{ run.name or run.code }}{% if run.name %} · {{ run.code }}{% endif %}</h3>
+      <p>分组：{{ {'baseline':'对照', 'control':'对照', 'candidate':'候选', 'treatment':'候选'}.get(run.source.arm, run.source.arm or '未记录') }}</p>
+      {% if run.question %}<details><summary>研究问题</summary><p>{{ run.question }}</p></details>{% endif %}
+      {% if run.error %}<p class="notice caution">{{ run.error }}</p>{% endif %}
+      {% if run.problems %}<ul>{% for problem in run.problems %}<li>{{ problem.problem }}</li>{% endfor %}</ul>{% endif %}
+      <a href="{{ '/reports/' ~ run.report_id ~ '?scope=1#research-scope' if run.report_id else '/runs/' ~ run.run_id }}">{{ '诊断报告 ' ~ run.report_id if run.report_id else '诊断任务 ' ~ run.run_id }}</a> · {{ {'done':'已完成','failed':'未完成'}.get(run.status, run.status) }}</li>{% endfor %}</ul>
+    <p class="hint">拒绝原因见页首。历史记录未保存逐家公司结构化判据和对照评分时，不推断是否达到判据；可进入诊断报告核对原问题与复核意见。未重新运行。</p>
   </section>{% endif %}
   <details><summary>来源报告与原缺口</summary>
     {% for source in item.sources %}<h3><a href="/reports/{{ source.report_id }}">{{ source.name or source.code }} · 报告 {{ source.report_id }}</a></h3>

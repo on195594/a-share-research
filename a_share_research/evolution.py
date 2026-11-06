@@ -548,6 +548,28 @@ def tick(conn) -> bool:
     return discover(conn) is not None
 
 
+def reason_blocks(text):
+    """Render saved plain text/Markdown tables as escaped readable HTML, without interpreting links or HTML."""
+    lines = text.splitlines()
+    blocks, index = [], 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if (line.startswith('|') and index + 1 < len(lines)
+                and re.fullmatch(r'[| :\-]+', lines[index + 1].strip())):
+            header = [cell.strip() for cell in line.strip('|').split('|')]
+            index += 2
+            rows = []
+            while index < len(lines) and lines[index].strip().startswith('|'):
+                rows.append([cell.strip() for cell in lines[index].strip().strip('|').split('|')])
+                index += 1
+            blocks.append({'header': header, 'rows': rows})
+            continue
+        if line:
+            blocks.append({'text': line.lstrip('# ').replace('**', '').replace('`', '')})
+        index += 1
+    return blocks
+
+
 def item(conn, run_id):
     row = conn.execute(f"SELECT * FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}", (run_id,)).fetchone()
     if row is None:
@@ -562,14 +584,17 @@ def item(conn, run_id):
                       "usage": [json.loads(c["usage"]) for c in calls if c["usage"]]})
     cases = []
     for record in state.get("cases", []):
-        child = conn.execute("SELECT u.status,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (record["run_id"],)).fetchone()
-        cases.append(record | dict(child))
+        child = conn.execute("SELECT u.status,u.code,COALESCE(u.name,r.name) AS name,u.error,u.request,r.body,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (record["run_id"],)).fetchone()
+        cases.append(record | {key: child[key] for key in ("status", "code", "name", "report_id", "passed")})
     archived_runs = []
     for target in state.get("archived_runs", []):
-        child = conn.execute("SELECT u.status,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (target,)).fetchone()
-        archived_runs.append({"run_id": target, **dict(child)})
+        child = conn.execute("SELECT u.status,u.code,COALESCE(u.name,r.name) AS name,u.error,u.request,r.body,r.id AS report_id,r.passed FROM runs u LEFT JOIN reports r ON r.run_id=u.id WHERE u.id=?", (target,)).fetchone()
+        payload = json.loads(child['request'] or '{}')
+        body = json.loads(child['body'] or '{}')
+        archived_runs.append({"run_id": target, **{key: child[key] for key in ("status", "code", "name", "error", "report_id", "passed")}, "question": payload.get('question'),
+                              "source": payload.get('source') or {}, "problems": body.get('problems') or []})
     return {"id": run_id, "status": row["status"], "created_at": row["created_at"], "finished_at": row["finished_at"],
-            **state, "cases": cases, "archived_runs": archived_runs, "usage": usage}
+            **state, "reason_blocks": reason_blocks(state.get("reason") or ""), "cases": cases, "archived_runs": archived_runs, "usage": usage}
 
 
 def list_items(conn, limit=30):

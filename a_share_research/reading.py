@@ -306,7 +306,8 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
     Search matches any historical name/code literally; source counts exclude replays.
     Filters apply before selecting the newest report, including passed/date constraints.
     """
-    where, params = ["u.kind = 'research'", "u.replay_of IS NULL"], []
+    where, params = ["u.kind = 'research'", "u.replay_of IS NULL",
+                     "json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL"], []
     if codes is not None:
         if not codes:
             return []
@@ -645,8 +646,12 @@ def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
 
 def active_runs(conn) -> list:
     return conn.execute(
-        "SELECT id, code, name, status, step FROM runs WHERE status IN ('queued', 'running')"
-        " AND kind IN ('research', 'price') ORDER BY id"
+        "SELECT id, code, name, status, step FROM runs u WHERE kind IN ('research', 'price')"
+        " AND (status IN ('queued', 'running') OR (status = 'failed' AND replay_of IS NULL"
+        " AND COALESCE(request_id, '') NOT LIKE 'batch-%'"
+        " AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.run_id=u.id)"
+        " AND NOT EXISTS (SELECT 1 FROM runs retry WHERE retry.request_id='web-retry:' || u.id)))"
+        " ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END, id DESC LIMIT 30"
     ).fetchall()
 
 
@@ -701,8 +706,8 @@ def followups(conn, code: str, report_id: int):
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"
         " json_extract(f.body, '$.prior.report_id') AS prior_report_id"
         " FROM runs u LEFT JOIN reports f ON f.run_id = u.id"
-        " WHERE u.kind = 'research' AND u.code = ? AND (json_extract(u.request, '$.parent_report_id') = ? OR"
-        " (f.code = ? AND (json_extract(f.body, '$.parent_report_id') = ? OR"
+        " WHERE u.kind = 'research' AND substr(u.code, 1, 6) = substr(?, 1, 6) AND (json_extract(u.request, '$.parent_report_id') = ? OR"
+        " (substr(f.code, 1, 6) = substr(?, 1, 6) AND (json_extract(f.body, '$.parent_report_id') = ? OR"
         " json_extract(f.body, '$.prior.report_id') = ?))) ORDER BY u.id DESC",
         (code, report_id, code, report_id, report_id)).fetchall()
 

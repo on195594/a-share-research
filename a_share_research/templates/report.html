@@ -215,13 +215,14 @@
 
   <details class="about" id="research-scope" tabindex="-1" {% if request and request.query_params.get('scope') == '1' %}open{% endif %}>
     <summary>研究范围与原文</summary>
-    {% if source_view.error %}<p class="notice caution">{{ source_view.error }}</p>{% endif %}
-    {% for key, source in documents.items() %}<p>{{ '基础原文' if key == 'D0' else '补充原文' }}：{% if source.href %}<a href="{{ source.href }}" rel="noreferrer noopener">{{ source.document.title or key }}</a>{% else %}{{ source.document.title or key }}（未记录原文链接）{% endif %}（公告日 {{ source.document.announced or '未记录' }}），{% if source.state == 'listed' %}仅目录记录，不是已读证据{% elif source.read_pages %}已读取页码：{{ source.read_pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
-    {% if body.document %}<p class="muted small">抓取于 {{ body.document.retrieved_at or '未记录' }} · SHA-256 {{ body.document.sha256[:16] if body.document.sha256 else '未记录' }} · 模型调用 {{ body.calls }} 次</p>{% endif %}
     {% if body.problems %}
     <p>复核意见：</p>
     <ul>{% for p in body.problems %}<li>{{ p.problem }}{% if p.id %}<small> · {{ p.id }} · {{ '仍未解决' if p.status == 'unresolved' else '状态未记录' }}</small>{% endif %}{% if p.importance %}<p>与本次判断的关系：{{ p.importance }}</p>{% endif %}{% if p.evidence %}{{ cites(dict(cites=p.evidence), rows, documents) }}{% endif %}</li>{% endfor %}</ul>
     {% endif %}
+    {% if source_view.error %}<p class="notice caution">{{ source_view.error }}</p>{% endif %}
+    {% for key, source in documents.items() %}<p>{{ '基础原文' if key == 'D0' else '补充原文' }}：{% if source.href %}<a href="{{ source.href }}" rel="noreferrer noopener">{{ source.document.title or key }}</a>{% else %}{{ source.document.title or key }}（未记录原文链接）{% endif %}（公告日 {{ source.document.announced or '未记录' }}），{% if source.state == 'listed' %}仅目录记录，不是已读证据{% elif source.read_pages %}已读取页码：{{ source.read_pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
+    {% if body.document %}<p class="muted small">抓取于 {{ body.document.retrieved_at or '未记录' }} · SHA-256 {{ body.document.sha256[:16] if body.document.sha256 else '未记录' }} · 模型调用 {{ body.calls }} 次</p>{% endif %}
+
     {% if body.stop_reasons %}<p>取证停止记录：{% for stop in body.stop_reasons %}{{ {'time_limit': '探索时限', 'fetch_limit': '取证次数上限', 'tool_limit': '工具次数上限', 'round_limit': '探索轮数上限', 'repeated_requests': '重复请求未增加资料'}.get(stop.reason, '已记录停止条件') }}{{ '；' if not loop.last else '。' }}{% endfor %}</p>{% endif %}
     {% for search in body.announcement_searches or [] %}<p>公告检索：{{ search.code }}，{{ search.since }} 至 {{ search.until }}，{{ '关键词「' ~ search.query ~ '」' if search.query else '全部标题' }}。{% if search.truncated %}结果未列全，仍需缩小范围。{% endif %}</p>{% endfor %}
     <p><a href="?evidence=1#evidence">展开证据日期与本报告记录的缺口</a></p>
@@ -261,7 +262,10 @@
 
   <div class="actions">
     <a class="btn secondary" href="/stock/{{ report.code }}">公司档案</a>
-    {% if purpose != 'diagnostic' %}{{ research_form(report.code[:6], csrf, request_id, "重新研究") }}{% endif %}
+    {% if purpose != 'diagnostic' and not replay_of %}
+      {% if report.passed %}{{ research_form(report.code[:6], csrf, request_id, "重新研究") }}
+      {% elif not feedback_retry %}<form method="post" action="/runs/{{ report.run_id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">重试原研究问题</button></form>{% endif %}
+    {% endif %}
   </div>
 </article>
 {% endblock %}
