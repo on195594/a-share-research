@@ -103,6 +103,48 @@ def test_worker_leaves_diagnostics_for_the_idle_branch(stored):
     assert worker.next_run(conn)["id"] == formal
 
 
+def test_diagnostic_is_hidden_from_home_and_formal_followups(stored):
+    conn, _ = stored
+    parent = CAPTURED[0]["id"]
+    diagnostic = service.submit_diagnostic(conn, CODE[:6], "diag-ui", question="核查缺口",
+                                           source={"event": "gap"}, parent_report_id=parent)
+    # The researcher normalizes the code after gathering material.
+    db.update_run(conn, diagnostic, code=CODE)
+    assert reading.active_runs(conn) == []
+    assert reading.followups(conn, CODE, parent) == []
+    conn.execute("UPDATE runs SET kind='research' WHERE id=?", (diagnostic,))
+    assert [r["id"] for r in reading.active_runs(conn)] == [diagnostic]
+    assert [r["id"] for r in reading.followups(conn, CODE, parent)] == [diagnostic]
+
+
+def test_queue_count_respects_idle_diagnostics_and_running_work(stored):
+    conn, _ = stored
+    diagnostic = service.submit_diagnostic(conn, CODE[:6], "diag-queue", question="核查", source={"event": "gap"})
+    batch = service.submit(conn, CODE[:6], "batch-1-test", question="现金流")
+    formal = service.submit(conn, CODE[:6], "owner-queue", question="现金流")
+    assert worker.next_run(conn)["id"] == formal
+    assert reading.queue_ahead(conn, formal)[0] == 0
+    assert reading.queue_ahead(conn, batch)[0] == 1
+    assert reading.queue_ahead(conn, diagnostic)[0] == 2
+    db.update_run(conn, diagnostic, status="running")
+    assert reading.queue_ahead(conn, formal)[0] == 1
+
+
+@pytest.mark.parametrize("kind", ["research", "diagnostic"])
+def test_report_labels_diagnostics_and_offers_only_valid_actions(stored, kind):
+    from support.templates import render
+    conn, _ = stored
+    insert(conn, CAPTURED[1], run_id=500, report_id=500, kind=kind)
+    saved = dict(reading.report(conn, 500))
+    body = json.loads(saved["body"])
+    html = render("report.html", report=saved, body=body, purpose=reading.report_run(conn, 500)["kind"],
+                  rows={r["id"]: r for r in body["table"]}, fin=[], market=[], price=None,
+                  comparison=reading.comparison(conn, saved), followups=[])
+    assert ("研究诊断 · 用于核查研究方法" in html) == (kind == "diagnostic")
+    assert ('name="parent_report_id"' in html) == (kind == "research")
+    assert ('action="/reports/500/feedback"' in html) == (kind == "research")
+
+
 REAL = json.loads((Path(__file__).parent / "data/valuation-warning-reports-20261105.json").read_text())["reports"]
 FORECAST = json.loads((Path(__file__).parent / "data/k7a-forecast-report.json").read_text())["report"]
 

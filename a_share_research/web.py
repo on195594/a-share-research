@@ -378,7 +378,7 @@ def run_page(request: Request, run_id: int):
     ahead = reading.queue_ahead(conn, run_id)[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
                   diagnostics=service.run_view(conn, run_id=run_id)["diagnostics"]
-                  if run["kind"] == "research" and run["status"] == "failed" else None,
+                  if run["kind"] in ("research", "diagnostic") and run["status"] == "failed" else None,
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   request_id=uuid.uuid4().hex)
 
@@ -426,7 +426,7 @@ def report_page(request: Request, report_id: int):
     evidence = reading.evidence_context(body, row['coverage'])
     rows = {r["id"]: r for r in body["table"]}
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
-    return render(request, "report.html", session, report=row, body=body, evidence=evidence,
+    return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"],
                   source_view=report_source_view(body, (json.loads(run["material"] or "{}") or {}).get("data")),
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
                   figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),

@@ -645,7 +645,8 @@ def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
 
 def active_runs(conn) -> list:
     return conn.execute(
-        "SELECT id, code, name, status, step FROM runs WHERE status IN ('queued', 'running') ORDER BY id"
+        "SELECT id, code, name, status, step FROM runs WHERE status IN ('queued', 'running')"
+        " AND kind IN ('research', 'price') ORDER BY id"
     ).fetchall()
 
 
@@ -677,9 +678,11 @@ def report_for_run(conn, run_id: int):
 
 def queue_ahead(conn, run_id: int):
     return conn.execute(
-        "SELECT COUNT(*) FROM runs u, (SELECT request_id LIKE 'batch-%' AS batch FROM runs WHERE id = ?) me"
+        "SELECT COUNT(*) FROM runs u, (SELECT kind = 'diagnostic' AS diagnostic,"
+        " COALESCE(request_id LIKE 'batch-%', 0) AS batch FROM runs WHERE id = ?) me"
         " WHERE u.request_id IS NOT NULL AND u.id != ? AND (u.status = 'running' OR (u.status = 'queued' AND"
-        " ((u.request_id LIKE 'batch-%') < me.batch OR ((u.request_id LIKE 'batch-%') = me.batch AND u.id < ?))))",
+        " (u.kind = 'diagnostic', COALESCE(u.request_id LIKE 'batch-%', 0), u.id)"
+        " < (me.diagnostic, me.batch, ?)))",
         (run_id, run_id, run_id)).fetchone()
 
 
@@ -698,7 +701,7 @@ def followups(conn, code: str, report_id: int):
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"
         " json_extract(f.body, '$.prior.report_id') AS prior_report_id"
         " FROM runs u LEFT JOIN reports f ON f.run_id = u.id"
-        " WHERE u.code = ? AND (json_extract(u.request, '$.parent_report_id') = ? OR"
+        " WHERE u.kind = 'research' AND u.code = ? AND (json_extract(u.request, '$.parent_report_id') = ? OR"
         " (f.code = ? AND (json_extract(f.body, '$.parent_report_id') = ? OR"
         " json_extract(f.body, '$.prior.report_id') = ?))) ORDER BY u.id DESC",
         (code, report_id, code, report_id, report_id)).fetchall()

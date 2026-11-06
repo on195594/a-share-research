@@ -29,7 +29,7 @@
 
 ## 运行
 
-需要 Python ≥3.13、uv、Node.js、`pdftotext`（poppler-utils）和本机 pi 运行时。按 `.env.example` 建 `.env`（0600，不进 Git），然后 `uv sync`。
+需要 Python ≥3.13、uv、Node.js、`pdftotext`（poppler-utils）、中文映射包 `poppler-data` 和本机 pi 运行时。按 `.env.example` 建 `.env`（0600，不进 Git），然后 `uv sync`。
 
 ```bash
 uv run --env-file .env python -m a_share_research.research 600519 --question '最新财报改变了什么？'

@@ -7,6 +7,7 @@
 <section class="narrow">
   <h1>{{ run.name or run.code }}</h1>
   <p class="code">{{ run.code }}</p>
+  {% if run.kind == 'diagnostic' %}<p class="notice" role="status">研究诊断 · 正式研究、扫描与候选批次空闲后执行。</p>{% endif %}
   {% if run.status == "queued" %}
     <p class="notice" role="status">排队中{% if ahead %}，前面还有 {{ ahead }} 家{% endif %}。页面会自动刷新。</p>
   {% elif run.status == "running" %}
@@ -32,7 +33,7 @@
         {% endif %}
       {% endfor %}
     </ol>
-    <p class="muted">已用 <span data-elapsed="{{ elapsed }}" class="num">{{ elapsed // 60 }} 分 {{ elapsed % 60 }} 秒</span>，页面每 4 秒自动刷新。任务在后台安全运行，你可以离开页面，稍后从首页“待处理事项”进入查看。</p>
+    <p class="muted">已用 <span data-elapsed="{{ elapsed }}" class="num">{{ elapsed // 60 }} 分 {{ elapsed % 60 }} 秒</span>，页面每 4 秒自动刷新。{% if run.kind == 'diagnostic' %}任务在后台运行，可稍后通过本页查看。{% else %}任务在后台安全运行，你可以离开页面，稍后从首页“待处理事项”进入查看。{% endif %}</p>
   {% else %}
     <p class="notice caution" role="alert">没有完成：{{ run.error }}</p>
     {% if diagnostics and diagnostics.failure %}
@@ -43,7 +44,7 @@
     {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{% endif %}
     <div class="actions">
       {% if feedback_retry %}{{ feedback_retry_form(run.id, csrf, request_id) }}
-      {% else %}{{ research_form(run.code[:6], csrf, request_id, "重新研究", cls="btn") }}{% endif %}
+      {% elif run.kind != 'diagnostic' %}{{ research_form(run.code[:6], csrf, request_id, "重新研究", cls="btn") }}{% endif %}
       <a class="link" href="/">返回首页</a>
     </div>
   {% endif %}
