@@ -12,6 +12,7 @@ DATA = Path(__file__).parent / "data"
 SOURCES = json.loads(gzip.decompress((DATA / "evolution-sources-20261106.json.gz").read_bytes()))["reports"]
 NOTE = json.loads((DATA / "evolution-note-plan-20261106.json").read_text())
 PLAN = json.loads((DATA / "evolution-plan-20261106.json").read_text())
+ISSUES = json.loads((DATA / "evolution-review-issues-20261107.json").read_text())
 
 
 @pytest.fixture
@@ -70,6 +71,56 @@ def test_plan_rejects_invented_report_and_missing_original_gap(stored):
     next(c for c in bad["cases"] if c["role"] == "affected")["gap_indices"] = [99999]
     with pytest.raises(ValueError, match="真实缺口"):
         evolution.validate_plan(bad, state["sources"])
+
+
+def attach_review_issues(conn):
+    """Marked variant: real audit records from reports 63/65 attached to two captured reports."""
+    targets = {}
+    for row, captured in zip(SOURCES, ISSUES["reports"]):
+        body = json.loads(row["body"])
+        body["review_audit"] = {"version": 1, "issues": captured["issues"], "rounds": []}
+        conn.execute("UPDATE reports SET body=? WHERE id=?", (json.dumps(body, ensure_ascii=False), row["id"]))
+        targets[row["id"]] = captured["issues"][0]["id"]
+    # Marked variant: older reports saved no review record at all.
+    body = json.loads(SOURCES[2]["body"])
+    body.pop("review_audit", None)
+    conn.execute("UPDATE reports SET body=? WHERE id=?", (json.dumps(body, ensure_ascii=False), SOURCES[2]["id"]))
+    return targets
+
+
+def test_review_issues_reach_plan_and_reader_and_can_anchor_affected_cases(stored):
+    targets = attach_review_issues(stored)
+    state = evolution.item(stored, evolution.discover(stored))
+    by_id = {s["report_id"]: s for s in state["sources"]}
+    report_id, issue_id = next(iter(targets.items()))
+    captured = ISSUES["reports"][0]["issues"][0]
+    assert by_id[report_id]["review_issues"][0]["problem"] == captured["problem"]
+    assert "evidence" not in by_id[report_id]["review_issues"][0]
+    assert captured["problem"] in evolution._plan_prompt(state)
+    overview = evolution.read_saved_evidence(stored, state["sources"], report_id)
+    assert overview["review_issues"][0]["evidence"] == captured["evidence"]
+    # A report without a review record stays distinct from one whose review found nothing.
+    assert by_id[SOURCES[2]["id"]]["review_issues"] is None
+    assert evolution.read_saved_evidence(stored, state["sources"], SOURCES[2]["id"])["review_issues"] is None
+    assert evolution._review_issues({"review_audit": {"version": 1, "issues": [], "rounds": []}}) == []
+
+    good = plan(state["sources"])
+    affected = next(c for c in good["cases"] if c["role"] == "affected" and c["report_id"] == report_id)
+    affected["gap_indices"] = []
+    affected["review_issue_ids"] = [issue_id]
+    assert evolution.validate_plan(good, state["sources"]) == good
+    for invalid in (["issue-invented"], [issue_id, 1], issue_id):
+        affected["review_issue_ids"] = invalid
+        with pytest.raises(ValueError, match="复核问题编号"):
+            evolution.validate_plan(good, state["sources"])
+    affected["review_issue_ids"] = []
+    with pytest.raises(ValueError, match="真实缺口下标或复核问题编号"):
+        evolution.validate_plan(good, state["sources"])
+    # An id from another report does not belong to this case.
+    affected["review_issue_ids"] = [issue_id]
+    next(c for c in good["cases"] if c["role"] == "normal")["review_issue_ids"] = [issue_id]
+    with pytest.raises(ValueError, match="复核问题编号"):
+        evolution.validate_plan(good, state["sources"])
 
 
 def test_cases_keep_frozen_official_start_and_only_candidate_gets_method(stored):
