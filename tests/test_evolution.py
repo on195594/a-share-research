@@ -368,18 +368,68 @@ def test_review_prompt_carries_frozen_original_and_inherited_calculations(stored
     assert "table" not in payload["source_report"]  # Do not resend full industry replay data.
     assert payload["source_review_issues"] == evolution._review_issues(body)
     assert "baseline 已有同等答案时，criterion_met=false" in prompt
-    assert "复用本身不是增量" in prompt and "正常案例检查无回退，不强求新增推导" in prompt
+    assert "复用本身不是增量" in prompt
+    assert "正常案例（role=normal）按冻结的无回退判据决定 criterion_met" in prompt
+    assert "不强求新增推导或 method_used=true" in prompt
     assert "不证明首轮遗漏被避免" in prompt
     assert stored.total_changes == before
     assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
     stored.execute("UPDATE reports SET body=? WHERE id=?", (json.dumps(body | {"summary": "互变"}, ensure_ascii=False), case["report_id"]))
     with pytest.raises(ValueError, match="冻结摘要"):
         evolution._review_prompt(stored, state, 0, [])
+    with pytest.raises(ValueError, match="冻结摘要"):
+        evolution._plan_review_prompt(stored, state)
     stored.execute("UPDATE reports SET body=? WHERE id=?", (captured["body"], case["report_id"]))
     # Explicit frozen-material mismatch; never silently compare a different starting table.
     next(s for s in state["sources"] if s["report_id"] == case["report_id"])["material_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="材料与冻结摘要"):
         evolution._review_prompt(stored, state, 0, [])
+    with pytest.raises(ValueError, match="材料与冻结摘要"):
+        evolution._plan_review_prompt(stored, state)
+
+
+def test_plan_review_receives_selected_frozen_references_without_tool_calls(stored):
+    state = evolution.item(stored, evolution.discover(stored))
+    assert state is not None
+    state["plan"] = plan(state["sources"])
+    before = stored.total_changes
+    prompt = evolution._plan_review_prompt(stored, state)
+    payload = json.loads(prompt[prompt.index("\n{") + 1:])
+    refs = payload["case_references"]
+    assert [s["report_id"] for s in payload["sources"]] == [c["report_id"] for c in state["plan"]["cases"]]
+    assert [(r["report_id"], r["role"]) for r in refs] == [
+        (c["report_id"], c["role"]) for c in state["plan"]["cases"]]
+    for index, ref in enumerate(refs):
+        captured = next(r for r in SOURCES if r["id"] == ref["report_id"])
+        body = json.loads(captured["body"])
+        rows = json.loads(captured["material"])["data"]["table"]
+        assert ref["source_report"]["answer"] == body["answer"]
+        assert "table" not in ref["source_report"] and "series" not in ref["source_report"]
+        assert ref["starting_calculations"] == [r for r in rows if r.get("calculation")]
+        assert ref["source_review_issues"] == evolution._review_issues(body)
+        case_prompt = evolution._review_prompt(stored, state, index, [])
+        case_payload = json.loads(case_prompt[case_prompt.index("\n{") + 1:])
+        for key in ("source_report", "starting_calculations", "source_review_issues"):
+            assert case_payload[key] == ref[key]
+    assert "仅对受影响案例（role=affected）" in prompt
+    assert "正常案例（role=normal）仅核对冻结的无回退判据" in prompt
+    assert "不以工具调用次数代替核验" in prompt
+    assert "提供了材料不等于已经核验" in prompt
+    assert "approved" not in payload  # The evidence projection does not make the model's decision.
+    assert stored.total_changes == before
+    assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("failed_gate", [None, "criterion_met", "no_regression", "grounded"])
+def test_normal_case_requires_its_own_criteria_not_novelty_or_method_use(failed_gate):
+    # Explicit protocol variants of a saved review, not observed model outcomes.
+    reviews = [deepcopy(REVIEW["response"]) for _ in PLAN["plan"]["cases"]]
+    for case, review in zip(PLAN["plan"]["cases"], reviews):
+        review.update(criterion_met=True, no_regression=True, grounded=True,
+                      method_used=case["role"] == "affected")
+        if case["role"] == "normal" and failed_gate is not None:
+            review[failed_gate] = False
+    assert evolution.decision(PLAN["plan"], reviews) == ("adopted" if failed_gate is None else "rejected")
 
 
 def test_resolved_review_repairs_are_visible_for_attribution_not_new_contributions(stored):
@@ -387,6 +437,9 @@ def test_resolved_review_repairs_are_visible_for_attribution_not_new_contributio
     state = evolution.item(stored, evolution.discover(stored))
     assert state is not None
     state["plan"] = plan(state["sources"])
+    plan_prompt = evolution._plan_review_prompt(stored, state)
+    plan_payload = json.loads(plan_prompt[plan_prompt.index("\n{") + 1:])
+    references = {r["report_id"]: r for r in plan_payload["case_references"]}
     for index, case in enumerate(state["plan"]["cases"]):
         if case["report_id"] not in targets:
             continue
@@ -395,6 +448,7 @@ def test_resolved_review_repairs_are_visible_for_attribution_not_new_contributio
         issue = payload["source_review_issues"][0]
         captured = next(r["issues"][0] for r in ISSUES["reports"] if r["issues"][0]["id"] == targets[case["report_id"]])
         assert issue == captured and issue["status"] == "resolved"
+        assert references[case["report_id"]]["source_review_issues"] == [captured]
         assert issue["resolution"]["evidence"]
         assert "原复核补入" in prompt
         assert "已有计算答案或复核补正" in prompt
