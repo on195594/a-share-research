@@ -30,8 +30,9 @@ def recover(conn) -> None:
 
 def next_run(conn):
     """A candidate batch queues 20 research runs; the owner's own submissions go ahead of them."""
+    # Preserve the old NULL request-id ordering for queued CLI runs.
     return conn.execute("SELECT id, kind FROM runs WHERE status = 'queued' AND kind != 'diagnostic'"
-                        " ORDER BY request_id LIKE 'batch-%', id LIMIT 1").fetchone()
+                        " ORDER BY request_id IS NOT NULL, batch_id IS NOT NULL, id LIMIT 1").fetchone()
 
 
 def next_diagnostic(conn):

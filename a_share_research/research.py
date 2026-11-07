@@ -8,7 +8,7 @@ import time
 from copy import deepcopy
 from datetime import date
 
-from a_share_research import db, model, sources, evidence, stance as stances, valuation
+from a_share_research import db, model, sources, evidence, stance as stances, valuation, stock_codes
 from a_share_research.service import MAX_CALLS, research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
@@ -313,9 +313,10 @@ def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool
 
 
 def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
+    code = stock_codes.normalize_key(code)
     parents = conn.execute(
         "SELECT r.id, r.body, r.passed, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.code = ? AND u.kind = 'research' AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
+        " WHERE r.company_key = ? AND u.kind = 'research' AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
         " AND json_type(u.request, '$.feedback') = 'object')) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
         (code, parent_id, parent_id),
     ).fetchall()
@@ -358,10 +359,10 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
 
     Only its risks and checkpoints travel: no verdict or summary, so the new judgment starts from evidence.
     """
+    code = stock_codes.normalize_key(code)
     row = conn.execute(
         "SELECT r.id, r.body, r.created_at, r.coverage FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.code = ? AND r.run_id < ? AND r.passed = 1 AND u.status = 'done' AND u.kind = 'research'"
-        " AND u.replay_of IS NULL AND json_type(u.request, '$.feedback') IS NOT 'object'"
+        f" WHERE r.company_key = ? AND r.run_id < ? AND {db.FORMAL_REPORT}"
         " ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
     return _agenda(row) if row else None
@@ -479,7 +480,7 @@ def stance_calc(stance: dict, calc: dict | None, market_date: str) -> dict:
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     from a_share_research import evolution
-    run = conn.execute("SELECT code, request, request_id, started_at FROM runs WHERE id = ?", (run_id,)).fetchone()
+    run = conn.execute("SELECT code, request, request_id, started_at, batch_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
     db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now())
     runner = Runner(conn, run_id)
@@ -499,7 +500,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"))
             # Batch deep dives stay independent so cross-company comparison inputs keep their meaning.
             if not (request.get("parent_report_id") or request.get("feedback")
-                    or (run["request_id"] or "").startswith("batch-")):
+                    or run["batch_id"] is not None):
                 if prior := _prior_report(conn, material.code, run_id):
                     material.extra["prior"] = prior
                     if not material.extra["question"]:

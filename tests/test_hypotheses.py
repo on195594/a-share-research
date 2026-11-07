@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import batches, hypotheses, valuation
+from a_share_research import batches, db, hypotheses, valuation
 
 DATA = Path(__file__).with_name('data')
 CAPTURE = json.loads((DATA / 'hypotheses_v3.json').read_text())
@@ -22,8 +22,11 @@ def conn():
     for table in ('runs', 'reports', 'scan_events'):
         rows = CAPTURE[table]
         columns = list(rows[0])
-        database.execute(f"CREATE TABLE {table} ({','.join(columns)})")
-        database.executemany(f"INSERT INTO {table} VALUES ({','.join('?' for _ in columns)})",
+        generated = db.COMPANY_KEY
+        if table == 'runs':
+            generated += ", is_feedback INTEGER GENERATED ALWAYS AS (json_extract(request, '$.feedback') IS NOT NULL) VIRTUAL"
+        database.execute(f"CREATE TABLE {table} ({','.join(columns)},{generated})")
+        database.executemany(f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
                              [[r[c] for c in columns] for r in rows])
     yield database
     database.close()

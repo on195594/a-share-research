@@ -120,7 +120,7 @@ def test_diagnostic_is_hidden_from_home_and_formal_followups(stored):
 def test_queue_count_respects_idle_diagnostics_and_running_work(stored):
     conn, _ = stored
     diagnostic = service.submit_diagnostic(conn, CODE[:6], "diag-queue", question="核查", source={"event": "gap"})
-    batch = service.submit(conn, CODE[:6], "batch-1-test", question="现金流")
+    batch = service.submit(conn, CODE[:6], f"batch-1-{CODE[:6]}", question="现金流")
     formal = service.submit(conn, CODE[:6], "owner-queue", question="现金流")
     assert worker.next_run(conn)["id"] == formal
     assert reading.queue_ahead(conn, formal)[0] == 0

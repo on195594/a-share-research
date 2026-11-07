@@ -48,9 +48,8 @@ def _eligible(conn):
         return []
     rows = conn.execute(
         "SELECT r.id,r.run_id,r.code,r.name,r.body,r.body_sha256,r.created_at,u.material,u.request"
-        " FROM reports r JOIN runs u ON u.id=r.run_id WHERE u.kind='research' AND u.replay_of IS NULL"
-        " AND u.status='done' AND r.passed=1 AND u.material IS NOT NULL"
-        " AND json_type(u.request,'$.feedback') IS NOT 'object' ORDER BY r.id DESC").fetchall()
+        f" FROM reports r JOIN runs u ON u.id=r.run_id WHERE {db.FORMAL_REPORT}"
+        " AND u.material IS NOT NULL ORDER BY r.id DESC").fetchall()
     found = {}
     for row in rows:
         code = row["code"][:6]
@@ -297,7 +296,7 @@ def prepare_material(conn, request):
     from a_share_research import model
     if source.get("application_sha256") and source["application_sha256"] != model.application_identity()["application_sha256"]:
         raise ValueError("应用已升级，停止旧版本实验案例；不以新代码替代冻结对照")
-    root = conn.execute(f"SELECT * FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}",
+    root = conn.execute(f"SELECT id,identity FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}",
                         (source.get("evolution_id"),)).fetchone()
     if root is None:
         raise ValueError("诊断没有已登记的实验")
@@ -453,7 +452,7 @@ def decision(plan, reviews, *, adoption_blocked=False):
 
 def execute(conn, run_id):
     from a_share_research import model
-    row = conn.execute(f"SELECT * FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}", (run_id,)).fetchone()
+    row = conn.execute(f"SELECT identity,started_at FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}", (run_id,)).fetchone()
     if row is None:
         raise ValueError("不是研究改进控制任务")
     state = _state(row)
@@ -530,7 +529,7 @@ def execute(conn, run_id):
 
 
 def tick(conn) -> bool:
-    row = conn.execute(f"SELECT * FROM runs WHERE kind='diagnostic' AND {ROOT} AND json_extract(identity, '$.evolution.phase') NOT IN ('adopted','rejected','deferred') ORDER BY id LIMIT 1").fetchone()
+    row = conn.execute(f"SELECT id,identity,status,error FROM runs WHERE kind='diagnostic' AND {ROOT} AND json_extract(identity, '$.evolution.phase') NOT IN ('adopted','rejected','deferred') ORDER BY id LIMIT 1").fetchone()
     if row:
         state = _state(row)
         if row["status"] == "failed":
@@ -571,7 +570,7 @@ def reason_blocks(text):
 
 
 def item(conn, run_id):
-    row = conn.execute(f"SELECT * FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}", (run_id,)).fetchone()
+    row = conn.execute(f"SELECT identity,status,created_at,finished_at FROM runs WHERE id=? AND kind='diagnostic' AND {ROOT}", (run_id,)).fetchone()
     if row is None:
         return None
     state = deepcopy(_state(row))

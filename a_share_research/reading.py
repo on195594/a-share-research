@@ -243,10 +243,10 @@ def pending_reviews(conn, limit: int = PAGE_SIZE) -> tuple[list, bool]:
         " f.id AS result_id, f.passed,"
         " ROW_NUMBER() OVER (PARTITION BY p.id, json_extract(u.request, '$.feedback.location'),"
         " json_extract(u.request, '$.feedback.text') ORDER BY u.id DESC) AS attempt"
-        " FROM runs u JOIN reports p ON p.id = json_extract(u.request, '$.parent_report_id')"
+        " FROM runs u JOIN reports p ON p.id = u.parent_report_id"
         " JOIN runs original ON original.id = p.run_id"
-        " LEFT JOIN reports f ON f.run_id = u.id AND f.code = p.code"
-        " WHERE u.kind = 'research' AND substr(u.code, 1, 6) = substr(p.code, 1, 6)"
+        " LEFT JOIN reports f ON f.run_id = u.id AND f.company_key = p.company_key"
+        " WHERE u.kind = 'research' AND u.company_key = p.company_key"
         " AND u.replay_of IS NULL"
         " AND json_type(u.request, '$.feedback') = 'object'"
         " AND length(trim(json_extract(u.request, '$.feedback.text'))) > 0"
@@ -308,35 +308,43 @@ def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
     Search matches any historical name/code literally; source counts exclude replays.
     Filters apply before selecting the newest report, including passed/date constraints.
     """
-    where, params = ["u.kind = 'research'", "u.replay_of IS NULL",
-                     "json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL"], []
+    where, params = [db.RESEARCH_ORIGINAL], []
     if codes is not None:
         if not codes:
             return []
-        prefixes = [c[:6] for c in codes if len(c) >= 6]
-        where.append(f"(p.code IN ({','.join('?' for _ in codes)})"
-                     f" OR substr(p.code, 1, 6) IN ({','.join('?' for _ in prefixes)}))")
-        params.extend(codes)
-        params.extend(prefixes)
+        keys = []
+        for code in codes:
+            try:
+                keys.append(stock_codes.normalize_key(code))
+            except ValueError:
+                continue
+        if not keys:
+            return []
+        where.append(f"p.company_key IN ({','.join('?' for _ in keys)})")
+        params.extend(keys)
     if passed:
         where.append("p.passed = 1")
     if since is not None:
         where.append("p.created_at >= ?")
         params.append(since)
     if code_prefix is not None:
-        where.append("(p.code = ? OR p.code LIKE ?)")
-        params.extend((code_prefix[:6], code_prefix[:6] + ".%"))
+        try:
+            key = stock_codes.normalize_key(code_prefix)
+        except ValueError:
+            return []
+        where.append("p.company_key = ?")
+        params.append(key)
     checkpoint = "json_extract(r.body, '$.checkpoints[0].text')" if include_checkpoint else "NULL"
     return conn.execute(
         "WITH latest AS (SELECT p.code, MAX(p.id) AS id,"
-        " SUM(COALESCE(u.request_id, '') NOT LIKE 'batch-%') AS own"
+        " SUM(u.batch_id IS NULL) AS own"
         " FROM reports p JOIN runs u ON u.id = p.run_id WHERE " + " AND ".join(where) +
-        " GROUP BY substr(p.code, 1, 6) HAVING MAX(instr(lower(COALESCE(p.name, '')), lower(?)) > 0"
+        " GROUP BY p.company_key HAVING MAX(instr(lower(COALESCE(p.name, '')), lower(?)) > 0"
         " OR instr(lower(p.code), lower(?)) > 0)),"
         " selected AS (SELECT * FROM latest ORDER BY id DESC LIMIT ? OFFSET ?)"
         " SELECT r.id, r.code, r.name, r.passed, r.verdict, r.created_at, s.own,"
         f" {checkpoint} AS checkpoint,"
-        " COALESCE(u.request_id, '') LIKE 'batch-%' AS from_batch, r.coverage"
+        " u.batch_id IS NOT NULL AS from_batch, r.coverage"
         " FROM selected s JOIN reports r ON r.id = s.id"
         " JOIN runs u ON u.id = r.run_id ORDER BY r.id DESC",
         (*params, query, query, limit, offset),
@@ -367,8 +375,11 @@ def search_items(conn, query: str, *, code: str | None = None, section: str | No
     terms = [term.casefold() for term in query.split()]
     if not terms or len(query) > SEARCH_MAX_LENGTH or len(terms) > SEARCH_MAX_TERMS:
         raise service.RequestError(f"查询须为 1–{SEARCH_MAX_LENGTH} 字、最多 {SEARCH_MAX_TERMS} 个词")
-    if code is not None and not re.fullmatch(r"\d{6}", code):
-        raise service.RequestError("公司代码必须为六位数字")
+    if code is not None:
+        try:
+            code = stock_codes.normalize_key(code)
+        except ValueError as exc:
+            raise service.RequestError("公司代码必须为六位数字") from exc
     if section is not None and section not in SEARCH_SECTIONS:
         raise service.RequestError("章节仅限：" + "、".join(SEARCH_SECTIONS))
     # Select lightweight metadata first: extracting JSON before sorting/fetchall would parse every
@@ -377,11 +388,10 @@ def search_items(conn, query: str, *, code: str | None = None, section: str | No
     rows = conn.execute(
         "SELECT c.id, c.code, c.name, c.created_at, c.coverage FROM ("
         " SELECT r.id, r.code, r.name, r.created_at, r.coverage, ROW_NUMBER() OVER ("
-        "  PARTITION BY substr(r.code, 1, 6) ORDER BY r.created_at DESC, r.id DESC) AS position"
+        "  PARTITION BY r.company_key ORDER BY r.created_at DESC, r.id DESC) AS position"
         " FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.passed = 1 AND u.status = 'done' AND u.kind = 'research' AND u.replay_of IS NULL"
-        " AND json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL"
-        " AND (? IS NULL OR substr(r.code, 1, 6) = ?)) c"
+        f" WHERE {db.FORMAL_REPORT}"
+        " AND (? IS NULL OR r.company_key = ?)) c"
         " WHERE (? OR c.position = 1) ORDER BY c.created_at DESC, c.id DESC",
         (code, code, int(history)),
     ).fetchall()
@@ -464,7 +474,7 @@ def library_results(conn, query: str, *, history: bool = False, whole_library: b
         # ID also prevents reusing metadata superseded since the company query. Replays/feedback
         # can cause an extra refresh, but latest_reports still applies the eligibility rules.
         versions = conn.execute(
-            "SELECT code, MAX(id) AS id FROM reports WHERE substr(code, 1, 6) IN ("
+            "SELECT code, MAX(id) AS id FROM reports WHERE company_key IN ("
             + ",".join("?" for _ in prefixes) + ") GROUP BY code", prefixes).fetchall()
         reusable, missing_codes = [], []
         for row in versions:
@@ -537,7 +547,9 @@ def comparison(conn, report) -> dict:
     if not isinstance(parent, int) or parent == report['id']:
         return {'parent_report_id': None, 'baseline_status': 'not_linked',
                 'reason': '未记录明确关联的原报告，不能按研究时间自动配对。'}
-    old = conn.execute('SELECT r.*, u.request, u.status FROM reports r JOIN runs u ON u.id = r.run_id'
+    old = conn.execute('SELECT r.id, r.run_id, r.code, r.name, r.period, r.passed, r.verdict, r.created_at,'
+                       ' r.body_sha256, r.coverage, r.body, u.request, u.status'
+                       ' FROM reports r JOIN runs u ON u.id = r.run_id'
                        ' WHERE r.id = ?', (parent,)).fetchone()
     if old is None or old['code'] != report['code']:
         return {'parent_report_id': parent, 'baseline_status': 'missing' if old is None else 'not_same_code',
@@ -735,10 +747,10 @@ def active_runs(conn) -> list:
     return conn.execute(
         "SELECT id, code, name, status, step FROM runs u WHERE kind IN ('research', 'price')"
         " AND (status IN ('queued', 'running') OR (status = 'failed' AND replay_of IS NULL AND created_at >= ?"
-        " AND COALESCE(request_id, '') NOT LIKE 'batch-%'"
+        " AND batch_id IS NULL"
         " AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.run_id=u.id)"
         " AND NOT EXISTS (SELECT 1 FROM runs newer WHERE newer.request_id='web-retry:' || u.id"
-        " OR (newer.id > u.id AND newer.kind = u.kind AND substr(newer.code, 1, 6) = substr(u.code, 1, 6)"
+        " OR (newer.id > u.id AND newer.kind = u.kind AND newer.company_key = u.company_key"
         " AND newer.request IS u.request))))"
         " ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END, id DESC LIMIT 30", (since,)
     ).fetchall()
@@ -750,8 +762,8 @@ def latest_price(conn, code: str) -> dict | None:
     except ValueError:
         return None
     row = conn.execute(
-        "SELECT body FROM prices WHERE (code = ? OR substr(code, 1, 6) = ?) ORDER BY id DESC LIMIT 1",
-        (code, key),
+        "SELECT body FROM prices WHERE company_key = ? ORDER BY id DESC LIMIT 1",
+        (key,),
     ).fetchone()
     if row is None:
         return None
@@ -768,7 +780,7 @@ def latest_batch(conn):
 
 def run(conn, run_id: int):
     return conn.execute(
-        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, request_id, replay_of FROM runs WHERE id = ?",
+        "SELECT id, kind, code, name, status, step, error, started_at, finished_at, request, request_id, replay_of, batch_id FROM runs WHERE id = ?",
         (run_id,),
     ).fetchone()
 
@@ -780,32 +792,37 @@ def report_for_run(conn, run_id: int):
 def queue_ahead(conn, run_id: int):
     return conn.execute(
         "SELECT COUNT(*) FROM runs u, (SELECT kind = 'diagnostic' AS diagnostic,"
-        " COALESCE(request_id LIKE 'batch-%', 0) AS batch FROM runs WHERE id = ?) me"
+        " batch_id IS NOT NULL AS batch FROM runs WHERE id = ?) me"
         " WHERE u.request_id IS NOT NULL AND u.id != ? AND (u.status = 'running' OR (u.status = 'queued' AND"
-        " (u.kind = 'diagnostic', COALESCE(u.request_id LIKE 'batch-%', 0), u.id)"
+        " (u.kind = 'diagnostic', u.batch_id IS NOT NULL, u.id)"
         " < (me.diagnostic, me.batch, ?)))",
         (run_id, run_id, run_id)).fetchone()
 
 
 def report(conn, report_id: int):
-    return conn.execute("SELECT r.* FROM reports r WHERE id = ?", (report_id,)).fetchone()
+    return conn.execute("SELECT id, run_id, code, name, period, passed, verdict, created_at,"
+                        " body_sha256, coverage, body FROM reports WHERE id = ?", (report_id,)).fetchone()
 
 
 def report_run(conn, run_id: int):
-    return conn.execute("SELECT kind, status, request, request_id, identity, replay_of, material FROM runs WHERE id = ?", (run_id,)).fetchone()
+    return conn.execute("SELECT kind, status, request, request_id, identity, replay_of, material, batch_id FROM runs WHERE id = ?", (run_id,)).fetchone()
 
 
 def followups(conn, code: str, report_id: int):
+    try:
+        key = stock_codes.normalize_key(code)
+    except ValueError:
+        return []
     return conn.execute(
         "SELECT u.id, u.status, COALESCE(NULLIF(json_extract(u.request, '$.question'), ''),"
         " json_extract(f.body, '$.question')) AS question,"
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"
         " json_extract(f.body, '$.prior.report_id') AS prior_report_id"
         " FROM runs u LEFT JOIN reports f ON f.run_id = u.id"
-        " WHERE u.kind = 'research' AND substr(u.code, 1, 6) = substr(?, 1, 6) AND (json_extract(u.request, '$.parent_report_id') = ? OR"
-        " (substr(f.code, 1, 6) = substr(?, 1, 6) AND (json_extract(f.body, '$.parent_report_id') = ? OR"
+        " WHERE u.kind = 'research' AND u.company_key = ? AND (u.parent_report_id = ? OR"
+        " (f.company_key = ? AND (json_extract(f.body, '$.parent_report_id') = ? OR"
         " json_extract(f.body, '$.prior.report_id') = ?))) ORDER BY u.id DESC",
-        (code, report_id, code, report_id, report_id)).fetchall()
+        (key, report_id, key, report_id, report_id)).fetchall()
 
 
 def request_run(conn, request_id: str):
@@ -818,9 +835,13 @@ def api_run(conn, run_id: int):
 
 
 def api_reports(conn, code: str):
+    try:
+        key = stock_codes.normalize_key(code)
+    except ValueError:
+        return []
     return conn.execute("SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, u.status"
-        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE substr(r.code, 1, 6) = ? AND u.kind = 'research'"
-        " ORDER BY r.id DESC LIMIT 100", (code,)).fetchall()
+        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE r.company_key = ? AND u.kind = 'research'"
+        " ORDER BY r.id DESC LIMIT 100", (key,)).fetchall()
 
 
 def stock_reports(conn, code: str, *, summaries: bool = False):
@@ -830,15 +851,17 @@ def stock_reports(conn, code: str, *, summaries: bool = False):
         return []
     # History needs metadata and saved series, not every report's full evidence body.
     columns = ("r.id,r.run_id,r.code,r.name,r.created_at,r.period,r.passed,r.verdict,r.coverage,"
-               "json_extract(r.body, '$.series') AS operating_series" if summaries else "r.*")
+               "json_extract(r.body, '$.series') AS operating_series" if summaries else
+               "r.id,r.run_id,r.code,r.name,r.period,r.passed,r.verdict,r.created_at,"
+               "r.body_sha256,r.coverage,r.body")
     return conn.execute(
         f"SELECT {columns}, u.replay_of AS replay_of,"
         " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
-        " COALESCE(json_extract(u.request, '$.parent_report_id'), json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
+        " COALESCE(u.parent_report_id, json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"
         " json_extract(r.body, '$.prior.report_id') AS prior_report_id FROM reports r"
-        " JOIN runs u ON u.id = r.run_id WHERE (r.code = ? OR substr(r.code, 1, 6) = ?)"
-        " AND u.kind = 'research' ORDER BY r.id DESC", (code, key),
+        " JOIN runs u ON u.id = r.run_id WHERE r.company_key = ?"
+        " AND u.kind = 'research' ORDER BY r.id DESC", (key,),
     ).fetchall()
 
 

@@ -85,7 +85,7 @@ ACTIVE_METHODS = (
     " AND NOT EXISTS (SELECT 1 FROM reports newer JOIN runs n ON n.id = newer.run_id"
     " WHERE newer.passed = 1 AND n.status = 'done' AND n.kind = 'research'"
     " AND json_type(newer.body, '$.methods') = 'array'"
-    " AND json_extract(n.request, '$.parent_report_id') = r.id"
+    " AND n.parent_report_id = r.id"
     " AND json_extract(n.request, '$.feedback.location') = 'methods[' || m.key || ']')"
 )
 
@@ -94,8 +94,8 @@ def method_catalog(conn, *, before=None) -> list[dict]:
     """Freeze retrievable methods at a run/batch boundary, including later supersessions."""
     from a_share_research import evolution
     sql = ACTIVE_METHODS.replace(
-        " AND json_extract(n.request, '$.parent_report_id') = r.id",
-        " AND (? IS NULL OR newer.created_at <= ?) AND json_extract(n.request, '$.parent_report_id') = r.id")
+        " AND n.parent_report_id = r.id",
+        " AND (? IS NULL OR newer.created_at <= ?) AND n.parent_report_id = r.id")
     rows = conn.execute(sql + " AND (? IS NULL OR r.created_at <= ?) ORDER BY r.id DESC, m.key",
                         (before, before, before, before)).fetchall()
     found = []

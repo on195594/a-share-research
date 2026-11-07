@@ -594,6 +594,8 @@ def api_reports(request: Request, code: str):
 def api_search(request: Request, q: str, code: str | None = None, section: str | None = None, history: bool = False,
                page: int = Query(1, ge=1, le=10000)):
     api_session(request)
+    if code is not None and not re.fullmatch(r"\d{6}", code):
+        raise service.RequestError("公司代码必须为六位数字")
     items, more = reading.search_items(conn, q, code=code, section=section, history=history, page=page)
     return {"version": service.VERSION, "items": items, "page": page, "more": more}
 

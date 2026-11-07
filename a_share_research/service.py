@@ -132,12 +132,12 @@ def retry_view(run) -> dict:
     else:
         label = '重试原研究问题' if (json.loads(run['request'] or '{}') or {}).get('question') else '重新运行这次研究'
     note = '重试会新建独立任务，结果不回填本批次，该候选在批次中仍显示失败、不可选；调用上限按普通研究计算。'
-    return {'label': label, 'note': note if (run['request_id'] or '').startswith('batch-') else None}
+    return {'label': label, 'note': note if run['batch_id'] is not None else None}
 
 
 def retry_run(conn, run_id: int) -> int:
     """Retry the saved task once, even across refreshed pages or concurrent clicks."""
-    run = conn.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+    run = conn.execute('SELECT kind, code, name, status, replay_of, request FROM runs WHERE id=?', (run_id,)).fetchone()
     if run is None:
         raise RequestError('任务不存在', 404)
     if run['status'] != 'failed' or run['replay_of'] is not None or run['kind'] not in ('research', 'price'):
@@ -164,7 +164,8 @@ def _table_periods(body: dict) -> list[str]:
 def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = False) -> dict:
     # One SELECT gives a consistent task/report snapshot while a worker is saving a result.
     row = conn.execute(
-        "SELECT r.*, u.kind AS purpose, u.status, u.error, u.identity, u.material, u.request,"
+        "SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, r.body,"
+        " u.kind AS purpose, u.status, u.error, u.identity, u.material, u.request,"
         " (SELECT json_group_array(identity) FROM calls WHERE run_id = r.run_id) AS call_identities FROM reports r"
         " JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (report_id,),
     ).fetchone()
@@ -227,9 +228,8 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         raise RequestError("公司代码必须为六位数字")
     row = conn.execute(
         "SELECT r.id, r.name, r.created_at, COALESCE(u.finished_at,r.created_at) AS completed_at, r.period, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
-        "WHERE substr(r.code, 1, 6) = ? AND r.passed = 1 AND u.status = 'done' AND u.kind = 'research' "
-        "AND json_extract(COALESCE(u.request, '{}'), '$.feedback') IS NULL "
-        "AND u.replay_of IS NULL ORDER BY r.created_at DESC, r.id DESC LIMIT 1", (code,),
+        f"WHERE r.company_key = ? AND {db.FORMAL_REPORT} "
+        "ORDER BY r.created_at DESC, r.id DESC LIMIT 1", (code,),
     ).fetchone()
     if row is None:
         raise RequestError("暂无通过复核的非纠错研究报告", 404)
@@ -285,11 +285,7 @@ def company_cards(conn: sqlite3.Connection) -> dict:
 def is_monthly_research(conn, run_id: int | None) -> bool:
     # Queued/gathering runs have six digits; gathered runs include the exchange suffix.
     return conn.execute(
-        "SELECT 1 FROM runs r JOIN batches b ON r.request_id IN ("
-        "'batch-' || b.id || '-' || substr(r.code, 1, 6), "
-        "'batch-' || b.id || '-' || substr(r.code, 1, 6) || '.SH', "
-        "'batch-' || b.id || '-' || substr(r.code, 1, 6) || '.SZ', "
-        "'batch-' || b.id || '-' || substr(r.code, 1, 6) || '.BJ') "
+        "SELECT 1 FROM runs r JOIN batches b ON r.batch_id = b.id "
         "WHERE r.id = ? AND b.request_id LIKE 'monthly:%'", (run_id,)).fetchone() is not None
 
 
@@ -507,8 +503,8 @@ def submit_price(conn, code: str, request_id: str) -> int:
     except ValueError as exc:
         raise RequestError("需要6位数字或带合法交易所后缀的股票代码", 400) from exc
     report = conn.execute(
-        "SELECT code, name FROM reports WHERE (code = ? OR substr(code, 1, 6) = ?) ORDER BY id DESC LIMIT 1",
-        (code, key),
+        "SELECT code, name FROM reports WHERE company_key = ? ORDER BY id DESC LIMIT 1",
+        (key,),
     ).fetchone()
     if report is None:
         raise RequestError("请先研究这家公司。", 404)

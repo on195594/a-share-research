@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from a_share_research import batches, screening, validation, valuation
+from a_share_research import batches, db, screening, validation, valuation
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -115,15 +115,14 @@ def load_samples(conn) -> list[dict]:
         "SELECT r.id AS report,r.run_id,r.code,u.created_at AS created,"
         "COALESCE(u.finished_at,r.created_at) AS completed,r.body,e.announced,e.doc_key "
         "FROM scan_events e JOIN runs u ON u.id=e.run_id JOIN reports r ON r.run_id=u.id "
-        "WHERE e.action='queued_review' AND r.passed=1 AND substr(e.code,1,6)=substr(r.code,1,6) "
+        "WHERE e.action='queued_review' AND r.passed=1 AND e.company_key=r.company_key "
         "ORDER BY r.id,e.announced,e.id").fetchall()
     grouped = {}
     for r in rows:
         if r['report'] not in grouped:
             prior = conn.execute(
                 "SELECT r.id,r.body FROM reports r JOIN runs u ON u.id=r.run_id "
-                "WHERE substr(r.code,1,6)=? AND r.passed=1 AND u.status='done' AND u.kind='research' "
-                "AND json_extract(COALESCE(u.request,'{}'),'$.feedback') IS NULL AND u.replay_of IS NULL "
+                f"WHERE r.company_key=? AND {db.FORMAL_REPORT} "
                 "AND julianday(COALESCE(u.finished_at,r.created_at)) < julianday(?) "
                 "ORDER BY r.created_at DESC,r.id DESC LIMIT 1", (r['code'][:6], r['created'])).fetchone()
             grouped[r['report']] = {k: r[k] for k in ('report', 'run_id', 'code', 'created', 'completed', 'announced')}

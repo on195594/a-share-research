@@ -12,6 +12,9 @@ from zoneinfo import ZoneInfo
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 DATA = Path(os.environ.get("DATA_DIR", "data"))  # production keeps data outside the code checkout
 
+RESEARCH_ORIGINAL = "u.kind = 'research' AND u.replay_of IS NULL AND NOT u.is_feedback"
+FORMAL_REPORT = f"{RESEARCH_ORIGINAL} AND r.passed = 1 AND u.status = 'done'"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY,

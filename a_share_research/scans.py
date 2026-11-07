@@ -7,7 +7,7 @@ import logging
 import math
 import re
 
-from a_share_research import companies, db, service, valuation
+from a_share_research import companies, db, service, stock_codes, valuation
 
 log = logging.getLogger(__name__)
 # Generic 风险提示 titles (trading-volatility or redemption notices) are routine and stay out of scope.
@@ -139,7 +139,7 @@ def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None
     with db.transaction(conn):
         for row in conn.execute("SELECT code FROM subscriptions WHERE origin='external'").fetchall():
             if row['code'] not in codes:
-                conn.execute('DELETE FROM subscriptions WHERE code=?', (row['code'],))
+                conn.execute('DELETE FROM subscriptions WHERE company_key=?', (stock_codes.normalize_key(row['code']),))
         for code in sorted(set(codes)):
             conn.execute("INSERT INTO subscriptions(code, added_at) VALUES (?,?) ON CONFLICT(code) DO NOTHING",
                          (code, db.now()))
@@ -161,8 +161,10 @@ def recover(conn) -> None:
 
 
 def events(conn, *, scan_id: int | None = None, code: str | None = None) -> list[dict]:
+    if code is not None:
+        code = stock_codes.normalize_key(code)
     where, params = [], []
-    for column, value in (('e.scan_id', scan_id), ('e.code', code)):
+    for column, value in (('e.scan_id', scan_id), ('e.company_key', code)):
         if value is not None:
             where.append(column + '=?')
             params.append(value)
@@ -195,7 +197,8 @@ def card_or_none(conn, code: str, *, scan_id: int | None = None) -> dict | None:
 
 
 def latest_close(conn, code: str) -> dict:
-    row = conn.execute('SELECT last_close,last_close_date FROM subscriptions WHERE code=?', (code,)).fetchone()
+    code = stock_codes.normalize_key(code)
+    row = conn.execute('SELECT last_close,last_close_date FROM subscriptions WHERE company_key=?', (code,)).fetchone()
     candidates = [dict(row)] if row and row['last_close'] is not None else []
     for scan in conn.execute('SELECT summary FROM scans WHERE summary IS NOT NULL ORDER BY id DESC'):
         close = json.loads(scan['summary']).get('closes', {}).get(code)
@@ -287,7 +290,7 @@ def normalize_close(row: dict, code: str, at: str) -> dict:
 
 
 def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
-    rows = conn.execute("SELECT DISTINCT u.* FROM runs u JOIN scan_events e ON e.run_id=u.id "
+    rows = conn.execute("SELECT DISTINCT u.id,u.code,u.status,u.error,u.finished_at FROM runs u JOIN scan_events e ON e.run_id=u.id "
                         "WHERE u.status IN ('done','failed') AND u.finished_at IS NOT NULL ORDER BY u.id")
     result = []
     for row in rows:
@@ -299,9 +302,8 @@ def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
             if current is None:
                 continue
             previous = conn.execute(
-                "SELECT r.body FROM reports r JOIN runs u ON u.id=r.run_id WHERE substr(r.code,1,6)=? "
-                "AND r.id<? AND r.passed=1 AND u.status='done' AND u.kind='research' AND u.replay_of IS NULL "
-                "AND json_extract(COALESCE(u.request,'{}'),'$.feedback') IS NULL ORDER BY r.id DESC LIMIT 1",
+                "SELECT r.body FROM reports r JOIN runs u ON u.id=r.run_id WHERE r.company_key=? "
+                f"AND r.id<? AND {db.FORMAL_REPORT} ORDER BY r.id DESC LIMIT 1",
                 (row['code'][:6], current['id'])).fetchone()
             if previous:
                 def judgment(body):
@@ -314,6 +316,7 @@ def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
 
 
 def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
+    scope = {stock_codes.normalize_key(code) for code in scope}
     with db.transaction(conn):
         pending = [e for e in events(conn) if e['action'] == 'deferred' and e['code'] in scope]
         eligible = []
@@ -335,8 +338,8 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
             run_id = service.submit(conn, code, f'scan-{scan_id}-{code}')
             # Explicit at makes offline replay and midnight boundary behavior deterministic.
             conn.execute('UPDATE runs SET created_at=? WHERE id=?', (at, run_id))
-            conn.execute("UPDATE scan_events SET action='queued_review',run_id=? WHERE code=? AND action='deferred'",
-                         (run_id, code))
+            conn.execute("UPDATE scan_events SET action='queued_review',run_id=? WHERE company_key=? AND action='deferred'",
+                         (run_id, stock_codes.normalize_key(code)))
             queued.append(run_id)
         return queued
 
@@ -397,8 +400,8 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
             try:
                 close = normalize_close(source.valuation(code), code, at)
                 summary['closes'][code] = close
-                conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=? WHERE code=?',
-                             (close['last_close'], close['last_close_date'], code))
+                conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=? WHERE company_key=?',
+                             (close['last_close'], close['last_close_date'], stock_codes.normalize_key(code)))
             except Exception as exc:
                 log.exception('scan %s valuation %s failed', scan_id, code)
                 summary['failures'].append({'code': code, 'stage': 'valuation', 'reason': str(exc)})
