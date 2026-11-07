@@ -292,6 +292,42 @@ def test_actual_review_nested_path_and_mutated_evidence():
         evolution.validate_review_evidence(wrong_quote, REVIEW_REPORTS)
 
 
+def test_actual_review_table_and_valuation_paths_and_mutated_evidence():
+    captured = json.loads(gzip.decompress((DATA / "evolution-review-table-path-20261107.json.gz").read_bytes()))
+    response, reports = captured["response"], captured["reports"]
+    # Production root 179 stopped when this legitimate response failed location validation.
+    assert evolution.validate_review_evidence(response, reports)["no_regression"] is False
+    table = reports["candidate"]
+    assert evolution._lookup(table, "table[id=C.37].calculation.requested_label").startswith("聚乙烯三季度")
+    assert evolution._lookup(table, "table[id=C.36]") != evolution._lookup(table, "table[id=C.37]")
+    for location in ("table[id=C.99999]", "table[id=C.37].__class__", "table[id=]", "table[id=C.37;exit()]",
+                     "answer[id=C.37]x", "valuation_calc[id=C.37]"):
+        assert evolution._lookup(table, location) == ""
+    moved = deepcopy(response)
+    ref = next(r for r in moved["evidence"] if "C.37" in r["location"])
+    ref["location"] = "table[id=C.36].calculation.requested_label"
+    with pytest.raises(ValueError, match="逐字原文"):
+        evolution.validate_review_evidence(moved, reports)
+    altered = deepcopy(response)
+    next(r for r in altered["evidence"] if "C.37" in r["location"])["quote"] += "（互变测试追加）"
+    with pytest.raises(ValueError, match="逐字原文"):
+        evolution.validate_review_evidence(altered, reports)
+
+
+def test_review_prompt_carries_frozen_original_without_table(stored):
+    state = evolution.item(stored, evolution.discover(stored))
+    state["plan"] = plan(state["sources"])
+    case = state["plan"]["cases"][0]
+    prompt = evolution._review_prompt(stored, state, 0, [])
+    payload = json.loads(prompt[prompt.index("\n{") + 1:])
+    body = json.loads(next(r["body"] for r in SOURCES if r["id"] == case["report_id"]))
+    assert payload["source_report"]["answer"] == body["answer"]
+    assert "table" not in payload["source_report"]
+    stored.execute("UPDATE reports SET body=? WHERE id=?", (json.dumps(body | {"summary": "互变"}, ensure_ascii=False), case["report_id"]))
+    with pytest.raises(ValueError, match="冻结摘要"):
+        evolution._review_prompt(stored, state, 0, [])
+
+
 def test_saved_review_requires_exact_prompt_and_preserves_failed_judgment(stored):
     root, state = registered(stored)
     call_id = db.log_call(stored, root, "evolution_case_review", REVIEW["prompt"],
