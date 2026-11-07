@@ -58,6 +58,34 @@ def test_source_watermark_prevents_repeated_idle_discovery_and_diagnostics_are_n
     assert evolution.item(stored, run_id)["usage"][0]["calls"] == 0
 
 
+def test_discovery_version_change_is_one_source_set_not_one_task_per_report(stored, monkeypatch):
+    root = evolution.discover(stored)
+    assert root is not None
+    row = stored.execute("SELECT identity FROM runs WHERE id=?", (root,)).fetchone()
+    state = evolution._state(row)
+    state.update(phase="deferred", reason="离线协议变体：保留旧来源的暂缓结果")
+    evolution._save(stored, root, state)
+    # A historical application identity does not invalidate the source-set receipt.
+    identity = json.loads(stored.execute("SELECT identity FROM runs WHERE id=?", (root,)).fetchone()[0])
+    identity["application_sha256"] = json.loads(SOURCES[0]["identity"])["application_sha256"]
+    db.update_run(stored, root, identity=json.dumps(identity))
+    assert evolution.discover(stored) is None
+
+    # Explicit experiment-version mutation, not a release or a new real experiment.
+    monkeypatch.setattr(evolution, "VERSION", evolution.VERSION + "-offline-test")
+    new_root = evolution.discover(stored)
+    assert new_root is not None and new_root != root
+    new_state = evolution.item(stored, new_root)
+    assert new_state is not None
+    assert new_state["sources"] == state["sources"]
+    assert evolution.discover(stored) is None
+    assert stored.execute(f"SELECT COUNT(*) FROM runs WHERE {evolution.ROOT}").fetchone()[0] == 2
+    assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
+    previous = evolution.item(stored, root)
+    assert previous is not None and previous["phase"] == "deferred"
+    assert evolution.active_methods(stored) == []
+
+
 def test_plan_rejects_invented_report_and_missing_original_gap(stored):
     run_id = evolution.discover(stored)
     state = evolution.item(stored, run_id)
@@ -155,6 +183,10 @@ def test_unmet_frozen_criteria_cannot_enter_active_methods(stored):
     evolution._save(stored, root, state)
     assert evolution.active_methods(stored) == []
     assert evolution.item(stored, root)["finished_at"] is not None
+    before = stored.total_changes
+    evolution.execute(stored, root)  # A terminal old root cannot resample after a code/parser change.
+    assert stored.total_changes == before
+    assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
     with pytest.raises(ValueError, match="全部事前案例"):
         evolution.decision(state["plan"], reviews[:1])
 
@@ -297,6 +329,12 @@ def test_actual_review_table_and_valuation_paths_and_mutated_evidence():
     response, reports = captured["response"], captured["reports"]
     # Production root 179 stopped when this legitimate response failed location validation.
     assert evolution.validate_review_evidence(response, reports)["no_regression"] is False
+    assert response["method_used"] is True and response["criterion_met"] is False
+    # One saved failed judgment is sufficient to reject, even if other cases passed.
+    reviews = [{"criterion_met": True, "no_regression": True, "grounded": True, "method_used": True}
+               for _ in PLAN["plan"]["cases"]]
+    reviews[0] = response
+    assert evolution.decision(PLAN["plan"], reviews) == "rejected"
     table = reports["candidate"]
     assert evolution._lookup(table, "table[id=C.37].calculation.requested_label").startswith("聚乙烯三季度")
     assert evolution._lookup(table, "table[id=C.36]") != evolution._lookup(table, "table[id=C.37]")
@@ -314,18 +352,55 @@ def test_actual_review_table_and_valuation_paths_and_mutated_evidence():
         evolution.validate_review_evidence(altered, reports)
 
 
-def test_review_prompt_carries_frozen_original_without_table(stored):
+def test_review_prompt_carries_frozen_original_and_inherited_calculations(stored):
     state = evolution.item(stored, evolution.discover(stored))
+    assert state is not None
     state["plan"] = plan(state["sources"])
     case = state["plan"]["cases"][0]
+    before = stored.total_changes
     prompt = evolution._review_prompt(stored, state, 0, [])
     payload = json.loads(prompt[prompt.index("\n{") + 1:])
-    body = json.loads(next(r["body"] for r in SOURCES if r["id"] == case["report_id"]))
+    captured = next(r for r in SOURCES if r["id"] == case["report_id"])
+    body = json.loads(captured["body"])
+    calculations = [r for r in json.loads(captured["material"])["data"]["table"] if r.get("calculation")]
+    assert calculations and payload["starting_calculations"] == calculations
     assert payload["source_report"]["answer"] == body["answer"]
-    assert "table" not in payload["source_report"]
+    assert "table" not in payload["source_report"]  # Do not resend full industry replay data.
+    assert payload["source_review_issues"] == evolution._review_issues(body)
+    assert "baseline 已有同等答案时，criterion_met=false" in prompt
+    assert "复用本身不是增量" in prompt and "正常案例检查无回退，不强求新增推导" in prompt
+    assert "不证明首轮遗漏被避免" in prompt
+    assert stored.total_changes == before
+    assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
     stored.execute("UPDATE reports SET body=? WHERE id=?", (json.dumps(body | {"summary": "互变"}, ensure_ascii=False), case["report_id"]))
     with pytest.raises(ValueError, match="冻结摘要"):
         evolution._review_prompt(stored, state, 0, [])
+    stored.execute("UPDATE reports SET body=? WHERE id=?", (captured["body"], case["report_id"]))
+    # Explicit frozen-material mismatch; never silently compare a different starting table.
+    next(s for s in state["sources"] if s["report_id"] == case["report_id"])["material_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="材料与冻结摘要"):
+        evolution._review_prompt(stored, state, 0, [])
+
+
+def test_resolved_review_repairs_are_visible_for_attribution_not_new_contributions(stored):
+    targets = attach_review_issues(stored)  # Explicit association variant of saved issues, not a new experiment.
+    state = evolution.item(stored, evolution.discover(stored))
+    assert state is not None
+    state["plan"] = plan(state["sources"])
+    for index, case in enumerate(state["plan"]["cases"]):
+        if case["report_id"] not in targets:
+            continue
+        prompt = evolution._review_prompt(stored, state, index, [])
+        payload = json.loads(prompt[prompt.index("\n{") + 1:])
+        issue = payload["source_review_issues"][0]
+        captured = next(r["issues"][0] for r in ISSUES["reports"] if r["issues"][0]["id"] == targets[case["report_id"]])
+        assert issue == captured and issue["status"] == "resolved"
+        assert issue["resolution"]["evidence"]
+        assert "原复核补入" in prompt
+        assert "已有计算答案或复核补正" in prompt
+    assert "baseline 已给出同等答案则不通过" in evolution._plan_prompt(state)
+    assert "缺少可核验的补正前输入" in evolution._plan_prompt(state)
+    assert stored.execute("SELECT COUNT(*) FROM calls").fetchone()[0] == 0
 
 
 def test_saved_review_requires_exact_prompt_and_preserves_failed_judgment(stored):
