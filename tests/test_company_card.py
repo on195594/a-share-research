@@ -121,7 +121,8 @@ def test_cards_scope_origins_missing_and_rolled_valuation_read_only(tmp_path):
         assert card == service.company_card(conn, code) | {'origin': card['origin']}
     current = cards['600900']['current']
     rolled = valuation.at(calc, calc['close'], '2027-10-30')
-    assert current['valuation'] == rolled | {'boundary': stance.on_boundary(rolled)}
+    assert current['valuation'] == rolled | {'boundary': stance.on_boundary(rolled),
+                                             'flip_distance': stance.flip_distance(calc | rolled)}
     assert current['current_zone'] == current['valuation']['zone'] == '中性区'
     assert cards['600900']['valuation_calc']['zone'] == '测算透支区'
     assert cards['600519']['current']['valuation'] is None

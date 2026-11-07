@@ -60,6 +60,7 @@ def stance_decision(stance: dict | None, stance_calc: dict | None, valuation_cal
 
     out["zone"] = v2.get("zone") or vc.get("zone")
     out["boundary"] = stances.on_boundary(vc) is True
+    out["flip_distance"] = stances.flip_distance(vc)
     return out
 
 
@@ -680,6 +681,7 @@ def card(report, body: dict, last_passed=None) -> dict:
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
             'open_questions': body.get('open_questions', []) if passed else [],
             'boundary': stances.on_boundary(body.get('valuation_calc')) if passed else None,
+            'flip_distance': stances.flip_distance(body.get('valuation_calc')) if passed else None,
             'stance': stance_decision(body.get('stance'), body.get('stance_calc'), body.get('valuation_calc')) if passed else None,
             'stance_market_date': body.get('market_date') if passed else None,
             'figures': [metrics[k] for k in CARD_KEYS if k in metrics],

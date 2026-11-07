@@ -5,7 +5,8 @@ New reports choose 现在分批, 等价格 or 回避. A next-disclosure add_trig
 
 Sizing and real orders stay with the account owner and Skills. See docs/judgment-validation.md.
 """
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, InvalidOperation, localcontext
+from math import isfinite
 
 from a_share_research import forecasts, valuation
 
@@ -36,6 +37,50 @@ def on_boundary(valuation_calc) -> bool | None:
     calc = valuation_calc
     # Decimal on the shown values keeps the band edge exact (105 vs 100 is on it, not 5.000…04% off).
     return abs(Decimal(str(calc["close"])) / Decimal(str(calc["v2"]["support_below"])) - 1) <= BOUNDARY
+
+
+def flip_distance(valuation_calc) -> float | None:
+    """Uniform exit-cap change reaching the v2 hurdle, with dividends and probabilities fixed.
+
+    A signed ratio, not a probability: negative means lower exit values, positive means higher.
+    Inputs must describe one price/date basis; incomplete or infeasible valuations return None.
+    """
+    if not isinstance(valuation_calc, dict) or valuation_calc.get("not_priced") or "error" in valuation_calc:
+        return None
+    try:
+        calc = valuation_calc
+        v2 = calc["v2"]
+        close, cap, r, horizon, hurdle = (_number(v) for v in
+                                        (calc["close"], calc["market_cap"], calc["r"],
+                                         calc["horizon"], v2["support_below"]))
+        if any(v is None for v in (close, cap, r, horizon, hurdle)):
+            return None
+        if min(close, cap, horizon, hurdle) <= 0 or r <= -1:
+            return None
+        with localcontext() as context:
+            context.prec = 40
+            weights, exits, dividends = [], [], []
+            for name in valuation.SCENARIOS:
+                scenario = calc["scenarios"][name]
+                weight, exit_cap, dividend = (_number(v) for v in
+                                             (v2["probabilities"][name], scenario["exit_cap"], scenario["dividends"]))
+                if any(v is None for v in (weight, exit_cap, dividend)):
+                    return None
+                if weight < 0 or exit_cap + dividend < 0:
+                    return None
+                weights.append(weight)
+                exits.append(weight * exit_cap)
+                dividends.append(weight * dividend)
+            expected_exit, expected_dividends = sum(exits), sum(dividends)
+            if sum(weights) != 1 or expected_exit <= 0:
+                return None
+            k = (cap * (1 + r) ** horizon - expected_dividends) / expected_exit
+            if k <= 0:
+                return None
+            distance = float(k - 1)
+            return distance if isfinite(distance) else None
+    except (KeyError, TypeError, DecimalException, OverflowError, ValueError):
+        return None
 
 
 def _number(value) -> Decimal | None:

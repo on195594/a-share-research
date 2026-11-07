@@ -37,7 +37,9 @@ def test_captured_report_and_current_boundary_reach_both_card_endpoints_unchange
     assert frozen['close'] == calc['close']
     assert frozen['v2']['support_below'] == calc['v2']['support_below']
     assert frozen['boundary'] is stance.on_boundary(calc)
+    assert frozen['flip_distance'] == stance.flip_distance(calc)
     assert card['current']['valuation']['boundary'] is stance.on_boundary(calc)
+    assert card['current']['valuation']['flip_distance'] == pytest.approx(stance.flip_distance(calc))
     assert card['stance_calc'] == record['body']['stance_calc']
     assert card['open_questions'] == []  # no recorded unanswered issues, not a completeness certificate
     before = conn.total_changes
@@ -60,7 +62,8 @@ def test_rolling_date_cannot_erase_or_replace_the_report_time_classification(tmp
     card = saved_card(conn, record, day=day)
     assert card['valuation_calc']['boundary'] is report_boundary
     rolled = valuation.at(record['body']['valuation_calc'], record['body']['valuation_calc']['close'], day)
-    assert card['current']['valuation'] == rolled | {'boundary': current_boundary}
+    distance = stance.flip_distance(record['body']['valuation_calc'] | rolled)
+    assert card['current']['valuation'] == rolled | {'boundary': current_boundary, 'flip_distance': distance}
     assert stance.on_boundary(rolled) is current_boundary
     conn.close()
 
@@ -74,4 +77,7 @@ def test_unpriced_or_missing_frozen_basis_is_unknown_not_false(tmp_path, calc):
     assert card['valuation_calc'] is None if calc is None else card['valuation_calc']['boundary'] is None
     current = card['current']['valuation']
     assert current is None if calc is None else current['boundary'] is None
+    if calc is not None:
+        assert card['valuation_calc']['flip_distance'] is None
+        assert current['flip_distance'] is None
     conn.close()

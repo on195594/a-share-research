@@ -245,6 +245,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         if isinstance(calc.get("v2"), dict):
             summary["v2"] = {k: calc["v2"][k] for k in ("rule", "probabilities", "annual_return", "zone", "support_below")}
         summary["boundary"] = stances.on_boundary(calc)
+        summary["flip_distance"] = stances.flip_distance(calc)
     from a_share_research import scans, valuation
     pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
     failure = scans.announcement_failure(conn, code, scan_id=scan_id)
@@ -255,6 +256,11 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
                             if current['last_close'] is not None else None)
     if current['valuation'] is not None:
         current['valuation']['boundary'] = stances.on_boundary(current['valuation'])
+        rolled = current['valuation']
+        # at() omits frozen inputs; restore them using its unchanged-share-count price basis.
+        rolled['flip_distance'] = stances.flip_distance({
+            **calc, **rolled, 'market_cap': calc['market_cap'] * rolled['close'] / calc['close'],
+        }) if rolled.get('v2') is not None else None
     current['current_zone'] = current['valuation']['zone'] if current['valuation'] is not None else None
     if pending:
         current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'

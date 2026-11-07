@@ -1,5 +1,6 @@
 {% from "_charts.html" import verdict_pips, verdict_scale %}
 {% from "_consensus.html" import coverage_note %}
+{% from "_macros.html" import flip_sensitivity %}
 {# Investment cards. Layers, top to bottom: identity and verdict; the one-line thesis; a check-up of
    saved figures grouped by dimension; then counter-evidence and checkpoints. Text is never truncated:
    the summary card folds the lists behind a disclosure, the full card shows them. #}
@@ -38,6 +39,7 @@
 {# Report limitations stay visible in both card shapes, not inside the ordinary risk fold. #}
 {% macro cautions(c) %}
 {% if c.boundary %}<p class="card-note"><strong class="flag">边界立场（报告时点）</strong>：报告收盘价接近期望回报门槛，同样材料重跑可能得出相反立场；不代表稳定的买入优势。</p>{% endif %}
+{{ flip_sensitivity(c.stance, 'card-note') }}
 {% if c.open_questions %}
 <p class="card-label risk">复核认为尚未答完</p>
 <ol class="card-list risk">{% for q in c.open_questions %}<li>{{ q.problem }}</li>{% endfor %}</ol>
