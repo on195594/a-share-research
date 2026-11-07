@@ -78,7 +78,7 @@ def peer_snapshots(body: dict) -> list[dict]:
             indexed.setdefault(row['id'], []).append(row)
 
     def code(value):
-        match = re.fullmatch(r'(\d{6})(?:\.(?:SH|SZ|BJ))?', str(value))
+        match = stock_codes.CODE_RE.fullmatch(str(value))
         return match[1] if match else None
 
     def number(value):
@@ -445,7 +445,7 @@ def search_scope(conn, query: str) -> tuple | None:
         rows = [] if len(term) < 2 or (term.isdigit() and len(term) != 6) else latest_reports(
             conn, query=term, include_checkpoint=False, limit=2)
         if len(rows) == 1:
-            named[rows[0]["code"][:6]] = rows[0]
+            named[stock_codes.normalize_key(rows[0]["code"])] = rows[0]
         else:
             rest.append(term)
     return (next(iter(named.values())), rest) if len(named) == 1 and rest else None
@@ -463,13 +463,13 @@ def library_results(conn, query: str, *, history: bool = False, whole_library: b
         results["companies"] = [scope[0]] if page == 1 else []
     try:
         hits, hits_more = search_items(conn, " ".join(scope[1]) if scope else query,
-                                       code=scope[0]["code"][:6] if scope else None, history=history, page=page)
+                                       code=stock_codes.normalize_key(scope[0]["code"]) if scope else None, history=history, page=page)
     except service.RequestError as exc:
         return results | {"error": str(exc)}
     if hits:
         known = {r["code"]: dict(r) | {"checkpoint": None}
                  for r in list(companies) + ([scope[0]] if scope else [])}
-        prefixes = sorted({hit["code"][:6] for hit in hits})
+        prefixes = sorted({stock_codes.normalize_key(hit["code"]) for hit in hits})
         # Discover alternate stored code formats without reading report bodies. The high-water
         # ID also prevents reusing metadata superseded since the company query. Replays/feedback
         # can cause an extra refresh, but latest_reports still applies the eligibility rules.
@@ -486,10 +486,10 @@ def library_results(conn, query: str, *, history: bool = False, whole_library: b
         refreshed = latest_reports(conn, codes=missing_codes, include_checkpoint=False) if missing_codes else []
         latest = {}
         for row in reusable + list(refreshed):
-            prefix = row["code"][:6]
+            prefix = stock_codes.normalize_key(row["code"])
             if prefix not in latest or row["id"] > latest[prefix]["id"]:
                 latest[prefix] = dict(row)
-        results["hits"] = [hit | {"latest": latest.get(hit["code"][:6]), "label": SEARCH_SECTIONS[hit["location"].split("[")[0]],
+        results["hits"] = [hit | {"latest": latest.get(stock_codes.normalize_key(hit["code"])), "label": SEARCH_SECTIONS[hit["location"].split("[")[0]],
                                   "url": item_link(hit["report_id"], hit["location"])} for hit in hits]
     return results | {"more": more or hits_more}
 
@@ -530,7 +530,7 @@ def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
     """Compact home-page cards; a failed report also links the company's last passed one."""
     bodies = report_bodies(conn, [report['id'] for report in reports])
     return [card(r, bodies[r['id']], None if r['passed'] else
-                 (passed_before.get(r['code']) or passed_before.get(r['code'][:6])))
+                 (passed_before.get(r['code']) or passed_before.get(stock_codes.normalize_key(r['code']))))
             | {'from_batch': r['from_batch']} for r in reports]
 
 

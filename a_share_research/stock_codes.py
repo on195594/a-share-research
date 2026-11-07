@@ -2,7 +2,9 @@
 
 import re
 
-_CODE_RE = re.compile(r"^([0-9]{6})(?:\.(SH|SZ|BJ))?$")
+KEY_PATTERN = r"^[0-9]{6}$"
+CODE_RE = re.compile(r"^([0-9]{6})(?:\.(SH|SZ|BJ))?$")
+KEY_RE = re.compile(KEY_PATTERN)
 _INVALID_CODE = "股票代码必须为6位数字或带.SH/.SZ/.BJ后缀"
 
 
@@ -10,7 +12,7 @@ def parse_code(code: str) -> tuple[str, str | None]:
     """Return the six-digit key and optional explicit exchange suffix."""
     if not isinstance(code, str) or not code:
         raise ValueError(_INVALID_CODE)
-    match = _CODE_RE.fullmatch(code.strip())
+    match = CODE_RE.fullmatch(code.strip())
     if match is None:
         raise ValueError(_INVALID_CODE)
     return match.group(1), match.group(2)

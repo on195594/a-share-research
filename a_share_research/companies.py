@@ -8,6 +8,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
+from a_share_research import stock_codes
+
 CNINFO = "https://www.cninfo.com.cn/new"
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0", "Referer": "https://www.cninfo.com.cn/"})
@@ -29,7 +31,11 @@ def stock_list() -> dict[str, dict]:
 
 def company(code: str) -> dict:
     """cninfo identity for a 6-digit code: {code, zwjc (short name), orgId, ...}."""
-    found = stock_list().get(code[:6])
+    try:
+        key = stock_codes.normalize_key(code)
+    except ValueError as exc:
+        raise SourceError(f"{code} is not a listed A share on cninfo") from exc
+    found = stock_list().get(key)
     if not found:
         raise SourceError(f"{code} is not a listed A share on cninfo")
     return found

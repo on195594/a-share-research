@@ -241,7 +241,7 @@ def link_research(conn, batch_id: int, q20: list[dict]) -> list[dict]:
         if recent:
             row |= {"run_id": recent["run_id"], "report_id": recent["id"], "reused": True}
         else:
-            row["run_id"] = service.submit(conn, row["code"][:6], f"batch-{batch_id}-{row['code']}",
+            row["run_id"] = service.submit(conn, stock_codes.normalize_key(row["code"]), f"batch-{batch_id}-{row['code']}",
                                            name=row["name"], question=QUESTION)
     return q20
 

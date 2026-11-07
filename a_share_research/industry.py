@@ -8,7 +8,7 @@ from statistics import median
 
 import pandas as pd
 
-from a_share_research import conditions, db, sources
+from a_share_research import conditions, db, sources, stock_codes
 
 BASIS = ("当前申万成分回看，存在幸存者偏差，不是历史申万指数；收益用收盘价×复权因子，"
          "只纳入两端均有有效价格和因子的股票，停牌/未上市缺失不填零；等权口径为个股收益中位数，"
@@ -86,7 +86,7 @@ def industry_rows(data):
     starts = {w: days[-w-1] for w in (20, 60, 120)}
     selected = sorted({end, *starts.values()})
     member_hash = hashlib.sha256(','.join(members).encode()).hexdigest()[:10]
-    prefix = f'X.SW.{level}.{sector.split(".")[0]}.{code[:6]}.{end}.{member_hash}'
+    prefix = f'X.SW.{level}.{sector.split(".")[0]}.{stock_codes.normalize_key(code)}.{end}.{member_hash}'
     anchor = f'{prefix}.pe_median'
     common = {'provider': 'TuShare', 'api': 'industry_constituents', 'dataset_ref': anchor,
               'members': members, 'level': level, 'industry_code': sector, 'company': code,

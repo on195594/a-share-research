@@ -23,14 +23,14 @@ class RequestError(ValueError):
 
 def submit(conn, code: str, request_id: str, *, name: str | None = None,
            question: str = "", parent_report_id: int | None = None, feedback: dict | None = None) -> int:
-    valid_code = code[:6] if re.fullmatch(r"[0-9]{6}(?:\.(?:SH|SZ|BJ))?", code) else ""
+    valid_code = stock_codes.normalize_key(code) if stock_codes.CODE_RE.fullmatch(code) else ""
     if (not valid_code and (code or parent_report_id is None)) or not 1 <= len(request_id) <= 128 or len(question) > 4000:
         raise RequestError("需要 6 位公司代码、1–128 字请求编号；问题不超过 4000 字")
     code = valid_code
     question = question.strip()
     if parent_report_id is not None:
         parent = conn.execute(
-            "SELECT r.code, r.name, r.passed, r.body, u.status, u.kind FROM reports r"
+            "SELECT r.company_key, r.name, r.passed, r.body, u.status, u.kind FROM reports r"
             " JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (parent_report_id,),
         ).fetchone()
         if parent is None:
@@ -39,9 +39,9 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             raise RequestError("报告尚未就绪或状态不一致", 409)
         if parent["kind"] != "research":
             raise RequestError("诊断结果不能作为正式研究的追问或纠错基础", 409)
-        code = code or parent["code"][:6]
+        code = code or parent["company_key"]
         name = name or parent["name"]
-        if parent["code"][:6] != code:
+        if parent["company_key"] != code:
             raise RequestError("原报告与研究公司不一致")
         if feedback is not None:
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
@@ -67,8 +67,8 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     ).fetchone()
     if row:
         return row["id"]
-    previous = conn.execute("SELECT id, kind, code, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-    if previous["kind"] != "research" or previous["code"][:6] != code or previous["request"] != payload:
+    previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+    if previous["kind"] != "research" or previous["company_key"] != code or previous["request"] != payload:
         raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
     return previous["id"]
 
@@ -76,7 +76,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
 def submit_diagnostic(conn, code: str, request_id: str, *, question: str, source: dict,
                       parent_report_id: int | None = None) -> int:
     """Queue a trusted internal diagnostic; no HTTP route reaches this, so callers cannot relabel formal research."""
-    if not re.fullmatch(r"[0-9]{6}", code) or not 1 <= len(request_id) <= 128 or not question.strip():
+    if not stock_codes.KEY_RE.fullmatch(code) or not 1 <= len(request_id) <= 128 or not question.strip():
         raise RequestError("诊断需要 6 位公司代码、1–128 字请求编号与问题")
     payload = json.dumps({"question": question.strip(), "parent_report_id": parent_report_id, "feedback": None,
                           "source": source}, ensure_ascii=False, sort_keys=True)
@@ -87,8 +87,8 @@ def submit_diagnostic(conn, code: str, request_id: str, *, question: str, source
     ).fetchone()
     if row:
         return row["id"]
-    previous = conn.execute("SELECT id, kind, code, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-    if previous["kind"] != "diagnostic" or previous["code"][:6] != code or previous["request"] != payload:
+    previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+    if previous["kind"] != "diagnostic" or previous["company_key"] != code or previous["request"] != payload:
         raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
     return previous["id"]
 
@@ -224,7 +224,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
 
 def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = None) -> dict:
     """A2 read-only projection of the latest reviewed, non-feedback company research."""
-    if not re.fullmatch(r"\d{6}", code):
+    if not stock_codes.KEY_RE.fullmatch(code):
         raise RequestError("公司代码必须为六位数字")
     row = conn.execute(
         "SELECT r.id, r.name, r.created_at, COALESCE(u.finished_at,r.created_at) AS completed_at, r.period, r.body FROM reports r JOIN runs u ON u.id = r.run_id "

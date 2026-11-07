@@ -10,7 +10,7 @@ import logging
 import re
 import time
 
-from a_share_research import db
+from a_share_research import db, stock_codes
 from a_share_research.material import Material, replay_material
 from a_share_research.prompts import parse_json
 from a_share_research.reviewing import digest
@@ -40,19 +40,19 @@ def _save(conn, run_id, state, *, status="done", error=None):
 
 def _eligible(conn):
     """Subscribed names and existing candidates, without expanding into an LLM market scan."""
-    codes = {r[0][:6] for r in conn.execute("SELECT code FROM subscriptions")}
+    codes = {r[0] for r in conn.execute("SELECT company_key FROM subscriptions")}
     for row in conn.execute("SELECT q20,s10 FROM batches WHERE q20 IS NOT NULL ORDER BY id DESC LIMIT 1"):
         for raw in row:
-            codes.update(r["code"][:6] for r in json.loads(raw or "[]"))
+            codes.update(stock_codes.normalize_key(r["code"]) for r in json.loads(raw or "[]"))
     if not codes:
         return []
     rows = conn.execute(
-        "SELECT r.id,r.run_id,r.code,r.name,r.body,r.body_sha256,r.created_at,u.material,u.request"
+        "SELECT r.id,r.run_id,r.code,r.company_key,r.name,r.body,r.body_sha256,r.created_at,u.material,u.request"
         f" FROM reports r JOIN runs u ON u.id=r.run_id WHERE {db.FORMAL_REPORT}"
         " AND u.material IS NOT NULL ORDER BY r.id DESC").fetchall()
     found = {}
     for row in rows:
-        code = row["code"][:6]
+        code = row["company_key"]
         if code in codes and code not in found:
             found[code] = row
     return list(found.values())
@@ -86,7 +86,7 @@ def discover(conn) -> int | None:
         if old.get("phase") in TERMINAL:
             history.append({"id": previous["id"], "phase": old["phase"], "plan": old.get("plan"), "reason": old.get("reason")})
     with db.transaction(conn):
-        run_id = service.submit_diagnostic(conn, sources[0]["code"][:6], request_id,
+        run_id = service.submit_diagnostic(conn, rows[0]["company_key"], request_id,
                     question="核查重复缺口，验证最小研究方法", source={"event": "evolution", "version": VERSION})
         identity = model.application_identity() | {"evolution": {"phase": "plan", "sources": sources,
                     "source_sha256": key, "created_at": db.now(), "attempts": {}, "cases": [], "history": history}}
@@ -106,7 +106,7 @@ def record_archived_rejection(conn, *, title, method, reason, source_sha256, sou
         return old["id"]
     cases = []
     for index, target in enumerate(dict.fromkeys(case_run_ids)):
-        row = conn.execute("SELECT code,kind,request FROM runs WHERE id=?", (target,)).fetchone()
+        row = conn.execute("SELECT company_key,kind,request FROM runs WHERE id=?", (target,)).fetchone()
         if row is None or row["kind"] != "diagnostic":
             raise ValueError("历史关联必须是已存在的诊断任务")
         source = json.loads(row["request"] or "{}").get("source") or {}
@@ -114,7 +114,7 @@ def record_archived_rejection(conn, *, title, method, reason, source_sha256, sou
                       "source_report_id": None})
     from a_share_research import model, service
     with db.transaction(conn):
-        run_id = service.submit_diagnostic(conn, row["code"][:6], request_id, question=title,
+        run_id = service.submit_diagnostic(conn, row["company_key"], request_id, question=title,
                     source={"event": "evolution", "version": VERSION, "archived": True})
         plan = {"title": title, "method": method, "decision": "defer", "reason": reason}
         state = {"phase": "rejected", "archived": True, "plan": plan, "plan_sha256": digest(plan),
@@ -280,7 +280,7 @@ def _enqueue_case(conn, run_id, state):
                             "case_index": index, "arm": arm, "source_report_id": source["report_id"],
                             "application_sha256": application}
             with db.transaction(conn):
-                child = service.submit_diagnostic(conn, source["code"][:6], f"evolution-case:{run_id}:{index}:{arm}",
+                child = service.submit_diagnostic(conn, stock_codes.normalize_key(source["code"]), f"evolution-case:{run_id}:{index}:{arm}",
                             question=question, source=child_source, parent_report_id=source["report_id"])
                 state["cases"].append({"run_id": child, "case_index": index, "arm": arm, "source_report_id": source["report_id"]})
                 _save(conn, run_id, state)

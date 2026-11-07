@@ -8,7 +8,7 @@ from typing import Self
 
 import pandas as pd
 
-from a_share_research import db, sources, evidence
+from a_share_research import db, sources, evidence, stock_codes
 from a_share_research.sources import Document
 from a_share_research.evidence import material_hash
 
@@ -118,11 +118,11 @@ class Material:
 
 
 def replay_material(conn, source_run: int) -> Material:
-    row = conn.execute("SELECT code, material FROM runs WHERE id = ?", (source_run,)).fetchone()
+    row = conn.execute("SELECT company_key, material FROM runs WHERE id = ?", (source_run,)).fetchone()
     if row is None or row["material"] is None:
         raise ResearchError(f"任务 {source_run} 没有完整材料快照，不能重放；不会重新取数补齐")
     material = Material.from_snapshot(json.loads(row["material"]))
-    if material.code[:6] != row["code"][:6] or material.doc.code != material.code:
+    if stock_codes.normalize_key(material.code) != row["company_key"] or material.doc.code != material.code:
         raise ResearchError("材料快照与任务公司不一致")
     return material
 

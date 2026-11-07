@@ -480,7 +480,7 @@ def stance_calc(stance: dict, calc: dict | None, market_date: str) -> dict:
 
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     from a_share_research import evolution
-    run = conn.execute("SELECT code, request, request_id, started_at, batch_id FROM runs WHERE id = ?", (run_id,)).fetchone()
+    run = conn.execute("SELECT code, company_key, request, request_id, started_at, batch_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
     db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now())
     runner = Runner(conn, run_id)
@@ -492,7 +492,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         experiment = evolution.prepare_material(conn, request) if replay_of is None else None
         material = (replay_material(conn, replay_of) if replay_of is not None
                     else experiment if experiment is not None else gather(code))
-        if material.code[:6] != code[:6] or material.doc.code != material.code:
+        if stock_codes.normalize_key(material.code) != run["company_key"] or material.doc.code != material.code:
             raise ResearchError("重放材料与目标公司不一致")
         if replay_of is None:
             material.extra["question"] = request.get("question", "")

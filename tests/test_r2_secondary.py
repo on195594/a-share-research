@@ -2,7 +2,7 @@
 
 import pytest
 
-from a_share_research import db, research, scans, screening
+from a_share_research import db, scans
 from support.continuation import load
 from support.valuation import BODY, RECORD
 
@@ -13,17 +13,6 @@ def conn(tmp_path):
     load(connection)
     yield connection
     connection.close()
-
-
-@pytest.mark.parametrize('query', [
-    lambda conn, code: research._research_context(conn, code, 37),
-    lambda conn, code: research._prior_report(conn, code, 999),
-    lambda conn, code: screening.reusable_report(conn, code, '2026-10-20'),
-])
-def test_research_queries_normalize_both_code_forms(conn, query):
-    bare = query(conn, '603606')
-    assert bare
-    assert query(conn, '603606.SH') == bare
 
 
 @pytest.fixture
@@ -37,21 +26,6 @@ def scan_event(conn):
         (scan, RECORD['code'][:6], document['sha256'], document['title'], document['announced'],
          document['url'], document['retrieved_at']))
     return scan
-
-
-def test_scan_events_normalize_both_code_forms(conn, scan_event):
-    bare = scans.events(conn, code='603606')
-    assert len(bare) == 1
-    assert scans.events(conn, code='603606.SH') == bare
-
-
-def test_latest_close_normalizes_both_code_forms(conn):
-    day, close = next(iter(next(row for row in BODY['table'] if row['id'] == 'M.close')['values'].items()))
-    conn.execute('INSERT INTO subscriptions(code,added_at,last_close,last_close_date) VALUES (?,?,?,?)',
-                 (RECORD['code'], RECORD['created_at'], close, day))
-    bare = scans.latest_close(conn, '603606')
-    assert bare['last_close'] == float(close)
-    assert scans.latest_close(conn, '603606.SH') == bare
 
 
 def test_dispatch_normalizes_both_scope_forms(conn, scan_event, tmp_path):

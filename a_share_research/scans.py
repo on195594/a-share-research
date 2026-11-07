@@ -123,14 +123,14 @@ def subscriptions(conn) -> list[dict]:
                          'ORDER BY frozen_at DESC, id DESC LIMIT 1').fetchone()
     if batch:
         for code in json.loads(batch['l5'])['codes']:
-            code = code[:6]
+            code = stock_codes.normalize_key(code)
             if code not in items:
                 items[code] = {'code': code, 'origin': 'l5', **latest_close(conn, code)}
     return list(items.values())
 
 
 def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None) -> list[dict]:
-    if not isinstance(codes, list) or any(not isinstance(c, str) or not re.fullmatch(r'[0-9]{6}', c) for c in codes):
+    if not isinstance(codes, list) or any(not isinstance(c, str) or not stock_codes.KEY_RE.fullmatch(c) for c in codes):
         raise service.RequestError('订阅代码必须为六位 A 股代码')
     catalog = companies.stock_list() if catalog is None and codes else (catalog or {})
     unknown = sorted(set(codes) - catalog.keys())
@@ -280,6 +280,7 @@ def normalize_announcements(rows: list[dict], code: str) -> list[dict]:
 
 
 def normalize_close(row: dict, code: str, at: str) -> dict:
+    # External TuShare identifier: a nonstandard form must surface as the source error below.
     if str(row.get('ts_code', code))[:6] != code:
         raise companies.SourceError('估值行情返回其他公司')
     close = float(row['close'])
@@ -304,7 +305,7 @@ def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
             previous = conn.execute(
                 "SELECT r.body FROM reports r JOIN runs u ON u.id=r.run_id WHERE r.company_key=? "
                 f"AND r.id<? AND {db.FORMAL_REPORT} ORDER BY r.id DESC LIMIT 1",
-                (row['code'][:6], current['id'])).fetchone()
+                (stock_codes.normalize_key(row['code']), current['id'])).fetchone()
             if previous:
                 def judgment(body):
                     body = json.loads(body)
@@ -411,7 +412,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         completed = completed_reviews(conn, previous['started_at'] if previous else None, at)
         new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)]
         candidates = []
-        for code in {s['code'] for s in scope} | {r['code'][:6] for r in completed}:
+        for code in {s['code'] for s in scope} | {stock_codes.normalize_key(r['code']) for r in completed}:
             card = card_or_none(conn, code, scan_id=scan_id)
             summary['cards'][code] = card
             before = (previous['summary'].get('cards', {}).get(code) if previous else None) or summary['before'].get(code)
@@ -422,7 +423,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
             related = [e for e in events(conn, code=code)
                        if e['scan_id'] == scan_id or e['run_id'] in {r['id'] for r in completed}]
             for reason in notification_reasons(before, card, [e for e in new_events if e['code'] == code],
-                                               [r for r in completed if r['code'][:6] == code],
+                                               [r for r in completed if stock_codes.normalize_key(r['code']) == code],
                                                last_extreme_zone=summary['last_extreme_zones'].get(code)):
                 candidates.append({'code': code, 'name': (card or {}).get('name') or summary['names'].get(code), **reason,
                                    'card': card, 'path': f'/stock/{code}', 'card_path': f'/api/companies/{code}/card',

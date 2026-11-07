@@ -1,13 +1,21 @@
 """Invariants of the v9 data foundation: rebuilt tables, generated identity columns and their checks."""
 
+import ast
+import importlib
 import json
+import re
 import sqlite3
+import sys
 import threading
+from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from a_share_research import db, integrity, scans, service
-from support.continuation import load
+import a_share_research
+from a_share_research import api_keys, companies, db, integrity, reading, research, research_tools, scans, screening, service, stock_codes
+from support.continuation import BODY, load
+from support.valuation import BODY as VALUATION_BODY, RECORD
 
 
 def v8_database(path, *, rows=True):
@@ -34,34 +42,89 @@ def stored(conn, table):
     return names, [tuple(row) for row in conn.execute(f"SELECT {', '.join(names)} FROM {table} ORDER BY id")]
 
 
-def test_rebuilt_tables_keep_payload_last_and_ids_are_never_reused(tmp_path):
-    conn = db.connect(tmp_path / "app.db")
-    for table, payload, _ in db.REBUILT:
+COMPANY_TABLES = ("runs", "reports", "prices", "scan_events", "subscriptions")
+CANONICAL_CODES = (("603606", "603606"), ("603606.SH", "603606"),
+                   ("000333.SZ", "000333"), ("920001.BJ", "920001"))
+INVALID_CODES = ("603606.SS", "60360", "６０３６０６", "603606.sh", "603606 ", "", "6036060", "60360x")
+
+
+def test_rebuilt_tables_keep_payload_last_and_ids_are_never_reused(conn):
+    for table in COMPANY_TABLES:
+        assert "company_key" in {row["name"] for row in conn.execute(f"PRAGMA table_xinfo({table})")}
+    for table, payload in (("runs", "material"), ("reports", "body"), ("calls", "prompt")):
         assert list(conn.execute(f"PRAGMA table_xinfo({table})"))[-1]["name"] == payload
-    first = db.create_run(conn, "603606.SH")
-    db.save_report(conn, first, "603606.SH", "东方电缆", "2026", True, None, {"table": []})
-    report = conn.execute("SELECT id FROM reports").fetchone()[0]
-    conn.execute("DELETE FROM reports")
-    conn.execute("DELETE FROM runs")
-    second = db.create_run(conn, "603606.SH")
-    db.save_report(conn, second, "603606.SH", "东方电缆", "2026", True, None, {"table": []})
-    assert second > first and conn.execute("SELECT id FROM reports").fetchone()[0] > report
+    report = conn.execute("SELECT * FROM reports ORDER BY id DESC LIMIT 1").fetchone()
+    first = conn.execute("SELECT MAX(id) FROM runs").fetchone()[0]
+    conn.execute("DELETE FROM reports WHERE id=?", (report['id'],))
+    # Delete the latest run too, after removing only its dependent captured report.
+    conn.execute("DELETE FROM reports WHERE run_id=?", (first,))
+    conn.execute("DELETE FROM runs WHERE id=?", (first,))
+    second = db.create_run(conn, report['code'])
+    db.save_report(conn, second, report['code'], report['name'], report['period'], report['passed'],
+                   report['verdict'], json.loads(report['body']))
+    assert second > first
+    assert conn.execute("SELECT MAX(id) FROM reports").fetchone()[0] > report['id']
 
 
-@pytest.mark.parametrize("insert", ["INSERT INTO runs(code, created_at) VALUES (?, 'x')",
-                                    "INSERT INTO subscriptions(code, added_at) VALUES (?, 'x')"])
-@pytest.mark.parametrize("code", ["603606.SS", "60360", "６０３６０６", "603606.sh", "603606 ", ""])
-def test_storage_rejects_a_code_without_a_company(tmp_path, insert, code):
-    conn = db.connect(tmp_path / "app.db")
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(insert, (code,))
+def insert_company(conn, table, code):
+    """Only code/identity varies; payloads come from captured company evidence."""
+    if table == 'runs':
+        conn.execute('INSERT INTO runs(code,created_at) VALUES (?,?)', (code, RECORD['created_at']))
+    elif table == 'subscriptions':
+        conn.execute('INSERT INTO subscriptions(code,added_at) VALUES (?,?)', (code, RECORD['created_at']))
+    elif table == 'scan_events':
+        document = VALUATION_BODY['document']
+        scan = scans.submit(conn)
+        conn.execute(
+            'INSERT INTO scan_events(scan_id,code,doc_key,title,announced,url,kind,severity,detected_at,action) '
+            "VALUES (?,?,?,?,?,?,'periodic',2,?,'deferred')",
+            (scan, code, document['sha256'], document['title'], document['announced'], document['url'],
+             document['retrieved_at']))
+    else:
+        run = db.create_run(conn, RECORD['code'])
+        if table == 'reports':
+            db.save_report(conn, run, code, RECORD['name'], RECORD['period'], RECORD['passed'],
+                           RECORD['verdict'], VALUATION_BODY)
+        else:
+            # Price payload is opaque to storage; use captured close evidence, not invented prices.
+            close = next(row for row in VALUATION_BODY['table'] if row['id'] == 'M.close')
+            conn.execute('INSERT INTO prices(run_id,code,name,as_of,expires,body,created_at) VALUES (?,?,?,?,?,?,?)',
+                         (run, code, RECORD['name'], RECORD['created_at'], RECORD['created_at'],
+                          json.dumps(close), RECORD['created_at']))
 
 
-@pytest.mark.parametrize("code", ["603606", "603606.SH", "000333.SZ", "920001.BJ"])
-def test_company_key_is_the_six_digits_of_every_stored_form(tmp_path, code):
-    conn = db.connect(tmp_path / "app.db")
-    run = db.create_run(conn, code)
-    assert conn.execute("SELECT company_key FROM runs WHERE id = ?", (run,)).fetchone()[0] == code[:6]
+@pytest.mark.parametrize('table', COMPANY_TABLES)
+@pytest.mark.parametrize('code', INVALID_CODES)
+def test_storage_rejects_a_code_without_a_company(tmp_path, table, code):
+    conn = db.connect(tmp_path / 'app.db')
+    with pytest.raises(sqlite3.IntegrityError, match='company_key'):
+        insert_company(conn, table, code)
+
+
+@pytest.mark.parametrize('table', COMPANY_TABLES)
+@pytest.mark.parametrize('code,expected', CANONICAL_CODES)
+def test_company_key_and_normalization_agree_on_canonical_forms(tmp_path, table, code, expected):
+    conn = db.connect(tmp_path / 'app.db')
+    insert_company(conn, table, code)
+    assert conn.execute(f'SELECT company_key FROM {table} WHERE code=?', (code,)).fetchone()[0] == expected
+    assert stock_codes.normalize_key(code) == expected
+
+
+@pytest.mark.parametrize('code', [code for code in INVALID_CODES if code != '603606 '])
+def test_normalization_rejects_the_same_noncanonical_codes(code):
+    with pytest.raises(ValueError):
+        stock_codes.normalize_key(code)
+
+
+@pytest.mark.parametrize('table', COMPANY_TABLES)
+@pytest.mark.parametrize('code,expected', CANONICAL_CODES)
+@pytest.mark.parametrize('padding', [(' ', ''), ('', ' '), ('\t', '\n')])
+def test_whitespace_tolerance_is_only_an_input_boundary(tmp_path, table, code, expected, padding):
+    conn = db.connect(tmp_path / 'app.db')
+    value = padding[0] + code + padding[1]
+    assert stock_codes.normalize_key(value) == expected
+    with pytest.raises(sqlite3.IntegrityError, match='company_key'):
+        insert_company(conn, table, value)
 
 
 @pytest.mark.parametrize("request_id, code, expected", [
@@ -190,3 +253,169 @@ def test_scan_api_rows_keep_their_published_fields(tmp_path):
                  " VALUES (?, '603606', 'k', 't', 'a', 'u', 'periodic', 1, 'x', 'deferred')", (scan,))
     assert "company_key" not in scans.subscriptions(conn)[0]
     assert "company_key" not in scans.events(conn)[0]
+
+
+@pytest.fixture
+def conn(tmp_path):
+    connection = db.connect(tmp_path / 'foundation.db')
+    load(connection)
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
+def scan_event(conn):
+    document = VALUATION_BODY['document']
+    scan = scans.submit(conn)
+    conn.execute(
+        'INSERT INTO scan_events(scan_id,code,doc_key,title,announced,url,kind,severity,detected_at,action) '
+        "VALUES (?,?,?,?,?,?,'periodic',2,?,'deferred')",
+        (scan, stock_codes.normalize_key(RECORD['code']), document['sha256'], document['title'],
+         document['announced'], document['url'], document['retrieved_at']))
+    return scan
+
+
+@pytest.mark.parametrize('query', [
+    lambda conn, code: reading.latest_reports(conn, codes=[code]),
+    lambda conn, code: reading.latest_reports(conn, code_prefix=code),
+    lambda conn, code: reading.api_reports(conn, code),
+    lambda conn, code: reading.stock_reports(conn, code),
+    lambda conn, code: reading.stock_reports(conn, code, summaries=True),
+    lambda conn, code: reading.followups(conn, code, 37),
+])
+def test_read_queries_normalize_company_inputs(conn, query):
+    bare = query(conn, '603606')
+    assert bare
+    assert query(conn, '603606.SH') == bare
+    assert query(conn, '603606.SS') == []
+
+
+def test_content_search_normalizes_company_input(conn):
+    text = BODY[39]['risks'][0]['text'][:12]
+    bare = reading.search_items(conn, text, code='603606')
+    assert bare[0]
+    assert reading.search_items(conn, text, code='603606.SH') == bare
+
+
+@pytest.mark.parametrize('query', [
+    lambda conn, code: research._research_context(conn, code, 37),
+    lambda conn, code: research._prior_report(conn, code, 999),
+    lambda conn, code: screening.reusable_report(conn, code, '2026-10-20'),
+])
+def test_research_queries_normalize_both_code_forms(conn, query):
+    bare = query(conn, '603606')
+    assert bare
+    assert query(conn, '603606.SH') == bare
+
+
+def test_scan_events_normalize_both_code_forms(conn, scan_event):
+    bare = scans.events(conn, code='603606')
+    assert len(bare) == 1
+    assert scans.events(conn, code='603606.SH') == bare
+
+
+def test_latest_close_normalizes_both_code_forms(conn):
+    day, close = next(iter(next(row for row in VALUATION_BODY['table'] if row['id'] == 'M.close')['values'].items()))
+    conn.execute('INSERT INTO subscriptions(code,added_at,last_close,last_close_date) VALUES (?,?,?,?)',
+                 (RECORD['code'], RECORD['created_at'], close, day))
+    bare = scans.latest_close(conn, '603606')
+    assert bare['last_close'] == float(close)
+    assert scans.latest_close(conn, '603606.SH') == bare
+
+
+
+def test_business_sql_uses_shared_company_and_sample_definitions():
+    root = Path(db.__file__).parent
+    # Section 3.5 of the data foundation plan: selection predicates kept as frozen.
+    retained = {'validation.py': 3, 'zones.py': 1, 'screening.py': 1, 'reading.py': 2}
+    found = dict.fromkeys(retained, 0)
+    for path in root.rglob('*.py'):
+        tree = ast.parse(path.read_text())
+        # DDL defines the identity; only these exact assignments may use substr(code).
+        excluded = set()
+        samples = set()
+        if path.name == 'db.py':
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+                    if names & {'COMPANY_KEY', 'BATCH_ID'}:
+                        excluded.update(id(child) for child in ast.walk(node))
+                    if names & {'RESEARCH_ORIGINAL', 'FORMAL_REPORT'}:
+                        samples.update(id(child) for child in ast.walk(node))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            text = node.value
+            location = f'{path.name}:{node.lineno}'
+            if id(node) not in excluded:
+                assert not re.search(r'\bsubstr\s*\(\s*(?:[a-z_]\w*\.)?code\b', text, re.I), location
+            assert not re.search(r"\bLIKE\s*'batch-%'", text, re.I), location
+            if id(node) not in samples:
+                hits = len(re.findall(r'\breplay_of\s+IS\s+NULL\b', text, re.I))
+                assert not hits or path.name in retained, location
+                found[path.name] = found.get(path.name, 0) + hits
+    assert {name: found[name] for name in retained} == retained
+
+
+@pytest.fixture
+def api_boundary(conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'DATA', tmp_path)
+    monkeypatch.setenv('DEV_LOGIN', '1')
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'http://127.0.0.1:8627')
+    monkeypatch.setenv('SESSION_SECRET', 'foundation-test-session-' * 2)
+    monkeypatch.setattr(a_share_research, 'web', None, raising=False)
+    monkeypatch.delitem(sys.modules, 'a_share_research.web', raising=False)
+    web = importlib.import_module('a_share_research.web')
+    monkeypatch.setattr(web, 'conn', conn)
+    token = api_keys.create(conn, 'foundation-boundary-test')
+    try:
+        request = web.Request({'type': 'http', 'headers': [(b'authorization', f'Bearer {token}'.encode())]})
+        yield web, request
+    finally:
+        sys.modules.pop('a_share_research.web', None)
+
+
+@pytest.mark.parametrize('code', ['603606.SH', '60360', '603606 ', '６０３６０６'])
+@pytest.mark.parametrize('endpoint', ['reports', 'search', 'card'])
+def test_http_company_boundaries_keep_status_and_error_text(api_boundary, code, endpoint):
+    web, request = api_boundary
+    with pytest.raises(service.RequestError) as error:
+        if endpoint == 'search':
+            web.api_search(request, BODY[39]['risks'][0]['text'][:12], code=code, page=1)
+        elif endpoint == 'reports':
+            web.api_reports(request, code)
+        else:
+            web.api_company_card(request, code)
+    assert error.value.status == 422
+    assert str(error.value) == '公司代码必须为六位数字'
+
+
+def test_http_full_width_submission_is_rejected_by_the_request_model(api_boundary):
+    web, _ = api_boundary
+    with pytest.raises(ValidationError):
+        web.ResearchRequest(code='６０３６０６', request_id='full-width')
+
+
+def test_full_width_input_gets_each_boundary_error():
+    assert not stock_codes.KEY_RE.fullmatch('６０３６０６')
+    assert not stock_codes.CODE_RE.fullmatch('６０３６０６.SH')
+    with pytest.raises(ValueError, match='公司代码必须为六位数字'):
+        research_tools.ResearchTools.code('６０３６０６')
+
+
+@pytest.mark.parametrize('code', ['６０３６０６', '603606.SS', '60360'])
+def test_invalid_company_input_keeps_source_error_without_fetching(monkeypatch, code):
+    def unexpected_fetch():
+        pytest.fail('Invalid company input must not fetch the remote catalog')
+
+    monkeypatch.setattr(companies, 'stock_list', unexpected_fetch)
+    with pytest.raises(companies.SourceError) as error:
+        companies.company(code)
+    assert str(error.value) == f'{code} is not a listed A share on cninfo'
+
+
+def test_external_identifier_outside_the_stored_form_does_not_break_a_source():
+    # T00018.SH is in the live index_member_all response (is_new=Y, 2026-11-07).
+    with pytest.raises(companies.SourceError, match='估值行情返回其他公司'):
+        scans.normalize_close({'ts_code': 'T00018.SH', 'close': 1.0, 'trade_date': '2026-11-06'}, '603606',
+                              '2026-11-07T10:00:00+08:00')

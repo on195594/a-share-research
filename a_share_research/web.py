@@ -311,7 +311,7 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     if companies:
         passed_before = {key: r for r in reading.latest_reports(
             conn, codes=[c["code"] for c in companies], passed=True, include_checkpoint=False)
-            for key in (r["code"], r["code"][:6])}
+            for key in (r["code"], stock_codes.normalize_key(r["code"]))}
         cards = reading.report_cards(conn, companies, passed_before)
     else:
         cards = []
@@ -510,7 +510,7 @@ def api_session(request: Request) -> str:
 
 class ResearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    code: str = Field(pattern=r"^\d{6}$")
+    code: str = Field(pattern=stock_codes.KEY_PATTERN)
     request_id: str = Field(min_length=1, max_length=128)
     question: str = Field(default="", max_length=4000)
     parent_report_id: int | None = Field(default=None, gt=0)
@@ -584,7 +584,7 @@ def api_run(request: Request, run_id: int):
 @app.get("/api/reports")
 def api_reports(request: Request, code: str):
     api_session(request)
-    if not re.fullmatch(r"\d{6}", code):
+    if not stock_codes.KEY_RE.fullmatch(code):
         raise service.RequestError("公司代码必须为六位数字")
     rows = reading.api_reports(conn, code)
     return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
@@ -594,7 +594,7 @@ def api_reports(request: Request, code: str):
 def api_search(request: Request, q: str, code: str | None = None, section: str | None = None, history: bool = False,
                page: int = Query(1, ge=1, le=10000)):
     api_session(request)
-    if code is not None and not re.fullmatch(r"\d{6}", code):
+    if code is not None and not stock_codes.KEY_RE.fullmatch(code):
         raise service.RequestError("公司代码必须为六位数字")
     items, more = reading.search_items(conn, q, code=code, section=section, history=history, page=page)
     return {"version": service.VERSION, "items": items, "page": page, "more": more}

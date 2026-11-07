@@ -21,7 +21,7 @@ from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
 from a_stock_lib.providers.tushare_valuation import TushareValuationProvider
 
 from a_share_research.db import DATA, SHANGHAI
-from a_share_research import db
+from a_share_research import db, stock_codes
 from a_share_research.companies import CNINFO, SESSION, SourceError, company
 
 log = logging.getLogger(__name__)
@@ -250,6 +250,7 @@ def peer_members(subject: pd.DataFrame, members: pd.DataFrame, level: str) -> di
         "retrieved_at": datetime.now(SHANGHAI).isoformat(timespec="seconds"),
         "industry": {lv: row[f"{lv}_name"] for lv in SW_LEVELS},
         "members": sorted(
+            # Live membership includes nonstandard identifiers such as T00018.SH; do not parse them.
             ({"code": str(m.ts_code)[:6], "name": str(m.name), "l3": str(m.l3_name)}
              for m in members.drop_duplicates("ts_code").itertuples() if m.ts_code != row.ts_code),
             key=lambda m: m["code"]),
@@ -288,7 +289,7 @@ def _query_announcements(code: str, days: int, query: str, category: str, max_pa
     rows = []
     for page in range(1, max_pages + 1):
         response = SESSION.post(f"{CNINFO}/hisAnnouncement/query", timeout=30, data={
-            "stock": f"{code[:6]},{org['orgId']}", "tabName": "fulltext", "pageSize": str(ANNOUNCEMENT_PAGE_SIZE),
+            "stock": f"{stock_codes.normalize_key(code)},{org['orgId']}", "tabName": "fulltext", "pageSize": str(ANNOUNCEMENT_PAGE_SIZE),
             "pageNum": str(page), "column": "", "plate": "", "searchkey": query, "secid": "",
             "category": category,
             "seDate": f"{end - timedelta(days=days)}~{end}", "sortName": "", "sortType": "",
@@ -327,7 +328,7 @@ def reports(code: str, days: int = 550) -> list[Document]:
 
 def announcement_document(raw: dict, code: str) -> Document | None:
     """Keep official company PDFs; an event date is never a financial period."""
-    if raw.get("secCode") != code[:6] or not PDF_PATH.fullmatch(raw.get("adjunctUrl", "")):
+    if raw.get("secCode") != stock_codes.normalize_key(code) or not PDF_PATH.fullmatch(raw.get("adjunctUrl", "")):
         return None
     title = re.sub(r"<[^>]+>", "", raw.get("announcementTitle", ""))
     match = TITLE_RE.search(title)

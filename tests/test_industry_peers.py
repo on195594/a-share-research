@@ -28,3 +28,10 @@ def test_mismatched_or_ambiguous_membership_is_rejected():
         peer_members(pd.concat([SUBJECT, SUBJECT]), MEMBERS, "l3")
     with pytest.raises(SourceError, match="缺少"):
         peer_members(SUBJECT.drop(columns=["l3_code"]), MEMBERS, "l3")
+
+
+def test_nonstandard_live_member_does_not_break_the_peer_list():
+    # T00018.SH is in the live index_member_all response (is_new=Y, 2026-11-07).
+    odd = pd.concat([MEMBERS, MEMBERS.iloc[[0]].assign(ts_code="T00018.SH")], ignore_index=True)
+    result = peer_members(SUBJECT, odd, "l3")
+    assert "T00018" in {member["code"] for member in result["members"]}

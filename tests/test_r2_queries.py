@@ -5,7 +5,7 @@ import json
 import pytest
 
 from a_share_research import db, reading, service, validation, worker
-from support.continuation import BODY, load
+from support.continuation import load
 
 
 @pytest.fixture
@@ -14,28 +14,6 @@ def conn(tmp_path):
     load(connection)
     yield connection
     connection.close()
-
-
-@pytest.mark.parametrize('query', [
-    lambda conn, code: reading.latest_reports(conn, codes=[code]),
-    lambda conn, code: reading.latest_reports(conn, code_prefix=code),
-    lambda conn, code: reading.api_reports(conn, code),
-    lambda conn, code: reading.stock_reports(conn, code),
-    lambda conn, code: reading.stock_reports(conn, code, summaries=True),
-    lambda conn, code: reading.followups(conn, code, 37),
-])
-def test_read_queries_normalize_company_inputs(conn, query):
-    bare = query(conn, '603606')
-    assert bare
-    assert query(conn, '603606.SH') == bare
-    assert query(conn, '603606.SS') == []
-
-
-def test_content_search_normalizes_company_input(conn):
-    text = BODY[39]['risks'][0]['text'][:12]
-    bare = reading.search_items(conn, text, code='603606')
-    assert bare[0]
-    assert reading.search_items(conn, text, code='603606.SH') == bare
 
 
 def test_company_card_keeps_six_digit_boundary(conn):

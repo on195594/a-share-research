@@ -8,7 +8,7 @@ import time
 from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 
-from a_share_research import db, sources, evidence, valuation as valuations
+from a_share_research import db, sources, evidence, stock_codes, valuation as valuations
 from a_share_research.checking import quote_found
 from a_share_research.material import financial_table
 from a_share_research.prompts import RULES, output_schema, parse_json
@@ -31,15 +31,15 @@ TOOLS = [
                     "required": ["query"], "additionalProperties": False}},
     {"name": "announcements", "description": "检索公司官方临时公告，包括业绩预告/快报、中标、重大事项等；query 为标题关键词，留空看近期目录。默认近180天，最多550天；返回截断范围。period 为空时不要用公告日代替财务期间。随后用 read_disclosure 读取原文。",
      "parameters": {"type": "object", "properties": {
-         "code": {"type": "string", "pattern": "^[0-9]{6}$"}, "query": {"type": "string", "maxLength": 40},
+         "code": {"type": "string", "pattern": stock_codes.KEY_PATTERN}, "query": {"type": "string", "maxLength": 40},
          "days": {"type": "integer", "minimum": 1, "maximum": 550}},
          "required": ["code"], "additionalProperties": False}},
     {"name": "peers", "description": "按申万2021行业（与候选初筛相同的分类）列出与该公司同属一个行业的上市公司代码与名称。level 默认 l3（最细），可用 l2/l1 放宽。行业相同不等于业务可比：自主决定是否比较、比谁，正文说明可比性与业务差异；随后用 financials 或 disclosures 取数。",
      "parameters": {"type": "object", "properties": {
-         "code": {"type": "string", "pattern": "^[0-9]{6}$"}, "level": {"type": "string", "enum": ["l1", "l2", "l3"]}},
+         "code": {"type": "string", "pattern": stock_codes.KEY_PATTERN}, "level": {"type": "string", "enum": ["l1", "l2", "l3"]}},
          "required": ["code"], "additionalProperties": False}},
     {"name": "disclosures", "description": "列出本公司或同业的官方定期报告，最新在前。code 为六位代码。",
-     "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
+     "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": stock_codes.KEY_PATTERN}},
                     "required": ["code"], "additionalProperties": False}},
     {"name": "read_disclosure", "description": "从已列出的文档读取原文。query 支持空格分隔多关键词同页匹配，返回匹配页号及最多 count 页原文（结合 page 可跳过目录或向后翻页）；不传 query 则从 page 起连续读 count 页（最多5页）。",
      "parameters": {"type": "object", "properties": {
@@ -47,7 +47,7 @@ TOOLS = [
          "page": {"type": "integer", "minimum": 1}, "count": {"type": "integer", "minimum": 1, "maximum": 5}},
          "required": ["source"], "additionalProperties": False}},
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
-     "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[0-9]{6}$"}},
+     "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": stock_codes.KEY_PATTERN}},
                     "required": ["code"], "additionalProperties": False}},
     {"name": "valuation", "description": "按拟定三情景估值（与报告 valuation 同格式，rationale 可暂缺）生成可引用 C.n：期望回报门槛价、期望年化回报，以及保守/中性/乐观各自的年化和累计回报，后者不是概率加权结果，也不是最坏情景。与报告页 valuation-v2 同源。正文引用时最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动后重算。期限固定并返回实际年数；其他持有期用 calculate annual_return。相同定价输入重复调用返回已有行。",
      "parameters": {"type": "object", "properties": {"valuation": {"type": "object"}}, "required": ["valuation"], "additionalProperties": False}},
@@ -313,8 +313,8 @@ class ResearchTools:
         self.conn = conn
         self.documents = {"D0": material.doc}
         self.cache = {}
-        self.disclosure_cache = {material.code[:6]: dict(material.extra.get("catalog", {}))}
-        self.financial_cache = {material.code[:6]: [r for r in material.table if not r["id"].startswith("C.")]}
+        self.disclosure_cache = {stock_codes.normalize_key(material.code): dict(material.extra.get("catalog", {}))}
+        self.financial_cache = {stock_codes.normalize_key(material.code): [r for r in material.table if not r["id"].startswith("C.")]}
 
     def _register(self, doc: sources.Document) -> str:
         """Catalog key for a document, adding it on first sight so read_disclosure can open it."""
@@ -344,7 +344,7 @@ class ResearchTools:
 
     @staticmethod
     def code(value):
-        if not isinstance(value, str) or not re.fullmatch(r"\d{6}", value):
+        if not isinstance(value, str) or not stock_codes.KEY_RE.fullmatch(value):
             raise ValueError("公司代码必须为六位数字")
         return value
 

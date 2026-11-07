@@ -3,7 +3,7 @@
 import re
 from decimal import Decimal
 
-from a_share_research import agenda, evidence, forecasts, stance as stances, valuation
+from a_share_research import agenda, evidence, forecasts, stance as stances, stock_codes, valuation
 from a_share_research.evidence import numbers as _numbers, supported as _supported
 from a_share_research.material import Material
 
@@ -14,7 +14,7 @@ REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a
 
 def _without_codes(text: str, material: Material) -> str:
     """Stock codes are identifiers, not figures: drop them rather than accept them as supported values."""
-    codes = {material.code[:6]} | {r["id"][1:7] for r in material.table if re.match(r"^P\d{6}\.", r["id"])}
+    codes = {stock_codes.normalize_key(material.code)} | {r["id"][1:7] for r in material.table if re.match(r"^P\d{6}\.", r["id"])}
     codes = sorted(c for c in codes if c.isdigit())
     return re.sub(r"(?<!\d)(?:" + "|".join(codes) + r")(?!\d)", " ", text) if codes else text
 
