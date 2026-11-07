@@ -37,6 +37,7 @@ def browser_request(web):
 def test_failed_feedback_form_submission_retry_failure_then_success_closes_group(web):
     request, csrf = browser_request(web)
     original = dict(web.conn.execute('SELECT * FROM reports WHERE id=12').fetchone())
+    original.pop('company_key')  # generated; cannot be written back
     payload = json.loads(web.conn.execute('SELECT request FROM runs WHERE id=18').fetchone()[0])
     web.conn.execute('DELETE FROM reports WHERE id=12')
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=18")

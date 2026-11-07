@@ -40,7 +40,7 @@ def legacy_database(path, columns="present"):
 
 
 def assert_derived(conn):
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
     for index, table, column in (("calls_by_run", "calls", "run_id"),
                                  ("runs_by_status", "runs", "status"),
                                  ("sessions_by_expires", "sessions", "expires_at")):
@@ -170,10 +170,10 @@ def test_v3_repairs_writes_missed_during_v2_rollback(tmp_path):
 def test_future_additive_version_remains_usable(tmp_path):
     path = tmp_path / "app.db"
     conn = db.connect(path)
-    conn.execute("PRAGMA user_version = 9")
+    conn.execute("PRAGMA user_version = 10")
     conn.close()
     conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
     assert conn.total_changes == 0
     conn.close()
 

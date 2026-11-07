@@ -210,16 +210,26 @@ def test_v7_empty_and_v6_migration_preserves_all_old_records(tmp_path):
         migration(old)
     old.execute('PRAGMA user_version=6')
     load(old)
-    before = list(old.iterdump())
+    tables = ('runs', 'reports', 'prices', 'batches', 'calls')
+    # Column order changes in v9, so compare stored rows by name rather than iterdump's positional INSERTs.
+    def rows(connection, table):
+        names = [row[1] for row in connection.execute(f'PRAGMA table_info({table})')]
+        ordered = sorted(names)
+        return ordered, connection.execute(f"SELECT {', '.join(ordered)} FROM {table} ORDER BY 1").fetchall()
+    before = {table: rows(old, table) for table in tables}
     old.close()
     upgraded = db.connect(path)
-    assert upgraded.execute('PRAGMA user_version').fetchone()[0] == 8
-    assert {line for line in before if not line.startswith("CREATE TABLE batches")} <= set(upgraded.iterdump())
+    assert upgraded.execute('PRAGMA user_version').fetchone()[0] == 9
+    for table in tables:
+        names, stored = before[table]
+        kept = [names.index(name) for name in names]
+        assert [tuple(row[i] for i in kept) for row in stored] == [
+            tuple(row) for row in upgraded.execute(f"SELECT {', '.join(names)} FROM {table} ORDER BY 1")]
     dump = list(upgraded.iterdump())
     upgraded.close()
     for database in (path, tmp_path / 'empty.db'):
         connection = db.connect(database)
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
         with db.transaction(connection):
             db._migrate_v7(connection)
         if database == path:

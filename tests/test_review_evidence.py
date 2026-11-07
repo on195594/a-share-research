@@ -246,7 +246,8 @@ def test_interrupted_repair_keeps_unresolved_opinion_and_safe_stage_in_api_and_p
     diagnostics = service.diagnostics("failed", {"failure": failure, "review_audit": ledger.snapshot()}, report_available=False)
     assert diagnostics["failure"] == failure and diagnostics["problems"] == ledger.pending()
     html = ENV.get_template("run.html").render(run={"status": "failed", "code": BODY["code"], "error": failure["message"]},
-                diagnostics=diagnostics, steps={"repair": "按复核意见修改"}, feedback_retry=False, csrf="", request_id="local")
+                diagnostics=diagnostics, steps={"repair": "按复核意见修改"}, feedback_retry=False, csrf="", request_id="local",
+                retry={"label": "重新运行这次研究", "note": None})
     assert "按复核意见修改" in html and "中断前仍未解决" in html and "不会自动重试" in html
 
 

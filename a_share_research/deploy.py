@@ -177,7 +177,7 @@ def deploy(code: str, evidence: Path) -> None:
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
         log.exception("发布失败，恢复原应用镜像；保留备份与证据")
-        # Application-only rollback: only additive migrations that old images tolerate may ship through here.
+        # Application-only rollback: a migration may ship through here only if the old image runs on the new schema.
         if switched:
             for service in SERVICES:
                 run("docker", "tag", before[service]["image"], f"a-share-research-{service}:latest")

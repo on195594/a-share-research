@@ -117,7 +117,8 @@ def allow_notification(item: dict, history: list[dict], at: str, trade_days: lis
 
 
 def subscriptions(conn) -> list[dict]:
-    items = {r['code']: dict(r) for r in conn.execute('SELECT * FROM subscriptions ORDER BY code')}
+    items = {r['code']: dict(r) for r in conn.execute(
+        'SELECT code,origin,added_at,last_close,last_close_date FROM subscriptions ORDER BY code')}
     batch = conn.execute('SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL '
                          'ORDER BY frozen_at DESC, id DESC LIMIT 1').fetchone()
     if batch:
@@ -166,7 +167,8 @@ def events(conn, *, scan_id: int | None = None, code: str | None = None) -> list
             where.append(column + '=?')
             params.append(value)
     rows = conn.execute(
-        'SELECT e.*,u.status AS run_status,u.finished_at AS judgment_completed_at,r.passed '
+        'SELECT e.id,e.scan_id,e.code,e.doc_key,e.title,e.announced,e.url,e.kind,e.severity,e.detected_at,e.action,e.run_id,'
+        'u.status AS run_status,u.finished_at AS judgment_completed_at,r.passed '
         'FROM scan_events e LEFT JOIN runs u ON u.id=e.run_id LEFT JOIN reports r ON r.run_id=u.id '
         + ('WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY e.id', params)
     return [dict(r) for r in rows]

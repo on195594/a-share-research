@@ -114,7 +114,26 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
                 except ValueError:
                     problems.append(f"批次 {batch['id']}：{column} 不是合法 JSON")
     return problems, {"runs_with_material": len(materials), "calls": calls, "reports": reports,
-                      "reports_without_hash": unhashed}
+                      "reports_without_hash": unhashed, **_check_relations(conn, problems)}
+
+
+def _check_relations(conn: sqlite3.Connection, problems: list[str]) -> dict:
+    """Links no foreign key can enforce. Release backups taken before v9 have none of these columns."""
+    if "company_key" not in {row["name"] for row in conn.execute("PRAGMA table_xinfo(reports)")}:
+        return {}
+    for row in conn.execute("SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
+                            " WHERE r.company_key != u.company_key ORDER BY r.id"):
+        problems.append(f"报告 {row['id']}：公司与任务 {row['run_id']} 不一致")
+    for row in conn.execute("SELECT u.id, u.parent_report_id FROM runs u JOIN reports p ON p.id = u.parent_report_id"
+                            " WHERE p.company_key != u.company_key ORDER BY u.id"):
+        problems.append(f"任务 {row['id']}：公司与父报告 {row['parent_report_id']} 不一致")
+    # Reported, not failed: deleting a report by hand legitimately leaves its continuations without a parent.
+    dangling = conn.execute("SELECT u.id FROM runs u LEFT JOIN reports p ON p.id = u.parent_report_id"
+                            " WHERE u.parent_report_id IS NOT NULL AND p.id IS NULL ORDER BY u.id").fetchall()
+    orphaned = conn.execute("SELECT u.id FROM runs u LEFT JOIN batches b ON b.id = u.batch_id"
+                            " WHERE u.batch_id IS NOT NULL AND b.id IS NULL ORDER BY u.id").fetchall()
+    return {"dangling_parent_reports": [row["id"] for row in dangling],
+            "orphan_batch_runs": [row["id"] for row in orphaned]}
 
 
 def main() -> None:

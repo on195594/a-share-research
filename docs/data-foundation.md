@@ -137,7 +137,7 @@ CASE WHEN request_id GLOB 'batch-[1-9]*-*'
 ```python
 def _migrate_v9(conn: sqlite3.Connection) -> None:
     # Payload columns stay last so metadata reads never walk their overflow pages.
-    for table, columns, payload in REBUILT:
+    for table, payload, columns in REBUILT:
         existing = list(conn.execute(f"PRAGMA table_xinfo({table})"))
         if existing[-1]["name"] == payload:  # already rebuilt; a re-run must be a no-op
             continue
@@ -173,16 +173,16 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 
 ## 5 发布与工作分解
 
-只有先后顺序是硬依赖：R2、R3 要用 R1 加的列。三段分开发是为了便于定位和回退，不需要等待期，相邻两段间隔 1 天。
+只有先后顺序是硬依赖：R2、R3 要用 R1 加的列。三段分开发是为了便于定位和回退，不需要等待期，所有者决定同一天完成（2026-11-07）。
 
-| 段 | 日期 | 条件 |
-|---|---|---|
-| P0 | 与 R1 同日完成 | 例行 |
-| R1 | 所有者授权当天，目标 11-07 | 第 7 节 R1 门禁全过。门禁未过或空闲检查不通过就停止，第二天 20:00 再试，不绕过 |
-| R2 | R1 次日，目标 11-09 | R1 后跑通一份真实研究；这只是补充证据，不替代差分 |
-| R3 | R2 次日，目标 11-10 | R2 差分通过 |
+| 段 | 条件 |
+|---|---|
+| P0 | 例行，与 R1 一起提交 |
+| R1 | 第 7 节 R1 门禁全过，且所有者当次授权。门禁未过或空闲检查不通过就停止，不绕过 |
+| R2 | R1 后跑通一份真实研究（只是补充证据，不替代差分），R2 差分通过 |
+| R3 | R2 已发布，R3 差分与互变验证通过 |
 
-R1 推迟时，R2、R3 同步后移。最晚 11-28；11-29 起月批保护期不发布，到时仍未发布的部分顺延到 12-05，并在实施计划公开标记。K7b（11-20）优先级不变，与之冲突时先合 K7b。
+分工：Claude 写 P0、R1 和差分脚本并负责发布，Codex 在独立工作树写 R2、R3，agy 只读审查（R1 发布前一次，R2、R3 发布前一次）。当天未完成的部分最晚 11-28 发布；11-29 起月批保护期不发布，到时仍未发布的顺延到 12-05，并在实施计划公开标记。K7b（11-20）优先级不变，与之冲突时先合 K7b。
 
 ### P0 清理基线（例行）
 
@@ -195,6 +195,7 @@ R1 推迟时，R2、R3 同步后移。最晚 11-28；11-29 起月批保护期不
 - `db.py`：`_migrate_v9`、`connect()` 调整。
 - `service.py:26,79`：`\d` 改为 `[0-9]`。Python 的 `\d` 接受全角数字，新约束下 `６０３６０６` 会从“能提交”变成裸 `IntegrityError`，必须改为返回既有的 `RequestError`。其余写入入口已核对：`scans.py:132` 已是 `[0-9]{6}`，`reports`、`prices`、`scan_events` 的代码来自已校验的任务或订阅。
 - `integrity.py`：增加 `reports` 与所属任务 `company_key` 一致性检查（列不存在时跳过），以及第 3.4.1 节的关系检查。
+- `scans.py`：`subscriptions`、`events` 的 `SELECT *`、`e.*` 改显式列。这两处直接 `dict(row)` 进 API，不改会把 `company_key` 带给 Skills，所以不能留到 R2。
 - 测试：
   - `test_db.py:43,173,176`、`test_batch_c.py:59`、`test_scans.py:216,222` 更新版本号；
   - `test_feedback_retry.py:39` 回插前去掉生成列；
@@ -219,7 +220,7 @@ R1 推迟时，R2、R3 同步后移。最晚 11-28；11-29 起月批保护期不
 
 - 约 35 处公司代码的 `[:6]`：有行数据的直接用 `company_key`，入参用 `stock_codes.normalize_key`。`backtest.py`、`industry.py` 的 `d[:6]` 是日期，不动。
 - 其余重复的代码正则（`service.py:226`、`web.py:587`、`reading.py:81,370`、`research_tools.py:347`）统一到 `stock_codes`，错误文案与状态码不变。有意变化：全角数字从 `web.py:587` 通过后查空，改为返回既有的校验错误。
-- 新增 `tests/test_data_foundation.py` 钉住不变量：
+- 扩展 R1 创建的 `tests/test_data_foundation.py`，钉住不变量：
   - 五张表都有 `company_key`，三张重建表最后一列是大字段；
   - 五张表都拒绝非法代码；
   - 同一组输入：规范形式下 `company_key` 表达式与 `stock_codes.normalize_key` 结论一致；带首尾空白时入参函数接受、存储拒绝；
@@ -267,6 +268,7 @@ R1 推迟时，R2、R3 同步后移。最晚 11-28；11-29 起月批保护期不
 - 数据守恒：迁移前后按列名逐行比较全部非生成列（含 `body_sha256` 和冻结 JSON），必须完全相同。发布工具的两次指纹比较都在迁移之前（`deploy.py:143-159`），证明不了这一点；
 - 回退兼容：用实际的回退镜像跑在 v9 副本上，读、写、触发器和完整性巡检都正常；
 - 关系检查：`dangling_parent_reports` 恰好是任务 16、66；
+- 行为不变：旧代码跑 v8、新代码跑 v9，所有 JSON 读接口和页面按字节比较（去掉 CSRF 令牌和随机请求编号），必须相同；
 - 发布后：对生产库只读复查一次数据守恒，只比较备份中已有的行。不一致就停止并报告所有者。这是发布后的确认，不阻止启动，应用回退也不会还原数据。
 
 **主验收：新旧差分。** R2、R3 各跑一次，新旧代码用同一数据库副本：

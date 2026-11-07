@@ -215,7 +215,64 @@ def _migrate_v8(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE batches ADD COLUMN {column} TEXT")
 
 
-MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8)
+COMPANY_KEY = ("company_key TEXT GENERATED ALWAYS AS (CASE WHEN length(code) IN (6, 9)"
+               " AND substr(code, 1, 6) NOT GLOB '*[^0-9]*'"
+               " AND (length(code) = 6 OR substr(code, 7) IN ('.SH', '.SZ', '.BJ'))"
+               " THEN substr(code, 1, 6) END) VIRTUAL NOT NULL")
+_BATCH_NUMBER = "substr(request_id, 7, instr(substr(request_id, 7), '-') - 1)"
+# External request ids are only length-checked, so match the whole id: its batch number and company must both fit.
+BATCH_ID = (f"batch_id INTEGER GENERATED ALWAYS AS (CASE WHEN request_id GLOB 'batch-[1-9]*-*'"
+            f" AND {_BATCH_NUMBER} NOT GLOB '*[^0-9]*'"
+            " AND substr(request_id, 7 + instr(substr(request_id, 7), '-')) IN ("
+            "substr(code, 1, 6), substr(code, 1, 6) || '.SH', substr(code, 1, 6) || '.SZ', substr(code, 1, 6) || '.BJ')"
+            f" THEN CAST({_BATCH_NUMBER} AS INTEGER) END) VIRTUAL")
+# Payload columns stay last so metadata reads never walk their overflow pages.
+REBUILT = (
+    ("runs", "material", "id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE,"
+     " kind TEXT NOT NULL DEFAULT 'research', code TEXT NOT NULL, name TEXT, status TEXT NOT NULL DEFAULT 'queued',"
+     " step TEXT, error TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, replay_of INTEGER,"
+     f" {COMPANY_KEY},"
+     " parent_report_id INTEGER GENERATED ALWAYS AS (json_extract(request, '$.parent_report_id')) VIRTUAL,"
+     " is_feedback INTEGER GENERATED ALWAYS AS (json_extract(request, '$.feedback') IS NOT NULL) VIRTUAL,"
+     f" {BATCH_ID}, request TEXT, identity TEXT, material TEXT"),
+    ("reports", "body", "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL UNIQUE REFERENCES runs(id),"
+     " code TEXT NOT NULL, name TEXT, period TEXT NOT NULL, passed INTEGER NOT NULL, verdict TEXT,"
+     f" created_at TEXT NOT NULL, body_sha256 TEXT, coverage TEXT, {COMPANY_KEY}, body TEXT NOT NULL"),
+    ("calls", "prompt", "id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES runs(id), step TEXT NOT NULL,"
+     " usage TEXT, seconds REAL, error TEXT, created_at TEXT NOT NULL, identity TEXT,"
+     " prompt_base INTEGER REFERENCES calls(id), prompt_block TEXT, response TEXT, prompt TEXT NOT NULL"),
+)
+
+
+def _migrate_v9(conn: sqlite3.Connection) -> None:
+    for table, payload, columns in REBUILT:
+        existing = list(conn.execute(f"PRAGMA table_xinfo({table})"))
+        if existing[-1]["name"] == payload:  # already rebuilt; a re-run must be a no-op
+            continue
+        names = ", ".join(row["name"] for row in existing)
+        attached = [row["sql"] for row in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+            (table,))]
+        conn.execute(f"CREATE TABLE {table}_v9 ({columns})")
+        conn.execute(f"INSERT INTO {table}_v9 ({names}) SELECT {names} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_v9 RENAME TO {table}")
+        for sql in attached:
+            conn.execute(sql)
+    for table in ("prices", "scan_events", "subscriptions"):
+        if "company_key" not in {row["name"] for row in conn.execute(f"PRAGMA table_xinfo({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {COMPANY_KEY}")
+    for table in ("runs", "reports", "prices", "scan_events"):
+        conn.execute(f"CREATE INDEX IF NOT EXISTS {table}_by_company_id ON {table}(company_key, id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS runs_by_parent_report ON runs(parent_report_id)"
+                 " WHERE parent_report_id IS NOT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS runs_by_batch ON runs(batch_id) WHERE batch_id IS NOT NULL")
+    if conn.execute("PRAGMA foreign_key_check").fetchall():
+        raise RuntimeError("foreign key violations after rebuild")
+
+
+MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
+              _migrate_v9)
 
 
 def now() -> str:
@@ -229,8 +286,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(SCHEMA)
+        migrated = False
         for version, migrate in enumerate(MIGRATIONS, start=1):
             if conn.execute("PRAGMA user_version").fetchone()[0] < version:
                 # Another process may finish the migration while we wait for the write lock.
@@ -238,6 +295,10 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
                     if conn.execute("PRAGMA user_version").fetchone()[0] < version:
                         migrate(conn)
                         conn.execute(f"PRAGMA user_version = {version}")
+                        migrated = True
+        conn.execute("PRAGMA foreign_keys=ON")  # A table rebuild cannot run with enforcement on.
+        if migrated:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()  # a rebuild leaves a WAL as large as the tables
     except BaseException:
         conn.close()
         raise

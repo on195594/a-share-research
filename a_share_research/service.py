@@ -23,7 +23,7 @@ class RequestError(ValueError):
 
 def submit(conn, code: str, request_id: str, *, name: str | None = None,
            question: str = "", parent_report_id: int | None = None, feedback: dict | None = None) -> int:
-    valid_code = code[:6] if re.fullmatch(r"\d{6}(?:\.(?:SH|SZ|BJ))?", code) else ""
+    valid_code = code[:6] if re.fullmatch(r"[0-9]{6}(?:\.(?:SH|SZ|BJ))?", code) else ""
     if (not valid_code and (code or parent_report_id is None)) or not 1 <= len(request_id) <= 128 or len(question) > 4000:
         raise RequestError("需要 6 位公司代码、1–128 字请求编号；问题不超过 4000 字")
     code = valid_code
@@ -76,7 +76,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
 def submit_diagnostic(conn, code: str, request_id: str, *, question: str, source: dict,
                       parent_report_id: int | None = None) -> int:
     """Queue a trusted internal diagnostic; no HTTP route reaches this, so callers cannot relabel formal research."""
-    if not re.fullmatch(r"\d{6}", code) or not 1 <= len(request_id) <= 128 or not question.strip():
+    if not re.fullmatch(r"[0-9]{6}", code) or not 1 <= len(request_id) <= 128 or not question.strip():
         raise RequestError("诊断需要 6 位公司代码、1–128 字请求编号与问题")
     payload = json.dumps({"question": question.strip(), "parent_report_id": parent_report_id, "feedback": None,
                           "source": source}, ensure_ascii=False, sort_keys=True)

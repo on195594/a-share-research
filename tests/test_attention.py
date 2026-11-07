@@ -120,6 +120,7 @@ def test_failed_report_hides_judgment_but_keeps_evidence_gaps():
     body = record['body']
     body['facts'] = {}  # failure boundary; no approved claim is invented
     html = render('report.html', report=record, body=body, feedback=None, feedback_label='', replay_of=None,
-                  rows={}, price=None, followups=[], comparison={}, market=[], fin=[])
+                  rows={}, price=None, followups=[], comparison={}, market=[], fin=[],
+                  retry={'label': '重新运行这次研究', 'note': None})
     assert body['summary'] not in html and '不展示结论' in html
     assert body['gaps'][0] in html
