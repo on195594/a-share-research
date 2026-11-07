@@ -219,7 +219,8 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 ### R3 代码层收口（例行）
 
 - 约 35 处公司代码的 `[:6]`：有行数据的直接用 `company_key`，入参用 `stock_codes.normalize_key`。`backtest.py`、`industry.py` 的 `d[:6]` 是日期，不动。
-- 其余重复的代码正则（`service.py:226`、`web.py:587`、`reading.py:81,370`、`research_tools.py:347`）统一到 `stock_codes`，错误文案与状态码不变。有意变化：全角数字从 `web.py:587` 通过后查空，改为返回既有的校验错误。
+- 其余重复的代码正则（`service.py:226`、`web.py:587`、`reading.py:81,370`、`research_tools.py:347`）统一到 `stock_codes`，错误文案与状态码不变。有意变化：全角数字从 `web.py:587` 通过后查空，改为返回既有的校验错误；统一后公司卡片（原 404）和提交请求同样返回校验错误。
+- 外部接口的标识不属于上述 35 处：`sources.peer_members`、`scans.normalize_close` 保留 `[:6]`。真实 `index_member_all`（`is_new=Y`，2026-11-07 共 5922 行）含 `T00018.SH`，解析会让所在行业的同业查询整体报错。
 - 扩展 R1 创建的 `tests/test_data_foundation.py`，钉住不变量：
   - 五张表都有 `company_key`，三张重建表最后一列是大字段；
   - 五张表都拒绝非法代码；
@@ -258,6 +259,24 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 绝对值目前不大。价值在于这类查询不再随大字段总量线性变慢。`latest_reports` 剩余耗时主要来自读 `body` 里的检查点，本次不处理。
 
 **尚未验证**：原型没有 `batch_id`，生成列位置也与最终设计不同，上表的迁移结果不能代替最终 DDL 的验收；进程崩溃和双进程同时启动未在最终版本上实测；R2、R3 的查询改动；未被上述 48 个文件覆盖的测试。前两项是 R1 门禁，其余在实施时验证。
+
+### 实施结果（2026-11-07）
+
+上面的“尚未验证”都已在实施时覆盖。发布记录见[实施计划](implementation-plan.md#当前部署)。
+
+| 段 | 差分与测试 | 差异归类 |
+|---|---|---|
+| R1 | 私有副本迁移门禁全过；发布后 13 张表逐列差异为 0 | 无 |
+| R2 | 3385 + 3596 个探针，HTTP 833 条路径，938 项测试 | 畸形批次编号；六位代码能命中九位存量；`/api/search` 空查询加非法代码时先报代码错误，两者都是 422 |
+| R3 | 3385 + 3596 个探针，HTTP 836 条路径，1136 项测试 | 只有全角代码在 `/api/reports`、公司卡片上改报校验错误；`evolution._eligible` 内部行多一个键，不进 API |
+
+`validation.source()` 与 `batch_id` 在有批次的任务上 38/38 一致。
+
+R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 杀死 12 处，包括其覆盖的全部查询入参。`latest_price` 由 `test_company_identity.py` 钉住，`submit_price`、页面入口等边界函数和存量行、已校验代码的处理，本轮只跑了这一个文件，靠差分确认与旧版一致，没有逐处钉住。
+
+差分的盲区：实现者只跑相关文件时漏过一个陈旧的 `batch-` 测试夹具，全量数据库测试才发现，所以每段都要跑全部数据库相关测试。`[:6]` 改解析函数也不能只靠差分，私有副本里没有 `T00018.SH` 的情形，要查外部接口的真实返回。
+
+未修：全新数据库并发切 WAL 约 2% 偶发失败（`test_db.py::test_concurrent_connections_migrate_once`），已是 WAL 的库为零，生产不受影响。
 
 ## 7 验收与治理规则
 
