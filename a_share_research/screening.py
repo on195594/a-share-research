@@ -221,12 +221,14 @@ def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dic
 # ---------- research and selection ----------
 
 def reusable_report(conn, code: str, since: str):
-    """The latest passed, non-replay report of `code` since `since` that a batch may reuse."""
+    """The latest formal report of `code` since `since` that a batch may reuse.
+
+    Corrections are excluded by FORMAL_REPORT: they may omit valuation and stance.
+    """
     code = stock_codes.normalize_key(code)
     return conn.execute(
         "SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
-        " WHERE r.company_key = ? AND r.passed = 1 AND u.status = 'done' AND r.created_at >= ?"
-        " AND u.kind = 'research' AND u.replay_of IS NULL"
+        f" WHERE r.company_key = ? AND r.created_at >= ? AND {db.FORMAL_REPORT}"
         # A continuation's answer is about its earlier report, not the batch question.
         " AND json_type(r.body, '$.prior') IS NOT 'object' ORDER BY r.id DESC LIMIT 1",
         (code, since),

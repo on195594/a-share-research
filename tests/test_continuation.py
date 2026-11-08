@@ -50,6 +50,8 @@ def test_batches_never_reuse_a_continuation(tmp_path):
     load(conn)
     assert screening.reusable_report(conn, "603606.SH", "2026-10-20")["id"] == 37
     assert screening.reusable_report(conn, "000651.SZ", "2026-10-20")["id"] == 25  # the replay 148 is skipped
+    # 茅台: correction 12 has no valuation or stance, and replay 143 is skipped, so the follow-up 11 is reused.
+    assert screening.reusable_report(conn, "600519.SH", "2026-10-20")["id"] == 11
     conn.close()
 
 

@@ -24,10 +24,11 @@ def normalize_key(code: str) -> str:
 
 
 def infer_ts_code(code: str) -> str:
-    """Preserve an explicit suffix or infer one using the source adapter."""
+    """Preserve an explicit suffix or infer one using a-stock-lib's exchange rules."""
     key, suffix = parse_code(code)
     if suffix is not None:
         return f"{key}.{suffix}"
-    from a_share_research.sources import to_tushare_stock_code
+    # Deferred: the provider module pulls pandas, which code parsing does not otherwise need.
+    from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
 
     return to_tushare_stock_code(key)

@@ -117,9 +117,9 @@ CASE WHEN request_id GLOB 'batch-[1-9]*-*'
 | 处理 | 位置 | 说明 |
 |---|---|---|
 | 切到 `FORMAL_REPORT` | `service.py:232`、`hypotheses.py:126`、`reading.py:382`、`scans.py:301`、`research.py:364`、`evolution.py:51` | 时间窗、`material` 等附加条件保留。后两处原用 `json_type = 'object'` 判纠错，写入路径只产生 object，切换后结果相同 |
+| 切到 `FORMAL_REPORT`（R3 后） | `screening.py` `reusable_report` | 原条件只按 `$.prior` 排除接续研究，不判纠错；纠错报告可以不带估值与立场，曾可能被批次复用（茅台 #12）。只影响之后的批次复用，已冻结批次的报告不变 |
 | 切到 `RESEARCH_ORIGINAL` | `reading.py:311` | 不要求通过和完成 |
 | 保留，不切换 | `validation.py:190,233,256`、`zones.py:199` | **没有 `status = 'done'`**，纠错在 Python 里判断 |
-| 保留，不切换 | `screening.py:228` | 按 `$.prior` 排除接续研究，SQL 不判纠错 |
 | 保留，不切换 | `reading.py:250` | 查的是纠错任务本身 |
 | 保留，不切换 | `reading.py:737` | 队列状态，不是样本口径 |
 
@@ -213,7 +213,7 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 | `service.py` | `company_card`、`submit_price`、`:289-292` 改 `batch_id` + `company_key`（`JOIN batches` 保留）；`:135` 的 `startswith('batch-')` 改用 `batch_id` |
 | `worker.py:34` | 排队顺序改用 `batch_id IS NOT NULL` |
 | `scans.py`、`hypotheses.py`、`evolution.py`、`research.py` | `company_key` 与第 3.5 节常量 |
-| `validation.py`、`zones.py`、`screening.py` | 只在涉及公司比较的地方用 `company_key`，**选样谓词不动**（第 3.5 节） |
+| `validation.py`、`zones.py`、`screening.py` | 只在涉及公司比较的地方用 `company_key`，**选样谓词不动**（第 3.5 节；`screening.py` 批次复用于 R3 后改用 `FORMAL_REPORT`） |
 | 全部 `SELECT *` / `r.*`（`runs`、`reports` 共 9 处） | 改为显式列，既不把新列带进 API，也不再无谓读取大字段 |
 
 ### R3 代码层收口（例行）

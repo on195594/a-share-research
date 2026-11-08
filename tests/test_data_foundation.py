@@ -327,7 +327,7 @@ def test_latest_close_normalizes_both_code_forms(conn):
 def test_business_sql_uses_shared_company_and_sample_definitions():
     root = Path(db.__file__).parent
     # Section 3.5 of the data foundation plan: selection predicates kept as frozen.
-    retained = {'validation.py': 3, 'zones.py': 1, 'screening.py': 1, 'reading.py': 2}
+    retained = {'validation.py': 3, 'zones.py': 1, 'reading.py': 2}
     found = dict.fromkeys(retained, 0)
     for path in root.rglob('*.py'):
         tree = ast.parse(path.read_text())
