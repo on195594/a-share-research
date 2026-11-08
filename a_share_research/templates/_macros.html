@@ -148,6 +148,6 @@
 {%- endmacro %}
 {% macro flip_sensitivity(sd, cls='small') -%}
 {% if sd and sd.flip_distance is number %}
-<p class="{{ cls }}">假设敏感度（报告时点）：分红不变时，{% if sd.flip_distance == 0 %}报告收盘价已等于门槛价{% else %}退出市值假设整体{{ '下调' if sd.flip_distance < 0 else '上调' }}约 <span class="num">{{ '%.1f' | format(sd.flip_distance | abs * 100) }}%</span> 后，报告收盘价即到门槛价{% if sd.flip_distance < 0 and sd.action == '现在分批' %}，再下调则报告收盘价高于门槛，立场可能由现在分批转为等价格{% elif sd.flip_distance > 0 and sd.action == '等价格' %}，再上调则报告收盘价低于门槛，立场可能由等价格转为现在分批{% endif %}{% endif %}。</p>
+<p class="{{ cls }}">假设敏感度（报告时点）：分红不变时，{% if sd.flip_distance == 0 %}报告收盘价已等于门槛价{% else %}退出市值假设整体{{ '下调' if sd.flip_distance < 0 else '上调' }}约 <span class="num">{{ '%.1f' | format(sd.flip_distance | abs * 100) }}%</span> 后，报告收盘价即到门槛价{% if sd.flip_distance < 0 and sd.action == '现在分批' %}，再下调则报告收盘价高于门槛，立场可能由现在分批转为等价格{% elif sd.flip_distance > 0 and sd.action == '等价格' %}，再上调则报告收盘价低于门槛，立场可能由等价格转为现在分批{% endif %}{% endif %}。{% if sd.flip_distance != 0 and sd.flip_distance | abs <= 0.02 and sd.action in ('现在分批', '等价格') %}（距离不足 2%，属于假设临界敏感区间，立场易受估值微调扰动）{% endif %}</p>
 {% endif %}
 {%- endmacro %}

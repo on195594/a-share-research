@@ -118,9 +118,12 @@ def test_report_and_both_card_shapes(sample, variant):
         assert ('整体下调' if distance < 0 else '整体上调') in html
         if variant == 'avoid':
             assert '立场可能由' not in html
+            assert '立场易受估值微调扰动' not in html
         else:
             assert ('立场可能由现在分批转为等价格' if distance < 0
                     else '立场可能由等价格转为现在分批') in html
+            if abs(distance) <= 0.02:
+                assert '距离不足 2%，属于假设临界敏感区间，立场易受估值微调扰动' in html
 
 
 def test_exact_hurdle_has_zero_distance_and_no_direction_claim():
@@ -135,6 +138,28 @@ def test_exact_hurdle_has_zero_distance_and_no_direction_claim():
     html = str(ENV.get_template('_macros.html').module.flip_sensitivity(view))
     assert '报告收盘价已等于门槛价' in html
     assert '立场可能由' not in html
+    assert '距离不足 2%' not in html
+
+
+def test_critical_sensitivity_boundary_note():
+    # Report 116 (|fd| = 0.87% <= 2%) shows critical sensitivity note.
+    view_116 = reading.stance_decision({'action': '现在分批'}, {}, SAMPLES[0]['valuation_calc'])
+    html_116 = str(ENV.get_template('_macros.html').module.flip_sensitivity(view_116))
+    assert '距离不足 2%，属于假设临界敏感区间，立场易受估值微调扰动' in html_116
+
+    # Avoid stance (|fd| = 0.87% <= 2%) never claims stance flip or critical sensitivity.
+    view_avoid = reading.stance_decision({'action': '回避'}, {}, SAMPLES[0]['valuation_calc'])
+    html_avoid = str(ENV.get_template('_macros.html').module.flip_sensitivity(view_avoid))
+    assert '距离不足 2%' not in html_avoid
+    assert '立场易受估值微调扰动' not in html_avoid
+    assert '到门槛价。' in html_avoid
+
+    # Report 132 (|fd| = 8.65% > 2%) omits the critical sensitivity note.
+    sample_132 = next(s for s in SAMPLES if s['report_id'] == 132)
+    view_132 = reading.stance_decision({'action': '等价格'}, {}, sample_132['valuation_calc'])
+    html_132 = str(ENV.get_template('_macros.html').module.flip_sensitivity(view_132))
+    assert '距离不足 2%' not in html_132
+    assert '8.7%' in html_132
 
 
 @pytest.mark.parametrize('price_factor,day', [(1, '2026-11-05'), (1.2, '2027-01-30')])
