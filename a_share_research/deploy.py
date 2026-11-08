@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import tarfile
@@ -51,6 +52,63 @@ def prune_backups(data: Path, keep: int = KEEP_BACKUPS) -> list[str]:
         for path in (old, old.with_name(old.name + "-shm"), old.with_name(old.name + "-wal")):
             path.unlink(missing_ok=True)
     return [old.name for old in backups[keep:]]
+
+
+KEEP_ROLLBACK_IMAGES = 2
+
+
+def _created(value: str) -> datetime:
+    """Docker's RFC 3339 creation time; nanoseconds are cut to what datetime holds."""
+    return datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", value))
+
+
+def images_to_prune(images: dict[str, dict], current: str, keep: int = KEEP_ROLLBACK_IMAGES) -> list[str]:
+    """Tags of one repository's images older than the current image and its newest `keep` rollback targets.
+
+    `images` maps image id to {"created", "tags"}. A rollback target is an image carrying a
+    `rollback-*` tag. Images newer than the oldest kept one (built but not released) are never chosen.
+    """
+    created = {image: _created(info["created"]) for image, info in images.items()}
+    rollbacks = sorted((image for image, info in images.items()
+                        if image != current and any(tag.startswith("rollback-") for tag in info["tags"])),
+                       key=created.__getitem__, reverse=True)[:keep]
+    kept = {current, *rollbacks}
+    cutoff = min(created[image] for image in kept)
+    return sorted(tag for image, info in images.items() if image not in kept and created[image] < cutoff
+                  for tag in info["tags"] if tag != "<none>")
+
+
+def prune_images(current: dict[str, str], keep: int = KEEP_ROLLBACK_IMAGES) -> dict:
+    """Untag old release images after a verified release (owner's standing rule, 11-08).
+
+    Docker deletes an image once its last tag is gone and no container uses it. A tag Docker
+    refuses to remove is reported, not retried: the release itself has already been verified.
+    """
+    result = {}
+    for service in SERVICES:
+        repository = f"a-share-research-{service}"
+        removed, failed = [], {}
+        try:
+            images = {}
+            for line in run("docker", "image", "ls", "--no-trunc", "--format", "{{.ID}} {{.Tag}}", repository).splitlines():
+                image, tag = line.split()
+                images.setdefault(image, {"tags": []})["tags"].append(tag)
+            for image in images:
+                images[image]["created"] = run("docker", "image", "inspect", "--format", "{{.Created}}", image)
+            tags = images_to_prune(images, current[service], keep)
+        except subprocess.CalledProcessError as exc:
+            log.warning("%s 镜像列表读取失败，本次不清理：%s", repository, exc)
+            result[service] = {"removed": [], "failed": {"list": str(exc)}}
+            continue
+        for tag in tags:
+            try:
+                run("docker", "image", "rm", f"{repository}:{tag}")
+                removed.append(tag)
+            except subprocess.CalledProcessError as exc:
+                log.warning("%s:%s 未能删除：%s", repository, tag, exc)
+                failed[tag] = str(exc)
+        result[service] = {"removed": removed, "failed": failed}
+    return result
 
 
 def fingerprints(database: Path) -> dict:
@@ -170,10 +228,11 @@ def deploy(code: str, evidence: Path) -> None:
         save("integrity-after.json", check)
         if not check["ok"]:
             raise RuntimeError("发布后完整性检查失败")
-        pruned = prune_backups(data)  # Only after a verified release; a failed one keeps every backup.
+        pruned = prune_backups(data)  # Only after a verified release; a failed one keeps every backup and image.
+        pruned_images = prune_images(images)
         save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
                                "backup": str(backup), "backup_counts": counts, "pruned_backups": pruned,
-                               "at": db.now()})
+                               "pruned_images": pruned_images, "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
         log.exception("发布失败，恢复原应用镜像；保留备份与证据")

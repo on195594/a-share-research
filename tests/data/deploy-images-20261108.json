@@ -1,0 +1,104 @@
+{
+ "captured": "2026-11-08 after 5b0b950 release",
+ "repository": "a-share-research-worker",
+ "current": "sha256:2be9fccdeb6999596cb3ded77857eb03dc683a0c5fe3db3e84f270b21cf355ac",
+ "images": {
+  "sha256:2be9fccdeb6999596cb3ded77857eb03dc683a0c5fe3db3e84f270b21cf355ac": {
+   "tags": [
+    "5b0b950",
+    "latest"
+   ],
+   "created": "2026-11-08T13:34:34.91585228+08:00"
+  },
+  "sha256:188f2bb8181a663875a35f69f0847c34b1c60c9d4c76bb1e4d76c2cb2460cd1f": {
+   "tags": [
+    "c34b854",
+    "rollback-5b0b950"
+   ],
+   "created": "2026-11-07T23:23:33.44144956+08:00"
+  },
+  "sha256:61fbf600547c6366d6173a149e85b599c194c003252cbae6b9f2da01d5be8f7e": {
+   "tags": [
+    "8f0e70f",
+    "rollback-c34b854"
+   ],
+   "created": "2026-11-07T15:52:01.25479436+08:00"
+  },
+  "sha256:a1f5f501a90dd955266ba01f001d0b73ba63bde00569ede3d85296868d408183": {
+   "tags": [
+    "09c3124",
+    "rollback-8f0e70f"
+   ],
+   "created": "2026-11-07T14:46:26.26050996+08:00"
+  },
+  "sha256:b1fd5b30ec753cc3d7ca6161a25d5b5c1c54bfef1e132271237f6bc41f2a0d6b": {
+   "tags": [
+    "9c6989f",
+    "rollback-09c3124"
+   ],
+   "created": "2026-11-07T13:04:41.78534516+08:00"
+  },
+  "sha256:bdbe4328602b26ca3f81c44a9d5ac411d9cbd96cde6d6ee0a275eaeb92c6255e": {
+   "tags": [
+    "71bf880",
+    "rollback-9c6989f"
+   ],
+   "created": "2026-11-07T10:58:00.92582432+08:00"
+  },
+  "sha256:ccc8ab0a574326d75056ff1227e7cfe16add6749b345f3d7fdf6aba5f8423f34": {
+   "tags": [
+    "32f2faa",
+    "rollback-71bf880"
+   ],
+   "created": "2026-11-07T10:28:54.15446488+08:00"
+  },
+  "sha256:dafd17135aa5039d1f51bc8e8f83df60ddb9fc9edd654992770672b6cb798d75": {
+   "tags": [
+    "c71a6ac",
+    "rollback-32f2faa"
+   ],
+   "created": "2026-11-07T10:08:07.490176+08:00"
+  },
+  "sha256:8f71546835078057a358f420be19db15bc8ff1ced34ab79c8dc0e72a41a0cf67": {
+   "tags": [
+    "fe0fd5b",
+    "rollback-c71a6ac"
+   ],
+   "created": "2026-11-07T07:52:30.0515174+08:00"
+  },
+  "sha256:e4de09b88581a39881a997a247b99d2715969f7cd772a8a8a952c0d92d958151": {
+   "tags": [
+    "80ed1ba",
+    "rollback-fe0fd5b"
+   ],
+   "created": "2026-11-06T21:20:04.09570972+08:00"
+  },
+  "sha256:426f08c0e0309c8a89dde7470b59e2c399df198b55ba2a975808fa017f192dbc": {
+   "tags": [
+    "225a02e",
+    "rollback-80ed1ba"
+   ],
+   "created": "2026-11-06T20:56:31.54975592+08:00"
+  },
+  "sha256:b74c6de36d6b577fb68604c86c19f03f6572216e31465e30f609edecc3aa54bd": {
+   "tags": [
+    "f47ae9a",
+    "rollback-225a02e"
+   ],
+   "created": "2026-11-06T20:02:22.00355228+08:00"
+  },
+  "sha256:a3adb29f43d4f57082df3a67228f39d461226dae01b5028edc02aa9a84365bee": {
+   "tags": [
+    "daa7244",
+    "rollback-f47ae9a"
+   ],
+   "created": "2026-11-06T19:23:07.07182844+08:00"
+  },
+  "sha256:8567c2b8aa3225fa8e215ffe70b17418734e35c9cddbec5bee0d5b0b10960a6f": {
+   "tags": [
+    "rollback-daa7244"
+   ],
+   "created": "2026-11-06T16:22:24.27830304+08:00"
+  }
+ }
+}
