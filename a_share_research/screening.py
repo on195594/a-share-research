@@ -393,7 +393,7 @@ def rank(candidates: list[dict], rule: dict) -> dict:
     """Separate forced ranking (V2 for batches); kept out of the selection prompt so picks are not shifted."""
     prompt, attempts = ranking_prompt(candidates, rule), []
     for _ in range(2):
-        completion = model.complete(prompt, timeout=600, max_tokens=6000)
+        completion = model.complete(prompt, timeout=600, max_tokens=16000)
         draft = parse_json(completion.text)
         problems = ranking_problems(draft, candidates)
         attempts.append({"identity": completion.identity, "usage": completion.usage,
@@ -442,7 +442,7 @@ def _select(candidates: list[dict], rule: dict) -> dict:
     log.info("comparison: %s candidates, %s prompt characters", len(candidates), len(prompt))
     attempts = []
     for _ in range(2):
-        completion = model.complete(prompt, timeout=600, max_tokens=12000)
+        completion = model.complete(prompt, timeout=600, max_tokens=20000)
         draft = parse_json(completion.text)
         problems = selection_problems(draft, candidates, rule)
         attempts.append({"identity": completion.identity, "usage": completion.usage,

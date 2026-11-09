@@ -27,7 +27,7 @@ def payload(configured):
     prompt = chain["calls"][0]["prompt"]
     return {
         "provider": os.environ["MODEL_PROVIDER"], "model": os.environ["MODEL_ID"],
-        "prompt": prompt, **json.loads(prompt), "timeout": -1, "max_tokens": 8000,
+        "prompt": prompt, **json.loads(prompt), "timeout": -1, "max_tokens": 16000,
         "session_id": hashlib.sha256(prompt[:4096].encode()).hexdigest()[:32],
     }
 
@@ -46,7 +46,7 @@ def test_model_error_retains_request_identity(payload):
     assert error.seconds > 0 and error.identity["pi_version"]
     assert error.identity["prompt_sha256"] == hashlib.sha256(payload["prompt"].encode()).hexdigest()
     assert error.identity["request_parameters"] == {
-        "timeout": -1, "max_tokens": 8000, "session_id": payload["session_id"]}
+        "timeout": -1, "max_tokens": 16000, "session_id": payload["session_id"]}
 
 
 def test_missing_runtime_raises_model_error_with_identity(configured, tmp_path):

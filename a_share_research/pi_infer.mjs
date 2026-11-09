@@ -102,8 +102,8 @@ try {
       if (loaded.errors.length) {
         throw new Error(`Provider extension failed to load: ${loaded.errors[0].error}`);
       }
-      if (loaded.extensions.some(e => e.tools.size || e.handlers.size)) {
-        throw new Error("Provider extension must not register tools or event handlers");
+      if (loaded.extensions.some(e => e.tools.size)) {
+        throw new Error("Provider extension must not register tools");
       }
       for (const entry of loaded.runtime.pendingProviderRegistrations) {
         if (entry.name === request.provider) runtime.registerProvider(entry.name, entry.config);

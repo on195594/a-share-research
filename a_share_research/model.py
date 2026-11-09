@@ -87,7 +87,7 @@ def preflight() -> dict:
     return result
 
 
-def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 8000,
+def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 16000,
              messages: list | None = None, tools: list | None = None) -> Completion:
     request = {
         "provider": os.environ.get("MODEL_PROVIDER"),
