@@ -96,11 +96,9 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `78d96cb`** 于 2026-11-09 11:56 经 README 固定入口发布：中国海油年报横线页脚（如 `- 85 -`）作为目录页码定位回退；优先保留原有可靠页码，避免财务附录重启编号干扰正文。分类为取证解析故障修复，无数据库迁移或凭据变更。修复前真实样本复现失败；修复后 Ruff、`tests/test_mdna_pages.py tests/test_material_cache.py -x` 共 22 项通过，中国海油 236 页完整缓存年报定位 85–92，紫金矿业 352 页正常案例仍定位 34–62。页面无改动，不重复浏览器验收。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `9cea81e`** 于 2026-11-09 12:09 经 README 固定入口发布：支持使用 `antigravity` provider 的 `gemini-3.8-flash`（思考强度 `high`，输出上限 16000 tokens）；通过环境变量 `MODEL_PROVIDER`, `MODEL_ID`, `MODEL_REASONING`, `MODEL_MAX_TOKENS` 统一维护模型配置与思考参数，向下兼容 `openai-codex / gpt-6.1-sol` 等旧模型与未设配置的缺省值；`deploy.py` 增加 `--allow-config` 标志支持授权后的环境与 Compose 变更发布。分类为模型与配置基础设施升级，无数据库结构迁移。发布前经 Codex 审查与确定性测试，worker 容器内离线预检确认 `ready: true`（`antigravity / gemini-3.8-flash / high`），容器内实测端到端推理成功。发布工具的空闲与暂停复查、业务表指纹及完整性巡检均通过（149 份报告、1418 次调用，0 问题）。备份 `backup-pre-9cea81e-20261109-120736.db`；证据 `deploy-9cea81e-20261109-120735/`。
 
-本次用户明确授权保留运行中模型配置，已将本机四项模型环境配置对齐运行中 worker，其余配置和凭据不变；变更前记录（不含凭据）保存在任务 checkpoint 旁的恢复 JSON。worker Pi 离线预检确认 `openai-codex / gpt-6.1-sol / high`。发布工具的配置、空闲与暂停复查、业务表指纹及完整性巡检均通过（148 份报告、1409 次调用，0 问题）。备份 `backup-pre-78d96cb-20261109-115642.db`；证据 `deploy-78d96cb-20261109-115641/`。原失败研究 #206 保留，经幂等重试入口新建中国海油研究 #207，于 12:03 完成并通过复核，报告 #155（报告期 2026-09-30）。
-
-**直接回退**：使用两服务的 `rollback-78d96cb`（web `6a154343`、worker `2be9fccd`），只换镜像，不动数据库和模型配置。版本镜像与备份继续由发布工具按 K4 保留。
+**直接回退**：使用两服务的 `rollback-9cea81e`（web `42e8e0c0`、worker `b87f15e0`），若需回退至原模型同时将 `.env` 恢复为 `openai-codex / gpt-6.1-sol`。版本镜像与备份继续由发布工具按 K4 保留。
 
 本节只保留当前版本与回退方式；各次发布的验证、备份与证据目录见 `git log` 及 `git show a387ebe:docs/implementation-plan.md`「当前部署」。
 
