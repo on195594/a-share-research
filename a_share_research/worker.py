@@ -47,9 +47,9 @@ def main() -> None:
     except RuntimeError:
         log.exception("worker 启动已阻断；修复 Pi 运行时后重启，队列保持原状")
         raise SystemExit(1)
-    log.info("pi ready: version=%s node=%s provider=%s model=%s source=%s",
+    log.info("pi ready: version=%s node=%s provider=%s model=%s reasoning=%s source=%s",
              runtime["pi_version"], runtime["node_version"], runtime["provider"],
-             runtime["model"], runtime["model_source"])
+             runtime["model"], runtime.get("reasoning", "high"), runtime["model_source"])
     conn = db.connect()
     recover(conn)
     screening.recover(conn)

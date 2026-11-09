@@ -46,7 +46,20 @@ def test_model_error_retains_request_identity(payload):
     assert error.seconds > 0 and error.identity["pi_version"]
     assert error.identity["prompt_sha256"] == hashlib.sha256(payload["prompt"].encode()).hexdigest()
     assert error.identity["request_parameters"] == {
-        "timeout": -1, "max_tokens": 16000, "session_id": payload["session_id"]}
+        "timeout": -1, "max_tokens": 16000, "reasoning": "high", "session_id": payload["session_id"]}
+
+
+def test_environment_configures_reasoning_and_max_tokens(payload, monkeypatch):
+    monkeypatch.setenv("MODEL_REASONING", "medium")
+    monkeypatch.setenv("MODEL_MAX_TOKENS", "12000")
+    with pytest.raises(model.ModelError, match="RangeError") as caught:
+        model.complete(payload["prompt"], timeout=-1,
+                       messages=payload["messages"], tools=payload["tools"])
+    error = caught.value
+    assert error.identity["request_parameters"]["max_tokens"] == 12000
+    assert error.identity["request_parameters"]["reasoning"] == "medium"
+    assert error.identity["parameters"]["reasoning"] == "medium"
+    assert error.identity["parameters"]["maxTokens"] == 12000
 
 
 def test_missing_runtime_raises_model_error_with_identity(configured, tmp_path):

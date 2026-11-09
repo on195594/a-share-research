@@ -11,6 +11,20 @@ const request = preflight
   : JSON.parse(await readFile(process.argv[2], "utf8"));
 const result = { pi_version: null, parameters: null, node_version: process.version,
   model_source: null, extension: null };
+if (!preflight) {
+  const rawReasoning = request.reasoning ?? process.env.MODEL_REASONING ?? "high";
+  const reasoning = (rawReasoning === "off" || rawReasoning === "none" || rawReasoning === "" || rawReasoning === false)
+    ? "off"
+    : rawReasoning;
+  result.parameters = {
+    maxTokens: request.max_tokens,
+    transport: "sse",
+    maxRetries: 0,
+    reasoning,
+    sessionId: request.session_id,
+    timeout: request.timeout,
+  };
+}
 
 async function readStore(path) {
   let content;
@@ -120,7 +134,8 @@ try {
     if (!runtime.hasConfiguredAuth(request.provider)) {
       throw new Error(`Provider ${request.provider} has no configured credentials; check auth.json or the provider's environment credentials`);
     }
-    Object.assign(result, { ready: true, provider: model.provider, model: model.id });
+    const reasoning = request.reasoning ?? process.env.MODEL_REASONING ?? "high";
+    Object.assign(result, { ready: true, provider: model.provider, model: model.id, reasoning });
   } else {
     await complete(request, result, model);
     if (result.stop_reason === "aborted") {
@@ -128,14 +143,6 @@ try {
     }
   }
   async function complete(request, result, model) {
-    result.parameters = {
-      maxTokens: request.max_tokens,
-      transport: "sse",
-      maxRetries: 0,
-      reasoning: "high",
-      sessionId: request.session_id, // pi only sends prompt_cache_key with a sessionId
-      timeout: request.timeout,
-    };
     const { timeout, ...options } = result.parameters;
     const response = await runtime.completeSimple(model, {
       messages: request.messages || [{ role: "user", content: request.prompt, timestamp: Date.now() }],
@@ -152,6 +159,7 @@ try {
       tool_calls: response.content.filter(c => c.type === "toolCall").length,
       provider: response.provider,
       model: response.model,
+      reasoning: result.parameters.reasoning,
       usage: response.usage,
       message: response,
     });

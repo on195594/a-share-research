@@ -31,9 +31,18 @@ def test_installed_runtime_resolves_model_without_calls_or_store_writes(configur
     status, out = check(configured)
     assert status == 0 and out["ready"] is True
     assert (out["provider"], out["model"]) == (configured["MODEL_PROVIDER"], configured["MODEL_ID"])
+    assert out.get("reasoning") == configured.get("MODEL_REASONING", "high")
     assert out["parameters"] is None and "usage" not in out and "message" not in out
     assert before == [(p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
     assert paths[0].parent.stat().st_mtime_ns == directory_mtime
+
+
+def test_legacy_model_preflight_compatibility(configured):
+    env = configured | {"MODEL_PROVIDER": "openai-codex", "MODEL_ID": "gpt-6.1-sol", "MODEL_REASONING": "medium"}
+    status, out = check(env)
+    assert status == 0 and out["ready"] is True
+    assert (out["provider"], out["model"]) == ("openai-codex", "gpt-6.1-sol")
+    assert out.get("reasoning") == "medium"
 
 
 def test_missing_configuration_blocks_worker_before_database_creation(tmp_path):

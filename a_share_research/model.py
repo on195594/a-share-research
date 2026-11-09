@@ -87,14 +87,19 @@ def preflight() -> dict:
     return result
 
 
-def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 16000,
-             messages: list | None = None, tools: list | None = None) -> Completion:
+def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None = None,
+             reasoning: str | None = None, messages: list | None = None,
+             tools: list | None = None) -> Completion:
+    resolved_timeout = timeout if timeout is not None else int(os.environ.get("MODEL_TIMEOUT", "240"))
+    resolved_max_tokens = max_tokens if max_tokens is not None else int(os.environ.get("MODEL_MAX_TOKENS", "16000"))
+    resolved_reasoning = reasoning if reasoning is not None else os.environ.get("MODEL_REASONING", "high")
     request = {
         "provider": os.environ.get("MODEL_PROVIDER"),
         "model": os.environ.get("MODEL_ID"),
+        "reasoning": resolved_reasoning,
         "prompt": prompt,
-        "timeout": timeout,
-        "max_tokens": max_tokens,
+        "timeout": resolved_timeout,
+        "max_tokens": resolved_max_tokens,
         # Calls sharing a long stable prefix share the provider prompt cache.
         "session_id": hashlib.sha256(prompt[:4096].encode()).hexdigest()[:32],
     }
@@ -106,7 +111,7 @@ def complete(prompt: str, *, timeout: int = 240, max_tokens: int = 16000,
         "node_version": None, "model_source": None, "extension": None,
         "pi_infer_sha256": None,
         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
-        "request_parameters": {k: request[k] for k in ("timeout", "max_tokens", "session_id")},
+        "request_parameters": {k: request[k] for k in ("timeout", "max_tokens", "reasoning", "session_id")},
     }
     started = time.monotonic()
     try:
