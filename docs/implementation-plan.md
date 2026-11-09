@@ -96,11 +96,11 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `5b0b950`** 于 2026-11-08 13:34 按所有者本次指令、经 README 固定入口发布：批次复用排除纠错报告（`3371550`，改用 `db.FORMAL_REPORT`），`stock_codes` 直接从 a-stock-lib 取交易所后缀。分类为故障修复，服务“发现候选”环节的批次深研输入；无迁移、配置或凭据变更，`VERSION` 不变。沿用 10 个相关测试文件 400 项通过与 Ruff；修复前用茅台真实记录复现复用了纠错报告 #12，修复后为追问 #11。发布工具空闲及暂停复查、业务表指纹、worker Pi 离线预检、完整性巡检均通过（148 份报告、1409 次调用、0 问题）。生产私有浏览器 390 宽度检查首页、`/reports/30`、`/batches`，均 200、无横向溢出、无脚本错误，验收会话已退出。备份 `backup-pre-5b0b950-20261108-133442.db`；证据 `deploy-5b0b950-20261108-133440/`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `78d96cb`** 于 2026-11-09 11:56 经 README 固定入口发布：中国海油年报横线页脚（如 `- 85 -`）作为目录页码定位回退；优先保留原有可靠页码，避免财务附录重启编号干扰正文。分类为取证解析故障修复，无数据库迁移或凭据变更。修复前真实样本复现失败；修复后 Ruff、`tests/test_mdna_pages.py tests/test_material_cache.py -x` 共 22 项通过，中国海油 236 页完整缓存年报定位 85–92，紫金矿业 352 页正常案例仍定位 34–62。页面无改动，不重复浏览器验收。
 
-**直接回退**：回到 `c34b854`，使用两服务的 `rollback-5b0b950`（web `128a622b`、worker `188f2bb8`），只换镜像，不动数据库。
+本次用户明确授权保留运行中模型配置，已将本机四项模型环境配置对齐运行中 worker，其余配置和凭据不变；变更前记录（不含凭据）保存在任务 checkpoint 旁的恢复 JSON。worker Pi 离线预检确认 `openai-codex / gpt-6.1-sol / high`。发布工具的配置、空闲与暂停复查、业务表指纹及完整性巡检均通过（148 份报告、1409 次调用，0 问题）。备份 `backup-pre-78d96cb-20261109-115642.db`；证据 `deploy-78d96cb-20261109-115641/`。原失败研究 #206 保留，经幂等重试入口新建中国海油研究 #207。
 
-本机另保留更早的回退镜像（2026-11-08 核对）：`rollback-c34b854`（回到 `8f0e70f`）、`rollback-8f0e70f`、`rollback-09c3124`、`rollback-9c6989f`、`rollback-71bf880`、`rollback-32f2faa`、`rollback-c71a6ac`、`rollback-fe0fd5b`、`rollback-80ed1ba`、`rollback-225a02e`、`rollback-f47ae9a`、`rollback-daa7244`。标签 `rollback-X` 是发布 X 之前运行的版本，web/worker 同名，只换镜像；下次成功发布后只剩当前与两级回退。迁移 v9 之后只验证过 `rollback-c71a6ac`（回到 `fe0fd5b`）能运行在 v9 上；比它更早的标签未在 v9 上验证。
+**直接回退**：使用两服务的 `rollback-78d96cb`（web `6a154343`、worker `2be9fccd`），只换镜像，不动数据库和模型配置。版本镜像与备份继续由发布工具按 K4 保留。
 
 本节只保留当前版本与回退方式；各次发布的验证、备份与证据目录见 `git log` 及 `git show a387ebe:docs/implementation-plan.md`「当前部署」。
 
