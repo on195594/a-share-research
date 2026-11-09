@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from a_share_research import sources
 from a_share_research.material import Material, financial_series, financial_table
 from a_share_research.reading import since_prior
 from a_share_research.research_tools import calculate
@@ -18,6 +19,8 @@ from support.reports import MATERIAL
 
 ROOT = Path(__file__).resolve().parents[1]
 CAPTURES = json.loads((ROOT / "tests/data/financial-series-captures.json").read_text())["companies"]
+FINANCIAL_DATA = json.loads((ROOT / "tests/data/600519-financials.json").read_text())
+DATA = FINANCIAL_DATA
 
 
 def frames(captured):
@@ -217,3 +220,58 @@ def test_yoy_source_missing_and_nonpositive_bases_are_not_replaced_or_hidden():
     assert "基期缺少 2020-12-31 的完整输入" in html
     assert "+ cashflow.n_cashflow_act（2022-03-31）：-6876059093.79 元" in html
     assert cell(series, "quarterly", "op_cash", "2023-03-31")["yoy"]["value"] is None
+
+
+# --- Financial Table Tests (absorbed from test_financial_table) ---
+
+def test_missing_financial_token_is_a_source_error(monkeypatch):
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    with pytest.raises(sources.SourceError, match="TuShare fina_indicator.*TUSHARE_TOKEN"):
+        sources.financials("002648.SZ")
+
+
+def test_indicators_survive_the_providers_null_statement_type():
+    data = json.loads((ROOT / "tests/data/600519-financials.json").read_text())
+    frames_dict = {name: pd.DataFrame(rows) for name, rows in data["financials"].items()}
+    rows = {row["id"]: row for row in financial_table(frames_dict, data["market"])}
+    expected = {
+        "T.revenue_yoy": "-1.21", "T.profit_yoy": "-4.53", "T.core_profit_yoy": "-4.58",
+        "T.gross_margin": "91.18", "T.roe": "32.53", "T.debt_ratio": "16.42",
+    }
+    for key, value in expected.items():
+        assert rows[key]["unit"] == "%"
+        assert rows[key]["values"]["2025-12-31"] == value
+    assert rows["T.revenue"]["label"] == "营业总收入"
+    assert rows["T.revenue_yoy"]["label"] == "营业收入同比"
+    assert rows["T.revenue"]["values"]["2025-12-31"] == "1720.54"
+    assert rows["T.net_profit"]["values"]["2025-12-31"] == "823.20"
+    assert rows["T.op_cash"]["values"]["2025-12-31"] == "615.22"
+    assert list(rows["T.roe"]["values"]) == ["2023-12-31", "2024-12-31", "2025-12-31", "2026-06-30"]
+
+    frames_dict["indicator"] = frames_dict["indicator"].iloc[:0]
+    table = financial_table(frames_dict, data["market"])
+    mat = Material(MATERIAL.code, MATERIAL.name, MATERIAL.doc, MATERIAL.pages,
+                   MATERIAL.raw_pages, table, data["market"]["trade_date"])
+    assert "[T.roe] 加权ROE（%）：缺失" in mat.prompt_block()
+
+
+def test_three_statement_rows_and_missing_components_from_real_disclosures():
+    expected = {
+        '002648': {'core_profit': '62.92', 'capex': '26.60', 'fcf': '69.47', 'cash': '74.60',
+                   'receivables': '6.63', 'inventory': '51.99', 'contract_liab': '7.11', 'goodwill': '0.44'},
+        '600519': {'core_profit': '822.93', 'capex': '31.28', 'fcf': '583.95', 'cash': '516.91',
+                   'receivables': '0.03', 'inventory': '614.27', 'contract_liab': '80.07'},
+    }
+    for code, values in expected.items():
+        captured = json.loads((ROOT / f'tests/data/{code}-three-statements.json').read_text())
+        frames_dict = {k: pd.DataFrame(v) for k, v in captured['financials'].items()}
+        table = {r['id']: r for r in financial_table(frames_dict, captured['market'])}
+        for key, value in values.items():
+            assert table[f'T.{key}']['values']['2025-12-31'] == value
+        assert table['T.interest_debt']['values']['2025-12-31'] == {'002648': '76.45', '600519': '0.44'}[code]
+        if code == '600519':
+            assert '2025-12-31' not in table['T.goodwill']['values']
+        else:
+            old = {k: v[v['end_date'] <= '2021-12-31'] for k, v in frames_dict.items()}
+            total = next(r for r in financial_table(old, {}) if r['id'] == 'T.interest_debt')
+            assert total['values'] == {'2021-12-31': '164.15'}

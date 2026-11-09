@@ -4,8 +4,9 @@ import json
 
 import pytest
 
-from a_share_research import db, reading, service, validation, worker
+from a_share_research import db, reading, scans, service, validation, worker
 from support.continuation import load
+from support.valuation import BODY, RECORD
 
 
 @pytest.fixture
@@ -88,3 +89,39 @@ def test_body_only_parent_fallback_is_preserved(conn):
     assert record['run_id'] in {
         row['id'] for row in reading.followups(conn, '600519.SH', 11)}
     assert next(row for row in reading.stock_reports(conn, '600519') if row['id'] == 12)['parent_report_id'] == 11
+
+
+@pytest.fixture
+def scan_event(conn):
+    document = BODY['document']
+    scan = scans.submit(conn)
+    conn.execute(
+        'INSERT INTO scan_events(scan_id,code,doc_key,title,announced,url,kind,severity,detected_at,action) '
+        "VALUES (?,?,?,?,?,?,'periodic',2,?,'deferred')",
+        (scan, RECORD['code'][:6], document['sha256'], document['title'], document['announced'],
+         document['url'], document['retrieved_at']))
+    return scan
+
+
+def test_dispatch_normalizes_both_scope_forms(conn, scan_event, tmp_path):
+    conn.execute("UPDATE reports SET created_at='2026-01-01T00:00:00+08:00'")
+    outputs = []
+    for code in ('603606', '603606.SH'):
+        variant = db.connect(tmp_path / f'{code}.db')
+        conn.backup(variant)
+        try:
+            outputs.append(scans._dispatch(variant, scan_event, '2026-10-30T18:00:00+08:00', {code}))
+        finally:
+            variant.close()
+    assert outputs[0]
+    assert outputs[0] == outputs[1]
+
+
+def test_completed_reviews_carry_what_notifications_read_and_no_payload(conn, scan_event):
+    run = conn.execute('SELECT run_id FROM reports WHERE id=39').fetchone()[0]
+    conn.execute('UPDATE scan_events SET run_id=? WHERE scan_id=?', (run, scan_event))
+    conn.execute("UPDATE runs SET finished_at='2026-10-30T18:00:00+08:00' WHERE id=?", (run,))
+    (review,) = scans.completed_reviews(conn, None, '2026-10-31T18:00:00+08:00')
+    assert {'id', 'code', 'status', 'error', 'finished_at', 'changed'} <= review.keys()
+    assert not review.keys() & {'company_key', 'batch_id', 'request', 'identity', 'material'}
+    assert review['id'] == run

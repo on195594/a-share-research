@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from a_share_research.sources import announcement_document
 
@@ -57,3 +58,37 @@ def test_announcement_page_cap_reaches_the_query_and_the_gap_text(monkeypatch, t
     assert material.extra["gaps"] == (
         [f"{item['code']} 公告检索超过60条，仅返回部分目录；请缩小关键词或时间范围。"] if truncated else [])
     assert material.extra["announcement_searches"][-1] == {"code": item["code"], **result["coverage"]}
+
+
+# --- Report Date Observations (absorbed from test_report_dates) ---
+
+def test_maotai_discloses_distinct_snapshot_dates_without_calling_price_expired():
+    root = Path(__file__).resolve().parents[1]
+    reports = json.loads((root / "tests/data/report-date-observations.json").read_text())["reports"]
+    templates = Environment(
+        loader=FileSystemLoader(root / "a_share_research/templates"),
+        autoescape=select_autoescape(),
+    )
+    report = reports[0]
+    notice = str(templates.get_template("_macros.html").module.snapshot_date_notice(
+        report["market_date"], report["price"],
+    ))
+    assert 'role="status"' in notice
+    assert 'href="#price"' in notice
+    assert "估值快照依据 2026-10-23 收盘" in notice
+    assert "依据 2026-10-20 收盘，有效至 2026-10-27" in notice
+    assert "过期" not in notice
+
+
+def test_industrial_fulian_same_date_has_no_mismatch_notice():
+    root = Path(__file__).resolve().parents[1]
+    reports = json.loads((root / "tests/data/report-date-observations.json").read_text())["reports"]
+    templates = Environment(
+        loader=FileSystemLoader(root / "a_share_research/templates"),
+        autoescape=select_autoescape(),
+    )
+    report = reports[1]
+    notice = str(templates.get_template("_macros.html").module.snapshot_date_notice(
+        report["market_date"], report["price"],
+    ))
+    assert not notice.strip()

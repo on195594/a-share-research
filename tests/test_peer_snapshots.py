@@ -46,8 +46,7 @@ def test_captured_pair_preserves_values_negative_cash_and_exact_saved_ratios():
 def test_ratios_from_original_precision_still_map_to_the_saved_peer_rows():
     from a_share_research.material import financial_table
     from a_share_research.research_tools import calculate
-    from test_financial_series import CAPTURES, frames
-    from test_financial_table import DATA
+    from test_financial_series import CAPTURES, frames, FINANCIAL_DATA as DATA
 
     body = captured()
     body['table'] = [r for r in body['table'] if not r['id'].startswith('C.')]

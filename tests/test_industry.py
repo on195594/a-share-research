@@ -5,13 +5,17 @@ from decimal import Decimal
 from pathlib import Path
 from statistics import median
 
+import pandas as pd
 import pytest
 
 from a_share_research import checking, evidence, industry, sources
 from a_share_research.research_tools import ResearchTools, calculate
+from a_share_research.sources import SourceError, peer_members
 from support.reports import MATERIAL, report
 
 DATA = json.loads(Path(__file__).with_name('data').joinpath('industry-20261104.json').read_text())
+PEER_CAPTURE = json.loads(Path(__file__).with_name('data').joinpath('sw-industry-members-603606.json').read_text())
+PEER_SUBJECT, PEER_MEMBERS = pd.DataFrame(PEER_CAPTURE['subject']), pd.DataFrame(PEER_CAPTURE['l3_members'])
 
 
 def test_live_aggregates_have_exact_reproducible_inputs():
@@ -140,3 +144,27 @@ def test_tool_compares_same_basis_returns_only(monkeypatch):
     change = next(c for c in result['changes'] if [i['ref'].rsplit('.', 1)[-1] for i in c['calculation']['inputs']] == ['company_60', 'weighted_ex_60'])
     assert Decimal(change['exact_values']['result']) == (Decimal(by_id['company_60']['exact_values'][period])
                                                          - Decimal(by_id['weighted_ex_60']['exact_values'][period]))
+
+
+def test_peers_exclude_subject_and_keep_classification_provenance():
+    result = peer_members(PEER_SUBJECT, PEER_MEMBERS, "l3")
+    codes = [m["code"] for m in result["members"]]
+    assert "603606" not in codes and len(codes) == len(PEER_MEMBERS) - 1
+    assert {"600973", "002498"} <= set(codes)
+    assert result["industry"]["l3"] == "线缆部件及其他" and result["classification"] == "SW2021"
+    assert codes == sorted(codes)
+
+
+def test_mismatched_or_ambiguous_membership_is_rejected():
+    with pytest.raises(SourceError, match="其他行业"):
+        peer_members(PEER_SUBJECT, PEER_MEMBERS.assign(l3_code="000000.SI"), "l3")
+    with pytest.raises(SourceError, match="记录数"):
+        peer_members(pd.concat([PEER_SUBJECT, PEER_SUBJECT]), PEER_MEMBERS, "l3")
+    with pytest.raises(SourceError, match="缺少"):
+        peer_members(PEER_SUBJECT.drop(columns=["l3_code"]), PEER_MEMBERS, "l3")
+
+
+def test_nonstandard_live_member_does_not_break_the_peer_list():
+    odd = pd.concat([PEER_MEMBERS, PEER_MEMBERS.iloc[[0]].assign(ts_code="T00018.SH")], ignore_index=True)
+    result = peer_members(PEER_SUBJECT, odd, "l3")
+    assert "T00018" in {member["code"] for member in result["members"]}

@@ -5,13 +5,20 @@ Factor inputs were checked against the 2025 annual reports: 格力电器 扣非�
 (p8), 9,606,885,402.76 (p8), 5,305,340,636.39 (p71).
 """
 
+from collections import Counter
+import copy
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from a_share_research import batches, screening
+from a_share_research.batches import NEW_RULE, RULE, small_rule
+from a_share_research.screening_factors import (
+    liquidity_mask, market_cap_mask, market_filters, pick, rank_candidates,
+)
 
 DATA = Path(__file__).parent / "data"
 FIN = json.loads((DATA / "screen-financials.json").read_text())
@@ -218,3 +225,99 @@ def test_returns_add_ranking_halves_and_skip_the_middle_of_an_odd_count():
     assert out["BOTTOM"] == pytest.approx(screening.group_return(PRICES["entry"], PRICES["mark"], codes[-half:], half, 0.002))
     unranked = screening.returns(batch | {"selection": {"ranking": {"order": None, "error": "x"}}})["values"]
     assert "TOP" not in unranked and "BOTTOM" not in unranked
+
+
+# --- Small-Cap Screening Tests (absorbed from test_screening_small) ---
+
+CAPTURED_SMALL = json.loads((DATA / "screen-small-rows.json").read_text())
+SMALL_RULE_OBJ = small_rule(NEW_RULE)
+
+
+def _codes(rows):
+    return [r["code"] for r in rows]
+
+
+def test_small_units_include_30_yi_floor_and_exclude_100_yi_ceiling():
+    low, high = 30e8 / 1e4, 100e8 / 1e4
+    values = pd.Series([math.nextafter(low, -math.inf), low,
+                        math.nextafter(high, -math.inf), high])
+    assert market_cap_mask(values, SMALL_RULE_OBJ).tolist() == [False, True, True, False]
+    assert market_cap_mask(values, RULE).tolist() == [False, False, False, True]
+
+
+def test_small_liquidity_3000_wan_is_inclusive_in_tushare_thousands():
+    boundary = 3000e4 / 1e3
+    values = pd.Series([math.nextafter(boundary, -math.inf), boundary,
+                        math.nextafter(boundary, math.inf), 1e8 / 1e3])
+    assert liquidity_mask(values, SMALL_RULE_OBJ).tolist() == [False, True, True, True]
+    assert liquidity_mask(values, RULE).tolist() == [False, False, False, True]
+
+
+def test_real_market_rows_stay_in_separate_pools():
+    frame = pd.DataFrame(CAPTURED_SMALL["large_market_rows"] + CAPTURED_SMALL["small_market_rows"])
+    args = (frame, set(CAPTURED_SMALL["suspended"]), CAPTURED_SMALL["as_of"])
+    large, large_funnel, _ = market_filters(*args, RULE)
+    small, small_funnel, _ = market_filters(*args, SMALL_RULE_OBJ)
+    assert set(large.ts_code) == {r["ts_code"] for r in CAPTURED_SMALL["large_market_rows"]}
+    assert set(small.ts_code) == {r["ts_code"] for r in CAPTURED_SMALL["small_market_rows"]}
+    assert set(large.ts_code).isdisjoint(small.ts_code)
+    assert large_funnel["listed"] == small_funnel["listed"] == len(frame)
+    assert large_funnel["after_industry_mapping"] == len(large)
+    assert small_funnel["after_industry_mapping"] == len(small)
+
+
+def test_frozen_v11_rankings_and_candidates_are_unchanged():
+    rows = copy.deepcopy(CAPTURED_SMALL["large_companies"])
+    before = copy.deepcopy(rows)
+    ranked, q20, q5 = rank_candidates(rows, RULE)
+    assert [{"code": r["code"], "score": r["score"]} for r in ranked] == CAPTURED_SMALL["frozen_large_ranked"]
+    assert q20 == pick(ranked, 20, 3)
+    assert q5 == _codes(pick(q20, 5, 2))
+    assert rows == before
+    live = json.loads((DATA / "screen-rows.json").read_text())["rows"]
+    ranked, _, _ = rank_candidates([r | {"status": "ok"} for r in live], RULE)
+    assert _codes(ranked) == _codes(live)
+    assert [r["score"] for r in ranked] == [r["score"] for r in live]
+
+
+def test_small_ranks_are_local_and_do_not_change_large_ranks():
+    small_rows = copy.deepcopy(CAPTURED_SMALL["small_companies"])
+    large_rows = copy.deepcopy(CAPTURED_SMALL["large_companies"])
+    small, _, _ = rank_candidates(small_rows, SMALL_RULE_OBJ)
+    large, _, _ = rank_candidates(large_rows, NEW_RULE)
+    assert [{"code": r["code"], "score": r["score"]} for r in small] == CAPTURED_SMALL["frozen_small_ranked"]
+    assert [{"code": r["code"], "score": r["score"]} for r in large] == CAPTURED_SMALL["frozen_large_ranked"]
+    counts = Counter(r["industry"] for r in small_rows)
+    assert all(r["group_size"] == counts[r["industry"]] for r in small)
+    assert all(r["small_group"] == (counts[r["industry"]] < 10) for r in small)
+    combined = {r["code"]: r for r in screening.score(small_rows + large_rows, RULE)}
+    assert any(r["score"] != combined[r["code"]]["score"] for r in small)
+
+
+def test_s10_and_sq3_have_their_own_seats_and_industry_limits():
+    _, s10, sq3 = rank_candidates(CAPTURED_SMALL["small_companies"], SMALL_RULE_OBJ)
+    assert len(s10) == 10 and max(Counter(r["industry"] for r in s10).values()) == 2
+    assert len(sq3) == 3 and sq3 == _codes(pick(s10, 3, 1))
+    industry = {r["code"]: r["industry"] for r in s10}
+    assert max(Counter(industry[c] for c in sq3).values()) == 1
+    assert SMALL_RULE_OBJ["mechanical_per_industry"] == SMALL_RULE_OBJ["picks_per_industry"] == 1
+
+
+def test_sq3_and_sl3_share_industry_constraints_and_leave_the_same_cash_seat():
+    rows = [r for r in CAPTURED_SMALL["small_companies"] if r["industry"] in {"食品饮料", "家用电器"}]
+    _, s10, sq3 = rank_candidates(rows, SMALL_RULE_OBJ)
+    assert len(sq3) == 2
+    assert sq3 == _codes(pick(s10, 3, SMALL_RULE_OBJ["picks_per_industry"]))
+
+
+def test_saved_v12_rule_retains_its_original_sq3_and_s10():
+    legacy = NEW_RULE | {"version": "screen-v1.2", "small": NEW_RULE["small"] | {"mechanical_per_industry": 2}}
+    rows = CAPTURED_SMALL["small_companies"]
+    old_ranked, old_s10, old_sq3 = rank_candidates(rows, small_rule(legacy))
+    ranked, s10, _ = rank_candidates(rows, SMALL_RULE_OBJ)
+    assert NEW_RULE["version"] == "screen-v1.3"
+    assert ranked == old_ranked and s10 == old_s10
+    assert old_sq3 == _codes(pick(old_s10, 3, 2))
+    two_industries = [r for r in rows if r["industry"] in {"食品饮料", "家用电器"}]
+    assert len(rank_candidates(two_industries, small_rule(legacy))[2]) == 3
+    assert len(rank_candidates(two_industries, SMALL_RULE_OBJ)[2]) == 2

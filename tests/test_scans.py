@@ -283,7 +283,11 @@ def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
     assert card['status'] == '待复核' and len(card['pending_events']) == 4
     assert card['current']['current_zone'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')['zone']
     rolled = valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')
-    assert card['current']['valuation'] == rolled | {'boundary': stance.on_boundary(rolled)}
+    calc = priced(conn)['valuation_calc']
+    assert card['current']['valuation'] == rolled | {
+        'boundary': stance.on_boundary(rolled),
+        'flip_distance': stance.flip_distance({**calc, **rolled, 'market_cap': calc['market_cap'] * rolled['close'] / calc['close']}),
+    }
     assert card['current']['note'] == '待复核，区间暂停解读'
     assert any(n['reason'] == 'pending_review' for n in first['notify'])
     second = run_scan(conn, source, '2026-10-31T18:00:00+08:00')

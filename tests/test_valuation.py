@@ -6,8 +6,9 @@ import json
 
 import pytest
 
-from a_share_research import checking, prompts, research, reviewing, valuation
+from a_share_research import checking, prompts, research, reviewing, stance, valuation
 from a_share_research.material import Material
+from a_share_research.research_tools import ResearchTools, _fetches
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
 from support.valuation import BODY, ROWS, STORED, assumptions, with_probabilities
@@ -330,3 +331,83 @@ def test_v2_probability_contract(weights, needle):
     missing = assumptions()
     del missing['scenarios']['乐观']['probability']
     assert any('probability' in p for p in valuation.problems(missing, BODY['table']))
+
+
+# --- Valuation Tool & Integration Tests (absorbed from test_valuation_tool) ---
+
+def _tool_material():
+    mat = Material(BODY['code'], BODY['name'], Document(**BODY['document']), {}, {},
+                   deepcopy(BODY['table']), BODY['market_date'])
+    mat.extra['question'] = '近期可以买入吗？参考价格是多少'
+    return mat
+
+
+def _tool_draft(rows, text):
+    return {'verdict': '值得继续研究', 'summary': '值得继续研究：测试。', 'valuation': assumptions(),
+            'answer': [{'text': text, 'cites': [{'ref': r['id']} for r in rows]}]}
+
+
+def _answer_problems(rep, mat):
+    return [p for p in checking.check(rep, mat) if p['where'] == 'answer[0]']
+
+
+def test_tool_rows_equal_program_wait_price_and_are_citable():
+    mat = _tool_material()
+    rows = ResearchTools(mat, None).run('valuation', {'valuation': assumptions()})
+    price, _ = stance.wait_price(assumptions(), BODY['table'], BODY['market_date'])
+    calc = valuation.compute(assumptions(), BODY['table'], BODY['market_date'])
+    assert [r['id'] for r in rows] == [f'C.{n}' for n in range(4, 12)] and rows == mat.table[-8:]
+    assert float(rows[0]['exact_values']['result']) == pytest.approx(price) == pytest.approx(30.502715198880022)
+    assert float(rows[1]['exact_values']['result']) == pytest.approx(calc['v2']['annual_return'] * 100)
+    annual = rows[1]['values']['result']
+    good = _tool_draft(rows, f'参考买入上限约为30.50元；按现价36.03元期望年化回报为{annual}%。')
+    assert _answer_problems(good, mat) == []
+    good['valuation']['rationale'][0]['text'] = '改写理由措辞。'
+    assert _answer_problems(good, mat) == []
+    assert any('30.8' in p['problem'] for p in _answer_problems(_tool_draft(rows, '参考买入上限约为30.80元。'), mat))
+
+
+@pytest.mark.parametrize('change', [
+    lambda v: with_probabilities(v, (40, 40, 20)),
+    lambda v: v | {'payout_pct': 10},
+    lambda v: v | {'basis': 'core_profit'},
+])
+def test_changed_scenarios_cannot_keep_old_price(change):
+    mat = _tool_material()
+    rows = ResearchTools(mat, None).run('valuation', {'valuation': assumptions()})
+    rep = _tool_draft(rows, '参考买入上限约为30.50元。')
+    rep['valuation'] = change(rep['valuation'])
+    assert any('重新调用 valuation' in p['problem'] for p in _answer_problems(rep, mat))
+
+
+def test_stale_price_through_a_derived_calculation_is_caught():
+    mat = _tool_material()
+    tools = ResearchTools(mat, None)
+    hurdle = tools.run('valuation', {'valuation': assumptions()})[0]
+    gap = tools.run('calculate', {'label': '现价高于门槛价', 'operation': 'difference',
+                                  'left': {'ref': 'M.close', 'period': BODY['market_date']}, 'right': {'ref': hurdle['id']}})
+    rep = {'verdict': '值得继续研究', 'summary': '值得继续研究：测试。', 'valuation': assumptions(),
+           'answer': [{'text': f"现价高于门槛价{gap['values']['result']}元。", 'cites': [{'ref': gap['id']}]}]}
+    assert _answer_problems(rep, mat) == []
+    rep['valuation'] = with_probabilities(rep['valuation'], (5, 90, 5))
+    assert any(hurdle['id'] in p['problem'] for p in _answer_problems(rep, mat))
+
+
+def test_tool_errors_are_actionable_and_not_fetches():
+    mat = _tool_material()
+    with pytest.raises(ValueError, match='not_priced'):
+        ResearchTools(mat, None).run('valuation', {'valuation': {'not_priced': {'text': 'x', 'cites': []}}})
+    broken = assumptions()
+    broken['scenarios']['保守']['probability'] = 80
+    with pytest.raises(ValueError, match='probability'):
+        ResearchTools(mat, None).run('valuation', {'valuation': broken})
+    assert _fetches([{'tool': 'valuation'}, {'tool': 'calculate'}, {'tool': 'read_disclosure'}]) == 1
+
+
+def test_reviewer_and_repair_see_the_page_price():
+    mat = _tool_material()
+    rep = _tool_draft([], '参考买入上限采用程序生成的门槛价。')
+    block = research.program_valuation(rep, mat)
+    assert '"hurdle_price": 30.5' in block and '"close": 36.03' in block
+    assert research.program_valuation(rep, mat) in research.repair_prompt(mat, rep, [])
+    assert research.program_valuation({'valuation': {'not_priced': {}}}, mat) == ''
