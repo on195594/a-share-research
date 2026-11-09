@@ -538,6 +538,9 @@ def _fetches(traces: list[dict]) -> int:
     return sum(t["tool"] not in COMPUTE_TOOLS for t in traces)
 
 
+STOPPED_CALL = "取证已停止，本次工具调用未执行；不要再调用工具，直接按本轮输出格式给出最终结果，缺口如实说明。"
+
+
 def record_stop(material, reason, stage="explore"):
     stops = material.extra.setdefault("stop_reasons", [])
     entry = {"stage": stage, "category": "acquisition_stop", "reason": reason}
@@ -632,12 +635,13 @@ class Acquisition:
 
     def write(self, prompt, stage):
         messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
+        declined = False
         while True:
             # Keep room for a final draft and a review with its existing format correction.
             # A smaller caller-supplied limit is never raised to the default.
             remaining = self.runner.max_calls - self.runner.calls
             reason = self.stopped(stage) or ("model_limit" if remaining <= 3 else None)
-            if reason:
+            if reason and not declined:
                 record_stop(self.material, reason, stage)
                 gap = "共享取证已到停止条件；未完成的取证仍未知。"
                 if gap not in self.material.extra["gaps"]:
@@ -653,8 +657,15 @@ class Acquisition:
             if not calls:
                 return parse_json(response.text)
             if reason:
-                # A tool-free final response cannot silently become another acquisition turn.
-                return None
+                # A tool-free final response cannot silently become another acquisition turn. Some models
+                # (Gemini) still call tools when none are offered: answer once, unexecuted, then give up.
+                if declined:
+                    return None
+                declined = True
+                messages.extend({"role": "toolResult", "toolCallId": call["id"], "toolName": call["name"],
+                                 "content": [{"type": "text", "text": json.dumps({"error": STOPPED_CALL}, ensure_ascii=False)}],
+                                 "isError": True, "timestamp": int(time.time() * 1000)} for call in calls)
+                continue
             before = self.evidence_key()
             for call in calls:
                 result, failed = self.tool_result(call, stage)

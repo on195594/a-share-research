@@ -126,7 +126,9 @@ def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None 
             identity["actual"] = {k: out.get(k) for k in ("provider", "model")}
         if out.get("error"):
             raise ValueError(out["error"])
-        valid_tools = bool(tools) and out["stop_reason"] == "toolUse" and out["tool_calls"] > 0
+        # In a tool loop, calls are a complete turn even when none were offered (Gemini imitates the
+        # history after the loop stops); the caller decides how to answer them.
+        valid_tools = messages is not None and out["stop_reason"] == "toolUse" and out["tool_calls"] > 0
         if not valid_tools and (out["stop_reason"] != "stop" or out["tool_calls"] or not out["text"].strip()):
             raise ValueError(f"incomplete model output: stop_reason={out['stop_reason']}")
         if (out["provider"], out["model"]) != (request["provider"], request["model"]):

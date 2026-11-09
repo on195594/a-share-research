@@ -543,3 +543,22 @@ def test_round_guard_stops_before_the_model_call_guard_fails_the_run():
     # round_limit ends exploration gracefully; MAX_CALLS raises and fails the whole research run.
     # Review and two repairs still need model calls after the last evidence round.
     assert research.MAX_CALLS >= ROUND_LIMIT + 6
+
+
+def test_calls_after_the_stop_are_declined_once_unexecuted(session):
+    # Gemini answers the tool-free final turn with more calls (captured live on 申通 2026-11-09).
+    runner, material, acquisition = session
+    acquisition.rounds = ROUND_LIMIT
+    runner.responses = [[read(9)], report()]
+    assert acquisition.write('停止后收尾', 'explore') == report()
+    assert runner.offered == [[], []] and acquisition.traces == []
+    stops = [s for s in material.extra['stop_reasons'] if s['reason'] == 'round_limit']
+    assert len(stops) == 1
+
+
+def test_calls_after_a_declined_round_still_end_the_write(session):
+    runner, _, acquisition = session
+    acquisition.rounds = ROUND_LIMIT
+    runner.responses = [[read(9)], [read(10)]]
+    assert acquisition.write('停止后收尾', 'explore') is None
+    assert runner.calls == 2 and acquisition.traces == []
