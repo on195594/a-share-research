@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research.material import DASHED_PAGE_NUMBER, _page_offset, mdna_pages
+from a_share_research.material import DASHED_PAGE_NUMBER, Material, _page_offset, mdna_pages
 from a_share_research.sources import Document
 
 
@@ -64,3 +64,22 @@ def test_dash_wrapped_page_number_whitespace(footer):
 @pytest.mark.parametrize("footer", ["-85", "85-", "-- 85 --", "- 85 - trailing", "prefix - 85 -"])
 def test_malformed_variants_of_cnooc_footer_are_not_page_numbers(footer):
     assert DASHED_PAGE_NUMBER.fullmatch(footer) is None
+
+
+def test_unlocatable_section_preloads_nothing_instead_of_failing():
+    # Marked variant of 申通快递 2025: blanking the contents pages leaves neither a text heading nor a TOC.
+    pages = ["" if i < 10 else page for i, page in enumerate(REPORTS["002468"]["pages"])]
+    assert mdna_pages(Document("", "", "", "", "", "", pages=pages)) == {}
+
+
+def test_material_without_preloaded_pages_lists_the_report_for_reading():
+    doc = Document("002468.SZ", "申通快递", "2025年年度报告", "2025-12-31", "2026-04-20",
+                   "https://static.cninfo.com.cn/finalpage/2026-04-20/1.PDF", sha256="a" * 64)
+    material = Material(code=doc.code, name=doc.name, doc=doc, pages={}, raw_pages={}, table=[],
+                        market_date="20261106", extra={"catalog": {"D0": doc.info()}, "sources": {}, "gaps": []})
+    assert material.source_registry()["D0"]["state"] == "listed"
+    assert '"D0"' in material.prompt_block()
+    assert Material.from_snapshot(json.loads(json.dumps(material.snapshot()))).pages == {}
+    # Mutation: one held page turns D0 into read, quotable evidence.
+    material.pages[15] = REPORTS["002468"]["pages"][14]
+    assert material.source_registry()["D0"]["state"] == "read"

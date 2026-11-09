@@ -293,6 +293,8 @@ def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str)
 
 # Titles never quote; a wrapped cross-reference like 第四节“经营情况讨论与分析”之… does.
 HEADING = re.compile(r"^\s*第[一二三四五六七八九十]+节\s*([^\s.…“”\"《][^.…“”\"《]*)$")
+MDNA_GAP = ("年报 D0 未能自动定位“管理层讨论与分析”一节，未预载正文；"
+            "请用 read_disclosure 检索 D0（如“管理层讨论与分析”“经营情况讨论”“业务回顾”“财务回顾”）后再引证。")
 
 
 TOC_SECTION = re.compile(r"^第[一二三四五六七八九十]+节$")
@@ -380,7 +382,11 @@ def _mdna_span_from_toc(doc: Document) -> tuple[int, int] | None:
 
 
 def mdna_pages(doc: Document) -> dict[int, str]:
-    """Pages of the 管理层讨论与分析 section, whitespace collapsed."""
+    """Pages of the 管理层讨论与分析 section, whitespace collapsed; empty when it cannot be located.
+
+    Preloading saves the researcher many page-by-page reads but is not a gate: a miss becomes MDNA_GAP
+    and the run goes on with read_disclosure. Do not add layout rules for each new report format.
+    """
     heads = [(i + 1, m[1]) for i, page in enumerate(doc.pages)
              for line in page.splitlines() if (m := HEADING.match(line))]
     starts = [p for p, title in heads if "管理层讨论与分析" in title]
@@ -390,7 +396,7 @@ def mdna_pages(doc: Document) -> dict[int, str]:
     elif span := _mdna_span_from_toc(doc):
         start, end = span
     else:
-        raise ResearchError("年报中找不到“管理层讨论与分析”一节")
+        return {}
     return {n: evidence.normalize_page(doc.pages[n - 1]) for n in range(start, end + 1)}
 
 
@@ -420,8 +426,10 @@ def gather(code: str) -> Material:
                           "source": {**reference["source"], "retrieved_at": retrieved_at}})
     except sources.SourceError as exc:
         gaps.add(str(exc))
+    if not (pages := mdna_pages(annual)):
+        gaps.add(MDNA_GAP)
     return Material(
-        code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=(pages := mdna_pages(annual)),
+        code=annual.code, name=annual.name.replace(" ", ""), doc=annual, pages=pages,
         raw_pages={n: annual.raw_pages[n - 1] for n in pages},
         table=table, market_date=market_date,
         extra={"catalog": {"D0" if d.url == annual.url else f"D{i + 1}": d.info()
