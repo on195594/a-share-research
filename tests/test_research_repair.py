@@ -5,6 +5,7 @@ calculator, snapshot store, checks and ledger run unchanged; no network/model is
 """
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -573,3 +574,18 @@ def test_calls_after_a_declined_round_still_end_the_write(session):
     runner.responses = [[read(9)], [read(10)]]
     assert acquisition.write('停止后收尾', 'explore') is None
     assert runner.calls == 2 and acquisition.traces == []
+
+
+def test_review_step_is_sent_to_the_review_model(tmp_path, monkeypatch):
+    # Wiring only: an unknown review model fails offline at model resolution, and the stored call
+    # identity shows the review step requested it rather than the main model.
+    if not all(os.environ.get(key) for key in ("MODEL_PROVIDER", "MODEL_ID", "PI_AGENT_DIR")):
+        pytest.skip("Run with the existing worker environment for real Pi checks")
+    monkeypatch.setenv("MODEL_REVIEW_PROVIDER", os.environ["MODEL_PROVIDER"])
+    monkeypatch.setenv("MODEL_REVIEW_ID", "no-such-review-model")
+    conn = db.connect(tmp_path / 'isolated.db')
+    runner = research.Runner(conn, db.create_run(conn, '002468', status='running'))
+    with pytest.raises(research.ModelStageError):
+        runner.call('review', '复核')
+    identity = json.loads(conn.execute("SELECT identity FROM calls WHERE step = 'review'").fetchone()[0])
+    assert identity['requested'] == {'provider': os.environ['MODEL_PROVIDER'], 'model': 'no-such-review-model'}

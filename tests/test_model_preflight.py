@@ -144,3 +144,25 @@ def test_managed_release_pointer_drift_and_recovery(configured, tmp_path):
         (tmp_path / name).symlink_to(agent / name)
     status, out = check(env)
     assert status == 0 and out["ready"]
+
+
+def test_review_model_is_checked_and_reported(configured, monkeypatch):
+    from a_share_research import model
+    monkeypatch.setenv("MODEL_REVIEW_PROVIDER", "openai-codex")
+    monkeypatch.setenv("MODEL_REVIEW_ID", "gpt-6.1-sol")
+    monkeypatch.delenv("MODEL_REVIEW_REASONING", raising=False)
+    out = model.preflight()
+    assert (out["provider"], out["model"]) == (configured["MODEL_PROVIDER"], configured["MODEL_ID"])
+    assert out["review"] == {"provider": "openai-codex", "model": "gpt-6.1-sol",
+                             "reasoning": configured.get("MODEL_REASONING", "high")}
+
+
+@pytest.mark.parametrize("review", [{"MODEL_REVIEW_PROVIDER": "openai-codex"},
+                                    {"MODEL_REVIEW_PROVIDER": "openai-codex", "MODEL_REVIEW_ID": "no-such-model"}])
+def test_incomplete_or_unknown_review_model_blocks_startup(configured, monkeypatch, review):
+    from a_share_research import model
+    monkeypatch.delenv("MODEL_REVIEW_ID", raising=False)
+    for key, value in review.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(RuntimeError, match="MODEL_REVIEW_ID" if len(review) == 1 else "not found"):
+        model.preflight()

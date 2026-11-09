@@ -68,10 +68,22 @@ def application_identity() -> dict:
 application_identity()  # Imported Python code does not follow later worktree edits.
 
 
-def preflight() -> dict:
-    """Resolve the installed runtime and configured model offline, without a completion."""
+def configured_model(role: str | None = None) -> tuple[str | None, str | None, str]:
+    """Provider, model and reasoning for a call role.
+
+    The review stage may use a second model (MODEL_REVIEW_*) so that the reviewer's errors are less
+    correlated with the author's; every other role, and review without that setting, uses MODEL_*.
+    """
+    reasoning = os.environ.get("MODEL_REASONING", "high")
+    if role == "review" and (os.environ.get("MODEL_REVIEW_PROVIDER") or os.environ.get("MODEL_REVIEW_ID")):
+        return (os.environ.get("MODEL_REVIEW_PROVIDER"), os.environ.get("MODEL_REVIEW_ID"),
+                os.environ.get("MODEL_REVIEW_REASONING", reasoning))
+    return os.environ.get("MODEL_PROVIDER"), os.environ.get("MODEL_ID"), reasoning
+
+
+def _check(env: dict) -> dict:
     try:
-        proc = subprocess.run(["node", str(SCRIPT), "--check"],
+        proc = subprocess.run(["node", str(SCRIPT), "--check"], env=env,
                               capture_output=True, text=True, timeout=30)
     except FileNotFoundError as exc:
         raise RuntimeError("Pi 启动预检失败：找不到 Node；请恢复 worker 的 Node 运行时及 PATH") from exc
@@ -87,16 +99,29 @@ def preflight() -> dict:
     return result
 
 
+def preflight() -> dict:
+    """Resolve the installed runtime and configured model(s) offline, without a completion."""
+    result = _check(dict(os.environ))
+    if os.environ.get("MODEL_REVIEW_PROVIDER") or os.environ.get("MODEL_REVIEW_ID"):
+        provider, model_id, reasoning = configured_model("review")
+        if not provider or not model_id:
+            raise RuntimeError("Pi 启动预检失败：复核模型须同时设置 MODEL_REVIEW_PROVIDER 与 MODEL_REVIEW_ID")
+        review = _check(os.environ | {"MODEL_PROVIDER": provider, "MODEL_ID": model_id, "MODEL_REASONING": reasoning})
+        result["review"] = {k: review.get(k) for k in ("provider", "model", "reasoning")}
+    return result
+
+
 def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None = None,
              reasoning: str | None = None, messages: list | None = None,
-             tools: list | None = None) -> Completion:
+             tools: list | None = None, role: str | None = None) -> Completion:
     env_max_tokens = os.environ.get("MODEL_MAX_TOKENS")
     resolved_max_tokens = int(env_max_tokens) if env_max_tokens is not None else (max_tokens if max_tokens is not None else 16000)
     resolved_timeout = timeout if timeout is not None else int(os.environ.get("MODEL_TIMEOUT", "240"))
-    resolved_reasoning = reasoning if reasoning is not None else os.environ.get("MODEL_REASONING", "high")
+    provider, model_id, role_reasoning = configured_model(role)
+    resolved_reasoning = reasoning if reasoning is not None else role_reasoning
     request = {
-        "provider": os.environ.get("MODEL_PROVIDER"),
-        "model": os.environ.get("MODEL_ID"),
+        "provider": provider,
+        "model": model_id,
         "reasoning": resolved_reasoning,
         "prompt": prompt,
         "timeout": resolved_timeout,
@@ -118,7 +143,7 @@ def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None 
     try:
         identity["pi_infer_sha256"] = hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
         if not request["provider"] or not request["model"]:
-            raise ValueError("MODEL_PROVIDER and MODEL_ID are required")
+            raise ValueError("MODEL_PROVIDER and MODEL_ID (MODEL_REVIEW_* for review) are required")
         out = _complete_once(request)
         identity.update({k: out.get(k) for k in
                          ("pi_version", "parameters", "node_version", "model_source", "extension")})

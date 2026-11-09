@@ -44,7 +44,7 @@ class Runner:
         self.calls += 1
         db.update_run(self.conn, self.run_id, step=step)
         try:
-            result = model.complete(prompt, timeout=timeout, messages=messages, tools=tools)
+            result = model.complete(prompt, timeout=timeout, messages=messages, tools=tools, role=step)
         except Exception as exc:
             db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: 模型阶段未完成（未保存供应商异常原文）",
                         identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None),

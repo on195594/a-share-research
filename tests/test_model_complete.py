@@ -110,3 +110,25 @@ def test_live_completion_tools_and_timeout(payload):
         assert completion.identity["actual"] == completion.identity["requested"]
         assert completion.identity["parameters"]["transport"] == "sse"
         assert completion.identity["pi_infer_sha256"] == hashlib.sha256(model.SCRIPT.read_bytes()).hexdigest()
+
+
+def test_review_role_uses_the_configured_review_model(payload, monkeypatch):
+    monkeypatch.setenv("MODEL_REVIEW_PROVIDER", "openai-codex")
+    monkeypatch.setenv("MODEL_REVIEW_ID", "gpt-6.1-sol")
+    monkeypatch.setenv("MODEL_REVIEW_REASONING", "medium")
+    for role, requested, reasoning in (
+            ("review", {"provider": "openai-codex", "model": "gpt-6.1-sol"}, "medium"),
+            ("compose", {"provider": payload["provider"], "model": payload["model"]},
+             os.environ.get("MODEL_REASONING", "high"))):
+        with pytest.raises(model.ModelError, match="RangeError") as caught:
+            model.complete(payload["prompt"], timeout=-1, role=role)
+        assert caught.value.identity["requested"] == requested
+        assert caught.value.identity["request_parameters"]["reasoning"] == reasoning
+
+
+def test_review_role_without_review_model_keeps_the_main_model(payload, monkeypatch):
+    monkeypatch.delenv("MODEL_REVIEW_PROVIDER", raising=False)
+    monkeypatch.delenv("MODEL_REVIEW_ID", raising=False)
+    with pytest.raises(model.ModelError, match="RangeError") as caught:
+        model.complete(payload["prompt"], timeout=-1, role="review")
+    assert caught.value.identity["requested"] == {"provider": payload["provider"], "model": payload["model"]}
