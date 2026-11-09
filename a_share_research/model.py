@@ -90,8 +90,9 @@ def preflight() -> dict:
 def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None = None,
              reasoning: str | None = None, messages: list | None = None,
              tools: list | None = None) -> Completion:
+    env_max_tokens = os.environ.get("MODEL_MAX_TOKENS")
+    resolved_max_tokens = int(env_max_tokens) if env_max_tokens is not None else (max_tokens if max_tokens is not None else 16000)
     resolved_timeout = timeout if timeout is not None else int(os.environ.get("MODEL_TIMEOUT", "240"))
-    resolved_max_tokens = max_tokens if max_tokens is not None else int(os.environ.get("MODEL_MAX_TOKENS", "16000"))
     resolved_reasoning = reasoning if reasoning is not None else os.environ.get("MODEL_REASONING", "high")
     request = {
         "provider": os.environ.get("MODEL_PROVIDER"),

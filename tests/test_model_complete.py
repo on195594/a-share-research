@@ -62,6 +62,16 @@ def test_environment_configures_reasoning_and_max_tokens(payload, monkeypatch):
     assert error.identity["parameters"]["maxTokens"] == 12000
 
 
+def test_environment_max_tokens_overrides_call_site(payload, monkeypatch):
+    monkeypatch.setenv("MODEL_MAX_TOKENS", "14000")
+    with pytest.raises(model.ModelError, match="RangeError") as caught:
+        model.complete(payload["prompt"], timeout=-1, max_tokens=8000,
+                       messages=payload["messages"], tools=payload["tools"])
+    error = caught.value
+    assert error.identity["request_parameters"]["max_tokens"] == 14000
+    assert error.identity["parameters"]["maxTokens"] == 14000
+
+
 def test_missing_runtime_raises_model_error_with_identity(configured, tmp_path):
     script = """
 import json, os
