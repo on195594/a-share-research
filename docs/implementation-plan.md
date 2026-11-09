@@ -96,9 +96,9 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `9cea81e`** 于 2026-11-09 12:09 经 README 固定入口发布：支持使用 `antigravity` provider 的 `gemini-3.8-flash`（思考强度 `high`，输出上限 16000 tokens）；通过环境变量 `MODEL_PROVIDER`, `MODEL_ID`, `MODEL_REASONING`, `MODEL_MAX_TOKENS` 统一维护模型配置与思考参数，向下兼容 `openai-codex / gpt-6.1-sol` 等旧模型与未设配置的缺省值；`deploy.py` 增加 `--allow-config` 标志支持授权后的环境与 Compose 变更发布。分类为模型与配置基础设施升级，无数据库结构迁移。发布前经 Codex 审查与确定性测试，worker 容器内离线预检确认 `ready: true`（`antigravity / gemini-3.8-flash / high`），容器内实测端到端推理成功。发布工具的空闲与暂停复查、业务表指纹及完整性巡检均通过（149 份报告、1418 次调用，0 问题）。备份 `backup-pre-9cea81e-20261109-120736.db`；证据 `deploy-9cea81e-20261109-120735/`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `c9d4965`** 于 2026-11-09 14:42 经 README 固定入口发布（`--allow-config`，所有者当次授权）：修复 12:09 切换到 `antigravity / gemini-3.8-flash`（思考强度 `high`）后研究无法完成的两个原因。① 取证停止后的无工具收尾轮，Gemini 仍返回工具调用，原先被判为输出不完整（`c9d4965`：工具循环内接受该轮，回一轮“未执行”结果后要求终稿；`toolChoice: none` 被 Antigravity 后端忽略）。② 复核轮思考用光 16000 输出 token、正文为空，`.env` 的 `MODEL_MAX_TOKENS` 由 16000 调为 48000（该模型上限 65536）。同时发布 `921798c`：年报定位不到管理层讨论与分析时不再中断研究，改记缺口由 AI 检索 D0，版面规则冻结。分类为故障修复。发布前跑定向确定性测试（148 项），本机以新上限对申通 002468 完整研究一次成功（取证→修正→复核，605 秒，报告通过核对）；此前同配置 5 次全部失败。发布工具的空闲与暂停复查、业务表指纹及完整性巡检均通过（149 份报告、1418 次调用）；worker 预检 `ready`。备份 `backup-pre-c9d4965-20261109-144122.db`；证据 `deploy-c9d4965-20261109-144120/`、`2026-11-09-mdna-soft-gemini/`。
 
-**直接回退**：使用两服务的 `rollback-9cea81e`（web `42e8e0c0`、worker `b87f15e0`），若需回退至原模型同时将 `.env` 恢复为 `openai-codex / gpt-6.1-sol`。版本镜像与备份继续由发布工具按 K4 保留。
+**直接回退**：使用两服务的 `rollback-c9d4965`（web `f9c5aef8`、worker `d04c69a8`，即 `9cea81e`）并将 `.env` 的 `MODEL_MAX_TOKENS` 改回 16000（须 `--allow-config`）；回退到原模型再用 `rollback-9cea81e`（web `42e8e0c0`、worker `b87f15e0`）并将 `.env` 恢复为 `openai-codex / gpt-6.1-sol`。版本镜像与备份继续由发布工具按 K4 保留。
 
 本节只保留当前版本与回退方式；各次发布的验证、备份与证据目录见 `git log` 及 `git show a387ebe:docs/implementation-plan.md`「当前部署」。
 
