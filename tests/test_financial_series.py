@@ -9,18 +9,17 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from a_share_research import sources
 from a_share_research.material import Material, financial_series, financial_table
 from a_share_research.reading import since_prior
 from a_share_research.research_tools import calculate
 from support.reports import MATERIAL
+from support.templates import ENV
 
 ROOT = Path(__file__).resolve().parents[1]
 CAPTURES = json.loads((ROOT / "tests/data/financial-series-captures.json").read_text())["companies"]
 FINANCIAL_DATA = json.loads((ROOT / "tests/data/600519-financials.json").read_text())
-DATA = FINANCIAL_DATA
 
 
 def frames(captured):
@@ -171,8 +170,7 @@ def test_series_survives_snapshot_but_stays_outside_model_evidence_and_renders_l
     restored = Material.from_snapshot(json.loads(json.dumps(material.snapshot())))
     assert restored.extra["series"] == series and restored.prompt_block() == prompt
     assert "series" not in Material.from_snapshot(MATERIAL.snapshot()).extra
-    env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
-    template = env.get_template("_series.html")
+    template = ENV.get_template("_series.html")
     html = template.render(body={"series": build()})
     assert html.count('<details open>') == 4
     assert html.index('2026 Q3') < html.index('2026 Q2')
@@ -183,8 +181,7 @@ def test_series_survives_snapshot_but_stays_outside_model_evidence_and_renders_l
 def test_yoy_sources_show_window_outside_inputs_and_quarter_ttm_formulas():
     series = build()
     before = json.dumps(series, ensure_ascii=False)
-    env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
-    html = env.get_template("_series.html").render(body={"series": series})
+    html = ENV.get_template("_series.html").render(body={"series": series})
 
     def source(title, period):
         group = html.split(f"<summary>{title}</summary>", 1)[1]
@@ -215,8 +212,7 @@ def test_yoy_source_missing_and_nonpositive_bases_are_not_replaced_or_hidden():
     captured = json.loads((ROOT / "tests/data/600519-three-statements.json").read_text())
     fin = {k: frame[frame.end_date <= "2023-06-30"] for k, frame in frames(captured).items()}
     series = financial_series(fin, "600519.SH", "2026-10-26")
-    env = Environment(loader=FileSystemLoader(ROOT / "a_share_research/templates"), autoescape=select_autoescape())
-    html = env.get_template("_series.html").render(body={"series": series})
+    html = ENV.get_template("_series.html").render(body={"series": series})
     assert "基期缺少 2020-12-31 的完整输入" in html
     assert "+ cashflow.n_cashflow_act（2022-03-31）：-6876059093.79 元" in html
     assert cell(series, "quarterly", "op_cash", "2023-03-31")["yoy"]["value"] is None
@@ -231,7 +227,7 @@ def test_missing_financial_token_is_a_source_error(monkeypatch):
 
 
 def test_indicators_survive_the_providers_null_statement_type():
-    data = json.loads((ROOT / "tests/data/600519-financials.json").read_text())
+    data = FINANCIAL_DATA
     frames_dict = {name: pd.DataFrame(rows) for name, rows in data["financials"].items()}
     rows = {row["id"]: row for row in financial_table(frames_dict, data["market"])}
     expected = {

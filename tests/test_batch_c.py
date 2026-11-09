@@ -349,8 +349,7 @@ def test_automatic_monthly_comparison_failure_never_requeues_paid_work(tmp_path,
 # --- Batch Small Pool Reading Tests (absorbed from test_batch_small_reading) ---
 
 def _render_two_pools(small_rows, status="proposed", coverage=None):
-    root = Path(__file__).resolve().parents[1]
-    captured = json.loads((root / 'tests/data/batch-candidate-matrix.json').read_text())
+    captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
     batch = {'id': 1, 'status': status, 'created_at': '2026-12-01', 'as_of': '20261023',
              'rule': {'version': 'screen-v1.2', 'picks': 5, 'picks_per_industry': 2},
              'q20': captured['rows'], 'q5': captured['q5'], 'l5': None, 'universe': None,
@@ -371,8 +370,7 @@ def _render_two_pools(small_rows, status="proposed", coverage=None):
 
 
 def test_two_pool_form_has_independent_fields_and_unique_ids():
-    root = Path(__file__).resolve().parents[1]
-    captured = json.loads((root / 'tests/data/batch-candidate-matrix.json').read_text())
+    captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
     html = _render_two_pools(captured['rows'][:1])
     assert html.count('action="/batches/1/freeze"') == 1
     assert 'name="codes"' in html and 'name="small_codes"' in html
@@ -391,8 +389,7 @@ def test_empty_small_pool_keeps_large_freeze_available():
 
 
 def test_unlinked_small_candidates_wait_without_query_or_finished_count():
-    root = Path(__file__).resolve().parents[1]
-    captured = json.loads((root / 'tests/data/batch-candidate-matrix.json').read_text())
+    captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
     row = {k: v for k, v in captured['rows'][0].items()
            if k not in ('run_id', 'research_status', 'report_id', 'verdict')}
     with sqlite3.connect(':memory:') as conn:
@@ -408,8 +405,7 @@ def test_unlinked_small_candidates_wait_without_query_or_finished_count():
 
 
 def test_failed_task_remains_linked_without_report():
-    root = Path(__file__).resolve().parents[1]
-    captured = json.loads((root / 'tests/data/batch-candidate-matrix.json').read_text())
+    captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
     row = dict(captured['rows'][0], research_status='failed', report_id=None, verdict=None,
                run_id=987, research_error='失败状态变体')
     html = _render_two_pools([row], status='researching')
