@@ -506,7 +506,7 @@ def test_rereading_gathered_mdna_page_is_not_a_conflict_but_other_text_is(tmp_pa
     conn.close()
 
 
-@pytest.mark.parametrize('used, expected_repairs', [(18, 0), (17, 1)])
+@pytest.mark.parametrize('used, expected_repairs', [(17, 0), (16, 1)])
 def test_monthly_repair_leaves_room_for_review(session, monkeypatch, used, expected_repairs):
     runner, material, acquisition = session
     runner.max_calls, runner.calls = 21, used
@@ -532,11 +532,22 @@ def test_monthly_repair_leaves_room_for_review(session, monkeypatch, used, expec
 
 def test_monthly_acquisition_reserves_writer_and_review_calls(session):
     runner, material, acquisition = session
-    runner.max_calls, runner.calls = 21, 18
+    runner.max_calls, runner.calls = 21, 17
     runner.responses = [report()]
     assert acquisition.write('额度内收尾', 'explore') == report()
-    assert runner.offered == [[]] and runner.calls == 19
-    assert runner.max_calls - runner.calls == 2
+    assert runner.offered == [[]] and runner.calls == 18
+    assert runner.max_calls - runner.calls == 3
+
+
+def test_declined_round_at_the_call_reserve_leaves_the_review_its_format_correction(session):
+    # Codex review 2026-11-09: with a reserve of 3, a declined turn left one call, so a review
+    # format correction raised "模型调用次数超过上限" and failed the monthly research.
+    runner, material, acquisition = session
+    runner.max_calls, runner.calls = 21, 17
+    runner.responses = [[read(9)], report()]
+    assert acquisition.write('额度内收尾', 'explore') == report()
+    assert runner.offered == [[], []] and acquisition.traces == []
+    assert runner.max_calls - runner.calls == 2  # review + its one format correction
 
 
 def test_round_guard_stops_before_the_model_call_guard_fails_the_run():

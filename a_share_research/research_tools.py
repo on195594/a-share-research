@@ -532,6 +532,9 @@ REPAIR_CALL_RESERVE = 48  # shared by both repairs; exploration cannot consume i
 # (report 108), so 120 need this; the runner's 1800 s must still leave review and repair their ~400 s.
 ACQUISITION_SECONDS = 1200
 COMPUTE_TOOLS = {"calculate", "valuation"}  # program arithmetic on held evidence, not evidence fetches
+# Model calls a draft needs once acquisition stops: the tool-free draft, one declined tool turn
+# (Gemini still calls tools when none are offered) and a review with its one format correction.
+DRAFT_CALLS = 4
 
 
 def _fetches(traces: list[dict]) -> int:
@@ -637,10 +640,9 @@ class Acquisition:
         messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
         declined = False
         while True:
-            # Keep room for a final draft and a review with its existing format correction.
-            # A smaller caller-supplied limit is never raised to the default.
+            # Stop while DRAFT_CALLS remain. A smaller caller-supplied limit is never raised to the default.
             remaining = self.runner.max_calls - self.runner.calls
-            reason = self.stopped(stage) or ("model_limit" if remaining <= 3 else None)
+            reason = self.stopped(stage) or ("model_limit" if remaining <= DRAFT_CALLS else None)
             if reason and not declined:
                 record_stop(self.material, reason, stage)
                 gap = "共享取证已到停止条件；未完成的取证仍未知。"

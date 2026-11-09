@@ -14,7 +14,7 @@ from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
 from a_share_research.checking import SECTIONS, check
 from a_share_research.prompts import RULES, output_schema, parse_json
-from a_share_research.research_tools import Acquisition, active_methods_digest, explore, method_catalog, method_entry
+from a_share_research.research_tools import DRAFT_CALLS, Acquisition, active_methods_digest, explore, method_catalog, method_entry
 
 log = logging.getLogger(__name__)
 
@@ -428,9 +428,9 @@ def revise(runner, material, report, ledger, *, acquisition=None):
             problems += ledger.pending()
         if not problems or attempt == 2:
             break
-        # A repair needs one writer call and up to two independent-review calls.
+        # A repair needs a writer call, possibly one declined tool turn, and up to two review calls.
         # Keep the unresolved draft rather than start a repair we cannot verify.
-        if runner.max_calls - runner.calls < 3:
+        if runner.max_calls - runner.calls < DRAFT_CALLS:
             break
         ledger.protect_risks(report)
         report = repair(runner, material, report, problems, acquisition=acquisition)
