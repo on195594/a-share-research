@@ -161,7 +161,7 @@ def wait_ready() -> None:
             time.sleep(0.5)
 
 
-def deploy(code: str, evidence: Path) -> None:
+def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
     revision = run("git", "rev-parse", f"{code}^{{commit}}")
     if revision != run("git", "rev-parse", "HEAD") or revision != run("git", "rev-parse", "origin/main"):
         raise RuntimeError("只能发布已提交并已推送到 origin/main 的 HEAD")
@@ -172,7 +172,7 @@ def deploy(code: str, evidence: Path) -> None:
     if not all(item["running"] for item in before.values()):
         raise RuntimeError("现有 web/worker 未同时运行，请先查明状态")
     for service in SERVICES:
-        if run("docker", "compose", "config", "--hash", service).split() != [service, before[service]["config_hash"]]:
+        if not allow_config and run("docker", "compose", "config", "--hash", service).split() != [service, before[service]["config_hash"]]:
             raise RuntimeError(f"{service} 的 Compose 或环境配置发生变化；须另行准备配置回退")
     if all(before[service]["image"] == images[service] for service in SERVICES):
         log.info("目标镜像已运行，无需重复切换")
@@ -222,7 +222,10 @@ def deploy(code: str, evidence: Path) -> None:
         save("worker-preflight.json", runtime)
         after = {service: describe(service) for service in SERVICES}
         for service in SERVICES:
-            if after[service] != before[service] | {"image": images[service]}:
+            expected = before[service] | {"image": images[service]}
+            if allow_config:
+                expected["config_hash"] = after[service]["config_hash"]
+            if after[service] != expected:
                 raise RuntimeError(f"{service} 镜像、运行状态或部署配置不一致")
         check = json.loads(run("docker", "exec", "a-share-research-worker", "python", "-m", "a_share_research.integrity"))
         save("integrity-after.json", check)
@@ -250,10 +253,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("code", help="short commit used as the prebuilt image tag")
     parser.add_argument("evidence", type=Path, help="new private directory for backup and release evidence")
+    parser.add_argument("--allow-config", action="store_true",
+                        help="allow authorized Compose or environment configuration changes")
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    deploy(args.code, args.evidence)
+    deploy(args.code, args.evidence, allow_config=args.allow_config)
 
 
 if __name__ == "__main__":
