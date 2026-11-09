@@ -3,7 +3,9 @@
 import json
 from pathlib import Path
 
-from a_share_research.material import _page_offset, mdna_pages
+import pytest
+
+from a_share_research.material import DASHED_PAGE_NUMBER, _page_offset, mdna_pages
 from a_share_research.sources import Document
 
 
@@ -42,3 +44,23 @@ def test_red_chip_report_in_overseas_format_spans_business_and_financial_overvie
     # 中国移动 2025: no 第X节 and no 管理层讨论与分析 section; the contents list title-first dotted entries
     # 业务概览 ... 15, 财务概览 ... 17, 可持续发展报告 ... 22, and printed page = PDF page - 1.
     assert _span("600941") == (16, 23)
+
+
+def test_cnooc_report_with_dash_wrapped_page_numbers():
+    # 中国海油 2025: no 第X节 headings; TOC says 85–92 and footers print "- 85 -".
+    report = json.loads((Path(__file__).parent / "data/cnooc-annual-report-sections.json").read_text())
+    doc = Document("", "", "", "", "", "", pages=report["pages"])
+    assert _page_offset(doc) == 0
+    pages = mdna_pages(doc)
+    assert (min(pages), max(pages)) == (85, 92)
+    assert "管理层讨论与分析" in pages[85]
+
+
+@pytest.mark.parametrize("footer", ["-85-", "- 85 -"])
+def test_dash_wrapped_page_number_whitespace(footer):
+    assert DASHED_PAGE_NUMBER.fullmatch(footer)[1] == "85"
+
+
+@pytest.mark.parametrize("footer", ["-85", "85-", "-- 85 --", "- 85 - trailing", "prefix - 85 -"])
+def test_malformed_variants_of_cnooc_footer_are_not_page_numbers(footer):
+    assert DASHED_PAGE_NUMBER.fullmatch(footer) is None

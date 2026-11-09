@@ -297,6 +297,8 @@ HEADING = re.compile(r"^\s*第[一二三四五六七八九十]+节\s*([^\s.…�
 
 TOC_SECTION = re.compile(r"^第[一二三四五六七八九十]+节$")
 PAGE_NUMBER = re.compile(r"(?:^|\s)(\d{1,3})(?:\s*/\s*\d{1,3})?$")
+# 中国海油 prints centered footers such as "- 85 -"; require both decorations.
+DASHED_PAGE_NUMBER = re.compile(r"^-\s*(\d{1,3})\s*-$")
 # Designed reports print the number first on left-hand pages: "3       Annual Report 2025".
 LEADING_PAGE_NUMBER = re.compile(r"^(\d{1,3})\s{2,}\S")
 # Number-first contents entries, possibly two columns per line: "34   管理层讨论与分析      94   债券相关情况".
@@ -338,21 +340,26 @@ def _toc_sections(doc: Document) -> list[tuple[str, int]]:
 
 def _page_offset(doc: Document) -> int | None:
     """PDF page minus printed page number, agreed by most numbered headers or footers."""
-    offsets = []
-    for i, page in enumerate(doc.pages):
-        lines = [line.strip() for line in page.splitlines() if line.strip()]
-        for line in lines[:1] + lines[-1:]:
-            if m := PAGE_NUMBER.search(line) or LEADING_PAGE_NUMBER.match(line):
-                offsets.append(i + 1 - int(m[1]))
-                break
-    if not offsets:
-        return None
-    counts = sorted((offsets.count(o) for o in set(offsets)), reverse=True)
-    if len(counts) > 1 and counts[0] == counts[1]:
-        return None  # two numbering schemes agree equally: the section could sit in either
-    best = max(set(offsets), key=offsets.count)
-    # Designed reports number only their front part; financial statements restart or go unnumbered.
-    return best if offsets.count(best) >= max(10, len(offsets) * 2 / 3) else None
+    # Keep established numbering ahead of dashed footers: a financial appendix may
+    # restart dashed numbering and outnumber the report's main-body page scheme.
+    for matchers in ((PAGE_NUMBER.search, LEADING_PAGE_NUMBER.match), (DASHED_PAGE_NUMBER.fullmatch,)):
+        offsets = []
+        for i, page in enumerate(doc.pages):
+            lines = [line.strip() for line in page.splitlines() if line.strip()]
+            for line in lines[:1] + lines[-1:]:
+                if m := next((m for match in matchers if (m := match(line))), None):
+                    offsets.append(i + 1 - int(m[1]))
+                    break
+        if not offsets:
+            continue
+        counts = sorted((offsets.count(o) for o in set(offsets)), reverse=True)
+        if len(counts) > 1 and counts[0] == counts[1]:
+            return None  # two numbering schemes agree equally: the section could sit in either
+        best = max(set(offsets), key=offsets.count)
+        # Designed reports number only their front part; financial statements restart or go unnumbered.
+        if offsets.count(best) >= max(10, len(offsets) * 2 / 3):
+            return best
+    return None
 
 
 def _mdna_span_from_toc(doc: Document) -> tuple[int, int] | None:
