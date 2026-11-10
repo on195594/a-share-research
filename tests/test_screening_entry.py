@@ -86,7 +86,7 @@ def test_invalid_benchmark_keeps_frozen_then_retries_with_frozen_rules(market, t
 
     monkeypatch.setattr(s, "datetime", Clock)
     monkeypatch.setattr(db, "now", lambda: Clock.value.isoformat())
-    monkeypatch.setattr(s, "_pro", lambda: market)
+    monkeypatch.setattr(s.market, "client", lambda: market)
     conn = db.connect(tmp_path / "synthetic-batch.db")
     try:
         rule = json.dumps(s.RULE)
@@ -168,7 +168,7 @@ def test_lagging_benchmarks_enter_then_mark_once_both_are_published(tmp_path, mo
     market = LaggedReplay()
     monkeypatch.setattr(s, "datetime", Clock)
     monkeypatch.setattr(db, "now", lambda: Clock.value.isoformat())
-    monkeypatch.setattr(s, "_pro", lambda: market)
+    monkeypatch.setattr(s.market, "client", lambda: market)
     code, day = LAGGED["stock"], LAGGED["trade_date"]
     later = LAGGED["published_later"]["index_daily"]
     conn = db.connect(tmp_path / "lagged-batch.db")
@@ -231,7 +231,7 @@ def test_horizon_write_closes_only_when_all_are_saved(market, tmp_path, monkeypa
             return cls.fromisoformat('2026-10-23T18:00:00+08:00').astimezone(tz)
 
     monkeypatch.setattr(s, 'datetime', Clock)
-    monkeypatch.setattr(s, '_pro', lambda: market)
+    monkeypatch.setattr(s.market, 'client', lambda: market)
     conn = db.connect(tmp_path / 'terminal.db')
     try:
         # Zero-month horizon is a test-only clock parameter, not a new investment rule.
@@ -267,7 +267,7 @@ def test_horizon_write_closes_only_when_all_are_saved(market, tmp_path, monkeypa
             conn.execute("UPDATE batches SET rule='invalid JSON'")
             def forbidden():
                 pytest.fail('closed batch requested a market provider')
-            monkeypatch.setattr(s, '_pro', forbidden)
+            monkeypatch.setattr(s.market, 'client', forbidden)
             changes = conn.total_changes
             assert not s.tick(conn)
             assert conn.total_changes == changes

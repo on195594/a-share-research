@@ -7,16 +7,15 @@ Design: docs/screening-experiment.md. Runs in the worker only (TuShare and model
 import json
 import logging
 import math
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 import pandas as pd
-import tushare as ts
 
-from a_share_research import db, model, service, sources, stock_codes
+from a_share_research import market, db, model, service, sources, stock_codes
 from a_share_research.db import SHANGHAI
+from a_share_research.market import ScreenError
 from a_share_research.batches import POLL_COLUMNS, horizons_complete, load, group_return, returns, small_rule
 from a_share_research.reading import research_state
 from a_share_research.service import freeze_batch as freeze
@@ -46,10 +45,6 @@ QUESTION = ("候选初筛深挖：从 6–12 个月持有角度，回报来源�
 MARK_HOUR = 17  # daily bars are complete well before this (Shanghai time)
 
 
-class ScreenError(Exception):
-    pass
-
-
 # ---------- storage ----------
 
 def _save(conn, batch_id: int, **fields) -> None:
@@ -59,24 +54,16 @@ def _save(conn, batch_id: int, **fields) -> None:
 
 # ---------- data ----------
 
-def _pro():
-    return ts.pro_api(os.environ["TUSHARE_TOKEN"])
-
-
 def _query(pro, api: str, **params) -> pd.DataFrame:
     """Cached TuShare call with two retries; the last error names the endpoint and parameters."""
     for attempt in range(3):
         try:
-            return sources.tushare_query(pro, api, **params)
+            return market.query(pro, api, **params)
         except Exception as exc:
             if attempt == 2:
                 raise ScreenError(f"{api} {params.get('ts_code') or params.get('trade_date') or ''}: {exc}") from exc
             time.sleep(1 + attempt * 2)
     raise AssertionError("unreachable")
-
-
-def _trade_days(pro, start: str, end: str) -> list[str]:
-    return sorted(_query(pro, "trade_cal", exchange="SSE", is_open="1", start_date=start, end_date=end)["cal_date"])
 
 
 def _compact(d: date) -> str:
@@ -86,7 +73,7 @@ def _compact(d: date) -> str:
 def latest_session(pro) -> str:
     """Latest trading day whose daily_basic cross-section is already published."""
     today = datetime.now(SHANGHAI).date()
-    for day in reversed(_trade_days(pro, _compact(today - timedelta(days=20)), _compact(today))):
+    for day in reversed(market.trade_days(pro, _compact(today - timedelta(days=20)), _compact(today))):
         if not _query(pro, "daily_basic", trade_date=day, fields="ts_code").empty:
             return day
     raise ScreenError("近 20 天没有可用的每日指标")
@@ -119,7 +106,7 @@ def momentum(pro, as_of: str, codes: list[str], rule: dict = RULE) -> dict:
     """Adjusted return over the last `momentum_days` sessions; None when either end has no bar."""
     days = rule.get("momentum_days", 60)  # screen-v1 batches predate the recorded momentum hint
     start = _compact(datetime.strptime(as_of, "%Y%m%d").date() - timedelta(days=days * 3))
-    first = _trade_days(pro, start, as_of)[-(days + 1)]
+    first = market.trade_days(pro, start, as_of)[-(days + 1)]
     ends = {}
     for day in (first, as_of):
         close = _query(pro, "daily", trade_date=day, fields="ts_code,close").set_index("ts_code")["close"]
@@ -142,10 +129,10 @@ def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dic
         raise ScreenError("screen-v1.1 缺少利润跳升提示规则")
     if rule["version"] in {"screen-v1.2", "screen-v1.3"} and not isinstance(rule.get("small"), dict):
         raise ScreenError(f"{rule['version']} 缺少小市值组规则")
-    pro = _pro()
+    pro = market.client()
     as_of = as_of or latest_session(pro)
     start = _compact(datetime.strptime(as_of, "%Y%m%d").date() - timedelta(days=60))
-    days = [d for d in _trade_days(pro, start, as_of)][-rule["amount_days"]:]
+    days = [d for d in market.trade_days(pro, start, as_of)][-rule["amount_days"]:]
     basic = _query(pro, "stock_basic", list_status="L", fields="ts_code,name,industry,market,list_date")
     valuation = _query(pro, "daily_basic", trade_date=as_of, fields="ts_code,close,pe_ttm,total_mv")
     suspended = set(_query(pro, "suspend_d", trade_date=as_of, suspend_type="S")["ts_code"])
@@ -531,7 +518,7 @@ def benchmark_prices(pro, start: str, end: str, field: str, benchmarks: dict) ->
         if field == "open" and (frame.empty or str(frame["trade_date"].iloc[-1]) != end):
             # Total-return rows publish after the price index; the entry-day pre_close equals the
             # previous session's close (no exception in either benchmark since 2015), so use that.
-            prev = [d for d in _trade_days(pro, _compact(datetime.strptime(end, "%Y%m%d") - timedelta(days=20)), end)
+            prev = [d for d in market.trade_days(pro, _compact(datetime.strptime(end, "%Y%m%d") - timedelta(days=20)), end)
                     if d < end][-1:]
             frame = _query(pro, "index_daily", ts_code=code, start_date=prev[0], end_date=prev[0]) if prev else frame.iloc[0:0]
             if frame.empty or str(frame["trade_date"].iloc[-1]) != prev[0]:
@@ -610,7 +597,7 @@ def update_marks(pro, batch: dict, day: str) -> dict:
         key, target = f"{months}m", _months_after(batch["entry"]["date"], months)
         if key in marks.get("horizons", {}) or day < target:
             continue
-        hday = next(d for d in _trade_days(pro, target, day))  # day itself is a trading day >= target
+        hday = next(d for d in market.trade_days(pro, target, day))  # day itself is a trading day >= target
         mark = latest if hday == day else mark_on(pro, batch, hday)
         marks = marks | {"horizons": (marks.get("horizons") or {}) | {key: returns(batch | {"marks": {"latest": mark}})}}
     return marks
@@ -792,10 +779,10 @@ def tick(conn) -> bool:
             stamp = now.strftime("%Y%m%d")
             if now.hour < MARK_HOUR or (batch.get("marks") or {}).get("checked") == stamp or _waiting(batch, now):
                 continue
-            pro = _pro()
+            pro = market.client()
             if batch["status"] == "frozen":
                 frozen = datetime.fromisoformat(batch["frozen_at"]).strftime("%Y%m%d")
-                days = [d for d in _trade_days(pro, frozen, stamp) if d > frozen]
+                days = [d for d in market.trade_days(pro, frozen, stamp) if d > frozen]
                 if not days:
                     _save(conn, batch["id"], marks=(batch.get("marks") or {}) | {"checked": stamp, "attempted": None})
                     continue
@@ -807,7 +794,7 @@ def tick(conn) -> bool:
                 _save(conn, batch["id"], status="closed" if horizons_complete(batch["rule"], marks) else "tracking",
                       entry=entry, error=None, marks=marks)
                 return True
-            day = _trade_days(pro, batch["entry"]["date"], stamp)[-1]
+            day = market.trade_days(pro, batch["entry"]["date"], stamp)[-1]
             marks = _marks_through(pro, batch, day, stamp)
             _save(conn, batch["id"], status="closed" if horizons_complete(batch["rule"], marks) else "tracking",
                   error=None, marks=marks)

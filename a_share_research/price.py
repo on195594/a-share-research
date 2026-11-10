@@ -7,13 +7,10 @@ next 5 trading sessions.
 
 import json
 import logging
-import os
 import re
 from datetime import datetime, timedelta
 
-import tushare as ts
-
-from a_share_research import db
+from a_share_research import market, db
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -58,7 +55,7 @@ def reference(code: str, name: str) -> dict:
         raise PriceError("价格参考支持沪深主板、创业板和科创板股票，暂不支持北交所")
     if "ST" in name.upper() or "退" in name:
         raise PriceError("ST 或退市风险股票不提供价格参考")
-    pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
+    pro = market.client()
     today = datetime.now(SHANGHAI).date()
     start, end = _compact(today - timedelta(days=150)), _compact(today + timedelta(days=30))
     calendar = sorted(pro.trade_cal(exchange="SSE", is_open="1", start_date=start, end_date=end)["cal_date"])

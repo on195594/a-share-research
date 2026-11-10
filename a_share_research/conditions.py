@@ -1,13 +1,12 @@
 """Typed external-condition series from the account's verified TuShare endpoints."""
 
-import os
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 
-from a_share_research import db, sources
+from a_share_research import market, db, sources
 
 MACRO = {
     "pmi": ("cn_pmi", {"pmi010000": ("制造业PMI", "指数"), "pmi010400": ("制造业生产指数", "指数"),
@@ -25,9 +24,9 @@ EXCHANGES = {"SHFE": "SHF", "DCE": "DCE", "CZCE": "ZCE", "INE": "INE", "GFEX": "
 
 def query(api, **params):
     try:
-        return sources.tushare_query(sources.ts.pro_api(os.environ["TUSHARE_TOKEN"]), api, **params)
+        return market.query(market.client(), api, **params)
     except Exception as exc:
-        message = str(exc).replace(os.environ.get("TUSHARE_TOKEN") or "\x00", "[REDACTED]")
+        message = market.redact_error(exc)
         raise sources.SourceError(f"TuShare {api} 未取得数据：{message}；请检查品种/交易所参数；权限或频次问题请记录缺口并使用其他已取得证据") from None
 
 

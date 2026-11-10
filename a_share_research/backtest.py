@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from a_share_research import screening
+from a_share_research import market, screening
 from a_share_research.screening import RULE, ScreenError
 
 log = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class Market:
                 raise ScreenError(f"{year} 年的简称变更超过单次 {NAME_LIMIT} 行，可能被截断")
             names.append(page)
         self.names = pd.concat(names).drop_duplicates()
-        self.days = days if days is not None else screening._trade_days(pro, "20150101", data_end)
+        self.days = days if days is not None else market.trade_days(pro, "20150101", data_end)
 
     def next_day(self, day: str) -> str | None:
         return next((d for d in self.days if d > day), None)
@@ -288,7 +288,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     CACHE = args.out / "cache"
     CACHE.mkdir(parents=True, exist_ok=True)
-    pro = screening._pro()
+    pro = market.client()
     m = Market(pro, screening.latest_session(pro))
     results = args.out / "batches"
     results.mkdir(exist_ok=True)

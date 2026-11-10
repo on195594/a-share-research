@@ -204,9 +204,9 @@ def test_queued_batch_uses_saved_rule_through_screen(connections, monkeypatch):
                 return pd.DataFrame()
             raise AssertionError(api)
 
-    monkeypatch.setattr(s, '_pro', lambda: Replay())
+    monkeypatch.setattr(s.market, 'client', lambda: Replay())
     monkeypatch.setattr(s, 'latest_session', lambda pro: '20261103')
-    monkeypatch.setattr(s, '_trade_days', lambda *a: ['20261102', '20261103'])
+    monkeypatch.setattr(s.market, 'trade_days', lambda *a: ['20261102', '20261103'])
     monkeypatch.setattr(s, 'indicator_check', lambda *a: {'status': 'ok'})
     monkeypatch.setattr(s, 'evaluate', lambda base, *a: base | {'status': 'ok', 'roe': float(codes.index(base['code'])),
                                                                  'cash': 1., 'growth': .5})
@@ -234,7 +234,7 @@ def test_unsupported_or_incomplete_rules_fail_before_market_calls(monkeypatch, c
             rule.pop(key)
         else:
             rule[key] = value
-    monkeypatch.setattr(s, '_pro', lambda: pytest.fail('market must not be called'))
+    monkeypatch.setattr(s.market, 'client', lambda: pytest.fail('market must not be called'))
     with pytest.raises(s.ScreenError):
         s.screen(rule=rule)
 
@@ -246,7 +246,7 @@ def test_legacy_rule_without_warning_and_momentum_settings(monkeypatch):
         legacy.pop(key)
     assert s.windfall({'growth': .5, 'pe': 9}, legacy) is None
     dates = [f'{i:08d}' for i in range(61)]
-    monkeypatch.setattr(s, '_trade_days', lambda *args: dates)
+    monkeypatch.setattr(s.market, 'trade_days', lambda *args: dates)
     class Replay:
         def query(self, api, **params):
             return pd.DataFrame([{'ts_code': '000001.SZ', 'close': 10., 'adj_factor': 1.}])

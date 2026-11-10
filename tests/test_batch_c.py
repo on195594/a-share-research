@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import batches, charts, db, reading, screening, service, sources
+from a_share_research import market, batches, charts, db, reading, screening, service, sources
 from support.templates import ENV
 from test_advisor_sources import DailyReports, budget_calls
 
@@ -24,9 +24,9 @@ def cache_partial_window(monkeypatch):
     monkeypatch.delenv('TUSHARE_CACHE', raising=False)
     monkeypatch.delenv('TUSHARE_TOKEN', raising=False)
     replay = DailyReports()
-    sources.tushare_query(replay, 'trade_cal', exchange='SSE', is_open='1',
+    market.query(replay, 'trade_cal', exchange='SSE', is_open='1',
                           start_date='20260620', end_date='20260918')
-    sources.tushare_query(replay, 'report_rc', start_date='20260918', end_date='20260918')
+    market.query(replay, 'report_rc', start_date='20260918', end_date='20260918')
     return replay
 
 

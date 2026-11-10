@@ -71,10 +71,10 @@ def run_scan(conn, source=None, at=AT):
 
 
 def test_consensus_prefetch_once_even_without_subscriptions(conn, monkeypatch):
-    from a_share_research import sources
+    from a_share_research import market
     from test_advisor_sources import DailyReports
     pro = DailyReports()
-    monkeypatch.setattr(sources.ts, 'pro_api', lambda token: pro)
+    monkeypatch.setattr(market.ts, 'pro_api', lambda token: pro)
     monkeypatch.setenv('TUSHARE_TOKEN', 'captured-response-only')
     monkeypatch.delenv('TUSHARE_CACHE', raising=False)
     monkeypatch.setenv('REPORT_RC_DAILY_BUDGET', '1')

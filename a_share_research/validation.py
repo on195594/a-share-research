@@ -13,7 +13,7 @@ import statistics
 from contextlib import closing
 from datetime import date, datetime, time
 
-from a_share_research import agenda, forecasts, screening, stance as stances
+from a_share_research import market, agenda, forecasts, screening, stance as stances
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -270,7 +270,7 @@ def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> di
     split = agenda.sample(reports)
     rows = split["picked"]
     if rows:
-        rows = score(pro or screening._pro(), rows, today or datetime.now(SHANGHAI).date())
+        rows = score(pro or market.client(), rows, today or datetime.now(SHANGHAI).date())
     counts = {name: {"reports": 0, "scored": 0, "pending_entry": 0, "no_market_data": 0} for name in agenda.GROUPS}
     for row in rows:
         group = counts[row["group"]]
@@ -314,7 +314,7 @@ def _adjusted_closes(pro, code: str, start: str, end: str) -> dict[str, float]:
 def score(pro, reports: list[dict], today: date) -> list[dict]:
     end = screening._compact(today)
     start = min(r["completed"] for r in reports).date() if reports else today
-    trade_days = screening._trade_days(pro, screening._compact(start), end)
+    trade_days = market.trade_days(pro, screening._compact(start), end)
     bench = {}
     if trade_days:
         frame = screening._query(pro, "index_daily", ts_code=BENCHMARK, start_date=trade_days[0], end_date=end)
@@ -413,7 +413,7 @@ def main() -> None:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump(result, fh, ensure_ascii=False, indent=1, default=str)
         return
-    pro, today = screening._pro(), datetime.now(SHANGHAI).date()
+    pro, today = market.client(), datetime.now(SHANGHAI).date()
     rows = score(pro, load_reports(args.database), today)
     if args.stances:
         rows = score_stances(pro, [r for r in rows if r["stance"] != "未记录"], today)

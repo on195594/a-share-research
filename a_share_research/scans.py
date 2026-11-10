@@ -252,8 +252,8 @@ class MarketSources:
         return sources.valuation(code)
 
     def trade_days(self, start, end):
-        from a_share_research import screening
-        return screening._trade_days(screening._pro(), start.replace('-', ''), end.replace('-', ''))
+        from a_share_research import market
+        return market.trade_days(market.client(), start.replace('-', ''), end.replace('-', ''))
 
     def report_rc_window(self, as_of):
         from a_share_research import sources

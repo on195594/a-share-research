@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from a_share_research import checking, conditions, sources
+from a_share_research import market, checking, conditions, sources
 from a_share_research.research_tools import ResearchTools, price_changes
 from support.reports import MATERIAL, report
 
@@ -77,20 +77,20 @@ def test_boundary_rejects_duplicate_bad_number_and_outside_period():
 def test_macro_cache_keys_include_series_and_month_range(monkeypatch):
     monkeypatch.delenv("TUSHARE_CACHE")
     a = DATA['apis']['cn_m']['params']
-    assert sources._tushare_cache_key('cn_m', a)
-    assert sources._tushare_cache_key('cn_m', a) != sources._tushare_cache_key('cn_pmi', a)
-    assert sources._tushare_cache_key('cn_m', a) != sources._tushare_cache_key('cn_m', a | {'end_m': '202609'})
+    assert market._tushare_cache_key('cn_m', a)
+    assert market._tushare_cache_key('cn_m', a) != market._tushare_cache_key('cn_pmi', a)
+    assert market._tushare_cache_key('cn_m', a) != market._tushare_cache_key('cn_m', a | {'end_m': '202609'})
 
 
 def test_lpr_cooldown_is_shared_and_prevents_an_upstream_call(monkeypatch):
     from contextlib import closing
     from a_share_research import db
     monkeypatch.delenv('TUSHARE_CACHE')
-    with closing(sources._report_rc_connect()) as conn:
+    with closing(market.report_rc_connect()) as conn:
         conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES ('shibor_lpr:last-call', '{}', ?)", (db.now(),))
     # No provider is needed: the reservation must reject before any upstream access.
     with pytest.raises(sources.SourceError, match='每小时一次'):
-        sources.tushare_query(None, 'shibor_lpr', **DATA['apis']['shibor_lpr']['params'])
+        market.query(None, 'shibor_lpr', **DATA['apis']['shibor_lpr']['params'])
 
 
 def test_missing_cites_still_reports_a_problem_instead_of_crashing():

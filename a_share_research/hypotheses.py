@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from a_share_research import batches, db, screening, validation, valuation
+from a_share_research import market, batches, db, screening, validation, valuation
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -193,7 +193,7 @@ def score(database: str, pro, today: date) -> dict:
     trade_days, bench, adjusted, raw = [], {}, {}, {}
     if starts:
         start = min(starts)
-        trade_days = screening._trade_days(pro, start, end)
+        trade_days = market.trade_days(pro, start, end)
         frame = screening._query(pro, 'index_daily', ts_code=validation.BENCHMARK, start_date=start, end_date=end)
         bench = dict(zip(frame['trade_date'].astype(str), frame['close'].astype(float)))
         if not bench:
@@ -219,7 +219,7 @@ def _pct(value) -> str:
 
 
 def run(database: str, output: str | None) -> None:
-    result = score(database, screening._pro(), datetime.now(SHANGHAI).date())
+    result = score(database, market.client(), datetime.now(SHANGHAI).date())
     log.info('V3 假设检验：基准 %s 最新 %s；%s', result['benchmark'], result['benchmark_last'], NOTE)
     for b in result['rows']['h1']:
         log.info('H1 批次 #%s 未成交 %s%s', b['batch'], b['unfilled'], ' 排除：' + b['reason'] if b.get('reason') else '')

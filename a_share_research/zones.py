@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from heapq import heappop, heappush
 from pathlib import Path
 
-from a_share_research import screening, validation, valuation
+from a_share_research import market as market_gateway, screening, validation, valuation
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -231,7 +231,7 @@ def load_market(pro, reports: list[dict], today: date) -> tuple[list[str], dict,
     start = min(r["completed"] for r in reports).date()
     end = screening._compact(today)
     # Six calendar years comfortably cover the requested 1250 prior SSE sessions.
-    calendar = screening._trade_days(pro, screening._compact(start - timedelta(days=6 * 366)), end)
+    calendar = market_gateway.trade_days(pro, screening._compact(start - timedelta(days=6 * 366)), end)
 
     def series(api, code, since, field):
         out = {}
@@ -284,7 +284,7 @@ def main() -> None:
         parser.error("JSON 输出不能覆盖输入数据库")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     reports = load_reports(args.database)
-    calendar, market, benchmark = load_market(screening._pro() if reports else None, reports, datetime.now(SHANGHAI).date())
+    calendar, market, benchmark = load_market(market_gateway.client() if reports else None, reports, datetime.now(SHANGHAI).date())
     result = diagnose(reports, calendar, market, benchmark)
     log.info("A3 区间条件收益诊断：%s 份有效报告，基准 %s，截至 %s", len(reports), validation.BENCHMARK, result["benchmark_last"])
     for description in METHOD.values():

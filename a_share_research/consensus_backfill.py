@@ -10,7 +10,7 @@ import time
 from contextlib import closing
 from datetime import datetime, timedelta
 
-from a_share_research import db, sources
+from a_share_research import market, db, sources
 
 log = logging.getLogger(__name__)
 STATUS_KEY = "report_rc:backfill-v1"
@@ -18,9 +18,9 @@ _next_tick = 0.0
 
 
 def status() -> dict:
-    with closing(sources._report_rc_connect()) as conn:
+    with closing(market.report_rc_connect()) as conn:
         row = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (STATUS_KEY,)).fetchone()
-    return {"backfill": json.loads(row[0]) if row else None, "pacing": sources.report_rc_status()}
+    return {"backfill": json.loads(row[0]) if row else None, "pacing": market.report_rc_status()}
 
 
 def tick() -> bool:
@@ -28,7 +28,7 @@ def tick() -> bool:
     global _next_tick
     if time.monotonic() < _next_tick:
         return False
-    _next_tick = time.monotonic() + sources.REPORT_RC_MIN_INTERVAL
+    _next_tick = time.monotonic() + market.REPORT_RC_MIN_INTERVAL
     state = status()
     at = datetime.now(db.SHANGHAI)
     retry = datetime.fromisoformat(state["pacing"]["retry_at"])
@@ -38,7 +38,7 @@ def tick() -> bool:
 
     as_of = (at.date() - timedelta(days=1)).isoformat()
     window = sources.report_rc_window(as_of, max_calls=1)
-    pacing = sources.report_rc_status()
+    pacing = market.report_rc_status()
     # A complete window needs only an hourly check. Calendar/provider failures
     # without a report reservation back off too, rather than spinning every tick.
     if not window["missing_days"] and not window.get("reason"):
@@ -46,13 +46,13 @@ def tick() -> bool:
     elif not window["trading_days"]:
         delay = 300
     else:
-        delay = sources.REPORT_RC_MIN_INTERVAL
+        delay = market.REPORT_RC_MIN_INTERVAL
     retry = max(datetime.fromisoformat(pacing["retry_at"]), at + timedelta(seconds=delay))
     snapshot = {key: value for key, value in window.items() if key != "rows"}
     complete = window["trading_days"] > 0 and not window["missing_days"] and not window["truncated_days"] and not window.get("reason")
     snapshot.update(status="complete" if complete else "partial" if window["covered_days"] else "unavailable",
                     as_of=as_of, checked_at=db.now(), next_check_at=retry.isoformat())
-    with closing(sources._report_rc_connect()) as conn:
+    with closing(market.report_rc_connect()) as conn:
         conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?,?,?)",
                      (STATUS_KEY, json.dumps(snapshot, ensure_ascii=False), db.now()))
     log.info("report_rc backfill: covered=%s/%s empty=%s missing=%s truncated=%s attempts=%s budget=%s/%s next=%s reason=%s",

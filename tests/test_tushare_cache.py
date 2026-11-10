@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from a_share_research import db, screening, sources
+from a_share_research import market, db, screening
 
 DATA = Path(__file__).parent / "data"
 FIN = json.loads((DATA / "screen-financials.json").read_text())
@@ -127,9 +127,9 @@ def test_current_and_future_dates_are_live(pro, days, api, bound):
 
 
 def test_open_financial_and_unsupported_queries_have_no_cache_key():
-    for api in sources.FINANCIAL_APIS:
-        assert sources._tushare_cache_key(api, {"ts_code": "000651.SZ"}) is None
-    assert sources._tushare_cache_key("stock_basic", {"end_date": FIN["as_of"]}) is None
+    for api in market.FINANCIAL_APIS:
+        assert market._tushare_cache_key(api, {"ts_code": "000651.SZ"}) is None
+    assert market._tushare_cache_key("stock_basic", {"end_date": FIN["as_of"]}) is None
 
 
 def test_cache_write_failure_returns_upstream_data(pro, caplog):
@@ -193,3 +193,28 @@ def test_concurrent_writes_use_separate_sqlite_connections(pro):
     with closing(sqlite3.connect(db.DATA / "tushare_cache.db")) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("failures", [0, 2, 3])
+def test_gateway_calendar_preserves_retries_and_screen_error(pro, monkeypatch, failures):
+    class InterruptedCalendar(CapturedQueries):
+        attempts = 0
+
+        def query(self, api, **params):
+            self.attempts += 1
+            if self.attempts <= failures:
+                raise RuntimeError("calendar transport interrupted")
+            return super().query(api, **params)
+
+    replay = InterruptedCalendar()
+    waits = []
+    monkeypatch.setattr(market.time, "sleep", waits.append)
+    if failures == 3:
+        with pytest.raises(screening.ScreenError, match="^trade_cal : calendar transport interrupted$") as error:
+            market.trade_days(replay, "20260101", "20261023")
+        assert isinstance(error.value.__cause__, RuntimeError)
+    else:
+        assert market.trade_days(replay, "20260101", "20261023") == sorted(
+            row["cal_date"] for row in MARKET["trade_cal"])
+    assert replay.attempts == min(failures + 1, 3)
+    assert waits == [1, 3][:failures]
