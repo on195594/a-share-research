@@ -116,7 +116,7 @@ CASE WHEN request_id GLOB 'batch-[1-9]*-*'
 
 | 处理 | 位置 | 说明 |
 |---|---|---|
-| 切到 `FORMAL_REPORT` | `service.py:232`、`hypotheses.py:126`、`reading.py:382`、`scans.py:301`、`research.py:364`、`evolution.py:51` | 时间窗、`material` 等附加条件保留。后两处原用 `json_type = 'object'` 判纠错，写入路径只产生 object，切换后结果相同 |
+| 切到 `FORMAL_REPORT` | `service.py:232`、`hypotheses.py:126`、`reading.py:382`、`scans.py:301`、`research.py:364` | 时间窗、`material` 等附加条件保留。`research.py` 原用 `json_type = 'object'` 判纠错，写入路径只产生 object，切换后结果相同 |
 | 切到 `FORMAL_REPORT`（R3 后） | `screening.py` `reusable_report` | 原条件只按 `$.prior` 排除接续研究，不判纠错；纠错报告可以不带估值与立场，曾可能被批次复用（茅台 #12）。只影响之后的批次复用，已冻结批次的报告不变 |
 | 切到 `RESEARCH_ORIGINAL` | `reading.py:311` | 不要求通过和完成 |
 | 保留，不切换 | `validation.py:190,233,256`、`zones.py:199` | **没有 `status = 'done'`**，纠错在 Python 里判断 |
@@ -182,7 +182,7 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 | R2 | R1 后跑通一份真实研究（只是补充证据，不替代差分），R2 差分通过 |
 | R3 | R2 已发布，R3 差分与互变验证通过 |
 
-分工：Claude 写 P0、R1 和差分脚本并负责发布，Codex 在独立工作树写 R2、R3，agy 只读审查（R1 发布前一次，R2、R3 发布前一次）。当天未完成的部分最晚 11-28 发布；11-29 起月批保护期不发布，到时仍未发布的顺延到 12-05，并在实施计划公开标记。K7b（11-20）优先级不变，与之冲突时先合 K7b。
+分工：Claude 写 P0、R1 和差分脚本并负责发布，Codex 在独立工作树写 R2、R3，agy 只读审查（R1 发布前一次，R2、R3 发布前一次）。当天未完成的部分最晚 11-28 发布；11-29 起月批保护期不发布，到时仍未发布的顺延到 12-05，并在实施计划公开标记。
 
 ### P0 清理基线（例行）
 
@@ -212,7 +212,7 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 | `reading.py` | `latest_reports`（`codes`、`code_prefix`、`GROUP BY`）、研究库搜索、`:467`、`latest_price`、`api_reports`、`stock_reports`、`:249`、`:741`、`:805-806`，以及 `$.parent_report_id`、`:332,339,738,783,785` 的 `LIKE 'batch-%'` |
 | `service.py` | `company_card`、`submit_price`、`:289-292` 改 `batch_id` + `company_key`（`JOIN batches` 保留）；`:135` 的 `startswith('batch-')` 改用 `batch_id` |
 | `worker.py:34` | 排队顺序改用 `batch_id IS NOT NULL` |
-| `scans.py`、`hypotheses.py`、`evolution.py`、`research.py` | `company_key` 与第 3.5 节常量 |
+| `scans.py`、`hypotheses.py`、`research.py` | `company_key` 与第 3.5 节常量 |
 | `validation.py`、`zones.py`、`screening.py` | 只在涉及公司比较的地方用 `company_key`，**选样谓词不动**（第 3.5 节；`screening.py` 批次复用于 R3 后改用 `FORMAL_REPORT`） |
 | 全部 `SELECT *` / `r.*`（`runs`、`reports` 共 9 处） | 改为显式列，既不把新列带进 API，也不再无谓读取大字段 |
 
@@ -268,7 +268,7 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 |---|---|---|
 | R1 | 私有副本迁移门禁全过；发布后 13 张表逐列差异为 0 | 无 |
 | R2 | 3385 + 3596 个探针，HTTP 833 条路径，938 项测试 | 畸形批次编号；六位代码能命中九位存量；`/api/search` 空查询加非法代码时先报代码错误，两者都是 422 |
-| R3 | 3385 + 3596 个探针，HTTP 836 条路径，1136 项测试 | 只有全角代码在 `/api/reports`、公司卡片上改报校验错误；`evolution._eligible` 内部行多一个键，不进 API |
+| R3 | 3385 + 3596 个探针，HTTP 836 条路径，1136 项测试 | 只有全角代码在 `/api/reports`、公司卡片上改报校验错误；当时 K7 内部候选行多一个键，不进 API（K7 已退役） |
 
 `validation.source()` 与 `batch_id` 在有批次的任务上 38/38 一致。
 
@@ -335,7 +335,7 @@ R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 
 | 拆出大字段表 | 调整列序已解决读取问题；将来要归档 `material` 时再拆 |
 | 报告与材料去重 | `report.table` 5848 行与材料 100% 相同，共 12.6 MB，约占库 6%；但受 `body_sha256` 约束，不值得 |
 | `companies` 维度表 | 同一公司名称无冲突，报告里的名称本就是历史快照 |
-| 记分结果落表 | V0 明确不建表；成熟读数归 K7d |
+| 记分结果落表 | V0 明确不建表；成熟读数沿用判断验证方案 |
 | `replay_of`、`coverage` 触发器改生成列 | 运行正常；`coverage` 含子查询，生成列不支持 |
 | Skills 账本改造 | 归 `a-stock-agent-skills`，消费者不直连 SQLite；本方案只保证 id 稳定、API 不变 |
 

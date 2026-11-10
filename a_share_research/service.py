@@ -5,14 +5,14 @@ import re
 import sqlite3
 from datetime import datetime
 
+from a_share_research import report as report_body
 from a_share_research import batches, db, stance as stances
 from a_share_research import stock_codes
+from a_share_research.limits import MAX_CALLS, MONTHLY_MAX_CALLS
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
 VERSION = "research-v1"
-MAX_CALLS = 30  # Default research loop guard, not a money cap.
-MONTHLY_MAX_CALLS = 21  # Owner-authorized automatic batch: 30 companies * 21 + 6 = 636.
 
 
 class RequestError(ValueError):
@@ -45,7 +45,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             raise RequestError("原报告与研究公司不一致")
         if feedback is not None:
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
-            body = json.loads(parent["body"])
+            body = report_body.load(parent["body"])
             content = body if "summary" in body else body.get("facts", {})
             match = re.fullmatch(r"(answer|risks|business|financial|methods|checkpoints|prior_status)\[(\d{1,4})\]", location)
             valid = location == "summary" and bool(content.get("summary"))
@@ -69,26 +69,6 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
         return row["id"]
     previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
     if previous["kind"] != "research" or previous["company_key"] != code or previous["request"] != payload:
-        raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
-    return previous["id"]
-
-
-def submit_diagnostic(conn, code: str, request_id: str, *, question: str, source: dict,
-                      parent_report_id: int | None = None) -> int:
-    """Queue a trusted internal diagnostic; no HTTP route reaches this, so callers cannot relabel formal research."""
-    if not stock_codes.KEY_RE.fullmatch(code) or not 1 <= len(request_id) <= 128 or not question.strip():
-        raise RequestError("诊断需要 6 位公司代码、1–128 字请求编号与问题")
-    payload = json.dumps({"question": question.strip(), "parent_report_id": parent_report_id, "feedback": None,
-                          "source": source}, ensure_ascii=False, sort_keys=True)
-    row = conn.execute(
-        "INSERT INTO runs (request_id, kind, code, status, created_at, request)"
-        " VALUES (?, 'diagnostic', ?, 'queued', ?, ?) ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, code, db.now(), payload),
-    ).fetchone()
-    if row:
-        return row["id"]
-    previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-    if previous["kind"] != "diagnostic" or previous["company_key"] != code or previous["request"] != payload:
         raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
     return previous["id"]
 
@@ -173,7 +153,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         raise RequestError("报告不存在", 404)
     if not ready(row["status"], row["passed"]):
         raise RequestError("报告尚未就绪或状态不一致", 409)
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     if "review_audit" in body:
         body["review_audit"] = audit_view(body["review_audit"])
     material = json.loads(row["material"] or "null")
@@ -189,9 +169,8 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "name": row["name"], "created_at": row["created_at"], "status": row["status"],
             "passed": bool(row["passed"]), "error": row["error"],
             "question": (json.loads(row["request"] or "{}") or {}).get("question", ""),
-            "report": body if row["passed"] else {"facts": body.get("facts", {}),
-                                                   "facts_reviewed": body.get("facts_reviewed"),
-                                                   "problems": body.get("problems", [])},
+            "report": body if row["passed"] else {key: body.get(key, default) for key, default in
+                                                   zip(report_body.FAILED_FIELDS, ({}, None, []))},
             "purpose": row["purpose"], "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
             "model_calls": [{key: identity.get(key) for key in
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}
@@ -207,8 +186,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
     result["report"] = ({key: body[key] for key in
-                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "stance", "stance_calc", "answer", "open_questions", "prior", "prior_status", "risks", "business", "financial", "methods", "checkpoints")
-                         if key in body} if row["passed"] else result["report"])
+                         report_body.COMPACT_FIELDS if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],
                           "source_error": evidence["source_error"],
@@ -233,7 +211,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
     ).fetchone()
     if row is None:
         raise RequestError("暂无通过复核的非纠错研究报告", 404)
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     calc = body.get("valuation_calc")
     summary = None
     if isinstance(calc, dict):
@@ -266,12 +244,13 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'
     return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],
             "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
-            "status": "待复核" if pending else "有效", "verdict": body.get("verdict"), "summary": body.get("summary"),
+            "status": "待复核" if pending else "有效",
+            **{key: body.get(key) for key in report_body.CARD_FIELDS},
+            # Four card fields are reshaped rather than copied from the stored body.
             "risks": [item["text"] for item in body.get("risks", [])[:3]],
             "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
                             for item in body.get("checkpoints", [])],
-            "relative": body.get("relative"), "valuation_calc": summary,
-            "stance": body.get("stance"), "stance_calc": body.get("stance_calc"),
+            "valuation_calc": summary,
             "open_questions": body.get("open_questions", [])}
 
 
@@ -301,13 +280,6 @@ def research_call_limit(conn, run_id: int | None = None) -> int:
 
 def run_budget(conn, run_id: int | None = None) -> dict:
     count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
-    controller = conn.execute("SELECT 1 FROM runs WHERE id=? AND kind='diagnostic'"
-                              " AND json_extract(request,'$.source.event')='evolution'", (run_id,)).fetchone()
-    if controller:
-        return {"model_call_limit": None, "model_calls_recorded": count, "run_id": run_id,
-                "scope": "method_experiment", "limit_kind": "per_stage_loop_guard", "cost": None,
-                "cost_status": "unavailable", "automatic_paid_restart": False,
-                "note": "实验分阶段记录调用；阶段失败最多重试一次，案例不追加抽样。各诊断研究仍受单次研究上限约束。"}
     return {"model_call_limit": research_call_limit(conn, run_id), "model_calls_recorded": count, "run_id": run_id,
             "scope": "run" if run_id is not None else "configuration",
             "limit_kind": "loop_guard_not_money_cap", "cost": None, "cost_status": "unavailable",
@@ -342,7 +314,7 @@ def continuation(conn, row, body: dict, extra: dict) -> dict:
 
     compared = reading.comparison(conn, row)
     parent = compared.get("old", {})
-    previous = json.loads(parent["body"]) if parent else {}
+    previous = report_body.load(parent["body"]) if parent else {}
     baseline_status = compared["baseline_status"]
     changes = {key: compared[key] for key in ("diff", "excluded", "missing", "reason") if key in compared}
     if not row["passed"] or baseline_status != "ready":
@@ -381,7 +353,7 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
                        f" WHERE u.{field} = ? AND u.kind IN ('research', 'diagnostic')", (value,)).fetchone()
     if row is None:
         raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
-    body = json.loads(row["report_body"]) if row["report_body"] else {}
+    body = report_body.load(row["report_body"]) if row["report_body"] else {}
     material = (json.loads(row["material"]) or {}) if row["material"] else {}
     extra = material.get("data", {}).get("extra", {})
     metadata = json.loads(row["identity"] or "{}") or {}
@@ -389,10 +361,6 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
         if key not in body and key in metadata | extra:
             body[key] = (extra | metadata)[key]
     public = {key: row[key] for key in row.keys() if key not in {"report_body", "material", "identity", "request"}}
-    source = (json.loads(row["request"] or "{}") or {}).get("source") or {}
-    if source.get("event") in ("evolution", "evolution_case"):
-        public["improvement_id"] = row["id"] if source["event"] == "evolution" else source["evolution_id"]
-        public["improvement_phase"] = (metadata.get("evolution") or {}).get("phase")
     return {"version": VERSION, **public,
             "budget": run_budget(conn, row["id"]),
             "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),

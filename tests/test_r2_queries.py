@@ -5,6 +5,7 @@ import json
 import pytest
 
 from a_share_research import db, reading, scans, service, validation, worker
+from a_share_research.limits import MAX_CALLS
 from support.continuation import load
 from support.valuation import BODY, RECORD
 
@@ -61,7 +62,7 @@ def test_batch_membership_drives_queue_and_retry(conn, request_id, member):
 def test_orphan_batch_stays_out_of_monthly_budget(conn):
     candidate = db.create_run(conn, '603606.SH', 'batch-999-603606.SH', status='running')
     assert not service.is_monthly_research(conn, candidate)
-    assert service.research_call_limit(conn, candidate) == service.MAX_CALLS
+    assert service.research_call_limit(conn, candidate) == MAX_CALLS
     worker.recover(conn)
     assert reading.run(conn, candidate)['status'] == 'queued'
 

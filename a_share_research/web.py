@@ -25,8 +25,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
-from a_share_research import charts, db, batches, companies as company_data, evolution, service, reading
+from a_share_research import report as report_body
+from a_share_research import charts, db, batches, companies as company_data, service, reading
 from a_share_research import stock_codes
+from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
@@ -192,23 +194,6 @@ def login_required() -> RedirectResponse:
 @app.get("/login")
 def login(request: Request):
     return render(request, "login.html", None, dev_login=settings.dev_login)
-
-
-@app.get("/improvements")
-def improvements_page(request: Request):
-    if not (session := current_session(request)):
-        return login_required()
-    return render(request, "improvements.html", session, items=evolution.list_summaries(conn), item=None)
-
-
-@app.get("/improvements/{run_id}")
-def improvement_page(request: Request, run_id: int):
-    if not (session := current_session(request)):
-        return login_required()
-    item = evolution.item(conn, run_id)
-    if item is None:
-        return not_found(request, session)
-    return render(request, "improvements.html", session, item=item, items=[])
 
 
 def _sign(message: str) -> str:
@@ -381,8 +366,6 @@ def run_page(request: Request, run_id: int):
     run = reading.run(conn, run_id)
     if run is None:
         return not_found(request, session)
-    if run["kind"] == "diagnostic" and evolution.is_controller(run):
-        return RedirectResponse(f"/improvements/{run_id}", status_code=303)
     if run["kind"] == "price" and run["status"] == "done":
         return RedirectResponse(f"/stock/{run['code']}#price", status_code=303)
     report = reading.report_for_run(conn, run_id)
@@ -392,7 +375,6 @@ def run_page(request: Request, run_id: int):
     # Same order as the worker: running first, then owner submissions, then batch research.
     ahead = reading.queue_ahead(conn, run_id)[0]
     return render(request, "run.html", session, run=run, ahead=ahead, elapsed=_elapsed(run),
-                  improvement_id=((json.loads(run["request"] or "{}") or {}).get("source") or {}).get("evolution_id"),
                   diagnostics=service.run_view(conn, run_id=run_id)["diagnostics"]
                   if run["kind"] in ("research", "diagnostic") and run["status"] == "failed" else None,
                   feedback_retry=service.feedback_retry_payload(run) is not None,
@@ -445,7 +427,7 @@ def report_page(request: Request, report_id: int):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     latest = reading.latest_reports(conn, codes=[row['code']], include_checkpoint=False) if run['kind'] == 'research' else []
     newer_report = latest[0] if latest and latest[0]['id'] > report_id else None
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     feedback = (json.loads(run["request"] or "{}") or {}).get("feedback")
     feedback_label = ""
     if feedback:
@@ -459,7 +441,6 @@ def report_page(request: Request, report_id: int):
     rows = {r["id"]: r for r in body["table"]}
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"], newer_report=newer_report,
-                  improvement_id=((json.loads(run["request"] or "{}") or {}).get("source") or {}).get("evolution_id"),
                   source_view=report_source_view(body, (json.loads(run["material"] or "{}") or {}).get("data")),
                   ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
                   figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),
@@ -557,21 +538,6 @@ def api_research_budget(request: Request):
     return {"version": service.VERSION, "budget": service.run_budget(conn)}
 
 
-@app.get("/api/improvements")
-def api_improvements(request: Request):
-    api_session(request)
-    return {"version": service.VERSION, "items": evolution.list_items(conn)}
-
-
-@app.get("/api/improvements/{run_id}")
-def api_improvement(request: Request, run_id: int):
-    api_session(request)
-    item = evolution.item(conn, run_id)
-    if item is None:
-        raise service.RequestError("研究改进记录不存在", 404)
-    return {"version": service.VERSION, "item": item}
-
-
 @app.get("/api/runs/{run_id}")
 def api_run(request: Request, run_id: int):
     api_session(request)
@@ -579,6 +545,15 @@ def api_run(request: Request, run_id: int):
     if row is None:
         raise service.RequestError("任务不存在", 404)
     return {"version": service.VERSION, **dict(row)}
+
+
+@app.get("/api/schema")
+def api_schema(request: Request):
+    api_session(request)
+    return {"version": service.VERSION, "schema_version": report_body.SCHEMA_VERSION,
+            "judgment_contract": JUDGMENT_CONTRACT, "report": report_body.json_schema(),
+            "views": {"compact": report_body.COMPACT_FIELDS, "card": report_body.CARD_FIELDS,
+                      "failed": report_body.FAILED_FIELDS}}
 
 
 @app.get("/api/reports")
@@ -721,7 +696,7 @@ def stock_page(request: Request, code: str, report: int | None = None):
     def full(row):
         if row['id'] not in loaded:
             record = reading.report(conn, row['id'])
-            loaded[row['id']] = (record, json.loads(record['body']))
+            loaded[row['id']] = (record, report_body.load(record['body']))
         return loaded[row['id']]
 
     latest = next(((r, v) for r in ordered if r['operating_series']

@@ -8,7 +8,11 @@ import time
 from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 
+from a_share_research import report as report_body
 from a_share_research import db, sources, evidence, stock_codes, valuation as valuations
+from a_share_research.limits import (
+    ACQUISITION_SECONDS, CALL_LIMIT, DRAFT_CALLS, FETCH_LIMIT, REPAIR_CALL_RESERVE, ROUND_LIMIT,
+)
 from a_share_research.checking import quote_found
 from a_share_research.material import financial_table
 from a_share_research.prompts import RULES, output_schema, parse_json
@@ -92,7 +96,6 @@ ACTIVE_METHODS = (
 
 def method_catalog(conn, *, before=None) -> list[dict]:
     """Freeze retrievable methods at a run/batch boundary, including later supersessions."""
-    from a_share_research import evolution
     sql = ACTIVE_METHODS.replace(
         " AND n.parent_report_id = r.id",
         " AND (? IS NULL OR newer.created_at <= ?) AND n.parent_report_id = r.id")
@@ -100,7 +103,7 @@ def method_catalog(conn, *, before=None) -> list[dict]:
                         (before, before, before, before)).fetchall()
     found = []
     for row in rows:
-        body, method = json.loads(row["body"]), json.loads(row["value"])
+        body, method = report_body.load(row["body"]), json.loads(row["value"])
         sources_by_id = {"D0": {"document": body.get("document", {})}, **body.get("sources", {})}
         found.append({"report_id": row["id"], "code": row["code"], "created_at": row["created_at"],
                       "location": f"methods[{row['key']}]", "method": method,
@@ -108,14 +111,7 @@ def method_catalog(conn, *, before=None) -> list[dict]:
                                   for c in method["cites"] if "ref" not in c},
                       "table": [r for r in body.get("table", [])
                                 if r["id"] in {c.get("ref") for c in method["cites"]}]})
-    return [method_entry(m) for m in evolution.active_methods(conn, before=before)] + found
-
-
-def method_entry(method: dict) -> dict:
-    return {"evolution_id": method["evolution_id"], "method_id": method.get("method_id"),
-            "created_at": method.get("adopted_at"),
-            "method": {"text": method["text"], "cites": []},
-            "sources": {}, "table": []}
+    return found
 
 
 def active_methods_digest(conn, *, catalog=None) -> str:
@@ -521,21 +517,7 @@ class ResearchTools:
 
 REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate", "valuation", "macro", "commodities", "commodity", "industry_trend"}
 
-# The 601600 external-condition smoke needed more than 24 ordinary evidence fetches.
-FETCH_LIMIT = 48  # runaway guard; time, rounds and total calls still bound exploration
-# Model turns shared by explore and repair. 12 stopped a normal repair in production (688578
-# research, report 83, hit round_limit mid-repair), so it is a runaway guard, not a depth quota.
-ROUND_LIMIT = 24
-CALL_LIMIT = 120  # runaway guard only, so calculations cannot swell the prompt without bound
-REPAIR_CALL_RESERVE = 48  # shared by both repairs; exploration cannot consume it
-# Shared by explore and repair and measured from the start of exploration. 72 calls already took 562 s
-# (report 108), so 120 need this; the runner's 1800 s must still leave review and repair their ~400 s.
-ACQUISITION_SECONDS = 1200
 COMPUTE_TOOLS = {"calculate", "valuation"}  # program arithmetic on held evidence, not evidence fetches
-# Model calls a draft needs once acquisition stops: the tool-free draft, one declined tool turn
-# (Gemini still calls tools when none are offered) and a review with its one format correction.
-DRAFT_CALLS = 4
-
 
 def _fetches(traces: list[dict]) -> int:
     return sum(t["tool"] not in COMPUTE_TOOLS for t in traces)

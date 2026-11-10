@@ -42,37 +42,48 @@ def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server):
     assert conn.execute('SELECT COUNT(*) FROM batches').fetchone()[0] == 1
 
 
-def test_improvements_are_authenticated_read_only_and_diagnostic(server):
+def test_historical_diagnostics_remain_read_only_and_labeled(server):
     import json
     from pathlib import Path
-    from a_share_research import evolution, service
-    conn, client, url, *_ = server
+    conn, client, url, run, report, *_ = server
+    # Captured diagnostic row; controller metadata is an explicit compatibility variant.
     captured = json.loads((Path(__file__).parent / 'data/evolution-note-plan-20261106.json').read_text())
     original = captured['diagnostic_runs'][0]
     keys = tuple(original)
     conn.execute(f"INSERT INTO runs({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", tuple(original.values()))
-    source_hash = evolution.digest(captured)
-    root = evolution.record_archived_rejection(conn, title='半年报附注基线', method=captured['method'],
-                 reason='E2、E4 未通过，保留原拒绝结论。', source_sha256=source_hash,
-                 source_label='k7b-note-baseline-20261106', case_run_ids=[original['id']])
-    before = conn.total_changes
-    for path in ('/api/improvements', f'/api/improvements/{root}'):
-        assert client.get(url + path, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
-    listing = client.get(url + '/api/improvements', timeout=3).json()['items']
-    detail = client.get(url + f'/api/improvements/{root}', timeout=3).json()['item']
-    assert listing[0] == detail and detail['phase'] == 'rejected'
-    assert client.get(url + '/api/improvements/999999', timeout=3).status_code == 404
-    run = client.get(url + '/api/request', params={'request_id': conn.execute('SELECT request_id FROM runs WHERE id=?', (root,)).fetchone()[0]}, timeout=3).json()
-    assert run['kind'] == 'diagnostic' and run['improvement_id'] == root
-    assert run['budget']['model_call_limit'] is None
-    assert service.run_budget(conn)['model_call_limit'] == 30
-    assert conn.total_changes == before
-    assert evolution.active_methods(conn) == []
+    root = original['id']
+    conn.execute("UPDATE runs SET request=?,identity=? WHERE id=?",
+                 (json.dumps({'source': {'event': 'evolution'}}),
+                  json.dumps({'evolution': {'phase': 'rejected'}}), root))
+    # The captured successful report exercises the historical diagnostic case reading path.
+    conn.execute("UPDATE runs SET kind='diagnostic',request=? WHERE id=?",
+                 (json.dumps({'source': {'event': 'evolution_case', 'evolution_id': root}}), run))
     browser = requests.Session()
     browser.trust_env = False
-    assert browser.get(url + '/improvements', allow_redirects=False, timeout=3).status_code == 303
     assert browser.post(url + '/auth/dev', headers={'Origin': url}, timeout=3).status_code == 200
-    page = browser.get(url + f'/improvements/{root}', timeout=3)
-    assert page.status_code == 200 and '半年报附注基线' in page.text and '已拒绝' in page.text
-    assert browser.get(url + f'/runs/{root}', allow_redirects=False, timeout=3).headers['location'] == f'/improvements/{root}'
+    before = conn.total_changes
+    for run_id in (root, run):
+        response = client.get(url + f'/api/runs/{run_id}', timeout=3)
+        assert response.status_code == 200 and response.json()['kind'] == 'diagnostic'
+        page = browser.get(url + f'/runs/{run_id}', timeout=3)
+        assert page.status_code == 200 and '研究诊断' in page.text
+    response = client.get(url + f'/api/reports/{report}', timeout=3)
+    assert response.status_code == 200 and response.json()['purpose'] == 'diagnostic'
+    page = browser.get(url + f'/reports/{report}', timeout=3)
+    assert page.status_code == 200 and '研究诊断' in page.text
+    assert conn.total_changes == before
     browser.close()
+
+
+def test_report_schema_is_authenticated_and_describes_public_views(server):
+    from a_share_research import report
+    from a_share_research.contract import JUDGMENT_CONTRACT
+    _, client, url, *_ = server
+    assert client.get(url + "/api/schema", headers={"Authorization": "Bearer invalid"}, timeout=3).status_code == 401
+    response = client.get(url + "/api/schema", timeout=3)
+    assert response.status_code == 200
+    schema = response.json()
+    assert schema == {"version": "research-v1", "schema_version": 2,
+                      "judgment_contract": JUDGMENT_CONTRACT, "report": report.json_schema(),
+                      "views": {"compact": list(report.COMPACT_FIELDS), "card": list(report.CARD_FIELDS),
+                                "failed": list(report.FAILED_FIELDS)}}

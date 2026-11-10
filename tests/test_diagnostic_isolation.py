@@ -1,4 +1,4 @@
-"""K7a: a diagnostic run keeps its evidence but never counts as formal research."""
+"""Historical diagnostics keep their evidence but never count as formal research."""
 
 import json
 from pathlib import Path
@@ -77,28 +77,21 @@ def test_diagnostic_is_not_a_base_for_formal_followups_and_stays_readable_by_id(
     assert service.report_view(conn, CAPTURED[0]["id"])["purpose"] == "research"
 
 
-def test_submit_diagnostic_is_idempotent_and_cannot_reuse_a_formal_request(stored):
+def test_formal_submission_cannot_reuse_a_diagnostic_request(stored):
     conn, _ = stored
-    source = {"event": "gap", "report_id": CAPTURED[0]["id"]}
-    first = service.submit_diagnostic(conn, CODE[:6], "diag-1", question="核查缺口", source=source)
-    assert service.submit_diagnostic(conn, CODE[:6], "diag-1", question="核查缺口", source=source) == first
-    row = conn.execute("SELECT kind, request FROM runs WHERE id=?", (first,)).fetchone()
-    assert row["kind"] == "diagnostic" and json.loads(row["request"])["source"] == source
+    payload = {'question': '核查缺口', 'parent_report_id': None, 'feedback': None}
+    conn.execute("INSERT INTO runs(request_id,kind,code,status,created_at,request)"
+                 " VALUES ('diag-1','diagnostic',?,'done',?,?)",
+                 (CODE[:6], db.now(), json.dumps(payload, ensure_ascii=False, sort_keys=True)))
     with pytest.raises(service.RequestError):
-        service.submit_diagnostic(conn, CODE[:6], "diag-1", question="别的问题", source=source)
-    formal = service.submit(conn, CODE[:6], "formal-1", question="现金流")
-    with pytest.raises(service.RequestError):
-        service.submit_diagnostic(conn, CODE[:6], "formal-1", question="现金流", source=source)
-    with pytest.raises(service.RequestError):
-        service.submit(conn, CODE[:6], "diag-1", question="核查缺口")
-    assert conn.execute("SELECT kind FROM runs WHERE id=?", (formal,)).fetchone()["kind"] == "research"
+        service.submit(conn, CODE[:6], 'diag-1', question='核查缺口')
 
 
-def test_worker_leaves_diagnostics_for_the_idle_branch(stored):
+def test_worker_never_selects_legacy_diagnostics(stored):
     conn, _ = stored
-    diagnostic = service.submit_diagnostic(conn, CODE[:6], "diag-1", question="核查", source={"event": "gap"})
+    conn.execute("INSERT INTO runs(kind,code,status,created_at) VALUES ('diagnostic',?,'queued',?)",
+                 (CODE, db.now()))
     assert worker.next_run(conn) is None
-    assert worker.next_diagnostic(conn)["id"] == diagnostic
     formal = service.submit(conn, CODE[:6], "formal-1", question="现金流")
     assert worker.next_run(conn)["id"] == formal
 
@@ -106,10 +99,9 @@ def test_worker_leaves_diagnostics_for_the_idle_branch(stored):
 def test_diagnostic_is_hidden_from_home_and_formal_followups(stored):
     conn, _ = stored
     parent = CAPTURED[0]["id"]
-    diagnostic = service.submit_diagnostic(conn, CODE[:6], "diag-ui", question="核查缺口",
-                                           source={"event": "gap"}, parent_report_id=parent)
-    # The researcher normalizes the code after gathering material.
-    db.update_run(conn, diagnostic, code=CODE)
+    diagnostic = conn.execute("INSERT INTO runs(kind,code,status,created_at,request)"
+                              " VALUES ('diagnostic',?,'queued',?,?) RETURNING id",
+                              (CODE, db.now(), json.dumps({"parent_report_id": parent}))).fetchone()[0]
     assert reading.active_runs(conn) == []
     assert reading.followups(conn, CODE, parent) == []
     conn.execute("UPDATE runs SET kind='research' WHERE id=?", (diagnostic,))
@@ -117,9 +109,10 @@ def test_diagnostic_is_hidden_from_home_and_formal_followups(stored):
     assert [r["id"] for r in reading.followups(conn, CODE, parent)] == [diagnostic]
 
 
-def test_queue_count_respects_idle_diagnostics_and_running_work(stored):
+def test_queue_count_excludes_queued_diagnostics_and_counts_running_work(stored):
     conn, _ = stored
-    diagnostic = service.submit_diagnostic(conn, CODE[:6], "diag-queue", question="核查", source={"event": "gap"})
+    diagnostic = conn.execute("INSERT INTO runs(request_id,kind,code,status,created_at)"
+                              " VALUES ('diag-queue','diagnostic',?,'queued',?) RETURNING id", (CODE, db.now())).fetchone()[0]
     batch = service.submit(conn, CODE[:6], f"batch-1-{CODE[:6]}", question="现金流")
     formal = service.submit(conn, CODE[:6], "owner-queue", question="现金流")
     assert worker.next_run(conn)["id"] == formal

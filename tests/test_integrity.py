@@ -94,11 +94,11 @@ def test_report_and_run_status_commit_together(tmp_path):
     conn.execute("CREATE TRIGGER fail_finish BEFORE UPDATE OF status ON runs"
                  " BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
     with pytest.raises(sqlite3.IntegrityError, match="injected failure"):
-        publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code})
+        publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
     assert conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
     assert conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()[0] == "running"
     conn.execute("DROP TRIGGER fail_finish")
-    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code})
+    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
     assert conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()[0] == "done"
 
 
@@ -106,7 +106,7 @@ def test_integrity_check_lists_each_injected_corruption_and_writes_nothing(tmp_p
     conn, run_id = research_db(tmp_path)
     material_sha = MATERIAL.snapshot()["sha256"]
     publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究",
-            {"code": MATERIAL.code, "material_sha256": material_sha})
+            {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "material_sha256": material_sha})
     pdf_dir = tmp_path / "pdf"
     stored(pdf_dir)
     conn.close()
@@ -137,9 +137,38 @@ def test_integrity_check_lists_each_injected_corruption_and_writes_nothing(tmp_p
     assert (tmp_path / "app.db").read_bytes() == before
 
 
+def test_legacy_diagnostic_metadata_survives_snapshot_reading_and_integrity(tmp_path):
+    from copy import deepcopy
+    from a_share_research.material import Material, ResearchError
+
+    conn, run_id = research_db(tmp_path)
+    snapshot = deepcopy(MATERIAL.snapshot())
+    # Compatibility variant of captured evidence, not a captured production diagnostic snapshot.
+    snapshot['version'] = 2
+    snapshot['data'].setdefault('extra', {}).update({
+        'experimental_method': {'text': '历史方法元数据'},
+        'evolution_start_sha256': snapshot['sha256'], 'method_catalog': []})
+    snapshot['sha256'] = material_hash(snapshot['data'])
+    conn.execute("UPDATE runs SET kind='diagnostic',identity=? WHERE id=?",
+                 (json.dumps({'evolution': {'phase': 'rejected'}}), run_id))
+    db.save_material(conn, run_id, snapshot)
+    restored = Material.from_snapshot(json.loads(json.dumps(snapshot)))
+    assert restored.extra == snapshot['data']['extra']
+    assert restored.snapshot()['sha256'] == snapshot['sha256']
+    conn.close()
+    assert integrity.check(tmp_path / 'app.db', tmp_path / 'pdf')[0] == []
+    # Tampering with an opaque legacy key still invalidates the complete snapshot hash.
+    snapshot['data']['extra']['experimental_method']['text'] += '篡改'
+    with pytest.raises(ResearchError, match='材料快照哈希不匹配'):
+        Material.from_snapshot(snapshot)
+    with db.connect(tmp_path / 'app.db') as conn:
+        conn.execute('UPDATE runs SET material=? WHERE id=?', (json.dumps(snapshot), run_id))
+    assert integrity.check(tmp_path / 'app.db', tmp_path / 'pdf')[0] == [f'任务 {run_id}：材料快照内容与其哈希不符']
+
+
 def test_report_pointing_at_another_material_snapshot_is_listed(tmp_path):
     conn, run_id = research_db(tmp_path)
-    publish(conn, run_id, MATERIAL, "2025-12-31", False, None, {"code": MATERIAL.code, "material_sha256": "f" * 64})
+    publish(conn, run_id, MATERIAL, "2025-12-31", False, None, {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "material_sha256": "f" * 64})
     conn.close()
     problems, _ = integrity.check(tmp_path / "app.db", tmp_path / "pdf")
     assert problems == [f"报告 1：引用的材料快照与任务 {run_id} 记录不符"]
@@ -185,9 +214,9 @@ def test_exploration_progress_keeps_the_identity_hash_in_step(tmp_path):
 
 def test_wrongly_typed_json_is_listed_and_the_check_carries_on(tmp_path):
     conn, run_id = research_db(tmp_path)
-    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code})
+    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
     second = db.create_run(conn, MATERIAL.code, status="running")
-    publish(conn, second, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code})
+    publish(conn, second, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
     conn.execute("UPDATE reports SET body = 'null' WHERE id = 1")
     conn.execute("UPDATE runs SET identity = '[]' WHERE id = ?", (run_id,))
     conn.close()

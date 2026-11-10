@@ -7,6 +7,7 @@ import logging
 import math
 import re
 
+from a_share_research import report as report_body
 from a_share_research import companies, db, service, stock_codes, valuation
 
 log = logging.getLogger(__name__)
@@ -308,7 +309,7 @@ def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
                 (stock_codes.normalize_key(row['code']), current['id'])).fetchone()
             if previous:
                 def judgment(body):
-                    body = json.loads(body)
+                    body = report_body.load(body)
                     return {'zone': (body.get('valuation_calc') or {}).get('zone'), 'verdict': body.get('verdict')}
                 item['change'] = {'before': judgment(previous['body']), 'after': judgment(current['body'])}
                 item['changed'] = item['change']['before'] != item['change']['after']

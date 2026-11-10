@@ -4,6 +4,7 @@ import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
+from a_share_research import report as report_body
 from a_share_research import charts, db, service, stance as stances
 from a_share_research import stock_codes
 
@@ -523,7 +524,7 @@ def recent_report(conn, code: str):
 def report_bodies(conn, ids: list[int]) -> dict:
     if not ids:
         return {}
-    return {r["id"]: json.loads(r["body"]) for r in conn.execute(
+    return {r["id"]: report_body.load(r["body"]) for r in conn.execute(
         f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
 
 
@@ -537,7 +538,7 @@ def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
 
 def comparison(conn, report) -> dict:
     """Resolve only saved parent/prior identities, never chronological neighbours."""
-    body = json.loads(report['body'])
+    body = report_body.load(report['body'])
     run = conn.execute('SELECT request, status FROM runs WHERE id = ?', (report['run_id'],)).fetchone()
     request = (json.loads(run['request'] or '{}') or {}) if run else {}
     parents = {x for x in (request.get('parent_report_id'), body.get('parent_report_id')) if isinstance(x, int)}
@@ -555,7 +556,7 @@ def comparison(conn, report) -> dict:
     if old is None or old['code'] != report['code']:
         return {'parent_report_id': parent, 'baseline_status': 'missing' if old is None else 'not_same_code',
                 'reason': '关联原报告不存在或不属于同一家公司，无法对照。'}
-    before = json.loads(old['body'])
+    before = report_body.load(old['body'])
     previous_request = json.loads(old['request'] or '{}') or {}
     baseline_status = ('ready' if old['status'] == 'done' and old['passed']
                        else 'failed' if old['status'] == 'failed' and not old['passed'] else 'not_ready')
@@ -769,7 +770,7 @@ def latest_price(conn, code: str) -> dict | None:
     ).fetchone()
     if row is None:
         return None
-    body = json.loads(row["body"])
+    body = json.loads(row["body"])  # a price reference from `prices`, not a research report body
     # Levels are only shown while valid; afterwards the reference is history, not an action line.
     body["expired"] = datetime.now(db.SHANGHAI).date().isoformat() > body["expires"]
     body["ladder"] = charts.price_ladder(body["levels"])

@@ -156,7 +156,7 @@ def test_resumed_run_clears_error_on_success(conn):
     worker.recover(conn)
     assert row(conn, run_id)["error"] == worker.AUTO_RESUME_ERROR
     # Research passed branch clears error
-    research.publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"summary": "值得继续研究"})
+    research.publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "summary": "值得继续研究"})
     finished = row(conn, run_id)
     assert finished["status"] == "done"
     assert finished["error"] is None

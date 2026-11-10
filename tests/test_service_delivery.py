@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, reading, service
-from a_share_research.research import MAX_CALLS
+from a_share_research.limits import MAX_CALLS
 from support.reports import MATERIAL
 from support.continuation import load
 
@@ -254,3 +254,15 @@ def test_configuration_budget_does_not_claim_zero_observed_calls(records):
     assert observed["scope"] == "run" and observed["run_id"] == run
     assert observed["model_calls_recorded"] == 1 and observed["cost"] is None
     assert records.total_changes == before
+
+
+def test_compact_existing_fields_keep_their_captured_values(records):
+    # This pre-change wire list is deliberately independent from the new projection owner.
+    legacy = ("verdict", "summary", "relative", "valuation", "valuation_calc", "stance", "stance_calc",
+              "answer", "open_questions", "prior", "prior_status", "risks", "business", "financial",
+              "methods", "checkpoints")
+    for row in records.execute("SELECT id, body FROM reports WHERE passed=1"):
+        original = json.loads(row["body"])
+        actual = service.report_view(records, row["id"], compact=True)["report"]
+        assert {k: actual[k] for k in legacy if k in actual} == {k: original[k] for k in legacy if k in original}
+        assert set(actual) - set(legacy) <= {"judgment", "schema_version"}
