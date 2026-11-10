@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import batches, charts, db, reading, screening, service, sources
+from a_share_research import batches, charts, db, model, reading, screening, service, sources
 from support.templates import ENV
 from test_advisor_sources import DailyReports, budget_calls
 
@@ -186,6 +186,7 @@ def test_zero_passed_large_resumes_small_comparison_and_auto_freezes(tmp_path, m
     assert screening.tick(conn)
     frozen = batches.load(conn.execute('SELECT * FROM batches').fetchone())
     assert frozen['status'] == 'frozen' and frozen['error'] is None
+    assert frozen['selection']['judgment'] == model.judgment_identity()
     assert frozen['selection']['draft'] == {
         'picks': [], 'rejected': [], 'concentration': '',
         'gaps': ['大市值组没有研究通过的候选，全部席位留现金']}

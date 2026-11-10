@@ -765,7 +765,8 @@ def tick(conn) -> bool:
                 try:
                     selection = batch.get("selection") if small else None
                     if not large_selectable:
-                        selection = {"draft": {"picks": [], "rejected": [], "concentration": "",
+                        selection = {"judgment": model.judgment_identity(),
+                                     "draft": {"picks": [], "rejected": [], "concentration": "",
                                                "gaps": ["大市值组没有研究通过的候选，全部席位留现金"]},
                                      "attempts": []}
                     elif not selection or "draft" not in selection:
