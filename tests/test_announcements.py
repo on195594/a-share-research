@@ -62,7 +62,7 @@ def test_announcement_page_cap_reaches_the_query_and_the_gap_text(monkeypatch, t
     assert material.extra["announcement_searches"][-1] == {"code": item["code"], **result["coverage"]}
 
 
-# --- Report Date Observations (absorbed from test_report_dates) ---
+# --- Report Date Observations ---
 
 def test_maotai_discloses_distinct_snapshot_dates_without_calling_price_expired():
     report = REPORT_DATES[0]

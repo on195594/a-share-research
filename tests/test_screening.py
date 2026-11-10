@@ -227,7 +227,7 @@ def test_returns_add_ranking_halves_and_skip_the_middle_of_an_odd_count():
     assert "TOP" not in unranked and "BOTTOM" not in unranked
 
 
-# --- Small-Cap Screening Tests (absorbed from test_screening_small) ---
+# --- Small-Cap Screening Tests ---
 
 CAPTURED_SMALL = json.loads((DATA / "screen-small-rows.json").read_text())
 SMALL_RULE_OBJ = small_rule(NEW_RULE)

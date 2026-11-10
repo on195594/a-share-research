@@ -199,7 +199,7 @@ def test_yoy_source_missing_and_nonpositive_bases_are_not_replaced_or_hidden():
     assert cell(series, "quarterly", "op_cash", "2023-03-31")["yoy"]["value"] is None
 
 
-# --- Financial Table Tests (absorbed from test_financial_table) ---
+# --- Financial Table Tests ---
 
 def test_missing_financial_token_is_a_source_error(monkeypatch):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)

@@ -333,7 +333,7 @@ def test_v2_probability_contract(weights, needle):
     assert any('probability' in p for p in valuation.problems(missing, BODY['table']))
 
 
-# --- Valuation Tool & Integration Tests (absorbed from test_valuation_tool) ---
+# --- Valuation Tool & Integration Tests ---
 
 def _tool_material():
     mat = Material(BODY['code'], BODY['name'], Document(**BODY['document']), {}, {},

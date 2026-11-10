@@ -143,7 +143,7 @@ def test_add_checkpoint_only_belongs_to_now_and_is_optional():
         assert any('只含' in p for p in stance_problems(ADD | {'action': action}))
 
 
-# --- Boundary Stance Tests (absorbed from test_stance_boundary) ---
+# --- Boundary Stance Tests ---
 
 def test_flipping_reruns_against_the_five_percent_band():
     xinru = [r for r in BOUNDARY_RUNS if r["code"] == "002946.SZ"]
@@ -186,7 +186,7 @@ def test_boundary_stances_are_summarized_apart():
     assert summary["现在分批"] == {"n": 2, "scored": 2, "mean_excess": pytest.approx(0.01)}
 
 
-# --- Stance Flip Sensitivity Tests (absorbed from test_stance_flip) ---
+# --- Stance Flip Sensitivity Tests ---
 
 @pytest.mark.parametrize('sample', FLIP_SAMPLES, ids=lambda s: str(s['report_id']))
 def test_real_distance_reaches_close_and_matches_hurdle_side(sample):

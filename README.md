@@ -25,7 +25,7 @@
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
 | `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
 
-`.pytest_cache/` 和应用、测试目录下的 `__pycache__/` 可重建；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
+`.pytest_cache/`、`.ruff_cache/` 和应用、测试目录下的 `__pycache__/` 是可重建缓存；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
 
 ## 运行
 

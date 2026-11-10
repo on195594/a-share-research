@@ -346,7 +346,7 @@ def test_automatic_monthly_comparison_failure_never_requeues_paid_work(tmp_path,
     conn.close()
 
 
-# --- Batch Small Pool Reading Tests (absorbed from test_batch_small_reading) ---
+# --- Batch Small Pool Reading Tests ---
 
 def _render_two_pools(small_rows, status="proposed", coverage=None):
     captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())

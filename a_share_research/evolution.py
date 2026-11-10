@@ -56,7 +56,7 @@ def _eligible(conn):
         "WITH latest AS (SELECT MAX(r.id) AS id FROM reports r JOIN runs u ON u.id=r.run_id"
         f" WHERE {db.FORMAL_REPORT} AND u.material IS NOT NULL"
         f" AND r.company_key IN ({','.join('?' for _ in keys)}) GROUP BY r.company_key)"
-        " SELECT r.id,r.run_id,r.code,r.company_key,r.name,r.body,r.body_sha256,r.created_at,u.material,u.request"
+        " SELECT r.id,r.run_id,r.code,r.company_key,r.name,r.body,r.created_at,u.material"
         " FROM latest JOIN reports r ON r.id=latest.id JOIN runs u ON u.id=r.run_id"
         " ORDER BY r.id DESC", keys).fetchall()
 

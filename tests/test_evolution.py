@@ -1,4 +1,5 @@
 """Persisted experiments over captured production reports, without model/network doubles."""
+from contextlib import contextmanager
 from copy import deepcopy
 import cProfile
 import gzip
@@ -15,6 +16,17 @@ SOURCES = json.loads(gzip.decompress((DATA / "evolution-sources-20261106.json.gz
 NOTE = json.loads((DATA / "evolution-note-plan-20261106.json").read_text())
 PLAN = json.loads((DATA / "evolution-plan-20261106.json").read_text())
 ISSUES = json.loads((DATA / "evolution-review-issues-20261107.json").read_text())
+
+
+@contextmanager
+def traced_queries(conn):
+    """Capture actual SQLite statements and always restore the connection callback."""
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        yield statements
+    finally:
+        conn.set_trace_callback(None)
 
 
 @pytest.fixture
@@ -77,12 +89,8 @@ def test_idle_cache_skips_report_reads_and_tick_keeps_its_existing_receipt(store
     evolution._save(stored, root, state | {"phase": "deferred"})
     cache = evolution.DiscoveryCache()
     assert evolution.tick(stored, discovery=cache) is False
-    queries = []
-    stored.set_trace_callback(queries.append)
-    try:
+    with traced_queries(stored) as queries:
         assert evolution.tick(stored, discovery=cache) is False
-    finally:
-        stored.set_trace_callback(None)
     assert queries and any("data_version" in sql for sql in queries)
     assert not any("FROM reports" in sql or "u.material" in sql for sql in queries)
     assert stored.execute(f"SELECT count(*) FROM runs WHERE {evolution.ROOT}").fetchone()[0] == 1
@@ -141,7 +149,9 @@ def test_idle_cache_does_not_publish_transactional_or_failed_reads(stored):
             cache.discover(stored)
     finally:
         stored.set_authorizer(None)
-    assert cache.discover(stored) is None
+    with traced_queries(stored) as queries:
+        assert cache.discover(stored) is None
+    assert any("FROM reports" in sql for sql in queries)  # A failed read must not become a cache hit.
     assert stored.execute(f"SELECT id FROM runs WHERE {evolution.ROOT}").fetchone()[0] == root
 
 
@@ -599,10 +609,8 @@ def test_web_summaries_match_full_experiments_without_loading_children(stored):
     root, _ = registered(stored)
     before = stored.total_changes
     full = evolution.item(stored, root)
-    statements = []
-    stored.set_trace_callback(statements.append)
-    summaries = evolution.list_summaries(stored, limit=1)
-    stored.set_trace_callback(None)
+    with traced_queries(stored) as statements:
+        summaries = evolution.list_summaries(stored, limit=1)
     assert len(summaries) == 1
     for key in ('id', 'created_at', 'phase', 'plan', 'reason'):
         assert summaries[0][key] == full.get(key)
