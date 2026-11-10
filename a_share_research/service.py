@@ -73,26 +73,6 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     return previous["id"]
 
 
-def submit_diagnostic(conn, code: str, request_id: str, *, question: str, source: dict,
-                      parent_report_id: int | None = None) -> int:
-    """Queue a trusted internal diagnostic; no HTTP route reaches this, so callers cannot relabel formal research."""
-    if not stock_codes.KEY_RE.fullmatch(code) or not 1 <= len(request_id) <= 128 or not question.strip():
-        raise RequestError("诊断需要 6 位公司代码、1–128 字请求编号与问题")
-    payload = json.dumps({"question": question.strip(), "parent_report_id": parent_report_id, "feedback": None,
-                          "source": source}, ensure_ascii=False, sort_keys=True)
-    row = conn.execute(
-        "INSERT INTO runs (request_id, kind, code, status, created_at, request)"
-        " VALUES (?, 'diagnostic', ?, 'queued', ?, ?) ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, code, db.now(), payload),
-    ).fetchone()
-    if row:
-        return row["id"]
-    previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-    if previous["kind"] != "diagnostic" or previous["company_key"] != code or previous["request"] != payload:
-        raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
-    return previous["id"]
-
-
 def ready(status: str, passed: int) -> bool:
     """A report is final only when its run agrees: reviewed and done, or failed."""
     return (status, passed) in (("done", 1), ("failed", 0))
@@ -301,13 +281,6 @@ def research_call_limit(conn, run_id: int | None = None) -> int:
 
 def run_budget(conn, run_id: int | None = None) -> dict:
     count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
-    controller = conn.execute("SELECT 1 FROM runs WHERE id=? AND kind='diagnostic'"
-                              " AND json_extract(request,'$.source.event')='evolution'", (run_id,)).fetchone()
-    if controller:
-        return {"model_call_limit": None, "model_calls_recorded": count, "run_id": run_id,
-                "scope": "method_experiment", "limit_kind": "per_stage_loop_guard", "cost": None,
-                "cost_status": "unavailable", "automatic_paid_restart": False,
-                "note": "实验分阶段记录调用；阶段失败最多重试一次，案例不追加抽样。各诊断研究仍受单次研究上限约束。"}
     return {"model_call_limit": research_call_limit(conn, run_id), "model_calls_recorded": count, "run_id": run_id,
             "scope": "run" if run_id is not None else "configuration",
             "limit_kind": "loop_guard_not_money_cap", "cost": None, "cost_status": "unavailable",
@@ -389,10 +362,6 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
         if key not in body and key in metadata | extra:
             body[key] = (extra | metadata)[key]
     public = {key: row[key] for key in row.keys() if key not in {"report_body", "material", "identity", "request"}}
-    source = (json.loads(row["request"] or "{}") or {}).get("source") or {}
-    if source.get("event") in ("evolution", "evolution_case"):
-        public["improvement_id"] = row["id"] if source["event"] == "evolution" else source["evolution_id"]
-        public["improvement_phase"] = (metadata.get("evolution") or {}).get("phase")
     return {"version": VERSION, **public,
             "budget": run_budget(conn, row["id"]),
             "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),

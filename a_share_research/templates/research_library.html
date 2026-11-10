@@ -2,7 +2,6 @@
 {% block title %}研究库 · 个股研究{% endblock %}
 {% block main %}
 <h1>研究库</h1>
-<p><a href="/improvements">研究改进与方法核查</a></p>
 <p class="muted">搜索只读取已有研究，不会启动新任务。</p>
 <form method="get" action="/research-library#results" class="search" role="search" autocomplete="off" data-library-search>
   {% if history %}<input type="hidden" name="history" value="true">{% endif %}

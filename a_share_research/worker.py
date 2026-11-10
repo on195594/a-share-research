@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import consensus_backfill, db, evolution, model, price, research, screening, scans, service
+from a_share_research import consensus_backfill, db, model, price, research, screening, scans, service
 
 log = logging.getLogger(__name__)
 
@@ -35,11 +35,6 @@ def next_run(conn):
                         " ORDER BY request_id IS NOT NULL, batch_id IS NOT NULL, id LIMIT 1").fetchone()
 
 
-def next_diagnostic(conn):
-    """Diagnostics run only after research, scans and batch steps found nothing to do."""
-    return conn.execute("SELECT id, request FROM runs WHERE status = 'queued' AND kind = 'diagnostic' ORDER BY id LIMIT 1").fetchone()
-
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
@@ -57,7 +52,6 @@ def main() -> None:
     screening.recover(conn)
     scans.recover(conn)
     log.info("worker ready")
-    discovery = evolution.DiscoveryCache()
     while True:
         row = next_run(conn)
         if row is None:
@@ -67,11 +61,6 @@ def main() -> None:
                 continue
             # Batch steps run only when no single-company task is waiting.
             if not screening.tick(conn):
-                if diagnostic := next_diagnostic(conn):
-                    (evolution if evolution.is_controller(diagnostic) else research).execute(conn, diagnostic["id"])
-                    continue
-                if evolution.tick(conn, discovery=discovery):
-                    continue
                 try:
                     consensus_backfill.tick()
                 except Exception:

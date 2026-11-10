@@ -92,7 +92,6 @@ ACTIVE_METHODS = (
 
 def method_catalog(conn, *, before=None) -> list[dict]:
     """Freeze retrievable methods at a run/batch boundary, including later supersessions."""
-    from a_share_research import evolution
     sql = ACTIVE_METHODS.replace(
         " AND n.parent_report_id = r.id",
         " AND (? IS NULL OR newer.created_at <= ?) AND n.parent_report_id = r.id")
@@ -108,14 +107,7 @@ def method_catalog(conn, *, before=None) -> list[dict]:
                                   for c in method["cites"] if "ref" not in c},
                       "table": [r for r in body.get("table", [])
                                 if r["id"] in {c.get("ref") for c in method["cites"]}]})
-    return [method_entry(m) for m in evolution.active_methods(conn, before=before)] + found
-
-
-def method_entry(method: dict) -> dict:
-    return {"evolution_id": method["evolution_id"], "method_id": method.get("method_id"),
-            "created_at": method.get("adopted_at"),
-            "method": {"text": method["text"], "cites": []},
-            "sources": {}, "table": []}
+    return found
 
 
 def active_methods_digest(conn, *, catalog=None) -> str:
