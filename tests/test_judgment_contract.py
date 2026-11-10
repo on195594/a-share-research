@@ -86,7 +86,7 @@ def test_contract_filter_and_report_counts_use_captured_records(tmp_path, monkey
     assert '未记录' in validation.contract_line(eligible)
     assert zones.load_reports(str(database), 999) == []
     assert validation.load_forecasts(str(database), 999) == []
-    assert validation.score_agenda(validation.load_agenda(str(database)), contract=999)["rows"] == []
+    assert validation.score_agenda(validation.load_agenda(str(database), 999))["rows"] == []
 
     output = tmp_path / 'forecast-contracts.json'
     monkeypatch.setattr(sys, 'argv', ['validation', '--database', str(database), '--forecasts',
@@ -109,3 +109,39 @@ def test_batch_contract_is_taken_from_scored_ranking():
     result = hypotheses.score_batch(batch, [], {}, {})
     assert result['contract'] == 1
     assert validation.contract_counts([result]) == [{'contract': 1, 'label': '1', 'count': 1}]
+
+
+def test_contract_filter_runs_before_first_report_dedup(tmp_path):
+    """A contract-1 rerun in the same month is that contract's first report; unfiltered dedup is unchanged."""
+    from pathlib import Path
+
+    from a_share_research import agenda, db, validation, zones
+
+    data = Path(__file__).with_name('data')
+    row = json.loads(data.joinpath('valuation-warning-reports-20261105.json').read_text())['reports'][0]
+    forecast = json.loads(data.joinpath('k7a-forecast-report.json').read_text())['report']
+    # Same real report as the diagnostic-isolation test, so all four scored readers accept it.
+    body = row['body'] | {'prior': {'report_id': 1, 'period': '2026-06-30'}, 'prior_status': [],
+                          'table': forecast['body']['table'], 'checkpoints': forecast['body']['checkpoints']}
+    request = json.dumps({'question': '现金流', 'feedback': None})
+    conn = db.connect(tmp_path / 'app.db')
+    # Marked variant: report 701 is a later same-month rerun of 700 that carries contract 1.
+    later = row['created_at'][:11] + '23:59:00+08:00'  # same day, so same month and same agenda period
+    for report_id, created, judgment in ((700, row['created_at'], None), (701, later, {'contract': 1})):
+        conn.execute('INSERT INTO runs(id,kind,code,status,created_at,request) VALUES (?,?,?,?,?,?)',
+                     (report_id, 'research', row['code'], 'done', created, request))
+        conn.execute('INSERT INTO reports(id,run_id,code,period,passed,body,created_at) VALUES (?,?,?,?,?,?,?)',
+                     (report_id, report_id, row['code'], row['period'], 1,
+                      json.dumps(body | ({'judgment': judgment} if judgment else {})), created))
+    conn.commit()
+    conn.close()
+    path = str(tmp_path / 'app.db')
+
+    assert [r['id'] for r in validation.load_reports(path)] == [700]  # original unfiltered dedup kept
+    assert [r['id'] for r in validation.load_reports(path, 1)] == [701]
+    assert [r['id'] for r in validation.load_reports(path, 0)] == [700]
+    assert {(f['report'], f['first']) for f in validation.load_forecasts(path)} >= {(700, True), (701, False)}
+    assert {f['report'] for f in validation.load_forecasts(path, 1) if f['first']} == {701}
+    assert [r['id'] for r in agenda.sample(validation.load_agenda(path))['picked']] == [700]
+    assert [r['id'] for r in agenda.sample(validation.load_agenda(path, 1))['picked']] == [701]
+    assert [r['id'] for r in zones.load_reports(path, 1)] == [701]

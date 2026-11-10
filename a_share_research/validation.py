@@ -32,6 +32,7 @@ def judgment_contract(body: dict) -> int | None:
 
 
 def filter_contract(rows: list[dict], contract: int | None) -> list[dict]:
+    """Apply before any first-report dedup, so another contract's earlier report never takes this contract's slot."""
     return rows if contract is None else [r for r in rows if r.get("contract") == (contract or None)]
 
 
@@ -224,7 +225,7 @@ def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
             if base and forecast and not forecasts.problems(forecast, table):
                 out.append({"report": report_id, "code": code, "name": name, "created": created, "index": i,
                             "contract": judgment_contract(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
-    return filter_contract(mark_first(out), contract)
+    return mark_first(filter_contract(out, contract))
 
 
 def period_ended(period: str, today: date) -> bool:
@@ -268,10 +269,10 @@ def load_reports(database: str, contract: int | None = None) -> list[dict]:
                         "trigger": calc.get("trigger", (body.get("stance") or {}).get("trigger")) if calc else None,
                         "add_trigger": calc.get("add_trigger") if calc else None,
                         "boundary": stances.on_boundary(body.get("valuation_calc"))})
-    return filter_contract(first_per_month(reports), contract)
+    return first_per_month(filter_contract(reports, contract))
 
 
-def load_agenda(database: str) -> list[dict]:
+def load_agenda(database: str, contract: int | None = None) -> list[dict]:
     """Passed, non-replay, non-feedback continuations with their prior period and status, if recorded."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
@@ -287,12 +288,12 @@ def load_agenda(database: str) -> list[dict]:
             reports.append({"id": report_id, "code": code, "name": name, "source": src, "period": coverage,
                             "completed": datetime.fromisoformat(created), "prior_period": body["prior"].get("period"),
                             "contract": judgment_contract(body), "prior_status": body.get("prior_status")})
-    return reports
+    return filter_contract(reports, contract)
 
 
-def score_agenda(reports: list[dict], pro=None, today: date | None = None, *, contract: int | None = None) -> dict:
+def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> dict:
     """V5 summary; market data is only requested once a scored sample exists."""
-    split = {key: filter_contract(rows, contract) for key, rows in agenda.sample(reports).items()}
+    split = agenda.sample(reports)
     rows = split["picked"]
     if rows:
         rows = score(pro or market.client(), rows, today or datetime.now(SHANGHAI).date())
@@ -435,7 +436,7 @@ def main() -> None:
                 json.dump({"forecasts": scored, "summary": summary, "contracts": contract_counts([s for s in scored if s["first"]])}, fh, ensure_ascii=False, indent=1, default=str)
         return
     if args.agenda:
-        result = score_agenda(load_agenda(args.database), contract=args.contract)
+        result = score_agenda(load_agenda(args.database, args.contract))
         log.info("\n%s", "\n".join(agenda_lines(result)))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:

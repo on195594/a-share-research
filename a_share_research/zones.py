@@ -263,7 +263,7 @@ def load_market(pro, reports: list[dict], today: date) -> tuple[list[str], dict,
     return calendar, market, benchmark
 
 
-def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark: dict, *, contract: int | None = None) -> dict:
+def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark: dict) -> dict:
     """Offline-capable composition: pure analysis of already loaded inputs."""
     rows = []
     for code in sorted({r["code"] for r in reports}):
@@ -271,8 +271,6 @@ def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark
         labels = pe_percentile_labels(data["pe"], trade_days)
         company_rows = observations([r for r in reports if r["code"] == code], trade_days, data["close"], labels)
         rows.extend(score_observations(company_rows, trade_days, data["adjusted"], benchmark))
-    rows = validation.filter_contract(rows, contract)
-    reports = validation.filter_contract(reports, contract)
     return {"benchmark": validation.BENCHMARK, "benchmark_last": max(benchmark, default=None),
             "reports": len(reports), "contracts": validation.contract_counts(reports), "method": METHOD, "rows": rows,
             "summary": summarize(rows), "diagnostics": diagnostics(rows)}
@@ -287,11 +285,12 @@ def main() -> None:
     if args.json and Path(args.json).resolve() == Path(args.database).expanduser().resolve():
         parser.error("JSON 输出不能覆盖输入数据库")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    reports = load_reports(args.database)
+    # Filter at load: another contract's report would otherwise replace the active one and cost market reads.
+    reports = load_reports(args.database, args.contract)
     calendar, market, benchmark = load_market(market_gateway.client() if reports else None, reports, datetime.now(SHANGHAI).date())
-    result = diagnose(reports, calendar, market, benchmark, contract=args.contract)
+    result = diagnose(reports, calendar, market, benchmark)
     log.info("A3 区间条件收益诊断：%s 份有效报告，基准 %s，截至 %s", result["reports"], validation.BENCHMARK, result["benchmark_last"])
-    log.info("%s", validation.contract_line(validation.filter_contract(reports, args.contract)))
+    log.info("%s", validation.contract_line(reports))
     for description in METHOD.values():
         log.info("%s", description)
     for row in result["rows"]:
