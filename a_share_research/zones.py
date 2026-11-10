@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from heapq import heappop, heappush
 from pathlib import Path
 
-from a_share_research import screening, validation, valuation
+from a_share_research import report as report_body, screening, validation, valuation
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def observations(reports: list[dict], trade_days: list[str], closes: dict[str, f
         for day in first_days(labels):
             report = by_day[day]
             row = {"report": report["id"], "code": report["code"], "name": report["name"],
-                   "source": report["source"], "period": report.get("period"),
+                   "source": report["source"], "period": report.get("period"), "contract": report.get("contract"),
                    "rule": {"pe": PE_RULE, "v2": valuation.RULE_V2}.get(kind, report["valuation_calc"]["rule"]),
                    "zone": labels[day], "observation": day, "entry": next_day.get(day),
                    "valuation_zone": valuations[day], "pe_zone": percentiles[day]}
@@ -191,7 +191,7 @@ def diagnostics(rows: list[dict]) -> dict:
 
 # ---------- data boundaries ----------
 
-def load_reports(database: str) -> list[dict]:
+def load_reports(database: str, contract: int | None = None) -> list[dict]:
     """V0 eligibility, but retain every usable valuation report (no monthly dedup)."""
     with closing(sqlite3.connect(Path(database).expanduser().resolve().as_uri() + "?mode=ro", uri=True)) as conn:
         rows = conn.execute(
@@ -203,7 +203,7 @@ def load_reports(database: str) -> list[dict]:
         src = validation.source(json.loads(request) if request else {})
         if src is None:
             continue
-        body = json.loads(body)
+        body = report_body.load(body)
         calc = body.get("valuation_calc")
         if not isinstance(calc, dict) or calc.get("not_priced") or "error" in calc:
             continue
@@ -220,8 +220,9 @@ def load_reports(database: str) -> list[dict]:
             raise ValueError(f"报告 #{report_id} valuation_calc 的规则或区间阈值无效")
         reports.append({"id": report_id, "code": code, "name": name, "source": src,
                         "completed": datetime.fromisoformat(created), "valuation_calc": calc,
+                        "contract": validation.judgment_contract(body),
                         "period": validation.forecasts.base_period(body.get("table") or [])})
-    return sorted(reports, key=lambda r: (r["completed"], r["id"]))
+    return sorted(validation.filter_contract(reports, contract), key=lambda r: (r["completed"], r["id"]))
 
 
 def load_market(pro, reports: list[dict], today: date) -> tuple[list[str], dict, dict]:
@@ -262,7 +263,7 @@ def load_market(pro, reports: list[dict], today: date) -> tuple[list[str], dict,
     return calendar, market, benchmark
 
 
-def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark: dict) -> dict:
+def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark: dict, *, contract: int | None = None) -> dict:
     """Offline-capable composition: pure analysis of already loaded inputs."""
     rows = []
     for code in sorted({r["code"] for r in reports}):
@@ -270,8 +271,10 @@ def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark
         labels = pe_percentile_labels(data["pe"], trade_days)
         company_rows = observations([r for r in reports if r["code"] == code], trade_days, data["close"], labels)
         rows.extend(score_observations(company_rows, trade_days, data["adjusted"], benchmark))
+    rows = validation.filter_contract(rows, contract)
+    reports = validation.filter_contract(reports, contract)
     return {"benchmark": validation.BENCHMARK, "benchmark_last": max(benchmark, default=None),
-            "reports": len(reports), "method": METHOD, "rows": rows,
+            "reports": len(reports), "contracts": validation.contract_counts(reports), "method": METHOD, "rows": rows,
             "summary": summarize(rows), "diagnostics": diagnostics(rows)}
 
 
@@ -279,14 +282,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="A3：区间条件收益诊断（只读，不调用模型）")
     parser.add_argument("--database", required=True, help="app.db，只读打开")
     parser.add_argument("--json", help="另存逐条观测、汇总与口径的 JSON 路径")
+    parser.add_argument("--contract", type=int, help="只看指定判断契约；0 表示未记录")
     args = parser.parse_args()
     if args.json and Path(args.json).resolve() == Path(args.database).expanduser().resolve():
         parser.error("JSON 输出不能覆盖输入数据库")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     reports = load_reports(args.database)
     calendar, market, benchmark = load_market(screening._pro() if reports else None, reports, datetime.now(SHANGHAI).date())
-    result = diagnose(reports, calendar, market, benchmark)
-    log.info("A3 区间条件收益诊断：%s 份有效报告，基准 %s，截至 %s", len(reports), validation.BENCHMARK, result["benchmark_last"])
+    result = diagnose(reports, calendar, market, benchmark, contract=args.contract)
+    log.info("A3 区间条件收益诊断：%s 份有效报告，基准 %s，截至 %s", result["reports"], validation.BENCHMARK, result["benchmark_last"])
+    log.info("%s", validation.contract_line(validation.filter_contract(reports, args.contract)))
     for description in METHOD.values():
         log.info("%s", description)
     for row in result["rows"]:

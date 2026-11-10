@@ -5,6 +5,7 @@ import re
 import sqlite3
 from datetime import datetime
 
+from a_share_research import report as report_body
 from a_share_research import batches, db, stance as stances
 from a_share_research import stock_codes
 from a_share_research.evidence import report_source_view, projection
@@ -45,7 +46,7 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             raise RequestError("原报告与研究公司不一致")
         if feedback is not None:
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
-            body = json.loads(parent["body"])
+            body = report_body.load(parent["body"])
             content = body if "summary" in body else body.get("facts", {})
             match = re.fullmatch(r"(answer|risks|business|financial|methods|checkpoints|prior_status)\[(\d{1,4})\]", location)
             valid = location == "summary" and bool(content.get("summary"))
@@ -153,7 +154,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         raise RequestError("报告不存在", 404)
     if not ready(row["status"], row["passed"]):
         raise RequestError("报告尚未就绪或状态不一致", 409)
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     if "review_audit" in body:
         body["review_audit"] = audit_view(body["review_audit"])
     material = json.loads(row["material"] or "null")
@@ -169,9 +170,8 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "name": row["name"], "created_at": row["created_at"], "status": row["status"],
             "passed": bool(row["passed"]), "error": row["error"],
             "question": (json.loads(row["request"] or "{}") or {}).get("question", ""),
-            "report": body if row["passed"] else {"facts": body.get("facts", {}),
-                                                   "facts_reviewed": body.get("facts_reviewed"),
-                                                   "problems": body.get("problems", [])},
+            "report": body if row["passed"] else {key: body.get(key, default) for key, default in
+                                                   zip(report_body.FAILED_FIELDS, ({}, None, []))},
             "purpose": row["purpose"], "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
             "model_calls": [{key: identity.get(key) for key in
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}
@@ -187,8 +187,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
         return result  # Keep the original full evidence wire contract.
     result["view"] = "compact"
     result["report"] = ({key: body[key] for key in
-                         ("verdict", "summary", "relative", "valuation", "valuation_calc", "stance", "stance_calc", "answer", "open_questions", "prior", "prior_status", "risks", "business", "financial", "methods", "checkpoints")
-                         if key in body} if row["passed"] else result["report"])
+                         report_body.COMPACT_FIELDS if key in body} if row["passed"] else result["report"])
     result["evidence"] = {"market_date": evidence["market_date"],
                           "material_sha256": evidence["material_sha256"],
                           "source_error": evidence["source_error"],
@@ -213,7 +212,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
     ).fetchone()
     if row is None:
         raise RequestError("暂无通过复核的非纠错研究报告", 404)
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     calc = body.get("valuation_calc")
     summary = None
     if isinstance(calc, dict):
@@ -246,12 +245,13 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         current['note'] = '公告扫描未完成，区间暂停解读' if failure else '待复核，区间暂停解读'
     return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],
             "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
-            "status": "待复核" if pending else "有效", "verdict": body.get("verdict"), "summary": body.get("summary"),
+            "status": "待复核" if pending else "有效",
+            **{key: body.get(key) for key in report_body.CARD_FIELDS},
+            # Four card fields are reshaped rather than copied from the stored body.
             "risks": [item["text"] for item in body.get("risks", [])[:3]],
             "checkpoints": [{k: item[k] for k in ("text", "forecast") if k in item}
                             for item in body.get("checkpoints", [])],
-            "relative": body.get("relative"), "valuation_calc": summary,
-            "stance": body.get("stance"), "stance_calc": body.get("stance_calc"),
+            "valuation_calc": summary,
             "open_questions": body.get("open_questions", [])}
 
 
@@ -315,7 +315,7 @@ def continuation(conn, row, body: dict, extra: dict) -> dict:
 
     compared = reading.comparison(conn, row)
     parent = compared.get("old", {})
-    previous = json.loads(parent["body"]) if parent else {}
+    previous = report_body.load(parent["body"]) if parent else {}
     baseline_status = compared["baseline_status"]
     changes = {key: compared[key] for key in ("diff", "excluded", "missing", "reason") if key in compared}
     if not row["passed"] or baseline_status != "ready":
@@ -354,7 +354,7 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
                        f" WHERE u.{field} = ? AND u.kind IN ('research', 'diagnostic')", (value,)).fetchone()
     if row is None:
         raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
-    body = json.loads(row["report_body"]) if row["report_body"] else {}
+    body = report_body.load(row["report_body"]) if row["report_body"] else {}
     material = (json.loads(row["material"]) or {}) if row["material"] else {}
     extra = material.get("data", {}).get("extra", {})
     metadata = json.loads(row["identity"] or "{}") or {}

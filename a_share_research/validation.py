@@ -13,7 +13,7 @@ import statistics
 from contextlib import closing
 from datetime import date, datetime, time
 
-from a_share_research import agenda, forecasts, screening, stance as stances
+from a_share_research import agenda, forecasts, report as report_body, screening, stance as stances
 from a_share_research.db import SHANGHAI
 
 log = logging.getLogger(__name__)
@@ -25,6 +25,30 @@ SESSION_OPEN = time(9, 30)
 
 
 # ---------- pure functions ----------
+
+
+def judgment_contract(body: dict) -> int | None:
+    return (body.get("judgment") or {}).get("contract")
+
+
+def filter_contract(rows: list[dict], contract: int | None) -> list[dict]:
+    return rows if contract is None else [r for r in rows if r.get("contract") == (contract or None)]
+
+
+def contract_counts(rows: list[dict]) -> list[dict]:
+    """Count distinct input reports (not checkpoint/observation rows), or batches."""
+    groups = {}
+    for row in rows:
+        key = row.get("contract")
+        identity = ("batch", row["batch"]) if "batch" in row else ("report", row.get("report", row.get("id")))
+        groups.setdefault(key, set()).add(identity)
+    return [{"contract": key, "label": "未记录" if key is None else str(key), "count": len(groups[key])}
+            for key in sorted(groups, key=lambda k: -1 if k is None else k)]
+
+
+def contract_line(rows: list[dict]) -> str:
+    return "按判断契约的入样数：" + ("，".join(f"{g['label']} {g['count']}" for g in contract_counts(rows)) or "无")
+
 
 def source(request: dict) -> str | None:
     """'batch' for screening deep dives, 'active' for owner/agent research, None for feedback checks."""
@@ -182,7 +206,7 @@ def size_bucket(mv: float | None, cuts: tuple[float, float]) -> str:
 
 # ---------- data ----------
 
-def load_forecasts(database: str) -> list[dict]:
+def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
     """Every checkpoint forecast in passed, non-replay research reports (corrections excluded, as in V0)."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
@@ -191,7 +215,7 @@ def load_forecasts(database: str) -> list[dict]:
             "AND r.body LIKE '%\"forecast\"%'").fetchall()
     out = []
     for report_id, code, name, created, body in rows:
-        body = json.loads(body)
+        body = report_body.load(body)
         table = body.get("table") or []
         base = forecasts.base_period(table)
         written = {r["id"]: r for r in table}
@@ -199,8 +223,8 @@ def load_forecasts(database: str) -> list[dict]:
             forecast = item.get("forecast") if isinstance(item, dict) else None
             if base and forecast and not forecasts.problems(forecast, table):
                 out.append({"report": report_id, "code": code, "name": name, "created": created, "index": i,
-                            "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
-    return mark_first(out)
+                            "contract": judgment_contract(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
+    return filter_contract(mark_first(out), contract)
 
 
 def period_ended(period: str, today: date) -> bool:
@@ -223,28 +247,28 @@ def score_forecasts(items: list[dict], today: date | None = None) -> list[dict]:
     return items
 
 
-def load_reports(database: str) -> list[dict]:
+def load_reports(database: str, contract: int | None = None) -> list[dict]:
     """Passed, non-replay, non-feedback research reports from a read-only connection."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, "
-            "json_extract(r.body, '$.stance'), json_extract(r.body, '$.stance_calc'), "
-            "json_extract(r.body, '$.valuation_calc') FROM reports r "
+            "r.body FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL"
         ).fetchall()
     reports = []
-    for report_id, code, name, verdict, created, request, stance, calc, valuation_calc in rows:
+    for report_id, code, name, verdict, created, request, body in rows:
         src = source(json.loads(request) if request else {})
         if src is None:
             continue
-        calc = json.loads(calc) if calc else None
+        body = report_body.load(body)
+        calc = body.get("stance_calc")
         reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
-                        "completed": datetime.fromisoformat(created),
+                        "completed": datetime.fromisoformat(created), "contract": judgment_contract(body),
                         "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
-                        "trigger": calc.get("trigger", (json.loads(stance) or {}).get("trigger")) if calc else None,
+                        "trigger": calc.get("trigger", (body.get("stance") or {}).get("trigger")) if calc else None,
                         "add_trigger": calc.get("add_trigger") if calc else None,
-                        "boundary": stances.on_boundary(json.loads(valuation_calc) if valuation_calc else None)})
-    return first_per_month(reports)
+                        "boundary": stances.on_boundary(body.get("valuation_calc"))})
+    return filter_contract(first_per_month(reports), contract)
 
 
 def load_agenda(database: str) -> list[dict]:
@@ -252,22 +276,23 @@ def load_agenda(database: str) -> list[dict]:
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.created_at, r.coverage, u.request, "
-            "json_extract(r.body, '$.prior.period'), json_extract(r.body, '$.prior_status') FROM reports r "
+            "r.body FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL "
             "AND json_type(r.body, '$.prior') = 'object'"
         ).fetchall()
     reports = []
-    for report_id, code, name, created, coverage, request, prior_period, status in rows:
+    for report_id, code, name, created, coverage, request, body in rows:
+        body = report_body.load(body)
         if src := source(json.loads(request or "{}") or {}):
             reports.append({"id": report_id, "code": code, "name": name, "source": src, "period": coverage,
-                            "completed": datetime.fromisoformat(created), "prior_period": prior_period,
-                            "prior_status": json.loads(status) if status is not None else None})
+                            "completed": datetime.fromisoformat(created), "prior_period": body["prior"].get("period"),
+                            "contract": judgment_contract(body), "prior_status": body.get("prior_status")})
     return reports
 
 
-def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> dict:
+def score_agenda(reports: list[dict], pro=None, today: date | None = None, *, contract: int | None = None) -> dict:
     """V5 summary; market data is only requested once a scored sample exists."""
-    split = agenda.sample(reports)
+    split = {key: filter_contract(rows, contract) for key, rows in agenda.sample(reports).items()}
     rows = split["picked"]
     if rows:
         rows = score(pro or screening._pro(), rows, today or datetime.now(SHANGHAI).date())
@@ -277,7 +302,7 @@ def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> di
         group["reports"] += 1
         key = "scored" if row["returns"] else "no_market_data" if row["entry"] else "pending_entry"
         group[key] += 1
-    return {"rows": rows, "unrecorded": len(split["unrecorded"]), "reruns": len(split["reruns"]),
+    return {"rows": rows, "contracts": contract_counts(rows), "unrecorded": len(split["unrecorded"]), "reruns": len(split["reruns"]),
             "tally": agenda.tally(rows), "groups": counts, "returns": summarize(rows, "group")}
 
 
@@ -286,6 +311,7 @@ def agenda_lines(result: dict) -> list[str]:
     share = lambda v: f"{v:.0%}" if v is not None else "—"
     lines = [f"V5 议程状态：入样 {len(result['rows'])} 份，历史未记录 {result['unrecorded']} 份，"
              f"同期重跑 {result['reruns']} 份（不入比率）"]
+    lines.append(contract_line(result["rows"]))
     for section, label in (("risks", "旧风险"), ("checkpoints", "旧检查点")):
         lines.append(f"{label}：" + "，".join(f"{status} {n}" for status, n in tally["counts"][section].items()))
     lines.append(f"可判定条目中的已发生占比 {share(tally['occurred'])}；检查点已触发占比 {share(tally['triggered'])}")
@@ -373,6 +399,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="V0：已有报告的事后超额（只读，不调用模型）")
     parser.add_argument("--database", required=True, help="生产或隔离库 app.db，只读打开")
     parser.add_argument("--json", help="另存逐份结果与汇总的 JSON 路径")
+    parser.add_argument("--contract", type=int, help="只看指定判断契约；0 表示未记录")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
     modes.add_argument("--hypotheses", action="store_true", help="V3：H1 避坑与 H3 读得快假设记分")
@@ -382,14 +409,15 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.hypotheses:
         from a_share_research import hypotheses
-        hypotheses.run(args.database, args.json)
+        hypotheses.run(args.database, args.json, args.contract)
         return
     if args.forecasts:
-        scored = score_forecasts(load_forecasts(args.database))
+        scored = score_forecasts(load_forecasts(args.database, args.contract))
         summary = summarize_forecasts(scored)
         lines = [f"V1 预测记分：首份 {summary['total']} 条（{summary['companies']} 家公司、{summary['periods']} 个目标期，"
                  f"另有更新 {summary['updates']} 条不重复记分），已兑现 {summary['scored']}，待披露 {summary['pending']}，"
                  f"缺失/不可比 {summary['unavailable']}，基期数据已更正 {summary['restated']}"]
+        lines.append(contract_line([s for s in scored if s["first"]]))
         for s in scored:
             r = s["result"]
             lines.append(f"#{s['report']}[{s['index']}]{'' if s['first'] else '（更新）'} {s['code']} {s['name']} "
@@ -404,21 +432,22 @@ def main() -> None:
         log.info("\n%s", "\n".join(lines))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump({"forecasts": scored, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
+                json.dump({"forecasts": scored, "summary": summary, "contracts": contract_counts([s for s in scored if s["first"]])}, fh, ensure_ascii=False, indent=1, default=str)
         return
     if args.agenda:
-        result = score_agenda(load_agenda(args.database))
+        result = score_agenda(load_agenda(args.database), contract=args.contract)
         log.info("\n%s", "\n".join(agenda_lines(result)))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump(result, fh, ensure_ascii=False, indent=1, default=str)
         return
     pro, today = screening._pro(), datetime.now(SHANGHAI).date()
-    rows = score(pro, load_reports(args.database), today)
+    rows = score(pro, load_reports(args.database, args.contract), today)
     if args.stances:
         rows = score_stances(pro, [r for r in rows if r["stance"] != "未记录"], today)
         summary = summarize_stances(rows)
         lines = [f"V4 研究立场记分（{len(rows)} 份带立场报告；超额为入场至今相对 {BENCHMARK}）"]
+        lines.append(contract_line(rows))
         for row in rows:
             outcome = row.get("stance_outcome") or {}
             latest = row["returns"].get("latest")
@@ -436,10 +465,10 @@ def main() -> None:
         log.info("\n%s", "\n".join(lines))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump({"rows": rows, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
+                json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
         return
     summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size"), "stance": summarize(rows, "stance")}
-    lines = [f"V0 事后超额（基准 {BENCHMARK}，起点为报告完成后首个完整交易日收盘）", ""]
+    lines = [f"V0 事后超额（基准 {BENCHMARK}，起点为报告完成后首个完整交易日收盘）", contract_line(rows), ""]
     for row in rows:
         latest = row["returns"].get("latest")
         lines.append(f"#{row['id']} {row['source']} {row['code']} {row['name']} {row['verdict']} 入场 {row['entry'] or '待入场'} "
@@ -453,7 +482,7 @@ def main() -> None:
     log.info("\n%s", "\n".join(lines))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
-            json.dump({"rows": rows, "summary": summary}, fh, ensure_ascii=False, indent=1, default=str)
+            json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
 
 
 if __name__ == "__main__":

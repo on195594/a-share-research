@@ -8,6 +8,7 @@ import time
 from copy import deepcopy
 from datetime import date
 
+from a_share_research import report as report_body
 from a_share_research import db, model, sources, evidence, stance as stances, valuation, stock_codes
 from a_share_research.service import MAX_CALLS, research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
@@ -121,8 +122,8 @@ REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods", "prior_status"
 
 def published(report: dict) -> dict:
     """Fields of a passed report that are saved; optional judgment fields only when the contract produced them."""
-    return {k: report[k] for k in ("verdict", "summary", *SECTIONS)} | {
-        k: report[k] for k in ("checkpoints", "valuation", "stance", "prior_status") if k in report}
+    return {k: report[k] for k in report_body.PUBLISHED_REQUIRED_FIELDS} | {
+        k: report[k] for k in report_body.PUBLISHED_FIELDS if k not in report_body.PUBLISHED_REQUIRED_FIELDS and k in report}
 PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
 {"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
 ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
@@ -322,7 +323,7 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     ).fetchall()
     context = []
     for parent in parents:
-        body = json.loads(parent["body"])
+        body = report_body.load(parent["body"])
         content = body if parent["passed"] else body.get("facts", {})
         claims = {k: content.get(k) for k in ("summary", "answer", "methods", "checkpoints", "prior_status", *SECTIONS)}
         # Retired methods must not return through automatic same-company context.
@@ -347,7 +348,7 @@ def _corrected_agenda(conn, body: dict) -> dict | None:
 
 
 def _agenda(row) -> dict:
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     return {"report_id": row["id"], "researched": row["created_at"][:10], "period": row["coverage"],
             "market_date": body.get("market_date"),
             "risks": [item["text"] for item in body.get("risks", [])],
@@ -376,6 +377,9 @@ def prior_question(prior: dict) -> str:
 def publish(conn, run_id: int, material: Material, period: str, passed: bool,
             verdict: str | None, body: dict) -> None:
     """Save the report and finish its run together, so a crash never leaves one without the other."""
+    body["schema_version"] = report_body.SCHEMA_VERSION
+    body["judgment"] = model.judgment_identity()
+    report_body.validate(body)
     with db.transaction(conn):
         db.save_report(conn, run_id, material.code, material.name, period, passed, verdict, body)
         if passed:
@@ -621,7 +625,7 @@ def main() -> None:
         execute(conn, run_id, replay_of=replay_of)
         run = conn.execute("SELECT status, error FROM runs WHERE id = ?", (run_id,)).fetchone()
         report = conn.execute("SELECT verdict, body FROM reports WHERE run_id = ?", (run_id,)).fetchone()
-        body = json.loads(report["body"]) if report else {}
+        body = report_body.load(report["body"]) if report else {}
         print(f"{code} run={run_id} {run['status']} {time.monotonic() - started:.0f}s "
               f"calls={body.get('calls')} {report['verdict'] if report else ''} "
               f"{run['error'] or body.get('summary', '')}", flush=True)

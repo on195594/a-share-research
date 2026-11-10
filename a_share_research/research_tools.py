@@ -8,6 +8,7 @@ import time
 from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 
+from a_share_research import report as report_body
 from a_share_research import db, sources, evidence, stock_codes, valuation as valuations
 from a_share_research.checking import quote_found
 from a_share_research.material import financial_table
@@ -99,7 +100,7 @@ def method_catalog(conn, *, before=None) -> list[dict]:
                         (before, before, before, before)).fetchall()
     found = []
     for row in rows:
-        body, method = json.loads(row["body"]), json.loads(row["value"])
+        body, method = report_body.load(row["body"]), json.loads(row["value"])
         sources_by_id = {"D0": {"document": body.get("document", {})}, **body.get("sources", {})}
         found.append({"report_id": row["id"], "code": row["code"], "created_at": row["created_at"],
                       "location": f"methods[{row['key']}]", "method": method,

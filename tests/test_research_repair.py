@@ -589,3 +589,58 @@ def test_review_step_is_sent_to_the_review_model(tmp_path, monkeypatch):
         runner.call('review', '复核')
     identity = json.loads(conn.execute("SELECT identity FROM calls WHERE step = 'review'").fetchone()[0])
     assert identity['requested'] == {'provider': os.environ['MODEL_PROVIDER'], 'model': 'no-such-review-model'}
+
+
+@pytest.mark.parametrize('replay', [False, True])
+@pytest.mark.parametrize('passed', [False, True])
+def test_execute_freezes_schema_and_judgment_at_publish(tmp_path, monkeypatch, replay, passed):
+    from a_share_research import model, report as report_body
+    conn = db.connect(tmp_path / 'publish.db')
+    material = research.Material.from_snapshot(deepcopy(MATERIAL.snapshot()))
+    source = db.create_run(conn, material.code, status='done')
+    db.save_material(conn, source, material.snapshot())
+    run = db.create_run(conn, material.code)
+    runner = ProtocolInputs(conn, run)
+    draft = report()
+    if passed:
+        runner.responses = [draft, lambda: bound(runner.material, draft)]
+    else:
+        # Explicit malformed writer outputs exercise the existing failed-report path.
+        runner.responses = [None] * 3
+    monkeypatch.setattr(research, 'Runner', lambda *args: runner)
+    monkeypatch.setattr(research, 'gather', lambda code: material)
+    research.execute(conn, run, replay_of=source if replay else None)
+    row = conn.execute('SELECT body, passed FROM reports WHERE run_id=?', (run,)).fetchone()
+    assert row is not None, dict(conn.execute('SELECT * FROM runs WHERE id=?', (run,)).fetchone())
+    body = report_body.load(row['body'])
+    assert bool(row['passed']) is passed
+    assert body['schema_version'] == 2
+    assert body['judgment'] == model.judgment_identity()
+    assert set(body['judgment']['author']) == set(body['judgment']['reviewer']) == {'provider', 'model', 'reasoning'}
+    assert body['replay_of'] == (source if replay else None)
+    report_body.validate(body)
+    conn.close()
+
+
+def test_invalid_program_body_fails_without_publishing(tmp_path, monkeypatch):
+    from a_share_research import report as report_body
+    conn = db.connect(tmp_path / 'invalid-publish.db')
+    run = db.create_run(conn, MATERIAL.code)
+    runner = ProtocolInputs(conn, run)
+    draft = report()
+    runner.responses = [draft, lambda: bound(runner.material, draft)]
+    monkeypatch.setattr(research, 'Runner', lambda *args: runner)
+    monkeypatch.setattr(research, 'gather', lambda code: research.Material.from_snapshot(deepcopy(MATERIAL.snapshot())))
+    validate = report_body.validate
+
+    def invalid(body):
+        # Deliberate unknown program field; use the real write-boundary validator.
+        validate(body | {'undeclared_program_field': True})
+
+    monkeypatch.setattr(report_body, 'validate', invalid)
+    research.execute(conn, run)
+    assert conn.execute('SELECT COUNT(*) FROM reports').fetchone()[0] == 0
+    row = conn.execute('SELECT status, identity FROM runs WHERE id=?', (run,)).fetchone()
+    assert row['status'] == 'failed'
+    assert json.loads(row['identity'])['failure']['category'] == 'pipeline_error'
+    conn.close()

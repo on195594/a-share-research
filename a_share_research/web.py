@@ -25,8 +25,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ConfigDict
 
+from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
 from a_share_research import stock_codes
+from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
@@ -425,7 +427,7 @@ def report_page(request: Request, report_id: int):
         return message(request, session, "报告尚未就绪", "报告尚未就绪或状态不一致", 409)
     latest = reading.latest_reports(conn, codes=[row['code']], include_checkpoint=False) if run['kind'] == 'research' else []
     newer_report = latest[0] if latest and latest[0]['id'] > report_id else None
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     feedback = (json.loads(run["request"] or "{}") or {}).get("feedback")
     feedback_label = ""
     if feedback:
@@ -543,6 +545,15 @@ def api_run(request: Request, run_id: int):
     if row is None:
         raise service.RequestError("任务不存在", 404)
     return {"version": service.VERSION, **dict(row)}
+
+
+@app.get("/api/schema")
+def api_schema(request: Request):
+    api_session(request)
+    return {"version": service.VERSION, "schema_version": report_body.SCHEMA_VERSION,
+            "judgment_contract": JUDGMENT_CONTRACT, "report": report_body.json_schema(),
+            "views": {"compact": report_body.COMPACT_FIELDS, "card": report_body.CARD_FIELDS,
+                      "failed": report_body.FAILED_FIELDS}}
 
 
 @app.get("/api/reports")
@@ -685,7 +696,7 @@ def stock_page(request: Request, code: str, report: int | None = None):
     def full(row):
         if row['id'] not in loaded:
             record = reading.report(conn, row['id'])
-            loaded[row['id']] = (record, json.loads(record['body']))
+            loaded[row['id']] = (record, report_body.load(record['body']))
         return loaded[row['id']]
 
     latest = next(((r, v) for r in ordered if r['operating_series']

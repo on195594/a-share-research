@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import tushare as ts
 
+from a_share_research import report as report_body
 from a_share_research import db, model, service, sources, stock_codes
 from a_share_research.db import SHANGHAI
 from a_share_research.batches import load, group_return, returns, small_rule
@@ -254,7 +255,7 @@ def _report_digest(conn, report_id: int | None) -> dict | None:
     row = conn.execute("SELECT passed, body FROM reports WHERE id = ?", (report_id,)).fetchone()
     if not row["passed"]:
         return None
-    body = json.loads(row["body"])
+    body = report_body.load(row["body"])
     texts = lambda key: [item["text"] for item in body.get(key, []) if isinstance(item, dict)]
     table = body.get("table", [])
     dates = sorted({p for r in table if r["id"].startswith("T.") for p in r["values"]})
@@ -399,9 +400,9 @@ def rank(candidates: list[dict], rule: dict) -> dict:
         attempts.append({"identity": completion.identity, "usage": completion.usage,
                          "seconds": round(completion.seconds, 1), "problems": problems})
         if not problems:
-            return {"order": draft["order"], "basis": draft["basis"], "attempts": attempts}
+            return {"judgment": model.judgment_identity(), "order": draft["order"], "basis": draft["basis"], "attempts": attempts}
         prompt += f"\n\n# 上一次输出的问题，请修正后完整重新输出\n{json.dumps(problems, ensure_ascii=False)}\n\n# 上一次输出\n{completion.text[:8000]}"
-    return {"order": None, "attempts": attempts, "error": "；".join(problems)}
+    return {"judgment": model.judgment_identity(), "order": None, "attempts": attempts, "error": "；".join(problems)}
 
 
 def candidate_digests(conn, batch: dict) -> list[dict]:
@@ -423,7 +424,7 @@ def select(conn, batch: dict) -> dict:
         selection["ranking"] = rank(candidates, rule)
     except Exception as exc:  # the ranking is scored separately and never blocks the watchlist
         log.exception("batch %s ranking failed", batch.get("id"))
-        selection["ranking"] = {"order": None, "error": str(exc) or type(exc).__name__}
+        selection["ranking"] = {"judgment": model.judgment_identity(), "order": None, "error": str(exc) or type(exc).__name__}
     return selection
 
 
@@ -432,7 +433,7 @@ def select_small(conn, batch: dict) -> dict:
     rule = small_rule(batch["rule"])
     candidates = candidate_digests(conn, batch | {"q20": batch["s10"], "rule": rule})
     if not any(selectable(c["report"]) for c in candidates):
-        return {"draft": {"picks": [], "rejected": [], "concentration": "",
+        return {"judgment": model.judgment_identity(), "draft": {"picks": [], "rejected": [], "concentration": "",
                           "gaps": ["小市值组没有研究通过且可选的候选，全部席位留现金"]}, "attempts": []}
     return _select(candidates, rule)
 
@@ -448,9 +449,9 @@ def _select(candidates: list[dict], rule: dict) -> dict:
         attempts.append({"identity": completion.identity, "usage": completion.usage,
                          "seconds": round(completion.seconds, 1), "problems": problems})
         if not problems:
-            return {"draft": draft, "attempts": attempts, "prompt_sha256": completion.identity["prompt_sha256"]}
+            return {"judgment": model.judgment_identity(), "draft": draft, "attempts": attempts, "prompt_sha256": completion.identity["prompt_sha256"]}
         prompt += f"\n\n# 上一次输出的问题，请修正后完整重新输出\n{json.dumps(problems, ensure_ascii=False)}\n\n# 上一次输出\n{completion.text[:20000]}"
-    return {"draft": None, "attempts": attempts, "error": "；".join(problems)}
+    return {"judgment": model.judgment_identity(), "draft": None, "attempts": attempts, "error": "；".join(problems)}
 
 
 # ---------- simulation ----------

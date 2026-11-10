@@ -7,6 +7,7 @@ dependencies = [
     "a-stock-lib[tushare] @ https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl#sha256=630d9aac557a62a6c475b51d7a6c3e94d1953928dd9473f4604c1d910b301bcf",
     "fastapi>=0.156.4",
     "jinja2>=3.1.6",
+    "pydantic>=2.14.1",
     "python-multipart>=0.0.32",
     "requests>=2.32",
     "uvicorn>=0.54.0",

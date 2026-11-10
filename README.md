@@ -91,6 +91,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `GET /api/runs/{run_id}` | 排队/研究/成功/失败、步骤、错误和 `report_id`；成功状态为 `done` |
 | `GET /api/request?request_id=...` | 只读找回原请求的任务、诊断与调用计数 |
 | `GET /api/research/budget` | 模型调用上限（循环保护而非金额预算） |
+| `GET /api/schema` | 正文 JSON Schema、判断契约版本与各视图字段清单（Bearer 鉴权） |
 | `GET /api/reports?code=600519` | 最近 100 份报告的身份、时间、状态 |
 | `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡；`current.valuation` 按最新收盘日滚动测算 |
 | `GET /api/cards` | `research-v1` 信封：`cards` 为扫描范围（订阅＋最近冻结批次 L5）的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |

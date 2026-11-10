@@ -126,7 +126,7 @@ def test_moved_read_queries_use_captured_records_and_do_not_write(conn):
     assert reading.api_run(conn, run['id'])['report_id'] == 39
     assert reading.api_reports(conn, '603606')[0]['id'] == 39
     assert reading.stock_reports(conn, '000651.SZ')[0]['replay_of'] is not None
-    assert reading.report_bodies(conn, [39])[39] == json.loads(report['body'])
+    assert reading.report_bodies(conn, [39])[39] == json.loads(report['body']) | {'schema_version': 1}
     assert reading.report_bodies(conn, []) == {}
     assert reading.active_runs(conn) == []
     assert reading.queue_ahead(conn, run['id'])[0] == 0

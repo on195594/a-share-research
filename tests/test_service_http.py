@@ -73,3 +73,17 @@ def test_historical_diagnostics_remain_read_only_and_labeled(server):
     assert page.status_code == 200 and '研究诊断' in page.text
     assert conn.total_changes == before
     browser.close()
+
+
+def test_report_schema_is_authenticated_and_describes_public_views(server):
+    from a_share_research import report
+    from a_share_research.contract import JUDGMENT_CONTRACT
+    _, client, url, *_ = server
+    assert client.get(url + "/api/schema", headers={"Authorization": "Bearer invalid"}, timeout=3).status_code == 401
+    response = client.get(url + "/api/schema", timeout=3)
+    assert response.status_code == 200
+    schema = response.json()
+    assert schema == {"version": "research-v1", "schema_version": 2,
+                      "judgment_contract": JUDGMENT_CONTRACT, "report": report.json_schema(),
+                      "views": {"compact": list(report.COMPACT_FIELDS), "card": list(report.CARD_FIELDS),
+                                "failed": list(report.FAILED_FIELDS)}}
