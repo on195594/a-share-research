@@ -20,7 +20,7 @@
 | V4 立场与 valuation-v2（11-04） | `f65904e` 已上线，后由上行修订，见[判断验证 V4](judgment-validation.md#v4-研究立场与等待代价2026-11-04)与[valuation-v2](judgment-validation.md#valuation-v2-影子规则2026-11-04) | 非阻塞观察：首份带立场的新报告后核对机会提示；首次等待代价读数待首批等价格到期（约 2027-05） |
 | 判断账本 K5/K6（11-05） | `9fb28b9` 已上线议程记分与搜索，见[积累方案 K5](research-accumulation.md#k5-议程状态账本针对-p6p7服务避开大亏与复盘改进)、[判断验证 V5](judgment-validation.md#v5-议程状态记分2026-11-05)；所有者 11-05 决定交易关联归 Skills，不合并数据库 | 非阻塞观察：首批新覆盖期样本预计 2026 年报后，抽查“无法判断”占比与“已发生”中旧问题延续比例（比亚迪 111 两条依据半年报）；搜索 P95 超 1 秒再评估索引 |
 | 复核放宽、边界立场与取材修复（11-05） | `37838e7`、`c2f78b4`、`db9f6f2` 已上线；所有者 11-05 批准仅剩未答完问题时列 `open_questions` 照常交付、距 v2 门槛价 ±5% 标边界立场并单列记分 | 非阻塞观察：抽查首批 5 份的 `open_questions` 频率及是否掩盖实质缺陷；首批等价格到期（约 2027-05）比较边界/非边界等待代价，再决定是否调整 5%；12-01 首个真实月批 |
-| 架构整理（11-10） | 维护与基础设施：K7 退役；判断契约版本与契约面哈希（`contract.py`）；报告正文类型与 `GET /api/schema`（`report.py`）；TuShare 网关 `market.py`；上限集中 `limits.py` 与分层测试；批次终态 `closed` 与轮询取列；Hermes 脚本入库 `ops/hermes/` | （待发布）；契约面修改走[季度窗口](judgment-validation.md#判断契约与修改窗口)，首个窗口 2027-01-01 月批之前 |
+| 架构整理（11-10） | 维护与基础设施：K7 退役；判断契约版本与契约面哈希（`contract.py`）；报告正文类型与 `GET /api/schema`（`report.py`）；TuShare 网关 `market.py`；上限集中 `limits.py` 与分层测试；批次终态 `closed` 与轮询取列；Hermes 脚本入库 `ops/hermes/` | `907a1be` 已上线（11-10）；契约面修改走[季度窗口](judgment-validation.md#判断契约与修改窗口)，首个窗口 2027-01-01 月批之前 |
 
 已完成且无后续项：D0、I1–I6、R0–R3（[项目契约](project-contract.md)、[路线图](roadmap.md)，Skills 长期 API Key 见其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record)）、数据层治理（[方案](data-foundation.md#6-已验证)，迁移 v9 获所有者 msg 4264 授权）、公司研究进展退役、统一来源与跨轮复核（[方案 5.1](proposal.md#51-统一来源与跨轮复核)）、数字阈值与遗漏关闭边界、技术债 T1–T3、取证与修正闭环、初筛解耦与图表防护及 Pi 预检、结构与存储整理、公司研究进展分类边界、性能整改与校验误伤、机会成本分红口径与验证边界、月批自动发起（详情见上述历史版本）。
 
@@ -39,15 +39,13 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**Research `9f99342`** 于 2026-11-10 14:52 经 README 固定入口发布：降低 worker 空闲发现研究改进机会时的重复读取、解析与哈希开销。属于性能维护，不改变研究深度、实验 `VERSION`、冻结来源与任务判重语义；依赖、配置、凭据、数据库结构及调用上限均未改变。生产模型沿用研究及其他非复核阶段 `openai-codex / gpt-6.1-sol / high`，复核 `antigravity / gemini-3.8-flash / medium`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**Research `907a1be`** 于 2026-11-10 20:34 经 README 固定入口发布：[架构整理（11-10）](#工作包与状态)，属维护与基础设施，不宣称投资收益改善。新增依赖 `pydantic`；配置、凭据、数据库结构、提示词与调用上限数值均未改变。生产模型沿用研究及其他非复核阶段 `openai-codex / gpt-6.1-sol / high`，复核 `antigravity / gemini-3.8-flash / medium`。
 
-定向验证 58 passed，涵盖实验状态与冻结来源、连接内缓存、外部写入／旧哈希／事务回滚／异常／版本失效、worker 恢复及相关方法／读取；Ruff、文档链接与差异检查通过。真实数据库只读对照中，23 份选中报告、完整来源投影与冻结 key 完全一致；冷发现 CPU 1.214 s → 0.460 s，暖缓存检查约 6–37 μs。生产发布前后各一次 16 s 无任务窗口，worker 主进程 CPU 从 31.00% → 1.56%（单核口径，约降 95%）；这不是长期峰值或研究执行阶段的性能结论，不据此宣称投资收益改善。发布复用上述验证，未跑全量套件或付费研究。
+发布前：合并后离线测试 1568 passed、20 skipped；生产库只读核对 150 份既有报告均通过新正文类型校验；在生产库副本上用真实模型跑 3 次研究（600519 首次与接续、300750），均完成并写入 `schema_version` 2 与判断契约 1；开发实例手机尺寸检查批次“模拟结束”显示与已删除的改进入口。发布工具一次通过空闲与暂停复查、表指纹、网页就绪与完整性巡检，worker 预检 `ready`（Pi 1.5.1，Node v22.23.4）。发布后用私有会话以 390×844 浏览器检查首页、批次列表与详情、研究库、报告与公司页均 200、无横向溢出、无脚本错误；`/improvements` 与 `/api/improvements` 为 404；`GET /api/schema` 以 bearer 返回 `schema_version` 2、`judgment_contract` 1。备份 `backup-pre-907a1be-20261110-203443.db`；证据在 `~/.local/share/a-share-research-evaluations/deploy-907a1be-20261110-203442/`（发布清单、预检、巡检、浏览器脚本与日志）及 `arch-20261110-409155f/`（真实研究）。
 
-固定发布入口执行一次，空闲与暂停复查、业务表指纹、本机网页就绪及完整性巡检通过（150 份报告、1444 次调用，0 问题）；生产 worker 双模型离线预检 `ready`（Pi 1.5.1，Node v22.23.4）。本次无页面改动，不追加浏览器或研究验收；发布后的 CPU 采样只服务本性能任务。备份 `backup-pre-9f99342-20261110-145109.db`；证据位于 `~/.local/share/a-share-research-evaluations/worker-idle-20261110-144044-39c7/`，含 `before.json`／`after.json`、`cpu-before.json`／`cpu-after.json`、构建／发布日志及 `release/` 下的发布清单、预检与巡检。K4 自动清理最旧一份发布备份，镜像清理无失败。
+**直接回退**：两服务的 `rollback-907a1be`（web `36163ca8`、worker `197b1290`，即 `9f99342`）；再往前为 `rollback-9f99342`（web `edfef4ee`、worker `ba1f5218`，即 `569850c`）。两级均支持当前双模型配置，无需恢复环境变量；旧代码不检查报告顶层键，新写入的 `schema_version`、`judgment` 会被忽略。回退到 `9f99342` 会恢复 K7 空闲诊断与改进页，且旧代码不识别批次终态 `closed`（不纳入记分与跟踪展示），批次进入 `closed` 后不宜回退。计划回退须将对应应用源码恢复后重新提交、推送与构建，再走固定发布入口；不要倒退 main，也不要把旧镜像标签直接作为发布工具的目标提交。发布工具自动回退镜像，不会恢复 `.env`。版本镜像与备份继续按 K4 保留。
 
-**直接回退**：两服务的 `rollback-9f99342`（web `edfef4ee`、worker `ba1f5218`，即 `569850c`）；再往前为 `rollback-569850c`（web `3c999b3c`、worker `7749f101`，即 `f487074`）。这两级均支持当前双模型配置，无需恢复环境变量。计划回退须将对应应用源码恢复后重新提交、推送与构建，再走固定发布入口；不要倒退 main，也不要把旧镜像标签直接作为发布工具的目标提交。发布工具自动回退镜像，不会恢复 `.env`。版本镜像与备份继续按 K4 保留。
-
-本节只保留当前版本与回退方式；此前 `569850c` 维护及双模型切换的评估、配置恢复注意事项与证据见 `git show d2d6255:docs/implementation-plan.md`「当前部署」，更早历史继续沿该版本追溯。
+本节只保留当前版本与回退方式；此前 `9f99342` 空闲性能维护的验证与证据见 `git show 907a1be:docs/implementation-plan.md`「当前部署」，更早历史继续沿该版本追溯。
 
 **上线后接入**：
 - 顾问（`d15af17` 起）：脚本源在 `ops/hermes/`；Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
