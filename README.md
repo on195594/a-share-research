@@ -14,16 +14,14 @@
 
 ## 项目目录
 
-`web.py` 负责鉴权、参数与渲染，页面数据查询集中在只读的 `reading.py`，提交写入由 `service.py` 承接。`companies.py`、`batches.py` 与 `evidence.py` 提供共享资料和纯函数，网页不加载行情供应商依赖。
-
 | 路径 | 内容 |
 |---|---|
-| `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 编排单股研究（取材料 `material.py`、机械核对 `checking.py`、成文契约 `prompts.py`、取证工具 `research_tools.py`），`screening.py` / `backtest.py` 为候选批次与历史回测 |
+| `a_share_research/` | `web.py` 鉴权/参数/渲染，`worker.py` 后台入口，`reading.py` 只读查询，`service.py` 提交；`research.py` 编排研究，`screening.py` / `backtest.py` 候选批次/回测；`contract.py` 判断契约，`report.py` 正文类型与视图，`market.py` TuShare 唯一网关（网页不加载行情依赖），`limits.py` 运行上限与依据 |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
 | `docs/` | 领域方案、项目契约、路线图、实施与部署状态；产品目标见根目录 `PRODUCT.md`，视觉规范见 `DESIGN.md` |
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
-| `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
+| `Dockerfile`、`compose.yaml`、`ops/hermes/` | Web / worker 构建部署；Hermes 定时脚本源与安装工具 |
 
 `.pytest_cache/`、`.ruff_cache/` 和应用、测试目录下的 `__pycache__/` 是可重建缓存；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
 
@@ -101,7 +99,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `POST /api/research`（追问） | 上述输入加 `parent_report_id`，必须同公司，创建关联新任务 |
 | `POST /api/reports/{id}/feedback` | `{"request_id":"新编号","location":"financial[0]","text":"具体问题与依据"}` → 核查任务 |
 
-request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。
+request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。正文顶层字段、compact / card / failed 各视图的字段清单与判断契约版本以 `GET /api/schema` 为准（定义在 `a_share_research/report.py`）。
 单家与批量卡片共用数据库读取路径，沿用 Bearer 鉴权，不联网取数、不触发研究。订阅与 L5 重叠时 `origin` 为 `external`。
 卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，`valuation` 仍是对象，其中各测算字段为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径；带情景概率的报告另有 `valuation_calc.v2`（`rule`、`probabilities`、`annual_return`、`zone`、`support_below`），滚动后的 `current.valuation.v2` 另含 `support_below`/`stretched_above`，旧报告为 null。卡片另带 `stance`（`action` 为 现在分批/等价格/等证据/回避，及理由、出处，等证据另有 `trigger`）与程序冻结的 `stance_calc`（等价格的 `price`、`valid_until`；等证据的 `trigger`），旧报告两者为 null。
 卡片还投影 `open_questions: [{id, where, problem}]`（无记录时为 `[]`，不代表用户全部要求均已完成）。冻结 `valuation_calc` 保留 `close`、`as_of`、`v2.support_below` 和 `boundary`；`current.valuation.boundary` 按滚动后的价格与门槛另行判定。两处 `boundary` 均复用同一 ±5% 规则，值为 true/false/null，null 表示无法定价或缺少依据。它们只在读取时派生，不修改原报告或冻结立场；false 也不代表已证明稳定。旧服务或旧快照缺字段不能当成无风险。边界与未答问题不改变通过状态或自动触发研究。
@@ -156,7 +154,7 @@ DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # �
 
 月度自动发起（启用状态与时间/额度记录见[实施计划](docs/implementation-plan.md)）：Bearer API Key 可调用 `POST /api/batches/monthly`（`{"month":"2026-12"}`）入队当月批次，`GET /api/batches/monthly/2026-12` 只读查询当月首批状态。服务端仅接受上海当前自然月自动发起，旧月拒绝；同月已有任意状态批次（含失败）均不另建，网页手动重开不受此限；已入队但跨月仍未开始初筛的自动批次直接失败停止，不使用后来数据补跑。
 
-**额度口径**：自动月批每月最多一批（Q20 + S10 最多 30 家新研究 × 每家最多 21 次调用 + 大/小组比较与排序最多 6 次 = 最多 636 次应用层模型调用；7 天内已通过报告直接复用），且不因研究或比较中断自动重跑付费阶段。自动月批按批次关联使用独立的单研究 21 次上限，其余工程上限的数值与依据见 `a_share_research/limits.py`；取证为写作与复核预留调用，剩余额度不足时不启动新一轮修复（成文、可能的拒绝工具轮及最多两次复核），未解决问题照实保留。核算复用关联研究的 `calls` 与大组比较、小组比较、排序的 `attempts`，单列缺失 usage；usage 中的费用估算不是实际账单。这是应用层调用次数上限，不是美元硬上限或供应商底层请求数上限。
+**额度口径**：自动月批每月最多一批，7 天内已通过报告直接复用，不因研究或比较中断自动重跑付费阶段；按批次关联使用独立的单研究上限，数值与依据见 `a_share_research/limits.py`；取证为写作与复核预留调用，剩余额度不足时不启动新一轮修复（成文、可能的拒绝工具轮及最多两次复核），未解决问题照实保留。核算复用关联研究的 `calls` 与大组比较、小组比较、排序的 `attempts`，单列缺失 usage；usage 中的费用估算不是实际账单。这是应用层调用次数上限，不是美元硬上限或供应商底层请求数上限。
 
 服务重启时，进行中的初筛记为失败（人工可重新开始本月批次），手动批次跨公司比较自动重试，自动月批中断比较则失败停止。只看初筛结果、不建批次：
 
