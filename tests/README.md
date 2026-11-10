@@ -7,12 +7,15 @@
 - `support/reports.py`：茅台年报摘录、财务数字和引文检查用报告构造器。
 - `support/continuation.py`：真实生产/K2 报告记录及 SQLite 装载器。
 - `support/templates.py`：统一开启自动转义的 Jinja 环境与报告渲染入口。
+- `support/financials.py`：财务序列、图表与研究工具共用的真实财务样本及隔离副本构造器。
+- `support/valuation.py`、`support/split_numbers.py`：估值案例与跨页数字采集样本的领域支撑。
+- `conftest.py`：缓存隔离、共享 Pi 运行环境和 HTTP 服务 fixture；模型测试未配置运行环境时跳过。
 
-通用支撑不再从 `test_check.py`、`test_continuation.py` 导入；其他领域专用采集数据/fixture 暂留原测试模块，不为整理目录搬动业务代码。报告构造器只用于检查边界，不能充当真实模型验收结果。不要修改公共样本对象；需要改变输入时复制后再处理。
+通用支撑不再从 `test_check.py`、`test_continuation.py`、`test_financial_series.py` 导入；其他领域专用采集数据/fixture 暂留原测试模块，不为整理目录搬动业务代码。报告构造器只用于检查边界，不能充当真实模型验收结果。不要修改公共样本对象；需要改变输入时复制后再处理。
 
 ## 验证范围
 
-从仓库根目录运行 `uv run pytest -q tests/test_相关能力.py`。选择受影响的真实案例及正常案例；同一版本已通过的结果复用，不因提交或部署再跑一轮。
+从仓库根目录运行 `nice -n 15 uv run pytest -x -q tests/test_相关能力.py`。选择受影响的真实案例及正常案例；同一版本已通过的结果复用，不因提交或部署再跑一轮。
 
 常见入口：
 
@@ -34,7 +37,7 @@
 | 模型运行时 | `test_model_preflight.py`、`test_model_complete.py`（在 worker 环境下运行，验证 Node 预检、单次推理的错误与运行身份；付费实测需 `PI_LIVE_TEST=1`） |
 | API、会话与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py`、`test_web_connection.py` |
 
-完整离线回归：`uv run pytest -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。
+完整离线回归：`nice -n 15 uv run pytest -x -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。已有 `.venv` 但离线缓存缺失时，可用 `uv run --no-sync --offline pytest ...` 复用已安装依赖；这不验证锁文件安装。
 
 ## 清理边界
 

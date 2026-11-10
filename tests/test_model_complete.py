@@ -14,20 +14,15 @@ from a_share_research import model
 
 
 @pytest.fixture
-def configured():
-    if not all(os.environ.get(key) for key in ("MODEL_PROVIDER", "MODEL_ID", "PI_AGENT_DIR")):
-        pytest.skip("Run with the existing worker environment for real Pi checks")
-    return dict(os.environ)
-
-
-@pytest.fixture
 def payload(configured):
     chain = json.loads(gzip.decompress(
         (Path(__file__).parent / "data/explore-call-chain.json.gz").read_bytes()))
     prompt = chain["calls"][0]["prompt"]
     return {
-        "provider": os.environ["MODEL_PROVIDER"], "model": os.environ["MODEL_ID"],
-        "prompt": prompt, **json.loads(prompt), "timeout": -1, "max_tokens": 16000,
+        "provider": configured["MODEL_PROVIDER"], "model": configured["MODEL_ID"],
+        "prompt": prompt, **json.loads(prompt), "timeout": -1,
+        "max_tokens": int(configured.get("MODEL_MAX_TOKENS", "16000")),
+        "reasoning": configured.get("MODEL_REASONING", "high"),
         "session_id": hashlib.sha256(prompt[:4096].encode()).hexdigest()[:32],
     }
 
@@ -46,30 +41,22 @@ def test_model_error_retains_request_identity(payload):
     assert error.seconds > 0 and error.identity["pi_version"]
     assert error.identity["prompt_sha256"] == hashlib.sha256(payload["prompt"].encode()).hexdigest()
     assert error.identity["request_parameters"] == {
-        "timeout": -1, "max_tokens": 16000, "reasoning": "high", "session_id": payload["session_id"]}
+        key: payload[key] for key in ("timeout", "max_tokens", "reasoning", "session_id")}
 
 
-def test_environment_configures_reasoning_and_max_tokens(payload, monkeypatch):
+@pytest.mark.parametrize(("call_max_tokens", "env_max_tokens"), [(None, 12000), (8000, 14000)],
+                         ids=["environment-default", "environment-overrides-call-site"])
+def test_environment_configures_reasoning_and_max_tokens(payload, monkeypatch, call_max_tokens, env_max_tokens):
     monkeypatch.setenv("MODEL_REASONING", "medium")
-    monkeypatch.setenv("MODEL_MAX_TOKENS", "12000")
+    monkeypatch.setenv("MODEL_MAX_TOKENS", str(env_max_tokens))
     with pytest.raises(model.ModelError, match="RangeError") as caught:
-        model.complete(payload["prompt"], timeout=-1,
+        model.complete(payload["prompt"], timeout=-1, max_tokens=call_max_tokens,
                        messages=payload["messages"], tools=payload["tools"])
     error = caught.value
-    assert error.identity["request_parameters"]["max_tokens"] == 12000
+    assert error.identity["request_parameters"]["max_tokens"] == env_max_tokens
     assert error.identity["request_parameters"]["reasoning"] == "medium"
     assert error.identity["parameters"]["reasoning"] == "medium"
-    assert error.identity["parameters"]["maxTokens"] == 12000
-
-
-def test_environment_max_tokens_overrides_call_site(payload, monkeypatch):
-    monkeypatch.setenv("MODEL_MAX_TOKENS", "14000")
-    with pytest.raises(model.ModelError, match="RangeError") as caught:
-        model.complete(payload["prompt"], timeout=-1, max_tokens=8000,
-                       messages=payload["messages"], tools=payload["tools"])
-    error = caught.value
-    assert error.identity["request_parameters"]["max_tokens"] == 14000
-    assert error.identity["parameters"]["maxTokens"] == 14000
+    assert error.identity["parameters"]["maxTokens"] == env_max_tokens
 
 
 def test_missing_runtime_raises_model_error_with_identity(configured, tmp_path):

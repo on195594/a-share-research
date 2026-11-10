@@ -17,13 +17,6 @@ def check(env):
     return process.returncode, json.loads(process.stdout)
 
 
-@pytest.fixture
-def configured():
-    if not all(os.environ.get(key) for key in ("MODEL_PROVIDER", "MODEL_ID", "PI_AGENT_DIR")):
-        pytest.skip("Run with the existing worker environment for the installed Pi checks")
-    return dict(os.environ)
-
-
 def test_installed_runtime_resolves_model_without_calls_or_store_writes(configured):
     paths = [Path(configured["PI_AGENT_DIR"]) / name for name in ("auth.json", "models-store.json")]
     before = [(p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]

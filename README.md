@@ -4,7 +4,7 @@
 
 本项目负责公司财报研究与阅读；`a-stock-agent-skills` 负责 Agent 投研、持仓与风险，两者独立运行并共用 `a-stock-lib`。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
-- 产品方向与现有流程：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
+- 产品目标与使用流程：[PRODUCT.md](PRODUCT.md)；领域设计与研究方案：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
 - 三项目职责与协作：[项目契约](docs/project-contract.md)。
 - AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
 - 候选发现与研究实验：[方案](docs/screening-experiment.md)，用法见下文[候选初筛](#候选初筛)。
@@ -21,7 +21,7 @@
 | `a_share_research/` | 应用源码；`web.py` / `worker.py` 为服务入口，`research.py` 编排单股研究（取材料 `material.py`、机械核对 `checking.py`、成文契约 `prompts.py`、取证工具 `research_tools.py`），`screening.py` / `backtest.py` 为候选批次与历史回测 |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
-| `docs/` | 方案、项目契约、路线图、实施与部署状态；`PRODUCT.md` / `DESIGN.md` 是界面设计入口 |
+| `docs/` | 领域方案、项目契约、路线图、实施与部署状态；产品目标见根目录 `PRODUCT.md`，视觉规范见 `DESIGN.md` |
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
 | `Dockerfile`、`compose.yaml` | Web / worker 构建与部署 |
 
@@ -157,7 +157,7 @@ DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # �
 
 月度自动发起（启用状态与时间/额度记录见[实施计划](docs/implementation-plan.md)）：Bearer API Key 可调用 `POST /api/batches/monthly`（`{"month":"2026-12"}`）入队当月批次，`GET /api/batches/monthly/2026-12` 只读查询当月首批状态。服务端仅接受上海当前自然月自动发起，旧月拒绝；同月已有任意状态批次（含失败）均不另建，网页手动重开不受此限；已入队但跨月仍未开始初筛的自动批次直接失败停止，不使用后来数据补跑。
 
-**额度口径**：自动月批每月最多一批（Q20 + S10 最多 30 家新研究 × 每家最多 21 次调用 + 大/小组比较与排序最多 6 次 = 最多 636 次应用层模型调用；7 天内已通过报告直接复用），且不因研究或比较中断自动重跑付费阶段。自动月批按批次关联使用独立的单研究 21 次上限，其他研究仍为 30 次；取证为写作与复核预留调用，剩余不足 3 次时不启动新一轮修复，未解决问题照实保留。核算复用关联研究的 `calls` 与大组比较、小组比较、排序的 `attempts`，单列缺失 usage；usage 中的费用估算不是实际账单。这是应用层调用次数上限，不是美元硬上限或供应商底层请求数上限。
+**额度口径**：自动月批每月最多一批（Q20 + S10 最多 30 家新研究 × 每家最多 21 次调用 + 大/小组比较与排序最多 6 次 = 最多 636 次应用层模型调用；7 天内已通过报告直接复用），且不因研究或比较中断自动重跑付费阶段。自动月批按批次关联使用独立的单研究 21 次上限，其他研究仍为 30 次；取证为写作与复核预留调用，剩余不足 4 次时不启动新一轮修复（成文、可能的拒绝工具轮及最多两次复核），未解决问题照实保留。核算复用关联研究的 `calls` 与大组比较、小组比较、排序的 `attempts`，单列缺失 usage；usage 中的费用估算不是实际账单。这是应用层调用次数上限，不是美元硬上限或供应商底层请求数上限。
 
 服务重启时，进行中的初筛记为失败（人工可重新开始本月批次），手动批次跨公司比较自动重试，自动月批中断比较则失败停止。只看初筛结果、不建批次：
 

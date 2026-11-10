@@ -16,7 +16,7 @@ from a_share_research.research import _research_context, _verified_facts
 from a_share_research.research_tools import calculate
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
-from test_financial_series import FINANCIAL_DATA as DATA
+from support.financials import FINANCIAL_DATA as DATA
 
 
 def test_same_period_growth_and_calculation_inputs_are_preserved():

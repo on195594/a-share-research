@@ -1,7 +1,5 @@
 """Exact financial history checked against captured TuShare single-quarter statements."""
 
-import copy
-import functools
 import json
 import re
 from decimal import Decimal
@@ -14,28 +12,11 @@ from a_share_research import sources
 from a_share_research.material import Material, financial_series, financial_table
 from a_share_research.reading import since_prior
 from a_share_research.research_tools import calculate
+from support.financials import CAPTURES, FINANCIAL_DATA, build, frames
 from support.reports import MATERIAL
 from support.templates import ENV
 
 ROOT = Path(__file__).resolve().parents[1]
-CAPTURES = json.loads((ROOT / "tests/data/financial-series-captures.json").read_text())["companies"]
-FINANCIAL_DATA = json.loads((ROOT / "tests/data/600519-financials.json").read_text())
-
-
-def frames(captured):
-    return {key: pd.DataFrame(rows) for key, rows in captured["financials"].items()}
-
-
-@functools.lru_cache(maxsize=None)
-def _build_cached(code="000858"):
-    captured = CAPTURES[code]
-    return financial_series(frames(captured), captured["code"], captured["retrieved_at"])
-
-
-def build(code="000858"):
-    return copy.deepcopy(_build_cached(code))
-
-
 def cell(series, kind, key, period):
     return next(row for row in series[kind]["rows"] if row["id"] == key)["values"][period]
 

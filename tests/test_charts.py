@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from support.templates import ENV
-from test_financial_series import CAPTURES, build, frames
+from support.financials import CAPTURES, build, frames
 
 from a_share_research import charts, reading, screening
 from a_share_research.material import financial_series
