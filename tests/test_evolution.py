@@ -1,8 +1,10 @@
 """Persisted experiments over captured production reports, without model/network doubles."""
 from copy import deepcopy
+import cProfile
 import gzip
 import json
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -56,6 +58,105 @@ def test_source_watermark_prevents_repeated_idle_discovery_and_diagnostics_are_n
     assert [r["id"] for r in reading.latest_reports(stored)] == before
     assert evolution.active_methods(stored) == []
     assert evolution.item(stored, run_id)["usage"][0]["calls"] == 0
+
+
+def test_existing_source_set_is_checked_before_rebuilding_material_sources(stored):
+    root = evolution.discover(stored)
+    sources = evolution.item(stored, root)["sources"]
+    expected = evolution.digest({"version": evolution.VERSION,
+                                 "sources": [(s["report_id"], s["report_sha256"]) for s in sources]})
+    assert stored.execute("SELECT request_id FROM runs WHERE id=?", (root,)).fetchone()[0] == "evolution:" + expected
+    profile = cProfile.Profile()
+    assert profile.runcall(evolution.discover, stored) is None
+    assert evolution._source.__code__ not in [entry.code for entry in profile.getstats()]
+
+
+def test_idle_cache_skips_report_reads_and_tick_keeps_its_existing_receipt(stored):
+    root = evolution.discover(stored)
+    state = evolution.item(stored, root)
+    evolution._save(stored, root, state | {"phase": "deferred"})
+    cache = evolution.DiscoveryCache()
+    assert evolution.tick(stored, discovery=cache) is False
+    queries = []
+    stored.set_trace_callback(queries.append)
+    try:
+        assert evolution.tick(stored, discovery=cache) is False
+    finally:
+        stored.set_trace_callback(None)
+    assert queries and any("data_version" in sql for sql in queries)
+    assert not any("FROM reports" in sql or "u.material" in sql for sql in queries)
+    assert stored.execute(f"SELECT count(*) FROM runs WHERE {evolution.ROOT}").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["same-connection", "external-connection"])
+@pytest.mark.parametrize("legacy_hash", [False, True], ids=["stored-hash", "missing-legacy-hash"])
+def test_idle_cache_detects_body_changes_even_without_updating_saved_hash(stored, external, legacy_hash):
+    # Explicitly marked offline mutation of a captured report; never a research/return sample.
+    if legacy_hash:
+        stored.execute("UPDATE reports SET body_sha256=NULL")
+    root = evolution.discover(stored)
+    cache = evolution.DiscoveryCache()
+    assert cache.discover(stored) is None
+    body = json.loads(SOURCES[0]["body"])
+    body["summary"] = "离线缓存互变测试：" + body["summary"]
+    writer = stored
+    if external:
+        path = stored.execute("PRAGMA database_list").fetchone()[2]
+        writer = sqlite3.connect(path, isolation_level=None)
+    try:
+        writer.execute("UPDATE reports SET body=? WHERE id=?", (json.dumps(body, ensure_ascii=False), SOURCES[0]["id"]))
+    finally:
+        if external:
+            writer.close()
+    new_root = cache.discover(stored)
+    assert new_root is not None and new_root != root
+    assert cache.discover(stored) is None
+    assert stored.execute("SELECT count(*) FROM calls").fetchone()[0] == 0
+
+
+def test_idle_cache_detects_version_and_subscription_changes(stored, monkeypatch):
+    root = evolution.discover(stored)
+    cache = evolution.DiscoveryCache()
+    assert cache.discover(stored) is None
+    monkeypatch.setattr(evolution, "VERSION", evolution.VERSION + "-offline-cache-test")
+    assert cache.discover(stored) not in (None, root)
+    stored.execute("DELETE FROM subscriptions WHERE company_key=?", (SOURCES[0]["code"][:6],))
+    assert cache.discover(stored) is None  # Two remaining companies cannot open an experiment.
+
+
+def test_idle_cache_does_not_publish_transactional_or_failed_reads(stored):
+    root = evolution.discover(stored)
+    cache = evolution.DiscoveryCache()
+    assert cache.discover(stored) is None
+    stored.execute("BEGIN")
+    stored.execute("DELETE FROM subscriptions")
+    assert cache.discover(stored) is None
+    stored.execute("ROLLBACK")
+    # An authorizer rejects actual report reads, rather than replacing discovery with a mock.
+    def deny_reports(action, table, column, database, trigger):
+        return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_READ and table == "reports" else sqlite3.SQLITE_OK
+    stored.set_authorizer(deny_reports)
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="prohibited|authorized"):
+            cache.discover(stored)
+    finally:
+        stored.set_authorizer(None)
+    assert cache.discover(stored) is None
+    assert stored.execute(f"SELECT id FROM runs WHERE {evolution.ROOT}").fetchone()[0] == root
+
+
+def test_eligible_loads_only_latest_formal_report_for_each_current_company(stored):
+    captured = SOURCES[0]
+    # Same real capture in a newer report slot solely to exercise latest/formal selection.
+    run = db.create_run(stored, captured["code"], request_id="offline-newer-report")
+    db.update_run(stored, run, status="done", material=captured["material"])
+    db.save_report(stored, run, captured["code"], captured["name"], captured["period"], True,
+                   None, json.loads(captured["body"]))
+    latest = stored.execute("SELECT id FROM reports WHERE run_id=?", (run,)).fetchone()[0]
+    ids = [r["id"] for r in evolution._eligible(stored)]
+    assert ids == sorted([latest, *[s["id"] for s in SOURCES[1:]]], reverse=True)
+    db.update_run(stored, run, status="failed")
+    assert [r["id"] for r in evolution._eligible(stored)] == sorted([s["id"] for s in SOURCES], reverse=True)
 
 
 def test_discovery_version_change_is_one_source_set_not_one_task_per_report(stored, monkeypatch):

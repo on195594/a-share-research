@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import json
 import logging
 import re
+import sqlite3
+from dataclasses import dataclass
 import time
 
 from a_share_research import db, stock_codes
@@ -48,16 +50,15 @@ def _eligible(conn):
             codes.update(stock_codes.normalize_key(r["code"]) for r in json.loads(raw or "[]"))
     if not codes:
         return []
-    rows = conn.execute(
-        "SELECT r.id,r.run_id,r.code,r.company_key,r.name,r.body,r.body_sha256,r.created_at,u.material,u.request"
-        f" FROM reports r JOIN runs u ON u.id=r.run_id WHERE {db.FORMAL_REPORT}"
-        " AND u.material IS NOT NULL ORDER BY r.id DESC").fetchall()
-    found = {}
-    for row in rows:
-        code = row["company_key"]
-        if code in codes and code not in found:
-            found[code] = row
-    return list(found.values())
+    # Select small IDs first; older/out-of-scope reports must not load their large snapshots.
+    keys = sorted(codes)
+    return conn.execute(
+        "WITH latest AS (SELECT MAX(r.id) AS id FROM reports r JOIN runs u ON u.id=r.run_id"
+        f" WHERE {db.FORMAL_REPORT} AND u.material IS NOT NULL"
+        f" AND r.company_key IN ({','.join('?' for _ in keys)}) GROUP BY r.company_key)"
+        " SELECT r.id,r.run_id,r.code,r.company_key,r.name,r.body,r.body_sha256,r.created_at,u.material,u.request"
+        " FROM latest JOIN reports r ON r.id=latest.id JOIN runs u ON u.id=r.run_id"
+        " ORDER BY r.id DESC", keys).fetchall()
 
 
 def _review_issues(body):
@@ -69,28 +70,52 @@ def _review_issues(body):
 def _source(row):
     body = json.loads(row["body"])
     issues = _review_issues(body)
-    material = Material.from_snapshot(json.loads(row["material"]))
+    snapshot = json.loads(row["material"])
+    material = Material.from_snapshot(snapshot)
     catalog = {key: {"document": value["document"], "read_pages": value["read_pages"]}
                for key, value in material.source_registry().items()}
     return {"catalog": catalog, "report_id": row["id"], "run_id": row["run_id"], "code": row["code"], "name": row["name"],
-            "report_sha256": digest(body), "material_sha256": json.loads(row["material"])["sha256"], "created_at": row["created_at"],
+            "report_sha256": digest(body), "material_sha256": snapshot["sha256"], "created_at": row["created_at"],
             "question": body.get("question", ""), "gaps": body.get("gaps", []),
             "review_issues": None if issues is None else [{key: issue.get(key) for key in
                 ("id", "type", "where", "problem", "importance", "status")} for issue in issues],
             "risks": body.get("risks", []), "stance": body.get("stance"), "summary": body.get("summary")}
 
 
+@dataclass
+class DiscoveryCache:
+    """Connection-local receipt for successful idle checks, never frozen experiment state."""
+
+    _connection: sqlite3.Connection | None = None
+    _watermark: tuple[str, int, int] | None = None
+
+    def discover(self, conn: sqlite3.Connection) -> int | None:
+        # data_version sees other connections; total_changes also sees our own writes/rollbacks.
+        # Never publish a receipt for uncommitted inputs or cache an exception.
+        if conn.in_transaction:
+            return discover(conn)
+        watermark = (VERSION, conn.total_changes, conn.execute("PRAGMA data_version").fetchone()[0])
+        if self._connection is conn and self._watermark == watermark:
+            return None
+        run_id = discover(conn)
+        # Capture before reading: writes during discovery must invalidate the following check.
+        self._connection, self._watermark = conn, watermark
+        return run_id
+
+
 def discover(conn) -> int | None:
-    """One controller per frozen source set. An idle loop with no new evidence makes no call."""
+    """One controller per frozen source set; check its receipt before rebuilding materials."""
     from a_share_research import model, service
     rows = _eligible(conn)
     if len(rows) < 3 or sum(bool(json.loads(r["body"]).get("gaps")) for r in rows) < 2:
         return None
-    sources = [_source(row) for row in rows]
-    key = digest({"version": VERSION, "sources": [(s["report_id"], s["report_sha256"]) for s in sources]})
+    # Keep the original canonical digest, not the differently serialized stored body_sha256.
+    key = digest({"version": VERSION,
+                  "sources": [(r["id"], digest(json.loads(r["body"]))) for r in rows]})
     request_id = f"evolution:{key}"
     if conn.execute("SELECT 1 FROM runs WHERE request_id=?", (request_id,)).fetchone():
         return None
+    sources = [_source(row) for row in rows]
     history = []
     for previous in conn.execute(f"SELECT id,identity FROM runs WHERE kind='diagnostic' AND {ROOT} ORDER BY id DESC LIMIT 30"):
         old = _state(previous)
@@ -599,7 +624,7 @@ def execute(conn, run_id):
             _save(conn, run_id, state, error=state["error"])
 
 
-def tick(conn) -> bool:
+def tick(conn, *, discovery: DiscoveryCache | None = None) -> bool:
     row = conn.execute(f"SELECT id,identity,status,error FROM runs WHERE kind='diagnostic' AND {ROOT} AND json_extract(identity, '$.evolution.phase') NOT IN ('adopted','rejected','deferred') ORDER BY id LIMIT 1").fetchone()
     if row:
         state = _state(row)
@@ -615,7 +640,7 @@ def tick(conn) -> bool:
             return False
         execute(conn, row["id"])
         return True
-    return discover(conn) is not None
+    return (discovery.discover(conn) if discovery is not None else discover(conn)) is not None
 
 
 def reason_blocks(text):

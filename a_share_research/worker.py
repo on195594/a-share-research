@@ -57,6 +57,7 @@ def main() -> None:
     screening.recover(conn)
     scans.recover(conn)
     log.info("worker ready")
+    discovery = evolution.DiscoveryCache()
     while True:
         row = next_run(conn)
         if row is None:
@@ -69,7 +70,7 @@ def main() -> None:
                 if diagnostic := next_diagnostic(conn):
                     (evolution if evolution.is_controller(diagnostic) else research).execute(conn, diagnostic["id"])
                     continue
-                if evolution.tick(conn):
+                if evolution.tick(conn, discovery=discovery):
                     continue
                 try:
                     consensus_backfill.tick()
