@@ -10,6 +10,9 @@ from decimal import Decimal, ROUND_HALF_UP, localcontext
 
 from a_share_research import report as report_body
 from a_share_research import db, sources, evidence, stock_codes, valuation as valuations
+from a_share_research.limits import (
+    ACQUISITION_SECONDS, CALL_LIMIT, DRAFT_CALLS, FETCH_LIMIT, REPAIR_CALL_RESERVE, ROUND_LIMIT,
+)
 from a_share_research.checking import quote_found
 from a_share_research.material import financial_table
 from a_share_research.prompts import RULES, output_schema, parse_json
@@ -514,21 +517,7 @@ class ResearchTools:
 
 REPAIR_TOOLS = {"disclosures", "announcements", "read_disclosure", "calculate", "valuation", "macro", "commodities", "commodity", "industry_trend"}
 
-# The 601600 external-condition smoke needed more than 24 ordinary evidence fetches.
-FETCH_LIMIT = 48  # runaway guard; time, rounds and total calls still bound exploration
-# Model turns shared by explore and repair. 12 stopped a normal repair in production (688578
-# research, report 83, hit round_limit mid-repair), so it is a runaway guard, not a depth quota.
-ROUND_LIMIT = 24
-CALL_LIMIT = 120  # runaway guard only, so calculations cannot swell the prompt without bound
-REPAIR_CALL_RESERVE = 48  # shared by both repairs; exploration cannot consume it
-# Shared by explore and repair and measured from the start of exploration. 72 calls already took 562 s
-# (report 108), so 120 need this; the runner's 1800 s must still leave review and repair their ~400 s.
-ACQUISITION_SECONDS = 1200
 COMPUTE_TOOLS = {"calculate", "valuation"}  # program arithmetic on held evidence, not evidence fetches
-# Model calls a draft needs once acquisition stops: the tool-free draft, one declined tool turn
-# (Gemini still calls tools when none are offered) and a review with its one format correction.
-DRAFT_CALLS = 4
-
 
 def _fetches(traces: list[dict]) -> int:
     return sum(t["tool"] not in COMPUTE_TOOLS for t in traces)

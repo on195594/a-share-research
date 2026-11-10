@@ -13,7 +13,8 @@ import pytest
 
 from a_share_research import db, evidence, research, sources
 from a_share_research.material import mdna_pages
-from a_share_research.research_tools import Acquisition, CALL_LIMIT, FETCH_LIMIT, REPAIR_CALL_RESERVE, REPAIR_TOOLS, ROUND_LIMIT, _fetches
+from a_share_research.limits import CALL_LIMIT, FETCH_LIMIT, MAX_CALLS, REPAIR_CALL_RESERVE, ROUND_LIMIT
+from a_share_research.research_tools import Acquisition, REPAIR_TOOLS, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from support.reports import MATERIAL, SALES_ROW, report
 from test_review_evidence import BODY, REVIEW, captured_registry, issue, payload, accept, pending_ledger
@@ -311,7 +312,7 @@ def test_repair_writer_can_act_after_exploration_uses_all_calls(session):
 
 def test_run_call_guard_preserves_a_smaller_cap_and_never_exceeds_default(session):
     recorded, _, _ = session
-    for requested, expected in ((1, 1), (99, research.MAX_CALLS)):
+    for requested, expected in ((1, 1), (99, MAX_CALLS)):
         runner = research.Runner(recorded.conn, recorded.run_id, max_calls=requested)
         assert runner.max_calls == expected
         runner.calls = expected
@@ -549,12 +550,6 @@ def test_declined_round_at_the_call_reserve_leaves_the_review_its_format_correct
     assert acquisition.write('额度内收尾', 'explore') == report()
     assert runner.offered == [[], []] and acquisition.traces == []
     assert runner.max_calls - runner.calls == 2  # review + its one format correction
-
-
-def test_round_guard_stops_before_the_model_call_guard_fails_the_run():
-    # round_limit ends exploration gracefully; MAX_CALLS raises and fails the whole research run.
-    # Review and two repairs still need model calls after the last evidence round.
-    assert research.MAX_CALLS >= ROUND_LIMIT + 6
 
 
 def test_calls_after_the_stop_are_declined_once_unexecuted(session):

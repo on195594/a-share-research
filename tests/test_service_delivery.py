@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, reading, service
-from a_share_research.research import MAX_CALLS
+from a_share_research.limits import MAX_CALLS
 from support.reports import MATERIAL
 from support.continuation import load
 

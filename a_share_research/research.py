@@ -10,12 +10,13 @@ from datetime import date
 
 from a_share_research import report as report_body
 from a_share_research import db, model, sources, evidence, stance as stances, valuation, stock_codes
-from a_share_research.service import MAX_CALLS, research_call_limit
+from a_share_research.limits import CALL_TIMEOUT_SECONDS, DRAFT_CALLS, MAX_CALLS, RUN_SECONDS
+from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
 from a_share_research.checking import SECTIONS, check
 from a_share_research.prompts import RULES, output_schema, parse_json
-from a_share_research.research_tools import DRAFT_CALLS, Acquisition, active_methods_digest, explore, method_catalog
+from a_share_research.research_tools import Acquisition, active_methods_digest, explore, method_catalog
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class Runner:
     def __init__(self, conn, run_id: int, *, max_calls: int = MAX_CALLS):
         self.conn, self.run_id, self.calls = conn, run_id, 0
         self.max_calls = min(max_calls, research_call_limit(conn, run_id))
-        self.deadline = time.monotonic() + 1800
+        self.deadline = time.monotonic() + RUN_SECONDS
         self.stage = "gather"
         self.chain = None  # (call id, full prompt) of the last tool-loop round, so the next stores only its additions
         self.material = None  # set once gathered; its prompt block is stored once however many prompts carry it
@@ -39,7 +40,7 @@ class Runner:
         self.stage = step
         if self.calls >= self.max_calls:
             raise ResearchError("模型调用次数超过上限")
-        timeout = int(min(600, self.deadline - time.monotonic()))
+        timeout = int(min(CALL_TIMEOUT_SECONDS, self.deadline - time.monotonic()))
         if timeout <= 0:
             raise ResearchError("研究超过整体时限，已保存取得的材料")
         self.calls += 1

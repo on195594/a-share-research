@@ -8,12 +8,11 @@ from datetime import datetime
 from a_share_research import report as report_body
 from a_share_research import batches, db, stance as stances
 from a_share_research import stock_codes
+from a_share_research.limits import MAX_CALLS, MONTHLY_MAX_CALLS
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
 VERSION = "research-v1"
-MAX_CALLS = 30  # Default research loop guard, not a money cap.
-MONTHLY_MAX_CALLS = 21  # Owner-authorized automatic batch: 30 companies * 21 + 6 = 636.
 
 
 class RequestError(ValueError):
