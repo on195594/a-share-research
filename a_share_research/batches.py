@@ -3,6 +3,16 @@
 import json
 
 
+ENTERED = ("tracking", "closed")
+# Worker projection: retain raw JSON for CAS, omit detail-only universe and coverage.
+POLL_COLUMNS = ("id", "request_id", "status", "rule", "q20", "q5", "selection", "l5",
+                "entry", "marks", "s10", "sq3", "sl3", "small_selection", "frozen_at")
+
+
+def horizons_complete(rule: dict, marks: dict) -> bool:
+    return all(f"{months}m" in marks.get("horizons", {}) for months in rule["horizons_months"])
+
+
 def load(row) -> dict:
     batch = dict(row)
     for key in ("rule", "universe", "q20", "q5", "selection", "l5", "entry", "marks",

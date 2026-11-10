@@ -185,7 +185,7 @@ def summarize_h3(rows: list[dict]) -> list[dict]:
 def score(database: str, pro, today: date) -> dict:
     with closing(sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
         conn.row_factory = sqlite3.Row
-        selected = [b for r in conn.execute("SELECT * FROM batches WHERE status IN ('tracking','done','completed')")
+        selected = [b for r in conn.execute("SELECT * FROM batches WHERE status IN (?, ?)", batches.ENTERED)
                     if (b := batches.load(r)).get('entry') and batches.ranking_halves(b)]
         samples = load_samples(conn)
     starts = [b['entry']['date'] for b in selected] + [s['completed'][:10].replace('-', '') for s in samples]

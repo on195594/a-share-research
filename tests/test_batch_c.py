@@ -291,8 +291,9 @@ def test_empty_group_with_seats_is_cash(seats):
 
 
 @pytest.mark.parametrize('rule', [batches.RULE, V12_RULE, batches.NEW_RULE], ids=['v11', 'v12', 'v13'])
-def test_cash_returns_render_while_missing_marks_and_zero_seats_stay_uncomputed(rule):
-    batch = {'id': 1, 'status': 'tracking', 'created_at': '2026-09-18', 'rule': rule,
+@pytest.mark.parametrize('status', batches.ENTERED)
+def test_cash_returns_render_while_missing_marks_and_zero_seats_stay_uncomputed(rule, status):
+    batch = {'id': 1, 'status': status, 'created_at': '2026-09-18', 'rule': rule,
              'entry': PRICES['entry'], 'marks': {'latest': PRICES['mark']},
              'q20': [], 'q5': [], 'l5': {'codes': []}, 'sq3': [], 'sl3': {'codes': []}}
     results = batches.returns(batch)
@@ -308,6 +309,9 @@ def test_cash_returns_render_while_missing_marks_and_zero_seats_stay_uncomputed(
     template = 'batch_v12.html' if 'small' in rule else 'batch.html'
     html = ENV.get_template(template).render(batch=batch, results=results, performance=performance,
                                              pools=[], names={}, frozen_by={})
+    if status == 'closed':
+        assert '模拟结束：全部期限收益已记录。' in html
+        assert '约 30 分钟后自动重试' not in html
     assert '<td class="num">-0.20%</td>' in html
     assert '<td class="num">—</td>' in html
     for missing in ({'entry': None}, {'marks': {}}, {'marks': {'latest': None}}):

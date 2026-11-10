@@ -35,7 +35,7 @@ def run(*args):
 def idle(database: Path) -> None:
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         active = conn.execute("SELECT id FROM runs WHERE status IN ('queued','running')").fetchall()
-        busy = conn.execute("SELECT id FROM batches WHERE status NOT IN ('failed','done')"
+        busy = conn.execute("SELECT id FROM batches WHERE status NOT IN ('failed','done','closed')"
                             " AND (status != 'tracking' OR step IS NOT NULL)").fetchall()
         scans = conn.execute("SELECT id FROM scans WHERE status IN ('queued','running')").fetchall()
     if active or busy or scans:

@@ -78,3 +78,22 @@ def test_prune_images_never_selects_an_unreleased_build_or_a_dangling_layer():
     only = {i: info for i, info in IMAGES["images"].items()
             if i == IMAGES["current"] or "rollback-5b0b950" in info["tags"]}
     assert deploy.images_to_prune(only, IMAGES["current"]) == []
+
+
+def test_closed_batch_is_idle_even_with_old_step(tmp_path):
+    captured = json.loads((Path(__file__).parent / 'data/hypotheses_v3.json').read_text())['batch']
+    database = tmp_path / 'closed.db'
+    conn = db.connect(database)
+    try:
+        # Lifecycle-only variant of a captured batch; closed never resumes its saved step.
+        conn.execute('INSERT INTO batches(status,created_at,rule,entry,marks,step) VALUES (?,?,?,?,?,?)',
+                     ('closed', db.now(), json.dumps(captured['rule']),
+                      json.dumps(captured['entry']), json.dumps(captured['marks']), 'old-step'))
+        deploy.idle(database)
+        conn.execute("UPDATE batches SET status='tracking'")
+        with pytest.raises(RuntimeError, match='尚未空闲'):
+            deploy.idle(database)
+        conn.execute('UPDATE batches SET step=NULL')
+        deploy.idle(database)
+    finally:
+        conn.close()

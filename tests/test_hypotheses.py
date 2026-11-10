@@ -206,3 +206,39 @@ def test_h3_mature_outcome_direction_and_rate_denominator(conn):
     # A lagging benchmark prevents maturation even when the stock calendar has 61 bars.
     pending = hypotheses.score_sample(sample, days, {d: v for d, v in bench.items() if d < days[-1]}, raw, raw)
     assert pending['result'] is None
+
+
+def test_closed_batch_stays_in_h1_sample(conn, tmp_path):
+    from datetime import date
+    import pandas as pd
+
+    batch = CAPTURE['batch']
+    mark = batch['marks']['latest']
+
+    class Replay:
+        def query(self, api, **params):
+            if api == 'trade_cal':
+                return pd.DataFrame([{'cal_date': mark['date']}])
+            if api == 'index_daily':
+                return pd.DataFrame([{'trade_date': mark['date'],
+                                      'close': mark['benchmarks'][params['ts_code']]['value']}])
+            value = mark['prices'][params['ts_code']]
+            if api == 'daily':
+                return pd.DataFrame([{'trade_date': mark['date'], 'close': value['close']}])
+            assert api == 'adj_factor'
+            return pd.DataFrame([{'trade_date': mark['date'], 'adj_factor': value['adj']}])
+
+    columns = list(batch)
+    conn.execute(f"CREATE TABLE batches ({','.join(columns)})")
+    conn.execute(f"INSERT INTO batches VALUES ({','.join('?' for _ in columns)})",
+                 [json.dumps(batch[k]) if isinstance(batch[k], (dict, list)) else batch[k] for k in columns])
+    database = tmp_path / 'hypotheses.db'
+    conn.commit()
+    with sqlite3.connect(database) as saved:
+        conn.backup(saved)
+    original = hypotheses.score(str(database), Replay(), date(2026, 11, 2))
+    with sqlite3.connect(database) as saved:
+        saved.execute("UPDATE batches SET status='closed'")
+    closed = hypotheses.score(str(database), Replay(), date(2026, 11, 2))
+    assert len(closed['rows']['h1']) == 1
+    assert closed == original

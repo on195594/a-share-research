@@ -17,7 +17,7 @@ import tushare as ts
 
 from a_share_research import db, model, service, sources, stock_codes
 from a_share_research.db import SHANGHAI
-from a_share_research.batches import load, group_return, returns, small_rule
+from a_share_research.batches import POLL_COLUMNS, horizons_complete, load, group_return, returns, small_rule
 from a_share_research.reading import research_state
 from a_share_research.service import freeze_batch as freeze
 from a_share_research.material import METRICS
@@ -696,7 +696,7 @@ def _marks_through(pro, batch: dict, day: str, stamp: str) -> dict:
 
 def tick(conn) -> bool:
     """Advance at most one batch by one step; returns True when it did work."""
-    rows = conn.execute("SELECT * FROM batches WHERE status IN ('queued', 'researching', 'proposed', 'frozen', 'tracking')"
+    rows = conn.execute(f"SELECT {', '.join(POLL_COLUMNS)} FROM batches WHERE status IN ('queued', 'researching', 'proposed', 'frozen', 'tracking')"
                         " ORDER BY id").fetchall()
     now = datetime.now(SHANGHAI)
     for r in rows:
@@ -803,11 +803,14 @@ def tick(conn) -> bool:
                 entry = {"date": days[0], "prices": entry_prices(pro, days[0], codes),
                          "benchmarks": benchmark_prices(pro, days[0], days[0], "open", batch["rule"]["benchmarks"])}
                 batch = batch | {"entry": entry}
-                _save(conn, batch["id"], status="tracking", entry=entry, error=None,
-                      marks=_marks_through(pro, batch, days[-1], stamp))
+                marks = _marks_through(pro, batch, days[-1], stamp)
+                _save(conn, batch["id"], status="closed" if horizons_complete(batch["rule"], marks) else "tracking",
+                      entry=entry, error=None, marks=marks)
                 return True
             day = _trade_days(pro, batch["entry"]["date"], stamp)[-1]
-            _save(conn, batch["id"], error=None, marks=_marks_through(pro, batch, day, stamp))
+            marks = _marks_through(pro, batch, day, stamp)
+            _save(conn, batch["id"], status="closed" if horizons_complete(batch["rule"], marks) else "tracking",
+                  error=None, marks=marks)
             return True
         except Exception as exc:
             if not isinstance(exc, ScreenError):

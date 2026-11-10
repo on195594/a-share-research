@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS prices_by_code ON prices(code, id);
 CREATE TABLE IF NOT EXISTS batches (
     id INTEGER PRIMARY KEY,
     request_id TEXT UNIQUE,
-    status TEXT NOT NULL,  -- queued / screening / researching / selecting / proposed / frozen / tracking / failed
+    status TEXT NOT NULL,  -- queued / screening / researching / selecting / proposed / frozen / tracking / closed / failed
     step TEXT,
     error TEXT,
     created_at TEXT NOT NULL,

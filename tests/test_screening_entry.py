@@ -219,3 +219,57 @@ def test_lagging_benchmarks_enter_then_mark_once_both_are_published(tmp_path, mo
         assert not {"daily", "adj_factor"} & set(market.calls)
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize('horizons, expected', [([0], 'closed'), ([0, 3], 'tracking')])
+def test_horizon_write_closes_only_when_all_are_saved(market, tmp_path, monkeypatch, horizons, expected):
+    from a_share_research import batches, reading
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromisoformat('2026-10-23T18:00:00+08:00').astimezone(tz)
+
+    monkeypatch.setattr(s, 'datetime', Clock)
+    monkeypatch.setattr(s, '_pro', lambda: market)
+    conn = db.connect(tmp_path / 'terminal.db')
+    try:
+        # Zero-month horizon is a test-only clock parameter, not a new investment rule.
+        # All entry/mark prices and benchmark inputs are the unmodified captured session.
+        rule = s.RULE | {'horizons_months': horizons}
+        entry = {'date': DAY, 'prices': s.entry_prices(market, DAY, [CODE]),
+                 'benchmarks': s.benchmark_prices(market, DAY, DAY, 'open', rule['benchmarks'])}
+        universe = json.loads((Path(__file__).parent / 'data/screen-rows.json').read_text())
+        conn.execute('INSERT INTO batches(status,created_at,rule,q20,q5,l5,entry,universe) '
+                     'VALUES (?,?,?,?,?,?,?,?)',
+                     ('tracking', db.now(), json.dumps(rule), json.dumps([{'code': CODE}]), json.dumps([CODE]),
+                      json.dumps({'codes': [CODE]}), json.dumps(entry), json.dumps(universe)))
+        assert batches.load(reading.batch(conn, 1))['universe'] == universe
+        before = dict(reading.batch(conn, 1))
+        writes = []
+        conn.set_trace_callback(writes.append)
+        assert s.tick(conn)
+        row = dict(reading.batch(conn, 1))
+        batch = batches.load(row)
+        assert batch['status'] == expected and set(batch['marks']['horizons']) == {'0m'}
+        assert batch['marks']['horizons']['0m'] == batches.returns(batch)
+        assert {k: v for k, v in row.items() if k not in ('status', 'marks', 'updated_at')} == {
+            k: v for k, v in before.items() if k not in ('status', 'marks', 'updated_at')}
+        updates = [sql for sql in writes if sql.startswith('UPDATE batches')]
+        assert len(updates) == 1 and 'marks' in updates[0] and 'status' in updates[0]
+        # Invalid detail-only JSON must not enter the polling projection, even while tracking.
+        conn.execute("UPDATE batches SET universe='invalid JSON', coverage='invalid JSON'")
+        assert not s.tick(conn)
+        conn.execute('UPDATE batches SET universe=?, coverage=NULL', (json.dumps(universe),))
+        assert batches.load(reading.batch(conn, 1))['universe'] == universe
+        if expected == 'closed':
+            # Poison a required polling field too: a closed row must not even be selected.
+            conn.execute("UPDATE batches SET rule='invalid JSON'")
+            def forbidden():
+                pytest.fail('closed batch requested a market provider')
+            monkeypatch.setattr(s, '_pro', forbidden)
+            changes = conn.total_changes
+            assert not s.tick(conn)
+            assert conn.total_changes == changes
+    finally:
+        conn.close()

@@ -41,7 +41,7 @@ def test_concurrent_monthly_requests_are_one_batch(tmp_path):
     conn.close()
 
 
-@pytest.mark.parametrize('status', ['queued', 'researching', 'frozen', 'tracking', 'failed'])
+@pytest.mark.parametrize('status', ['queued', 'researching', 'frozen', 'tracking', 'closed', 'failed'])
 def test_existing_manual_batch_suppresses_automatic(tmp_path, status):
     conn = db.connect(tmp_path / 'monthly.db')
     ident = service.create_batch(conn, 'manual')
@@ -49,6 +49,9 @@ def test_existing_manual_batch_suppresses_automatic(tmp_path, status):
     month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
     result = service.monthly_batch(conn, month, submit=True)
     assert not result['created'] and result['batch']['id'] == ident
+    if status == 'closed':
+        with pytest.raises(service.RequestError):
+            service.create_batch(conn, 'duplicate-closed-month')
     with pytest.raises(service.RequestError, match='不补跑'):
         service.monthly_batch(conn, '2020-01', submit=True)
     conn.close()

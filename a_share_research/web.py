@@ -301,7 +301,7 @@ def research_library(request: Request, q: str = "", content: str = "", history: 
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
     batch = reading.latest_batch(conn)
     performance = None
-    if batch and batch["status"] == "tracking":
+    if batch and batch["status"] in batches.ENTERED:
         loaded = batches.load(batch)
         performance = charts.batch_returns(loaded, batches.returns(loaded),
                                            {r["code"]: r["name"] for r in (loaded["q20"] or []) + (loaded.get("s10") or [])})
