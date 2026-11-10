@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Weekly K7 progress: read the milestone table, check delivery against production, print the message."""
+"""Weekly milestone progress: read the milestone table, check delivery against production, print the message."""
 
 import re
 import sqlite3
@@ -18,8 +18,8 @@ def git(*args: str) -> subprocess.CompletedProcess:
 
 
 def parse_milestones(text: str) -> list[dict]:
-    """Rows of the K7 milestone table; a malformed row fails loudly rather than vanishing from the push."""
-    section = text.split("### K7 里程碑", 1)[1].split("\n\n已完成", 1)[0]
+    """Rows of the fixed milestone table; a malformed row fails loudly rather than vanishing from the push."""
+    section = text.split("### 固定里程碑", 1)[1].split("\n\n已完成", 1)[0]
     rows = []
     for line in section.splitlines():
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
@@ -31,11 +31,11 @@ def parse_milestones(text: str) -> list[dict]:
         rows.append({"name": cells[0], "due": date.fromisoformat(cells[1]), "state": cells[2],
                      "commit": commit[1] if commit else None, "note": cells[4]})
     if not rows:
-        raise ValueError("实施计划里没有 K7 里程碑行")
+        raise ValueError("实施计划里没有固定里程碑行")
     return rows
 
 
-def render(rows: list[dict], today: date, *, production: str | None, released, commits: list[str],
+def render(rows: list[dict], today: date, *, production: str | None, released,
            counts: dict) -> str:
     overdue, soon, done, unreleased = [], [], [], []
     for row in rows:
@@ -45,7 +45,7 @@ def render(rows: list[dict], today: date, *, production: str | None, released, c
             overdue.append(row)
         elif row["due"] <= today + timedelta(days=14):
             soon.append(row)
-    lines = [f"K7 周进度 {today.isoformat()}", ""]
+    lines = [f"里程碑进度 {today.isoformat()}", ""]
     if overdue:
         lines.append(f"逾期 {len(overdue)} 项（须交付或改方案）")
         lines += [f"- {r['name']}：到期 {r['due']}，已逾期 {(today - r['due']).days} 天，{r['state']}" for r in overdue]
@@ -58,8 +58,7 @@ def render(rows: list[dict], today: date, *, production: str | None, released, c
         lines.append("14 天内到期")
         lines += [f"- {r['name']}：{r['due']}，{r['state']}（{r['note']}）" for r in soon]
     lines.append(f"已交付并上线 {len(done)}/{len(rows)}" + (f"：{'、'.join(r['name'] for r in done)}" if done else ""))
-    lines += ["", f"过去 7 天 K7 提交 {len(commits)} 个"] + [f"- {c}" for c in commits[:5]]
-    lines.append(f"过去 7 天诊断任务 {counts['diagnostic']} 个，研究失败 {counts['failed']} 个，研究总数 {counts['research']} 个")
+    lines.append(f"过去 7 天研究失败 {counts['failed']} 个，研究总数 {counts['research']} 个")
     lines.append(f"生产版本 {production or '无法确认'}")
     return "\n".join(lines)
 
@@ -76,9 +75,9 @@ def production_commit() -> str | None:
 
 def activity(since: date) -> dict:
     with sqlite3.connect(f"file:{DATABASE}?mode=ro", uri=True) as conn:
-        row = conn.execute("SELECT SUM(kind='diagnostic'), SUM(kind='research' AND status='failed'), SUM(kind='research')"
+        row = conn.execute("SELECT SUM(kind='research' AND status='failed'), SUM(kind='research')"
                            " FROM runs WHERE created_at >= ?", (since.isoformat(),)).fetchone()
-    return dict(zip(("diagnostic", "failed", "research"), (value or 0 for value in row)))
+    return dict(zip(("failed", "research"), (value or 0 for value in row)))
 
 
 def main() -> None:
@@ -88,8 +87,7 @@ def main() -> None:
         raise SystemExit(plan.stderr)
     production = production_commit()
     since = today - timedelta(days=7)
-    commits = git("log", f"--since={since.isoformat()}", "-i", "--grep=k7", "--format=%h %s").stdout.splitlines()
-    print(render(parse_milestones(plan.stdout), today, production=production, commits=commits, counts=activity(since),
+    print(render(parse_milestones(plan.stdout), today, production=production, counts=activity(since),
                  released=lambda commit: bool(production) and git("merge-base", "--is-ancestor", commit, production).returncode == 0))
 
 

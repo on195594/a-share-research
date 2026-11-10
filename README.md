@@ -238,3 +238,5 @@ uv run python -m a_share_research.deploy "$release_code" \
 业务表指纹只在两服务停止的窗口内比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `MODEL_REASONING` 分别记录，模型与推理强度未变时不追加模型配置检查或研究调用。
 
 最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
+
+定时脚本的唯一来源是 `ops/hermes/`，改动提交后用 `python3 ops/hermes/install.py --check` 核对、`python3 ops/hermes/install.py --apply` 同步宿主。发布工具不负责这一步，任务与宿主路径见 [脚本说明](ops/hermes/README.md)。

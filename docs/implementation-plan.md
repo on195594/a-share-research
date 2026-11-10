@@ -78,10 +78,10 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 本节只保留当前版本与回退方式；此前 `569850c` 维护及双模型切换的评估、配置恢复注意事项与证据见 `git show d2d6255:docs/implementation-plan.md`「当前部署」，更早历史继续沿该版本追溯。
 
 **上线后接入**：
-- 顾问（`d15af17` 起）：Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
-- 月批（11-03 安装）：no-agent 任务 `3d8b860808e4`（每月 1 日 20:00 `cron/a-share-monthly-submit.sh` 调 `POST /api/batches/monthly`，发一次确认）与 `112633a18054`（1–3 日每小时 :30 `cron/a-share-monthly-status.sh`，只在冻结/待确认/失败/带缺口完成或创建超 48 小时未完成时推送一次）；沿用 `hermes-advisor` 凭据与 Host 头，去重回执在宿主 `~/.local/state/a-share-monthly/<月>.receipt`（11 月手动批次已预置为已通知）。已对生产实测：11 月状态推送与去重、已有批次不新建、旧月 409。回退或停用先 `hermes cron pause` 这两项。
-- 里程碑进度：no-agent 任务 `6b6ecd1783ea`（每周一 09:03 `cron/a-share-k7-progress.sh`）读取上方里程碑表、生产镜像与只读业务库，推送已交付、逾期和近期到期项；不跑模型、不写数据。
-- 记分：no-agent 任务 `2c0e2f798501`（周日 19:07 `cron/a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
+- 顾问（`d15af17` 起）：脚本源在 `ops/hermes/`；Hermes 具名 Key `hermes-advisor`（编号 3，凭据 `~/.config/a-share-advisor/runtime.env`，0600）；no-agent 任务 `fbb0cbf6ee60`（工作日 16:37 扫描）与 `7845e96f4184`（周日 18:07 周报），走 `http://127.0.0.1:8620` 并发送公共 Host 头。
+- 月批（11-03 安装）：脚本源在 `ops/hermes/`；no-agent 任务 `3d8b860808e4`（每月 1 日 20:00 `a-share-monthly-submit.sh` 调 `POST /api/batches/monthly`，发一次确认）与 `112633a18054`（1–3 日每小时 :30 `a-share-monthly-status.sh`，只在冻结/待确认/失败/带缺口完成或创建超 48 小时未完成时推送一次）；沿用 `hermes-advisor` 凭据与 Host 头，去重回执在宿主 `~/.local/state/a-share-monthly/<月>.receipt`（11 月手动批次已预置为已通知）。已对生产实测：11 月状态推送与去重、已有批次不新建、旧月 409。回退或停用先 `hermes cron pause` 这两项。
+- 里程碑进度：脚本源在 `ops/hermes/`；no-agent 任务 `6b6ecd1783ea`（每周一 09:03 `a-share-milestones.sh`）读取上方里程碑表、生产镜像与只读业务库，推送已交付、逾期和近期到期项；不跑模型、不写数据。
+- 记分：脚本源在 `ops/hermes/`；no-agent 任务 `2c0e2f798501`（周日 19:07 `a-share-scoring.sh`）在 worker 容器内并行跑 V0/V1/V3/A3，仅成熟样本数变化时推送；Hermes 脚本超时 600 秒（11-02 由 240 调高），实测约 3 分钟（V0 冷缓存最慢），基线 11-02 已建。
 
 ## 尚待完成与未采用项
 
