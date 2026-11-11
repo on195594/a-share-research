@@ -2,7 +2,7 @@
 
 更新：2026-11-11。覆盖 `a-share-research`、`a-stock-agent-skills`、`a-stock-lib` 与调度方 Hermes。
 
-本文件是三个项目的架构分层、职责与协作边界的单一来源；[路线图](roadmap.md)定义演进原则与阶段日期，[实施计划](implementation-plan.md)定义工作包与验收。现行接口以各 owner 的代码和合同为准，标为“方向”的内容尚未实现。本文不改变投资规则，也不扩展各仓库 `AGENTS.md` 中的授权。
+**过渡期文件**：所有者 2026-11-11 决定把三个项目合为一个系统（[合一重构方案](consolidation.md)）。本文件描述 2026-12-02 切换前仍然生效的职责与协作边界，切换后删除，由 `ARCHITECTURE.md` 取代。现行接口以各 owner 的代码和合同为准；本文不改变投资规则。
 
 ## 1. 共同目标与当前关系
 
@@ -46,7 +46,7 @@ flowchart LR
 
 **两个应用的判断分工**：Research 回答公司层面的“值不值、值多少、什么会证伪”，Skills 回答账户层面的“能不能买、买多少、何时必须处理”。Skills 的买入动作以 Research 有效论点卡立场为主干，A—F 矩阵作参考（Skills 现行规格）；Research 的结论与立场不等于账户动作，须与账户事实和风险政策合成后才成为 `decision-v1`/`monitor-v1`。`a-share-research` 是应用名，`a-stock-research` 是 Skills 中的首次研究入口。
 
-**现存重复（方向）**：宿主 Agent 在 Skill 流程里自行取证、评分得出的公司结论，不经引文与计算核验，也不进判断账本；Research 的取证与核验工具目前只在 worker 内可用。方向是公司判断只由 Research 生产并记分，Skill 收敛为读卡、账户门禁与仓位，Research 的工具与核验对宿主 Agent 开放（[路线图第 3 节](roadmap.md#3-阶段与日期)）。落地须 Skills 的带日期规格与所有者授权，此前现行流程不变。
+**现存重复**：宿主 Agent 在 Skill 流程里自行取证、评分得出的公司结论，不经引文与计算核验，也不进判断账本；Research 的取证与核验工具目前只在 worker 内可用。合一重构用同一份工具注册表和入账门解决（[方案第 3 节](consolidation.md#3-目标结构)），切换前现行流程不变。
 
 Research 的价格参考由应用拥有；Skills 的止损、仓位和风险政策由 runtime 拥有。模拟组合设计见[候选发现与研究实验方案](screening-experiment.md)。
 
@@ -54,7 +54,7 @@ Research 的价格参考由应用拥有；Skills 的止损、仓位和风险政�
 
 - 两个消费者通过锁定版本及哈希的 Lib wheel 使用公共能力，不导入对方源码或跨项目读取数据库。当前锁定见各自 `pyproject.toml`，发版记录见 Lib `CHANGELOG.md`；此前记在本节的锁定流水见 `git show d73505d:docs/project-contract.md`。
 - **Lib 的实际共用面**：两端都用的是 TuShare Provider 基座、财务与估值历史、代码规范化。A—F 评分、周期与主观证据类型、送转、股息、行业与实时行情校验目前只有 Skills 使用，作为版本化规则留在 Lib。Research 另经 `market.py` 直连全市场截面、复权、停牌、卖方预测等接口。
-- **入库判据**：同一指标同时出现在 Research 报告与 Skills 输出、口径必须一致时，下沉到 Lib 一处实现；只有一方使用的能力留在使用方。不为统一目录搬迁代码，也不为复用扩展 Lib。
+- Lib 不再接收新能力：它整体并入本仓库 `core/`，两端的口径差异在政策 v0 中冻结，由后续政策版本统一（[方案第 3 节](consolidation.md#3-目标结构)）。
 - 公共 Provider 保留来源、获取时间、数据时点、缺失与降级信息；消费者决定字段是否满足本次任务，不能把缺失默认为有效值。
 - A—F 规则在 Lib 维护；框架路由、账户风险政策和动作出口在 Skills runtime。规则版本与软件版本分开。AI 可以质疑 A—F 的适用性、提出替代假设；未经 owner 采用不能自行修改生效政策，不因框架不适用而禁止继续研究。
 - Research 拥有研究库和 PDF（含候选批次、模拟实验与不带持仓标签的订阅代码）；Skills 拥有真实账户库、风险政策及其运行状态，交易与报告的关联存在 Skills 账本（写入前向 Research 核对报告 ID）。模拟与真实账户记录不混写。各自凭据由各自运行环境注入，不发现或借用另一项目的私有配置。
