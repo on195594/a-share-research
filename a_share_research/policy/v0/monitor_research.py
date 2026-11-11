@@ -1,10 +1,9 @@
 """Optional Research card projection and review prompts; no valuation formulas."""
 
+import sqlite3
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
-
-import requests
 
 from a_share_research.policy.v0 import boards, monitor_contract, research_client
 from a_share_research.policy.v0.trading_costs import COMMISSION_RATE, STAMP_TAX_RATE
@@ -17,14 +16,11 @@ def fetch_cards(*, skip: bool = False) -> dict:
         return {"status": "skipped"}
     try:
         # Optional research must fail promptly so core risk checks can continue.
-        payload = research_client.request_json(
-            "/api/cards", new_endpoint=True, timeout=(2, 3)
-        )
+        payload = research_client.request_json("/api/cards")
         monitor_contract.validate_research_cards(payload)
     except research_client.ResearchNotConfigured:
         return {"status": "not_configured"}
-    except requests.RequestException as exc:
-        # Transport exception text may contain credentials or response bodies.
+    except sqlite3.Error as exc:
         return {
             "status": "unavailable",
             "reason": f"Research 连接失败：{type(exc).__name__}",

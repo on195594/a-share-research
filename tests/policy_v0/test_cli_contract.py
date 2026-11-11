@@ -7,16 +7,7 @@ from a_share_research.policy.v0 import cache, fetcher
 CLI_ARGUMENT_CASES = {
     "research": (
         ["reports", "600519"],
-        [
-            "start",
-            "600519",
-            "--question",
-            "现金流变化？",
-            "--request-id",
-            "cli-contract",
-            "--parent-report-id",
-            "9",
-        ],
+        ["report", "9", "--compact"],
     ),
     "check": ([], ["600000"]),
     "get": ([], ["600000"]),

@@ -11,7 +11,6 @@ from pathlib import Path
 import sqlite3
 
 import pytest
-import requests
 
 from a_share_research.policy.v0 import (
     cache,
@@ -54,24 +53,19 @@ def card(cards, code):
 
 @pytest.fixture
 def http(monkeypatch, cards):
-    monkeypatch.setattr(
-        research_client.paths,
-        "research_connection",
-        lambda: ("https://research.example", "secret-test-token"),
-    )
+    """Stand-in for the research read: the payloads are the captured service responses."""
     calls = []
     state = {"status": 200, "body": cards}
 
-    def request(method, url, **kwargs):
-        calls.append((method, url, kwargs))
+    def read(path, params):
+        calls.append(("GET", path, {"params": params}))
         if "exception" in state:
             raise state["exception"]
-        response = requests.Response()
-        response.status_code = state["status"]
-        response._content = json.dumps(state["body"], ensure_ascii=False).encode()
-        return response
+        if state["status"] != 200:
+            raise ValueError(f"Research {state['status']}")
+        return json.loads(json.dumps(state["body"], ensure_ascii=False))
 
-    monkeypatch.setattr(research_client.requests, "request", request)
+    monkeypatch.setattr(research_client, "_read", read)
     return state, calls
 
 
@@ -160,16 +154,7 @@ def test_real_cards_one_call_projection_and_prompts_do_not_enter_escalations(
     )
     horizon = card(cards, "600309")["current"]["valuation"]["horizon"]
     assert evidence["annual_switch_cost"] == pytest.approx(0.001 / horizon)
-    calls = http[1]
-    assert len(calls) == 1
-    method, url, kwargs = calls[0]
-    assert (method, url) == ("GET", "https://research.example/api/cards")
-    assert kwargs["timeout"] == (2, 3) and kwargs["allow_redirects"] is False
-    assert kwargs["headers"] == {
-        "Authorization": "Bearer secret-test-token",
-        "X-Research-Version": "research-v1",
-    }
-    assert kwargs["json"] is None and kwargs["params"] is None
+    assert http[1] == [("GET", "/api/cards", {"params": {}})]
 
 
 def test_pending_card_escalates_only_review_and_keeps_returns(run_snapshot, cards):
@@ -290,7 +275,6 @@ def test_close_date_comparison(run_snapshot, cards, days, expected):
         ("http", "unavailable"),
         ("shape", "unavailable"),
         ("nan", "unavailable"),
-        ("unsafe_url", "unavailable"),
     ],
 )
 def test_optional_failures_preserve_all_gates(
@@ -299,11 +283,9 @@ def test_optional_failures_preserve_all_gates(
     _, baseline = run_snapshot("--no-research")
     state, calls = http
     if case == "unconfigured":
-        monkeypatch.setattr(
-            research_client.paths, "research_connection", lambda: ("", "")
-        )
+        state["exception"] = research_client.ResearchNotConfigured("研究库不存在")
     elif case == "timeout":
-        state["exception"] = requests.ReadTimeout("secret-test-token")
+        state["exception"] = sqlite3.OperationalError("database is locked")
     elif case == "version":
         state["body"] = {"version": "research-v2"}
     elif case == "http":
@@ -315,16 +297,10 @@ def test_optional_failures_preserve_all_gates(
         state["body"] = {"version": "research-v1", "cards": []}
     elif case == "nan":
         state["body"]["cards"][0]["current"]["last_close"] = float("nan")
-    elif case == "unsafe_url":
-        monkeypatch.setattr(
-            research_client.paths,
-            "research_connection",
-            lambda: ("http://research.example", "secret-test-token"),
-        )
     result, payload = run_snapshot(*(["--no-research"] if case == "skip" else []))
     assert result == 0 and payload["research"]["status"] == status
     assert_gate_unchanged(baseline, payload)
-    assert len(calls) == (0 if case in {"unconfigured", "skip", "unsafe_url"} else 1)
+    assert len(calls) == (0 if case == "skip" else 1)
     assert "secret-test-token" not in json.dumps(payload, ensure_ascii=False)
     assert bool(prompts(payload, "research_unavailable")) is (status == "unavailable")
 
@@ -470,20 +446,6 @@ def test_unavailable_database_still_reports_optional_research(http, capsys):
     assert payload["data_status"] == "unavailable"
     assert payload["research"]["status"] == "ok" and len(http[1]) == 1
     assert payload["research"]["holdings"] == []
-
-
-def test_malformed_json_does_not_leak_response(monkeypatch):
-    monkeypatch.setattr(
-        research_client.paths,
-        "research_connection",
-        lambda: ("https://research.example", "secret-test-token"),
-    )
-    response = requests.Response()
-    response.status_code = 200
-    response._content = b"secret-test-token not json"
-    monkeypatch.setattr(research_client.requests, "request", lambda *a, **k: response)
-    result = monitor_research.fetch_cards()
-    assert result == {"status": "unavailable", "reason": "Research 响应不是有效 JSON"}
 
 
 def test_opportunity_freshness_uses_snapshot_as_of(run_snapshot, monkeypatch):

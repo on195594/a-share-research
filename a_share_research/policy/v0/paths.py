@@ -69,11 +69,6 @@ def tushare_token() -> str:
     return _setting("TUSHARE_TOKEN", "")
 
 
-def research_connection() -> tuple[str, str]:
-    """Resolve only the explicitly configured peer service and its API token."""
-    return _setting("A_STOCK_RESEARCH_URL", ""), _setting("A_STOCK_RESEARCH_TOKEN", "")
-
-
 def cache_db_path() -> Path:
     """The application database, where the account tables live beside the research tables.
 

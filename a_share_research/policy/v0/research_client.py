@@ -1,32 +1,15 @@
-"""Small research-v1 HTTP client; never opens the investment-state database."""
+"""Reads research results in process from the application database; touches no account table."""
+
+from __future__ import annotations
 
 import argparse
 import json
 import re
-import shlex
+import sqlite3
 import sys
-from urllib.parse import urlsplit
 
-import requests
-
+from a_share_research import reading, service
 from a_share_research.policy.v0 import paths
-
-
-def endpoint_url(value: str) -> str:
-    parsed = urlsplit(value)
-    local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
-    if (
-        not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-        or (parsed.scheme != "https" and not (parsed.scheme == "http" and local))
-    ):
-        raise ValueError(
-            "Research URL 须为 HTTPS（本机允许 HTTP），不能包含凭据、查询或片段"
-        )
-    return value.rstrip("/")
 
 
 def _code(value: str) -> str:
@@ -59,90 +42,71 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     resume.add_argument("--request-id", required=True)
     # Explicit opt-in preserves the existing full report wire contract.
     actions.choices["report"].add_argument("--compact", action="store_true")
-    start = actions.add_parser("start", help="发起研究或关联追问，返回任务编号")
-    start.add_argument("code", type=_code)
-    start.add_argument("--question", required=True)
-    start.add_argument("--parent-report-id", type=_positive_id)
-    feedback = actions.add_parser("feedback", help="针对报告段落发起核查，保留原报告")
-    feedback.add_argument("id", type=_positive_id)
-    feedback.add_argument("--location", required=True)
-    feedback.add_argument("--text", required=True)
-    for action in (start, feedback):
-        action.add_argument(
-            "--request-id", required=True, help="同一请求重试沿用同一编号"
-        )
 
 
 class ResearchNotConfigured(ValueError):
-    """The optional Research connection has not been configured."""
+    """There is no application database to read research from."""
 
 
-def request_json(
-    path: str, *, body=None, params=None, new_endpoint=False, timeout=(10, 30)
-) -> dict:
-    """One versioned request, with shared credential and transport safeguards."""
-    base, token = paths.research_connection()
-    if not base or not token:
-        raise ResearchNotConfigured(
-            "请配置 A_STOCK_RESEARCH_URL 和 A_STOCK_RESEARCH_TOKEN；不会自动读取其他项目的凭据"
-        )
-    base = endpoint_url(base)
-    response = requests.request(
-        "POST" if body is not None else "GET",
-        base + path,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Research-Version": "research-v1",
-        },
-        params=params,
-        json=body,
-        timeout=timeout,
-        allow_redirects=False,
-    )
-    if response.status_code == 401:
-        raise ValueError(
-            "Research HTTP 401：研究凭据无效、已撤销或临时令牌已过期；"
-            "请由 Research owner 更新 A_STOCK_RESEARCH_TOKEN，检查环境变量是否覆盖 runtime.env。"
-            "更新前不要重试；更新后沿用原 request-id，不要重复创建任务"
-        )
-    if not 200 <= response.status_code < 300:
-        detail = ""
-        try:
-            failure = response.json()
-        except ValueError:
-            failure = None
-        if (
-            isinstance(failure, dict)
-            and failure.get("version") == "research-v1"
-            and isinstance(failure.get("error"), str)
-        ):
-            # Only the public error field, bounded and stripped of control characters/secrets.
-            public_error = failure["error"].replace(token, "[REDACTED]")
-            detail = (
-                "："
-                + "".join(char for char in public_error if char.isprintable())[:600]
-            )
-        elif response.status_code == 404 and new_endpoint:
-            detail = "；服务可能尚未部署此读取接口，请核对配套服务版本"
-        raise ValueError(
-            f"Research HTTP {response.status_code}{detail}；不会自动重试或重开研究，勿换编号重复提交"
-        )
+def _run(conn, match, params) -> dict:
+    row = reading.api_run(conn, int(match[1]))
+    if row is None:
+        raise service.RequestError("任务不存在", 404)
+    return {"version": service.VERSION, **dict(row)}
+
+
+def _reports(conn, match, params) -> dict:
+    return {"version": service.VERSION,
+            "reports": [dict(row) for row in reading.api_reports(conn, params["code"])]}
+
+
+# The read routes of the research-v1 interface, answered by the functions the web service itself calls.
+_ROUTES = (
+    (re.compile(r"/api/cards"), lambda conn, match, params: service.company_cards(conn)),
+    (re.compile(r"/api/companies/([0-9]{6})/card"), lambda conn, match, params: service.company_card(conn, match[1])),
+    (re.compile(r"/api/reports"), _reports),
+    (re.compile(r"/api/reports/([0-9]+)"), lambda conn, match, params: service.report_view(
+        conn, int(match[1]), compact=params.get("compact") == "true")),
+    (re.compile(r"/api/request"), lambda conn, match, params: service.run_view(conn, request_id=params["request_id"])),
+    (re.compile(r"/api/research/budget"),
+     lambda conn, match, params: {"version": service.VERSION, "budget": service.run_budget(conn)}),
+    (re.compile(r"/api/runs/([0-9]+)"), _run),
+)
+
+
+def _read(path: str, params: dict) -> dict:
+    database = paths.cache_db_path()
+    if not database.exists():
+        raise ResearchNotConfigured(f"研究库不存在：{database}")
+    conn = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    conn.row_factory = sqlite3.Row
     try:
-        payload = response.json()
-    except ValueError:
-        raise ValueError("Research 响应不是有效 JSON") from None
+        for pattern, handler in _ROUTES:
+            match = pattern.fullmatch(path)
+            if match:
+                return handler(conn, match, params)
+        raise ValueError(f"政策运行时只读取研究结果，没有 {path} 这项读取")
+    except service.RequestError as exc:
+        raise ValueError(f"Research {exc.status}：{exc}") from None
+    finally:
+        conn.close()
+
+
+def request_json(path: str, *, params: dict | None = None) -> dict:
+    """One read of the research-v1 interface; raises ValueError with a message that is safe to show."""
+    payload = _read(path, params or {})
     if not isinstance(payload, dict) or payload.get("version") != "research-v1":
         raise ValueError("Research 响应版本不兼容")
     return payload
 
 
 def cmd_research(argv: list[str]) -> int:
-    """通过 Research 服务复用报告、研究、追问及纠错；不修改账户或评分。"""
+    """读取研究报告、论点卡与任务状态；不发起研究，不修改账户或评分。"""
     parser = argparse.ArgumentParser(prog="a-stock-cache research")
     configure_parser(parser)
     args = parser.parse_args(argv)
     try:
-        body, params = None, None
+        params = None
         if args.action == "cards":
             path = "/api/cards"
         elif args.action == "card":
@@ -157,51 +121,11 @@ def cmd_research(argv: list[str]) -> int:
             path, params = "/api/request", {"request_id": args.request_id}
         elif args.action == "budget":
             path = "/api/research/budget"
-        elif args.action == "status":
-            path = f"/api/runs/{args.id}"
-        elif args.action == "start":
-            path = "/api/research"
-            body = {
-                "code": args.code,
-                "question": args.question,
-                "request_id": args.request_id,
-            }
-            if args.parent_report_id is not None:
-                body["parent_report_id"] = args.parent_report_id
         else:
-            path = f"/api/reports/{args.id}/feedback"
-            body = {
-                "request_id": args.request_id,
-                "location": args.location,
-                "text": args.text,
-            }
-        payload = request_json(
-            path,
-            body=body,
-            params=params,
-            new_endpoint=args.action in {"resume", "budget", "cards", "card"}
-            or args.action == "report"
-            and args.compact,
-        )
-        if (
-            args.action == "report"
-            and args.compact
-            and payload.get("view") != "compact"
-        ):
-            raise ValueError(
-                "Research 服务尚未支持精简视图；需要原文时显式去掉 --compact，不自动重开研究"
-            )
-    except requests.RequestException as exc:
-        print(
-            f"Research 连接失败：{type(exc).__name__}；"
-            + (
-                f"提交结果可能未知。先只读找回任务：a-stock-cache research resume "
-                f"--request-id {shlex.quote(args.request_id)}；勿换编号重复提交"
-                if args.action in {"start", "feedback"}
-                else "读取失败；不会自动重提研究"
-            ),
-            file=sys.stderr,
-        )
+            path = f"/api/runs/{args.id}"
+        payload = request_json(path, params=params)
+    except sqlite3.Error as exc:
+        print(f"Research 读取失败：{type(exc).__name__}；不会自动重提研究", file=sys.stderr)
         return 1
     except (OSError, RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

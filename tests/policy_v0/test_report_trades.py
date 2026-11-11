@@ -1,7 +1,7 @@
 """Ledger trades linked to the Research report they relied on."""
 
+import sqlite3
 import pytest
-import requests
 from a_share_research.core.market_data import MarketDataResult
 
 from a_share_research.policy.v0 import cache, commands_holdings, db, research_client
@@ -521,8 +521,8 @@ def test_unlinked_trade_never_calls_research(catalog):
 @pytest.mark.parametrize(
     "failure",
     [
-        requests.ConnectionError("https://user:secret@research"),
-        research_client.ResearchNotConfigured("请配置 A_STOCK_RESEARCH_URL"),
+        sqlite3.OperationalError("unable to open /data/secret/app.db"),
+        research_client.ResearchNotConfigured("研究库不存在"),
         ValueError("Research HTTP 503"),
     ],
 )

@@ -10,8 +10,6 @@ def isolated_cache_database(tmp_path, monkeypatch):
     """Keep every test and child process away from external runtime state."""
     for name in (
         "A_STOCK_STATE_DIR",
-        "A_STOCK_RESEARCH_URL",
-        "A_STOCK_RESEARCH_TOKEN",
         "A_STOCK_RISK_POLICY_FILE",
         "XDG_DATA_HOME",
         "XDG_CONFIG_HOME",

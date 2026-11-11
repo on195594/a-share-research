@@ -1,164 +1,81 @@
+"""Research reads of policy v0: answered in process from the application database, read-only."""
+
+import hashlib
 import json
-from pathlib import Path
 
 import pytest
-import requests
 
+from a_share_research import db as app_db, reading, service
 from a_share_research.policy.v0 import cache, research_client
+from test_service_delivery import SUCCESS, saved
 
 
-def test_research_url_keeps_credentials_on_explicit_secure_endpoint():
-    assert (
-        research_client.endpoint_url("https://stock.keyi.win/")
-        == "https://stock.keyi.win"
-    )
-    assert (
-        research_client.endpoint_url("http://127.0.0.1:18620")
-        == "http://127.0.0.1:18620"
-    )
-    for value in (
-        "http://example.com",
-        "https://user:secret@example.com",
-        "https://example.com?token=secret",
-        "file:///tmp/x",
-    ):
-        with pytest.raises(ValueError):
-            research_client.endpoint_url(value)
+@pytest.fixture
+def research(isolated_cache_database):
+    """The isolated database holding one real captured report that passed review and one that failed."""
+    conn = app_db.connect(isolated_cache_database)
+    run, report = saved(conn)
+    saved(conn, passed=False)
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    yield conn, run, report
+    conn.close()
 
 
-def test_research_cli_requires_idempotency_and_does_not_open_account_db(
-    tmp_path, monkeypatch, capsys
-):
-    path = tmp_path / "absent.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(path))
-    monkeypatch.setenv("A_STOCK_CONFIG_FILE", str(tmp_path / "absent.env"))
-    monkeypatch.delenv("A_STOCK_RESEARCH_URL", raising=False)
-    monkeypatch.delenv("A_STOCK_RESEARCH_TOKEN", raising=False)
-    assert (
-        cache.main(["research", "start", "600519", "--question", "现金流变化？"]) == 2
-    )
-    assert cache.main(["research", "reports", "600519"]) == 1
-    assert "A_STOCK_RESEARCH_URL" in capsys.readouterr().err
-    assert not path.exists()
-
-
-def test_compact_budget_and_recovery_are_get_only(monkeypatch, capsys):
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("http://127.0.0.1:9000", "test-key"))
-    calls = []
-
-    def request(method, url, **kwargs):
-        calls.append((method, url, kwargs))
-        response = requests.Response()
-        response.status_code = 200
-        response._content = json.dumps({"version": "research-v1", "status": "queued", "view": "compact"}).encode()
-        return response
-
-    monkeypatch.setattr(research_client.requests, "request", request)
-    for args in (["report", "37", "--compact"], ["budget"], ["resume", "--request-id", "lost-response"]):
-        assert research_client.cmd_research(args) == 0
-        assert json.loads(capsys.readouterr().out)["version"] == "research-v1"
-    assert [item[0] for item in calls] == ["GET", "GET", "GET"]
-    assert calls[0][2]["params"] == {"compact": "true"}
-    assert calls[2][2]["params"] == {"request_id": "lost-response"}
-    assert all(item[2]["json"] is None for item in calls)
-
-
-def test_submit_timeout_does_not_auto_retry_or_print_credentials(monkeypatch, capsys):
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("http://127.0.0.1:9000", "test-secret"))
-    calls = []
-
-    def timeout(*args, **kwargs):
-        calls.append(args)
-        raise requests.ReadTimeout("test-secret should not be printed")
-
-    monkeypatch.setattr(research_client.requests, "request", timeout)
-    assert research_client.cmd_research(["start", "603606", "--question", "现金流", "--request-id", "original"]) == 1
-    error = capsys.readouterr().err
-    assert "resume --request-id original" in error
-    assert "test-secret" not in error and len(calls) == 1
-
-
-def test_old_server_cannot_silently_return_full_evidence_for_compact(monkeypatch, capsys):
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("http://127.0.0.1:9000", "test-key"))
-    response = requests.Response()
-    response.status_code = 200
-    response._content = json.dumps({"version": "research-v1", "report": {"summary": "old"}}).encode()
-    monkeypatch.setattr(research_client.requests, "request", lambda *args, **kwargs: response)
-    assert research_client.cmd_research(["report", "37", "--compact"]) == 1
-    output = capsys.readouterr()
-    assert not output.out and "尚未支持精简视图" in output.err
-
-
-def test_lookup_not_found_keeps_public_diagnostic_and_redacts_key(monkeypatch, capsys):
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("http://127.0.0.1:9000", "test-key"))
-    response = requests.Response()
-    response.status_code = 404
-    response._content = json.dumps({"version": "research-v1", "error": "未找到不代表原提交失败；test-key\n不要换编号"}).encode()
-    calls = []
-
-    def request(*args, **kwargs):
-        calls.append(args)
-        return response
-
-    monkeypatch.setattr(research_client.requests, "request", request)
-    assert research_client.cmd_research(["resume", "--request-id", "original"]) == 1
-    output = capsys.readouterr()
-    assert not output.out and "未找到不代表原提交失败" in output.err
-    assert "test-key" not in output.err and "[REDACTED]" in output.err
-    assert "不要换编号" in output.err and len(calls) == 1
-
-
-def test_missing_new_route_is_not_treated_as_a_missing_task(monkeypatch, capsys):
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("http://127.0.0.1:9000", "test-key"))
-    response = requests.Response()
-    response.status_code = 404
-    response._content = b'{"detail":"Not Found"}'
-    monkeypatch.setattr(research_client.requests, "request", lambda *args, **kwargs: response)
-    assert research_client.cmd_research(["resume", "--request-id", "original"]) == 1
-    output = capsys.readouterr()
-    assert not output.out and "尚未部署此读取接口" in output.err
-    assert "勿换编号重复提交" in output.err
-
-
-@pytest.mark.parametrize("status", [401, 404, 409, 503])
-def test_http_denials_do_not_retry(monkeypatch, capsys, status):
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("http://127.0.0.1:9000", "test-key"))
-    calls = []
-
-    def request(*args, **kwargs):
-        calls.append(args)
-        response = requests.Response()
-        response.status_code = status
-        return response
-
-    monkeypatch.setattr(research_client.requests, "request", request)
-    assert research_client.cmd_research(["resume", "--request-id", "original"]) == 1
-    assert str(status) in capsys.readouterr().err
-    assert len(calls) == 1
-
-
-@pytest.mark.parametrize("args,path", [(["cards"], "/api/cards"), (["card", "600900"], "/api/companies/600900/card")])
-def test_card_cli_read_only(monkeypatch, capsys, isolated_cache_database, args, path):
-    fixture = Path(__file__).parent / "fixtures/monitor/research-cards.json"
-    payload = json.loads(fixture.read_text())["response"]
-    if args[0] == "card":
-        payload = next(card for card in payload["cards"] if card["code"] == "600900")
-    monkeypatch.setattr(research_client.paths, "research_connection", lambda: ("https://research.example", "test-key"))
-    calls = []
-
-    def request(method, url, **kwargs):
-        calls.append((method, url, kwargs))
-        response = requests.Response()
-        response.status_code = 200
-        response._content = json.dumps(payload).encode()
-        return response
-
-    monkeypatch.setattr(research_client.requests, "request", request)
+def _output(capsys, *args):
     assert cache.main(["research", *args]) == 0
-    assert json.loads(capsys.readouterr().out) == payload
+    return json.loads(capsys.readouterr().out)
+
+
+def test_every_read_returns_what_the_service_returns_and_changes_nothing(research, isolated_cache_database, capsys):
+    conn, run, report = research
+    code = SUCCESS["code"][:6]
+    before = hashlib.sha256(isolated_cache_database.read_bytes()).hexdigest()
+
+    assert _output(capsys, "reports", code) == {
+        "version": service.VERSION, "reports": [dict(row) for row in reading.api_reports(conn, code)]}
+    assert _output(capsys, "report", str(report)) == json.loads(json.dumps(service.report_view(conn, report)))
+    compact = _output(capsys, "report", str(report), "--compact")
+    assert compact == json.loads(json.dumps(service.report_view(conn, report, compact=True)))
+    assert compact["view"] == "compact"
+    assert _output(capsys, "status", str(run)) == {"version": service.VERSION, **dict(reading.api_run(conn, run))}
+    request_id = conn.execute("SELECT request_id FROM runs WHERE id = ?", (run,)).fetchone()[0]
+    assert _output(capsys, "resume", "--request-id", request_id) == json.loads(
+        json.dumps(service.run_view(conn, request_id=request_id)))
+    assert _output(capsys, "budget") == {"version": service.VERSION, "budget": service.run_budget(conn)}
+    assert _output(capsys, "card", code) == json.loads(json.dumps(service.company_card(conn, code)))
+    assert _output(capsys, "cards") == json.loads(json.dumps(service.company_cards(conn)))
+
+    assert hashlib.sha256(isolated_cache_database.read_bytes()).hexdigest() == before
+
+
+def test_missing_database_is_reported_and_not_created(isolated_cache_database, capsys):
+    assert cache.main(["research", "reports", "600519"]) == 1
+    assert "研究库不存在" in capsys.readouterr().err
     assert not isolated_cache_database.exists()
-    assert len(calls) == 1 and calls[0][0:2] == ("GET", "https://research.example" + path)
-    assert calls[0][2]["json"] is None
-    assert calls[0][2]["timeout"] == (10, 30) and calls[0][2]["allow_redirects"] is False
-    assert cache.main(["research", "card", "invalid"]) == 2
-    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("args, message", [
+    (["status", "999"], "Research 404：任务不存在"),
+    (["report", "999"], "Research 404"),
+    (["resume", "--request-id", "never-submitted"], "Research 404"),
+])
+def test_unknown_ids_fail_with_the_service_error(research, capsys, args, message):
+    assert cache.main(["research", *args]) == 1
+    output = capsys.readouterr()
+    assert not output.out and message in output.err
+
+
+@pytest.mark.parametrize("args", [
+    ["start", "600519", "--question", "现金流变化？", "--request-id", "r-1"],
+    ["feedback", "1", "--location", "summary", "--text", "数字有误", "--request-id", "r-2"],
+])
+def test_policy_runtime_cannot_submit_research(research, args):
+    conn, _, _ = research
+    runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+    assert cache.main(["research", *args]) == 2
+    assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == runs
+
+
+def test_reader_refuses_a_route_it_does_not_serve(research):
+    with pytest.raises(ValueError, match="只读取研究结果"):
+        research_client.request_json("/api/research")

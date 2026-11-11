@@ -8,7 +8,6 @@ import sqlite3
 import sys
 from datetime import date, datetime, timedelta, timezone
 
-import requests
 from a_share_research.core.market_data import MarketDataResult
 from a_share_research.core.providers import TushareMarketDataProvider
 from a_share_research.core.providers.tushare_fundamentals import TushareFundamentalsProvider
@@ -664,8 +663,7 @@ def _require_report(report_id: int | None, code: str, trade_date: str) -> None:
                 if report_day > date.fromisoformat(trade_date)
                 else None
             )
-    except requests.RequestException as exc:
-        # Transport exception text may contain credentials or response bodies.
+    except sqlite3.Error as exc:
         problem = f"无法向 Research 核对（{type(exc).__name__}）"
     except (
         OSError,
