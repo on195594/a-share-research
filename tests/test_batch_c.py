@@ -57,7 +57,7 @@ def test_only_new_batches_receive_v13_and_existing_rows_survive_v8(tmp_path):
     before = [dict(r) for r in old.execute('SELECT * FROM batches')]
     old.close()
     conn = db.connect(path)
-    assert conn.execute('PRAGMA user_version').fetchone()[0] == 9
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
     assert conn.total_changes == 0
     for row in before:
         saved = dict(conn.execute('SELECT * FROM batches WHERE id=?', (row['id'],)).fetchone())

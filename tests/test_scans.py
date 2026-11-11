@@ -219,7 +219,7 @@ def test_v7_empty_and_v6_migration_preserves_all_old_records(tmp_path):
     before = {table: rows(old, table) for table in tables}
     old.close()
     upgraded = db.connect(path)
-    assert upgraded.execute('PRAGMA user_version').fetchone()[0] == 9
+    assert upgraded.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
     for table in tables:
         names, stored = before[table]
         kept = [names.index(name) for name in names]
@@ -229,7 +229,7 @@ def test_v7_empty_and_v6_migration_preserves_all_old_records(tmp_path):
     upgraded.close()
     for database in (path, tmp_path / 'empty.db'):
         connection = db.connect(database)
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
         with db.transaction(connection):
             db._migrate_v7(connection)
         if database == path:
