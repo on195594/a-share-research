@@ -11,7 +11,7 @@ from a_share_research.tools.control import Gate
 @pytest.fixture
 def operations(monkeypatch,tmp_path):
     """Model container images and local admission without mocking release decisions."""
-    def setup(*, existing=True, failure=None, paused=False):
+    def setup(*, existing=True, failure=None, paused=False, compatible=True):
         data=tmp_path/'data'
         data.mkdir(exist_ok=True)
         state=SimpleNamespace(events=[], existing=existing, failure=failure, paused=paused,
@@ -126,6 +126,18 @@ def operations(monkeypatch,tmp_path):
                 raise RuntimeError('injected backup failure')
             return {'rows':0}
 
+        def assess(images,database,evidence_directory):
+            record('rollback_probe')
+            assert images=={'web':'old-web','worker':'old-worker'}
+            assert database==data/'app.db'
+            assert evidence_directory==state.evidence/'rollback-probe'
+            assert not any(state.running.values())
+            if 'tools' in state.containers:
+                assert state.paused and state.in_flight==0
+            return {'ok':compatible,'scope':'read_only','images':{
+                service:{'ok':compatible,'error':None if compatible else 'incompatible_records'}
+                for service in images}}
+
         monkeypatch.setattr(deploy,'run',run)
         monkeypatch.setattr(deploy,'describe',describe)
         monkeypatch.setattr(deploy,'verify_images',lambda code:{'web':'new-web','worker':'new-worker'})
@@ -135,6 +147,7 @@ def operations(monkeypatch,tmp_path):
         monkeypatch.setattr(deploy,'idle',lambda database:record('idle'))
         monkeypatch.setattr(deploy,'fingerprints',lambda database:{'rows':'unchanged'})
         monkeypatch.setattr(deploy,'create_release_backup',backup)
+        monkeypatch.setattr(deploy.rollback,'assess',assess)
         monkeypatch.setattr(deploy,'prune_backups',lambda data:[])
         monkeypatch.setattr(deploy,'prune_images',lambda images:{})
         state.evidence=tmp_path/'release-evidence'
@@ -203,6 +216,10 @@ def test_existing_tools_failure_rebuilds_old_services_and_restores_admission(ope
     assert not commands(state,'rm')
     assert commands(state,'up')[-1][-3:]==('web','worker','tools')
     assert index(state,('control','resume'))>index(state,('integrity',) if failure=='integrity' else ('preflight',))
+    probe=index(state,('rollback_probe',))
+    rollback_tag=index(state,('run','docker','tag','old-web','a-share-research-web:latest'))
+    assert probe<rollback_tag<state.events.index(commands(state,'up')[-1],probe)<index(state,('control','resume'))
+    assert json.loads((state.evidence/'rollback-compatibility.json').read_text())['ok'] is True
 
 
 def test_first_tools_requires_explicit_configuration_authorization(operations):
@@ -225,6 +242,7 @@ def test_first_tools_failure_removes_only_new_container_and_own_marker(operation
     assert len(removals)==1 and removals[0][-1]=='tools'
     assert set(state.data.iterdir())==before
     assert commands(state,'up')[-1][-2:]==('web','worker')
+    assert index(state,('rollback_probe',))<state.events.index(removals[0])
 
 
 def test_existing_tools_must_share_old_worker_image(operations):
@@ -256,7 +274,7 @@ def test_lost_resume_reply_drains_again_before_rolling_back(operations):
     rollback_tag=next(i for i,event in enumerate(state.events) if i>resumes[0]
                       and event==('run','docker','tag','old-web','a-share-research-web:latest'))
     rollback_up=state.events.index(commands(state,'up')[-1],resumes[0])
-    assert pauses[1]<rollback_tag<rollback_up<resumes[1]
+    assert pauses[1]<index(state,('rollback_probe',))<rollback_tag<rollback_up<resumes[1]
     assert state.containers=={'web':'old-web','worker':'old-worker','tools':'old-worker'}
     assert not state.paused and state.in_flight==0
 
@@ -284,6 +302,7 @@ def test_backup_failure_restarts_existing_services_without_retagging(operations)
     assert not commands(state,'up')
     assert all(state.running.values()) and not state.paused
     assert state.tags=={'web':'old-web','worker':'old-worker'}
+    assert not any(event[0]=='rollback_probe' for event in state.events)
 
 
 def test_first_tools_backup_failure_cleans_marker_without_removing_any_container(operations):
@@ -295,6 +314,46 @@ def test_first_tools_backup_failure_cleans_marker_without_removing_any_container
     assert not (state.data/'.tools-paused').exists()
     assert state.containers=={'web':'old-web','worker':'old-worker'}
     assert all(state.running.values())
+    assert not any(event[0]=='rollback_probe' for event in state.events)
+
+
+@pytest.mark.parametrize('first',[False,True])
+@pytest.mark.parametrize('failure',['integrity','resume_lost'])
+def test_incompatible_old_reader_keeps_current_images_and_admission_paused(operations,first,failure):
+    state=operations(existing=not first,failure=failure,compatible=False)
+    with pytest.raises(RuntimeError,match='旧镜像读取兼容检查未通过'):
+        deploy.deploy('revision',state.evidence,allow_config=first,with_tools=first)
+    assert state.tags=={'web':'new-web','worker':'new-worker'}
+    assert state.containers=={'web':'new-web','worker':'new-worker','tools':'new-worker'}
+    assert not any(state.running.values())
+    assert state.paused and state.in_flight==0
+    assert not commands(state,'rm') and not commands(state,'start')
+    assert len(commands(state,'up'))==1
+    assert state.events[-1]==('rollback_probe',)
+    report=json.loads((state.evidence/'rollback-compatibility.json').read_text())
+    assert report=={'ok':False,'scope':'read_only','images':{
+        service:{'ok':False,'error':'incompatible_records'} for service in ('web','worker')}}
+    resumes=[i for i,event in enumerate(state.events) if event==('control','resume')]
+    if failure=='resume_lost':
+        assert len(resumes)==1
+        assert state.events[resumes[0]+1]==('control','pause')
+    else:
+        assert not resumes
+        if first:
+            assert (state.data/'.tools-paused').exists()
+
+
+def test_two_service_rollback_also_requires_old_reader_compatibility(operations):
+    state=operations(existing=False,failure='integrity',compatible=False)
+    with pytest.raises(RuntimeError,match='旧镜像读取兼容检查未通过'):
+        deploy.deploy('revision',state.evidence)
+    assert state.tags=={'web':'new-web','worker':'new-worker'}
+    assert state.containers=={'web':'new-web','worker':'new-worker'}
+    assert not any(state.running.values())
+    assert not any(event[0]=='control' for event in state.events)
+    assert not commands(state,'rm') and not commands(state,'start')
+    assert len(commands(state,'up'))==1
+    assert state.events[-1]==('rollback_probe',)
 
 
 def test_first_tools_never_removes_a_preexisting_pause_marker(operations):

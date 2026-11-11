@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen, build_opener, ProxyHandler
 
-from a_share_research import backup as recovery, db
+from a_share_research import backup as recovery, db, rollback
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
@@ -365,7 +365,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
                                "pruned_images": pruned_images, "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
-        log.exception("发布失败，恢复原应用镜像；保留备份与证据")
+        log.exception("发布失败，核对兼容性后回退应用；保留数据、备份与证据")
         # Application-only rollback: a migration may ship through here only if the old image runs on the new schema.
         if include_tools and switched and not tools_paused:
             # Never replace a process that may now be handling a newly admitted financial call.
@@ -373,6 +373,20 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             if drained != {'paused':True,'in_flight':0}:
                 raise RuntimeError('tools 回退前排空失败；保持当前镜像和暂停状态')
             tools_paused = True
+        if switched:
+            # Pin the post-failure state, including writes admitted after a lost resume reply.
+            compose('stop', '-t', '30', 'web')
+            idle(database)
+            compose('stop', '-t', '30', 'worker')
+            if include_tools:
+                compose('stop', '-t', '60', 'tools')
+            idle(database)
+            compatibility = rollback.assess({service: before[service]['image'] for service in SERVICES},
+                                            database, evidence / 'rollback-probe')
+            save('rollback-compatibility.json', compatibility)
+            if compatibility['ok'] is not True:
+                raise RuntimeError('旧镜像读取兼容检查未通过；保持当前镜像、停服和 tools 暂停状态，'
+                                   '请核对 rollback-compatibility.json')
         if new_tools_started:
             compose('rm','-f','-s','tools')
         if switched:
