@@ -19,9 +19,11 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 `ASHARE_URL` 缺省为 `http://127.0.0.1:8621`，客户端仅允许回环 IP、禁止代理和重定向，不自动重试。
 
+宿主可改用 `python scripts/ashare.py --config /absolute/private/client.json tools`，文件仅含 `url` 与 `token`，须为属主私有常规文件且路径无符号链接。显式配置覆盖本次调用的环境变量，不把令牌放在命令参数里；同一全局参数适用于 `call` 和 `mcp`。五宿主配置包、独立凭据路径与统一 Skill 见[客户端准备手册](../../ops/clients/README.md)，生成包不会安装或启用宿主。
+
 ### MCP stdio 客户端
 
-宿主通过 `python /absolute/path/scripts/ashare.py mcp` 启动桥接进程，并从私有环境注入同一 `ASHARE_TOKEN` / `ASHARE_URL`；不把令牌写进命令参数、仓库或共享配置。此单文件仅用标准库，不能直接读取数据库，也不持模型凭据。宿主安装与启用按整段验收另行执行。
+宿主通过 `python /absolute/path/scripts/ashare.py --config /absolute/private/client.json mcp` 启动桥接进程，也可沿用私有环境注入 `ASHARE_TOKEN` / `ASHARE_URL`；不把令牌写进命令参数、仓库或共享配置。此单文件仅用标准库，不能直接读取数据库，也不持模型凭据。宿主安装与启用按整段验收另行执行。
 
 支持 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)中的初始化、版本协商及 ping，协议版本为 2025-11-25 / 2025-06-18。[stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) 使用 UTF-8 JSON 行，stdout 仅输出协议消息；EOF 退出。单条输入上限 32 MiB，重复 JSON 键、非有限数字、批量请求和非法请求编号均拒绝。
 

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Standard-library client for the local a-share tools service."""
 import argparse
+from contextlib import contextmanager
 import ipaddress
 import json
 import math
 import os
+from pathlib import Path
 import re
+import stat
 import sys
 import urllib.error
 import urllib.parse
@@ -25,6 +28,46 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def valid_token(token):
+    return (isinstance(token,str) and bool(token) and token.isascii()
+            and not any(c.isspace() or ord(c)<32 for c in token))
+
+
+@contextmanager
+def configuration(filename):
+    """Load an explicitly selected private client file, without sourcing shell code."""
+    if filename is None:
+        yield
+        return
+    try:
+        path=Path(filename)
+        if not path.is_absolute() or any(p.is_symlink() for p in (path,*path.parents)):
+            raise ValueError('absolute regular path required')
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+        with os.fdopen(fd,'rb') as stream:
+            info=os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o077:
+                raise ValueError('private owned file required')
+            raw=stream.read(16*1024+1)
+        if len(raw)>16*1024:
+            raise ValueError('oversized configuration')
+        settings=json.loads(raw,object_pairs_hook=unique_object,parse_constant=reject_constant,parse_float=finite_float)
+        if (not isinstance(settings,dict) or set(settings)!={'url','token'}
+                or not isinstance(settings['url'],str) or not valid_token(settings['token'])):
+            raise ValueError('invalid client configuration')
+        selected={'ASHARE_URL':base_url(settings['url']),'ASHARE_TOKEN':settings['token']}
+    except (OSError,ValueError,UnicodeError,RecursionError):
+        raise ClientError('客户端配置须为绝对路径的属主私有常规 JSON 文件，仅含回环 url 和有效 token') from None
+    previous={key:os.environ.get(key) for key in selected}
+    os.environ.update(selected)
+    try:
+        yield
+    finally:
+        for key,value in previous.items():
+            if value is None: os.environ.pop(key,None)
+            else: os.environ[key]=value
+
+
 def base_url(value):
     try:
         url = urllib.parse.urlsplit(value)
@@ -42,7 +85,7 @@ def base_url(value):
 def request(path, payload=None):
     url = base_url(os.environ.get('ASHARE_URL', 'http://127.0.0.1:8621'))
     token = os.environ.get('ASHARE_TOKEN', '')
-    if not token or not token.isascii() or any(c.isspace() or ord(c) < 32 for c in token):
+    if not valid_token(token):
         raise ClientError('请设置有效的 ASHARE_TOKEN')
     try:
         data = None if payload is None else json.dumps(payload, allow_nan=False).encode()
@@ -203,6 +246,7 @@ def serve_mcp(input_stream=None, output_stream=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config',help='绝对路径的私有 JSON 客户端配置，仅含 url/token；显式选择时覆盖本次环境值')
     actions = parser.add_subparsers(dest='action', required=True)
     actions.add_parser('tools')
     actions.add_parser('mcp', help='MCP stdio bridge to the local HTTP tools service')
@@ -211,22 +255,24 @@ def main(argv=None):
     call.add_argument('--json', default='{}', dest='arguments')
     args = parser.parse_args(argv)
     try:
-        if args.action == 'mcp':
-            return serve_mcp()
-        if args.action == 'tools':
-            result = request('/tools')
-        else:
-            if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,99}', args.name):
-                raise ClientError('工具名称格式无效')
-            try:
-                payload = json.loads(args.arguments, parse_constant=reject_constant)
-                if not isinstance(payload, dict):
-                    raise ValueError
-            except ValueError:
-                raise ClientError('--json 须为有效 JSON 对象') from None
-            result = request('/tools/' + args.name, payload)
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
+        with configuration(args.config):
+            if args.action == 'mcp':
+                return serve_mcp()
+            if args.action == 'tools':
+                result = request('/tools')
+            else:
+                if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,99}', args.name):
+                    raise ClientError('工具名称格式无效')
+                try:
+                    payload = json.loads(args.arguments, parse_constant=reject_constant,
+                                         parse_float=finite_float,object_pairs_hook=unique_object)
+                    if not isinstance(payload, dict):
+                        raise ValueError
+                except (ValueError,RecursionError):
+                    raise ClientError('--json 须为有效 JSON 对象') from None
+                result = request('/tools/' + args.name, payload)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
     except ClientError as exc:
         print(str(exc), file=sys.stderr)
         return 1
