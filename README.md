@@ -280,7 +280,7 @@ uv run python -m a_share_research.deploy "$release_code" \
 
 已启用政策服务时，镜像就绪与政策实装一致是两项检查：应用代码参与政策身份，升级或回退后 `policy.current.installed` 可能为 false，新计算会拒绝，已有请求仍可查回原回执。所有者须按[政策本地入口](a_share_research/tools/README.md#完整政策身份生效指针与固定输入重放影子入口)，用核对后的参数在目标镜像下登记身份并追加生效指针；回退同样适用。发布工具不代替所有者切换政策，也不改写既存回执与旧周期参数。
 
-首次 v9→v21 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
+首次 v9→v21 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。v9 漏传此参数会在停服和更改镜像标签前拒绝。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
 
 ```sh
 uv run --offline --no-sync python -m a_share_research.deploy <目标提交> <新的私有证据目录> \

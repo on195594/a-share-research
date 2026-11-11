@@ -15,6 +15,7 @@ def test_idle_guard_and_fingerprints_on_captured_records(tmp_path):
     conn = db.connect(database)
     try:
         load(conn)
+        assert deploy._source_version(database) == len(db.MIGRATIONS)
         original = deploy.fingerprints(database)
         deploy.idle(database)
         assert deploy.fingerprints(database) == original

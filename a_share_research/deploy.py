@@ -153,6 +153,11 @@ def fingerprints(database: Path) -> dict:
                                                  ensure_ascii=False).encode()).hexdigest() for table in tables}
 
 
+def _source_version(database: Path) -> int:
+    with closing(sqlite3.connect(database.absolute().as_uri()+'?mode=ro', uri=True)) as conn:
+        return conn.execute('PRAGMA user_version').fetchone()[0]
+
+
 def describe(service: str) -> dict:
     container = json.loads(run("docker", "inspect", f"a-share-research-{service}"))[0]
     mounts = {m['Destination']: ['tmpfs' if m.get('Type') == 'tmpfs' else m['Source'], m['RW']]
@@ -317,6 +322,8 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
     if before["web"]["mounts"]["/data"] != before["worker"]["mounts"]["/data"]:
         raise RuntimeError("web/worker 数据目录不一致")
     database = data / "app.db"
+    if initial_recovery is None and _source_version(database) == 9:
+        raise RuntimeError('v9→v21 首次发布须指定 --initial-recovery；不能使用日常回退路径')
     if has_tools and before['tools']['mounts'].get('/data') != before['web']['mounts']['/data']:
         raise RuntimeError('tools 数据目录与 web/worker 不一致')
     marker = data/'.tools-paused'

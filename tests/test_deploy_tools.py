@@ -146,6 +146,7 @@ def operations(monkeypatch,tmp_path):
         monkeypatch.setattr(deploy,'wait_ready',lambda:record('web_ready'))
         monkeypatch.setattr(deploy,'idle',lambda database:record('idle'))
         monkeypatch.setattr(deploy,'fingerprints',lambda database:{'rows':'unchanged'})
+        monkeypatch.setattr(deploy,'_source_version',lambda database:21)
         monkeypatch.setattr(deploy,'create_release_backup',backup)
         monkeypatch.setattr(deploy.rollback,'assess',assess)
         monkeypatch.setattr(deploy,'prune_backups',lambda data:[])

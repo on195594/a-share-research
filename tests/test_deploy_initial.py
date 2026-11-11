@@ -1,9 +1,11 @@
 """Initial-release ordering and failure decisions; structural operations, not Docker acceptance."""
 import json
+import sqlite3
 
 import pytest
 
 from a_share_research import deploy, initial_release
+from a_share_research.deploy import _source_version as read_schema
 from a_share_research.tools.control import Gate, pause_offline
 from test_deploy_tools import commands, index, operations as _operations
 
@@ -82,6 +84,18 @@ def initial(operations, monkeypatch):
 
 def release(state):
     return deploy.deploy('revision', state.evidence, with_tools=True, allow_config=True, initial_recovery='baseline')
+
+
+def test_actual_v9_without_initial_option_is_refused_before_pause_or_tagging(operations, monkeypatch):
+    state = operations(existing=False)
+    with sqlite3.connect(state.data/'app.db') as conn:
+        conn.execute('PRAGMA user_version=9')  # Structural version boundary, not financial data.
+    monkeypatch.setattr(deploy, '_source_version', read_schema)
+    with pytest.raises(RuntimeError, match='首次发布须指定 --initial-recovery'):
+        deploy.deploy('revision', state.evidence, with_tools=True, allow_config=True)
+    assert not commands(state, 'stop')
+    assert not any(e[:3] == ('run', 'docker', 'tag') for e in state.events)
+    assert not state.evidence.exists() and not (state.data/'.tools-paused').exists()
 
 
 def test_cli_passes_the_explicit_initial_recovery_option(monkeypatch, tmp_path):
