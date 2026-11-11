@@ -447,8 +447,15 @@ def _migrate_v19(conn: sqlite3.Connection) -> None:
 
 
 
+def _migrate_v20(conn: sqlite3.Connection) -> None:
+    columns = {r[1] for r in conn.execute('PRAGMA table_info(policy_evaluations)')}
+    for column in ('capture_context','capture_context_hash'):
+        if column not in columns:
+            conn.execute(f'ALTER TABLE policy_evaluations ADD COLUMN {column} TEXT')
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20)
 
 
 def now() -> str:

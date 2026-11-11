@@ -55,6 +55,11 @@ class PolicyEvaluation(Arguments):
     evaluation_id: int = Field(gt=0)
 
 
+class PolicyMonitor(Arguments):
+    request_id: str = Field(min_length=1, max_length=128)
+    expected_activation_id: int = Field(gt=0)
+
+
 class ExternalStart(Arguments):
     request_id: str = Field(min_length=1, max_length=128)
     source_run_id: int = Field(gt=0)
@@ -197,6 +202,11 @@ def _lifecycle(ctx: Context, args: Analysis) -> Payload:
     return Payload(data=read(ctx.connection, ctx.principal, args.holding_id))
 
 
+def _monitor(ctx: Context, args: PolicyMonitor) -> Payload:
+    from a_share_research.policy.monitor import run
+    return Payload(data=run(ctx.connection,ctx.principal,ctx.database,args.request_id,args.expected_activation_id))
+
+
 def _v0_positions(ctx: Context, args: Account) -> Payload:
     from a_share_research.policy.v0.account_store import read
     return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
@@ -216,6 +226,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.monitor', '从核对过的账户镜像采集当前行情，按生效政策保存评估与原始输入；来源时点随回执返回',
+         frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True),
     Tool('policy.current', '读取生效政策身份、参数与实装一致性；未启用时不猜测默认版本',
          frozenset({'assistant','owner'}), Arguments, Payload,
          lambda c,a: Payload(data=policies.current(c.connection,c.principal)), account=True),
@@ -321,7 +333,8 @@ def invoke(ctx: Context, name: str, arguments: dict) -> dict:
     try:
         return tool.result.model_validate(tool.handler(ctx, parsed)).model_dump(mode='json')
     except policies.PolicyError as exc:
-        code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments'}[exc.status]
+        code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments',
+                503: 'unavailable', 504: 'timeout'}[exc.status]
         raise ToolError(code, str(exc), exc.status) from None
     except ledger.LedgerError as exc:
         code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments'}[exc.status]

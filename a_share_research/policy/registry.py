@@ -143,9 +143,15 @@ def guide(conn, principal, name):
 
 
 def _evaluation(row):
-    return dict(id=row[0],identity=row[1],activation_id=row[2],created_at=row[3],created_by=row[4],
+    result = dict(id=row[0],identity=row[1],activation_id=row[2],created_at=row[3],created_by=row[4],
                 request_id=row[5],input_hash=row[6],result_hash=row[7],mode='supplied_input_replay',
                 input=json.loads(row[8]),result=json.loads(row[9]))
+    if len(row)>10 and row[10] is not None:
+        context=json.loads(row[10])
+        if gate.digest(context)!=row[11]:
+            raise PolicyError('政策采集来源哈希不一致')
+        result.update(mode='service_monitor_capture',capture_context=context)
+    return result
 
 
 def replay(conn, principal, selected, request_id, bundle):
@@ -164,7 +170,7 @@ def replay(conn, principal, selected, request_id, bundle):
         row = conn.execute('SELECT * FROM policy_evaluations WHERE created_by=? AND request_id=?',
                            (principal.key_id,request_id)).fetchone()
         if row:
-            if row[1] != selected or row[6] != input_hash:
+            if row[1] != selected or row[6] != input_hash or len(row)>10 and row[10] is not None:
                 raise PolicyError('request_id 已用于不同评估输入或政策')
             return _evaluation(row)
         try:
@@ -210,6 +216,12 @@ def inspect(conn):
                 problems.append(f'政策切换 {row[0]}：{exc}')
     for row in conn.execute('SELECT * FROM policy_evaluations'):
         try:
+            if len(row)>10 and (row[10] is not None or row[11] is not None):
+                context=json.loads(row[10])
+                if (gate.digest(context)!=row[11] or context.get('schema_version')!=1
+                        or context.get('request')!={'action':'policy.monitor','expected_activation_id':row[2]}
+                        or context.get('source',{}).get('mode')!='mirror'):
+                    raise PolicyError('采集来源或生效指针不一致')
             if gate.digest(json.loads(row[8])) != row[6] or gate.digest(json.loads(row[9])) != row[7]:
                 raise PolicyError('输入或结果哈希不一致')
             manifest = _version(conn,row[1])

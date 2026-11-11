@@ -2,7 +2,7 @@
 
 HTTP 与进程内入口默认只读，单文件 CLI/MCP 客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排已支持 tools 暂停排空，新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
-开发验证使用已迁移至 v19 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
+开发验证使用已迁移至 v20 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
 DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
@@ -181,4 +181,15 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 `bundle` 包含 local、quotes、portfolio_value、industry_result、now、risk_policy、denominator_evidence、account_scope_required、research_result；数据类以对应 JSON 字段表示，now 必须带时区，缺失和降级语义沿用 v0。`policy.evaluation.pack` 可把已受信内存输入转为 JSON；它不反序列化可执行内容。重放同请求幂等，参数/输入变化冲突，写入失败整体回滚。
 
-结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，旧生产监控和持仓来源仍沿用切换前入口；实时监控采集、所有评估入口统一留存、网页当前政策展示与宿主激活尚待接入。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
+结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，旧生产监控和持仓来源仍沿用切换前入口；切换后的新账本监控采集、所有生产评估入口统一留存、网页当前政策展示与宿主激活尚待接入。切换前镜像采集见下节。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
+
+
+## 服务端监控采集（切换前镜像，影子入口）
+
+v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策、账户镜像全量哈希及资产原件，随后用固定子进程读取镜像、相邻资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
+
+子进程只接收生效身份保存的参数，使用单独的空私有配置，不加载宿主 risk-policy.json，不继承模型、owner 或行情令牌。实际资产分母与其账户范围、记录时间和缺失估值时点原样保留；参数范围不匹配或尚未生效时拒绝。未取得行情、行业缓存过期和旧财务缓存等缺口沿用 monitor-v1 的 data_status/逐项缺口，不把采集调用成功等同于证据完整。
+
+采集不持写锁。返回后再次核对当前 Key、生效指针和镜像来源，任何漂移都拒绝保存；通过才原子追加评估及来源上下文。正常结果标为 `mode=service_monitor_capture`，context 包括账户镜像来源哈希/更新时间/水位、请求和采集起止时间。它表示服务端执行了采集，不保证每项行情都最新；必须继续查看原输入的来源时点及结果缺口。账户切换为 ledger 后此镜像入口明确拒绝，不静默读旧持仓。
+
+同一 Key 的同 request_id 返回第一次已提交回执，不重新采集；希望获得新观察须使用新 request_id。并发重复请求可能各自取一次行情，但只保存并返回第一份回执。request_id 与不同操作/生效指针复用会冲突。子进程 25 秒超时后清理自身进程组，失败无成功回执；HTTP/CLI 超时后可用原请求查询重试，不假定已写入。`policy.evaluation` 同样可读取这类结果，`policy.replay` 不会把同请求的服务采集冒充为用户提供输入的重放。
