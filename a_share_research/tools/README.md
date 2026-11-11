@@ -1,6 +1,6 @@
 # 工具入口
 
-HTTP 与进程内入口默认只读，单文件客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排已支持 tools 暂停排空，MCP、新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
+HTTP 与进程内入口默认只读，单文件 CLI/MCP 客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排已支持 tools 暂停排空，新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
 开发验证使用已迁移至 v18 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
@@ -18,6 +18,16 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 ```
 
 `ASHARE_URL` 缺省为 `http://127.0.0.1:8621`，客户端仅允许回环 IP、禁止代理和重定向，不自动重试。
+
+### MCP stdio 客户端
+
+宿主通过 `python /absolute/path/scripts/ashare.py mcp` 启动桥接进程，并从私有环境注入同一 `ASHARE_TOKEN` / `ASHARE_URL`；不把令牌写进命令参数、仓库或共享配置。此单文件仅用标准库，不能直接读取数据库，也不持模型凭据。宿主安装与启用按整段验收另行执行。
+
+支持 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)中的初始化、版本协商及 ping，协议版本为 2025-11-25 / 2025-06-18。[stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) 使用 UTF-8 JSON 行，stdout 仅输出协议消息；EOF 退出。单条输入上限 32 MiB，重复 JSON 键、非有限数字、批量请求和非法请求编号均拒绝。
+
+`tools/list` 每次向 HTTP 服务发现完整列表，映射注册表输入/输出 Schema、只读及幂等提示；无需 cursor，不宣称列表变更通知。`tools/call` 直接交给服务校验角色和参数；[工具结果](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)同时提供 structuredContent 和 JSON 文本。服务拒绝或连接失败以 isError 返回安全错误，未知工具/不存在资源的 HTTP 404 转为协议参数错误；政策子命令非零退出也标为 isError，保留原结果。写入业务回执须继续核对其中的状态，HTTP/MCP 成功本身不代表已入账。
+
+桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
 
 - `research`：读取研究卡片及报告；看不到也不能调用账户和政策工具。
 - `assistant`：研究读取，加成交时可用研究诊断、v0 五项 R0 读取命令。
