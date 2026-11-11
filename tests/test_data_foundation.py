@@ -165,14 +165,15 @@ def test_migration_keeps_rows_triggers_and_sequence_and_reruns_as_a_noop(tmp_pat
     old.close()
 
     conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     assert all("company_key" in {row["name"] for row in conn.execute(f"PRAGMA table_xinfo({table})")}
                for table in tables if table != "calls")
     for table, (names, rows) in before.items():
         assert [tuple(row) for row in conn.execute(f"SELECT {', '.join(names)} FROM {table} ORDER BY id")] == rows
-    assert {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")} == triggers
+    assert {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                                           " AND tbl_name != 'policy_activations'")} == triggers
     sequence = dict(tuple(row) for row in conn.execute("SELECT name, seq FROM sqlite_sequence"))
     assert sequence["runs"] == before["runs"][1][-1][before["runs"][0].index("id")]
     assert sequence["reports"] == before["reports"][1][-1][before["reports"][0].index("id")]
@@ -181,7 +182,7 @@ def test_migration_keeps_rows_triggers_and_sequence_and_reruns_as_a_noop(tmp_pat
     conn.execute("PRAGMA user_version = 8")
     conn.close()
     again = db.connect(path)
-    assert schema(again) == final and again.execute("PRAGMA user_version").fetchone()[0] == 9
+    assert schema(again) == final and again.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
 
 
 def test_failure_after_a_table_is_dropped_rolls_back_everything(tmp_path, monkeypatch):
@@ -212,7 +213,7 @@ def test_two_starts_at_once_migrate_once_and_both_open(tmp_path):
         try:
             gate.wait()
             conn = db.connect(path)
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
             conn.close()
         except BaseException as exc:  # surfaced by the assertion below
             errors.append(exc)

@@ -274,8 +274,114 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
         raise RuntimeError("foreign key violations after rebuild")
 
 
+# Account codes also hold non-A-share history (old analyses), so this key is nullable here.
+ACCOUNT_COMPANY_KEY = COMPANY_KEY.removesuffix(" NOT NULL")
+# Account and analysis-state tables of the former a-stock-agent-skills runtime (policy v0), under their
+# original names and column semantics. Until the account cutover they only hold a mirror of the old
+# account database (account/mirror.py). Large payload columns stay last.
+ACCOUNT_TABLES = {
+    "holdings": "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL, name TEXT, cost_price REAL, shares INTEGER,"
+                " buy_date TEXT, buy_score INTEGER, stop_loss_15 REAL, stop_loss_20 REAL, notes TEXT, updated_at TEXT,"
+                " exit_price REAL, exit_date TEXT, framework TEXT, initial_shares INTEGER, main_entry_date TEXT,"
+                " main_entry_basis REAL, additions_since_main REAL NOT NULL DEFAULT 0, reference_cost REAL,"
+                f" framework_confident INTEGER NOT NULL DEFAULT 0, {ACCOUNT_COMPANY_KEY}",
+    "holding_events": "id INTEGER PRIMARY KEY AUTOINCREMENT, holding_id INTEGER NOT NULL, code TEXT NOT NULL,"
+                      " event_type TEXT NOT NULL, event_date TEXT NOT NULL, shares INTEGER, price REAL,"
+                      " fees REAL NOT NULL DEFAULT 0, tax REAL NOT NULL DEFAULT 0, cash_amount REAL, realized_pnl REAL,"
+                      " notes TEXT, inferred INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, report_id INTEGER,"
+                      f" {ACCOUNT_COMPANY_KEY},"
+                      " CHECK (event_type IN ('buy', 'sell', 'dividend', 'adjustment'))",
+    "holding_alerts": "id INTEGER PRIMARY KEY AUTOINCREMENT, holding_id INTEGER NOT NULL, code TEXT NOT NULL,"
+                      " level TEXT NOT NULL, category TEXT NOT NULL, reason_code TEXT NOT NULL, reason TEXT NOT NULL,"
+                      " status TEXT NOT NULL DEFAULT 'active', evidence TEXT, opened_at TEXT NOT NULL, review_due TEXT,"
+                      f" resolved_at TEXT, resolution_evidence TEXT, updated_at TEXT NOT NULL, {ACCOUNT_COMPANY_KEY},"
+                      " CHECK (level IN ('yellow', 'red')),"
+                      " CHECK (category IN ('holding_deterioration', 'entry_valuation', 'unverified')),"
+                      " CHECK (status IN ('active', 'pending', 'resolved'))",
+    "holding_l3_conditions":
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, holding_id INTEGER NOT NULL, condition_text TEXT NOT NULL,"
+        " origin_type TEXT NOT NULL DEFAULT 'original', status TEXT NOT NULL DEFAULT 'pending', evidence TEXT,"
+        " as_of TEXT, next_review_date TEXT, temporary_exit_rule TEXT, created_at TEXT NOT NULL,"
+        " updated_at TEXT NOT NULL, thesis_version_id INTEGER,"
+        " is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)), retired_at TEXT, retired_reason TEXT,"
+        " condition_scope TEXT NOT NULL DEFAULT 'legacy_unclassified' CHECK(condition_scope IN"
+        " ('aggregate','core_driver','non_core','governance','legacy_unclassified')),"
+        " action_level TEXT NOT NULL DEFAULT 'legacy_unclassified' CHECK(action_level IN"
+        " ('review','reduce','exit','legacy_unclassified')), materiality_basis TEXT,"
+        " evidence_cadence TEXT NOT NULL DEFAULT 'unspecified' CHECK(evidence_cadence IN"
+        " ('quarterly','semiannual','annual','event','unspecified')),"
+        " CHECK (origin_type IN ('original', 'recovered', 'new_monitoring')),"
+        " CHECK (status IN ('pending', 'not_triggered', 'watch', 'triggered'))",
+    "holding_thesis_versions": "id INTEGER PRIMARY KEY AUTOINCREMENT, holding_id INTEGER NOT NULL,"
+                               " version INTEGER NOT NULL, l1 TEXT NOT NULL, l2 TEXT NOT NULL,"
+                               " rewrite_reason TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,"
+                               " UNIQUE (holding_id, version), CHECK (status IN ('active', 'superseded'))",
+    "holding_tier_state": "holding_id INTEGER PRIMARY KEY, tier1_status TEXT NOT NULL DEFAULT 'pending',"
+                          " tier2_status TEXT NOT NULL DEFAULT 'pending', tier3_status TEXT NOT NULL DEFAULT 'pending',"
+                          " exit_path TEXT, exit_target_pct REAL, exemption_framework TEXT,"
+                          " exemption_declared_at TEXT, peg_method TEXT, updated_at TEXT NOT NULL,"
+                          " CHECK (tier1_status IN ('pending', 'completed', 'exempted')),"
+                          " CHECK (tier2_status IN ('pending', 'completed')),"
+                          " CHECK (tier3_status IN ('pending', 'completed'))",
+    "retro_notes": "id INTEGER PRIMARY KEY AUTOINCREMENT, holding_id INTEGER NOT NULL, code TEXT NOT NULL, name TEXT,"
+                   " framework TEXT, buy_date TEXT, exit_date TEXT, buy_score INTEGER, actual_return_pct REAL,"
+                   f" holding_days INTEGER, error_tags TEXT, created_at TEXT NOT NULL, {ACCOUNT_COMPANY_KEY},"
+                   " thesis_notes TEXT, retro_text TEXT, framework_gap TEXT",
+    "analysis_results": "code TEXT, date TEXT, created_at TEXT, name TEXT, score INTEGER,"
+                        " return_pct REAL, holding_days INT, framework TEXT, quote_price REAL, quote_as_of TEXT,"
+                        f" quote_source TEXT, scoring_status TEXT DEFAULT 'complete', {ACCOUNT_COMPANY_KEY},"
+                        " flags TEXT, score_breakdown TEXT, decision_json TEXT, result TEXT, PRIMARY KEY (code, date)",
+    "stock_fundamentals": "code TEXT PRIMARY KEY, name TEXT, industry TEXT, updated_at TEXT,"
+                          f" ttl_hours INTEGER DEFAULT 24, {ACCOUNT_COMPANY_KEY}, data JSON",
+    "quote_snapshots": "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL, price REAL NOT NULL,"
+                       " quote_date TEXT NOT NULL, quote_time TEXT NOT NULL, fetched_at TEXT NOT NULL,"
+                       " source TEXT NOT NULL, verification_sources TEXT NOT NULL, degraded INTEGER NOT NULL DEFAULT 0,"
+                       f" valid INTEGER NOT NULL DEFAULT 1, {ACCOUNT_COMPANY_KEY}",
+    "qualitative_only_securities": "code TEXT PRIMARY KEY, name TEXT NOT NULL, industry TEXT NOT NULL,"
+                                   f" updated_at TEXT NOT NULL, {ACCOUNT_COMPANY_KEY}",
+    "market_indicator_snapshots": "indicator_key TEXT PRIMARY KEY, value REAL NOT NULL, as_of TEXT NOT NULL,"
+                                  " fetched_at TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ok'",
+}
+ACCOUNT_INDEXES = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_active_reason ON holding_alerts(holding_id, reason_code)"
+    " WHERE status != 'resolved'",
+    "CREATE INDEX IF NOT EXISTS idx_alert_code_status ON holding_alerts(code, status)",
+    "CREATE INDEX IF NOT EXISTS idx_analysis_results_code_created ON analysis_results(code, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_analysis_results_date ON analysis_results(date)",
+    "CREATE INDEX IF NOT EXISTS idx_holding_events_holding_date ON holding_events(holding_id, event_date, id)",
+    "CREATE INDEX IF NOT EXISTS idx_holdings_code ON holdings(code)",
+    "CREATE INDEX IF NOT EXISTS idx_holdings_exit ON holdings(exit_date)",
+    "CREATE INDEX IF NOT EXISTS idx_l3_holding_status ON holding_l3_conditions(holding_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_quote_snapshots_code_id ON quote_snapshots(code, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quote_snapshots_code_time ON quote_snapshots(code, fetched_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_retro_framework ON retro_notes(framework)",
+    "CREATE INDEX IF NOT EXISTS idx_retro_holding ON retro_notes(holding_id)",
+    "CREATE INDEX IF NOT EXISTS idx_thesis_holding_version ON holding_thesis_versions(holding_id, version)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_thesis_one_active_per_holding ON holding_thesis_versions(holding_id)"
+    " WHERE status='active'",
+    "CREATE INDEX IF NOT EXISTS holding_events_by_company_date ON holding_events(company_key, event_date)",
+)
+
+
+def _migrate_v10(conn: sqlite3.Connection) -> None:
+    for table, columns in ACCOUNT_TABLES.items():
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({columns})")
+    for statement in ACCOUNT_INDEXES:
+        conn.execute(statement)
+    # One row: where account state comes from. 'mirror' until the cutover, then 'ledger' for good.
+    conn.execute("CREATE TABLE IF NOT EXISTS account_source (id INTEGER PRIMARY KEY CHECK (id = 1),"
+                 " mode TEXT NOT NULL CHECK (mode IN ('mirror', 'ledger')), source_sha256 TEXT NOT NULL,"
+                 " updated_at TEXT NOT NULL, watermark TEXT NOT NULL)")
+    # Append-only pointer to the investment policy in force; the newest row wins.
+    conn.execute("CREATE TABLE IF NOT EXISTS policy_activations (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " policy TEXT NOT NULL, activated_at TEXT NOT NULL, activated_by TEXT NOT NULL, identity TEXT NOT NULL)")
+    for event in ("UPDATE", "DELETE"):
+        conn.execute(f"CREATE TRIGGER IF NOT EXISTS policy_activations_no_{event.lower()} BEFORE {event}"
+                     " ON policy_activations BEGIN SELECT RAISE(ABORT, 'policy_activations is append-only'); END")
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9)
+              _migrate_v9, _migrate_v10)
 
 
 def now() -> str:
