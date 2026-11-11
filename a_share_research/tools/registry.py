@@ -14,7 +14,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from a_share_research import api_keys, service, external_research, external_review
-from a_share_research.account import trades, ledger, evidence
+from a_share_research.account import trades, ledger, evidence, analysis
 
 
 class ToolError(Exception):
@@ -78,6 +78,19 @@ class AccountReceipt(Account):
 class AccountObserve(Account):
     observation: ledger.Observation
     evidence_hash: str
+
+
+class Analysis(Arguments):
+    holding_id: int = Field(gt=0)
+
+
+class AnalysisHistory(Analysis):
+    after_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class AnalysisUpdate(Analysis):
+    update: analysis.Update
 
 
 class EvidenceUpload(Arguments):
@@ -157,6 +170,14 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('account.analysis.current', '读取持仓周期最新影子分析状态', frozenset({'assistant'}), Analysis, Payload,
+         lambda c, a: Payload(data=analysis.current(c.connection, c.principal, a.holding_id)), account=True),
+    Tool('account.analysis.history', '分页读取不可变分析历史，旧基线不冒充完整历史', frozenset({'assistant'}), AnalysisHistory, Payload,
+         lambda c, a: Payload(data=analysis.history(c.connection, c.principal, a.holding_id,
+                              after_id=a.after_id, limit=a.limit)), account=True),
+    Tool('account.analysis.update', '带证据追加L3、预警或Tier状态；不修改旧监控来源', frozenset({'assistant'}), AnalysisUpdate, Payload,
+         lambda c, a: Payload(data=analysis.update(c.connection, c.principal, a.holding_id, a.update,
+                              c.database.parent / 'account-evidence')), access='write', account=True),
     Tool('account.evidence', '私有存储截图或交割单，返回内容哈希', frozenset({'assistant'}), EvidenceUpload, Payload,
          _store_evidence, access='write', account=True),
     Tool('account.state', '查询影子账本版本与股数现金投影', frozenset({'assistant'}), Account, Payload,

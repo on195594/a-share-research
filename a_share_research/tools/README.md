@@ -2,7 +2,7 @@
 
 HTTP 与进程内入口默认只读，单文件客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排、MCP、新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
-开发验证使用已迁移至 v14 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
+开发验证使用已迁移至 v15 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
 DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server
@@ -63,3 +63,16 @@ v14 新增期初与投影、批次回执、事件、作废记录、资产观察�
 提交结果的 `data.status` 为 `posted`、`missing_material`、`conflict` 或 `service_failure`。HTTP 200 只表示返回了业务回执，必须检查此状态。成功同请求重提复用原回执；失败批次可补齐条件后重试。SQL 入账失败先回滚，数据库仍可写时单独持久化失败回执；数据库不可用时返回 HTTP 503，不声称已存回执。所有失败均不改变交易投影。HTTP 拒绝重复 JSON 键和非有限数字，避免重复持仓键被静默覆盖。
 
 完整性巡检检查事件归属、业务身份、作废关系、回执和投影重放，发布数据库指纹覆盖五张新表。物理证据备份/恢复、旧成本与持仓生命周期投影、分析状态追加、完整券商流水对账和生产切换验收仍需完成。
+
+
+## 分析状态追加历史（影子入口）
+
+v15 的 `account_analysis_history` 按持仓周期 `holding_id` 保存完整快照，包含 L3、预警、Tier 和论点版本；每次追加关联前一版本、创建凭据、请求/快照哈希和证据。当前值取最新追加行，历史不可更新或删除。同公司不同持仓周期不会合并。内部 `analysis.initialize` 原样保存一次旧表基线，明确标为 `legacy_baseline`，保留空证据和退休条件，不把当前快照当成已恢复的历史。
+
+三个工具沿用 `account_shadow_enabled` 开关，仅 assistant 可用：
+
+- `account.analysis.current`：读取指定持仓周期最新影子快照。
+- `account.analysis.history`：按修订编号分页读取完整历史及来源。
+- `account.analysis.update`：传 `holding_id` 及 `update`（`expected_version`、`evidence_hashes`、`reason`、`changes`）；支持活动 L3 的状态/证据/复核日期，现有预警转 pending 或 resolved，以及未豁免 Tier 的 pending/completed 状态。一个请求内多项变更全成全败，同请求重提返回原修订，版本冲突返回 409。
+
+新写入须引用已存证据；已关闭持仓、退休 L3、已解除预警不能更新。买入时豁免和路径配置不属于普通状态更新。发现旧镜像基线或公司身份已变化时拒绝继续叠加，等待核对，不静默合并。论点整组重写/L3 退休新增、预警新增、旧监控读取切换仍未开放，不能据此取消旧宿主确认流程。所有操作只写影子历史，不改旧四表或成交。
