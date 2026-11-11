@@ -141,6 +141,8 @@ def mirror(conn: sqlite3.Connection, source_path: Path) -> dict:
         conn.execute(f"DELETE FROM sqlite_sequence WHERE name IN ({', '.join('?' * len(MANIFEST))})", tuple(MANIFEST))
         conn.executemany("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", content["sequences"].items())
         directory = target_directory(conn)
+        if directory.stat().st_mode & 0o077:
+            raise MirrorError(f"目标数据目录须只有属主可访问（0700），账户数据不写入共享目录：{directory}")
         if digest({**_read(conn, directory), "files": content["files"]}) != sha:
             raise MirrorError("镜像后的内容与来源不一致，已回滚")
         watermark = {"rows": {table: len(rows) for table, rows in content["tables"].items()},

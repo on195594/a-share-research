@@ -81,9 +81,21 @@ def cache_db_path() -> Path:
     """
     _read_config()  # a runtime config that is not private still fails closed before any database use
     explicit = os.environ.get("POLICY_V0_DB")
-    return Path(explicit).expanduser() if explicit else Path(app_db.DATA) / "app.db"
+    path = Path(explicit).expanduser() if explicit else Path(app_db.DATA) / "app.db"
+    if not path.is_absolute():
+        # A relative data directory would start a second, empty ledger wherever the command happens to run.
+        raise RuntimeError("account database path must be absolute; set DATA_DIR")
+    return path
 
 
 def state_dir() -> Path:
     """Runtime state files (asset observation, alert de-duplication) stay beside the database."""
     return cache_db_path().parent
+
+
+def ensure_db_parent(path: str | Path) -> None:
+    """Create a private database parent without changing existing directories."""
+    parent = Path(path).expanduser().resolve().parent
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if parent.stat().st_mode & 0o077:
+        raise PermissionError(f"database parent must be private (0700): {parent}")

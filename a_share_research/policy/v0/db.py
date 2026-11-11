@@ -52,6 +52,10 @@ def _ensure_schema(database_path: Path) -> None:
     with _SCHEMA_LOCK:
         if _SCHEMA_INITIALIZED and _SCHEMA_INITIALIZED_PATH == key:
             return
+        try:
+            paths.ensure_db_parent(database_path)
+        except PermissionError as exc:
+            raise sqlite3.OperationalError(str(exc)) from exc
         if database_path.exists():
             probe = sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
             try:

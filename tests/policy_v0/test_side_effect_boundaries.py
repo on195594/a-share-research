@@ -71,6 +71,17 @@ def test_read_only_database_path_is_literal(tmp_path, monkeypatch, suffix) -> No
     assert set(tmp_path.iterdir()) == before - {database}
 
 
+def test_w1_refuses_public_parent_without_changing_it(tmp_path, monkeypatch, capsys):
+    parent = tmp_path / "shared"
+    parent.mkdir(mode=0o755)
+    parent.chmod(0o755)
+    monkeypatch.setenv("POLICY_V0_DB", str(parent / "cache.db"))
+    assert cache.main(["--confirm-write", "add-holding", "600036", "40", "100"]) == 1
+    assert "0700" in capsys.readouterr().err
+    assert parent.stat().st_mode & 0o777 == 0o755
+    assert list(parent.iterdir()) == []
+
+
 def test_missing_w1_confirmation_keeps_fixture_hash(tmp_path, monkeypatch) -> None:
     database = tmp_path / "cache.db"
     monkeypatch.setenv("POLICY_V0_DB", str(database))

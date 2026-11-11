@@ -43,3 +43,35 @@ def test_importing_paths_does_not_create_home_state(tmp_path) -> None:
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / ".local").exists()
 
+
+@pytest.mark.parametrize("existing_mode", [None, 0o700, 0o755])
+def test_db_parent_permissions_do_not_change_existing_directories(
+    tmp_path, existing_mode
+):
+    parent = tmp_path / "state"
+    if existing_mode is not None:
+        parent.mkdir(mode=existing_mode)
+        parent.chmod(existing_mode)
+    if existing_mode == 0o755:
+        with pytest.raises(PermissionError, match="0700"):
+            paths.ensure_db_parent(parent / "cache.db")
+    else:
+        paths.ensure_db_parent(parent / "cache.db")
+    assert parent.stat().st_mode & 0o777 == (existing_mode or 0o700)
+
+
+def test_relative_data_directory_is_refused_instead_of_starting_a_second_ledger(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    from a_share_research import db as app_db
+    from a_share_research.policy.v0 import cache
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("POLICY_V0_DB", raising=False)
+    monkeypatch.setattr(app_db, "DATA", Path("data"))
+    with pytest.raises(RuntimeError, match="absolute"):
+        paths.cache_db_path()
+    assert cache.main(["holdings"]) == 1
+    assert "运行配置不可用" in capsys.readouterr().err
+    assert cache.main(["--confirm-write", "add-holding", "600036", "40", "100"]) == 1
+    assert list(tmp_path.iterdir()) == []

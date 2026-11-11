@@ -156,6 +156,18 @@ def test_mirror_never_runs_after_the_cutover(conn, source):
     assert conn.execute("SELECT shares FROM holdings WHERE code = '600519'").fetchone()[0] == 150
 
 
+def test_mirror_does_not_write_account_data_into_a_shared_directory(conn, source):
+    directory = mirror.target_directory(conn)
+    directory.chmod(0o755)
+    try:
+        with pytest.raises(mirror.MirrorError, match="0700"):
+            mirror.mirror(conn, source)
+    finally:
+        directory.chmod(0o700)
+    assert conn.execute("SELECT COUNT(*) FROM holdings").fetchone()[0] == 0
+    assert not (directory / "account-snapshot.json").exists()
+
+
 def test_account_tables_reject_what_the_old_schema_rejected(conn):
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO holding_events (holding_id, code, event_type, event_date, created_at)"
