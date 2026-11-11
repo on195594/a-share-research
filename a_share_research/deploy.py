@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen, build_opener, ProxyHandler
 
-from a_share_research import backup as recovery, db, rollback
+from a_share_research import backup as recovery, db, initial_release, rollback
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
@@ -244,13 +244,47 @@ def _tools_config():
     return configured
 
 
-def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bool = False) -> None:
+def _verify_release(images, before, services, *, allow_config, save):
+    """Verify a target or compatible recovery before reopening tools admission."""
+    wait_ready()
+    if 'tools' in services:
+        save('tools-ready-paused.json', wait_tools_ready(paused=True))
+    runtime = json.loads(run('docker', 'exec', 'a-share-research-worker', 'python', '-c',
+                            'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'))
+    save('worker-preflight.json', runtime)
+    after = {service: describe(service) for service in services}
+    for service in before:
+        expected = before[service] | {'image': images[service]}
+        if allow_config:
+            expected['config_hash'] = after[service]['config_hash']
+        if after[service] != expected:
+            raise RuntimeError(f'{service} 镜像、运行状态或部署配置不一致')
+    if 'tools' in services:
+        tool = after['tools']
+        if (not tool['running'] or tool['image'] != images['worker']
+                or tool['mounts'].get('/data') != before['web']['mounts']['/data']
+                or set(tool['mounts']) != {'/data', '/run/ashare-tools'}
+                or tool['mounts'].get('/run/ashare-tools') != ['tmpfs', True]
+                or tool['cpus'] != 400_000_000
+                or tool['ports'] != {'8621/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8621'}]}):
+            raise RuntimeError('tools 镜像、资源、挂载或回环端口与约定不符')
+    check = json.loads(run('docker', 'exec', 'a-share-research-worker', 'python', '-m', 'a_share_research.integrity'))
+    save('integrity-after.json', check)
+    if not check['ok']:
+        raise RuntimeError('发布后完整性检查失败')
+    return after
+
+
+def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bool = False,
+           initial_recovery: str | None = None) -> None:
     revision = run("git", "rev-parse", f"{code}^{{commit}}")
     if revision != run("git", "rev-parse", "HEAD") or revision != run("git", "rev-parse", "origin/main"):
         raise RuntimeError("只能发布已提交并已推送到 origin/main 的 HEAD")
     if run("git", "status", "--porcelain", "--", "a_share_research", "Dockerfile", "compose.yaml", "pyproject.toml", "uv.lock"):
         raise RuntimeError("应用或部署文件有未提交修改；无关文档改动不阻断发布")
     has_tools = bool(run('docker','ps','-a','--filter','name=^/a-share-research-tools$','--format','{{.ID}}'))
+    if initial_recovery is not None and (has_tools or not with_tools or not allow_config):
+        raise RuntimeError('首次迁移恢复入口仅用于尚无 tools 的部署，且须同时指定 --with-tools --allow-config')
     include_tools = with_tools or has_tools
     services = (*SERVICES,'tools') if include_tools else SERVICES
     existing = (*SERVICES,'tools') if has_tools else SERVICES
@@ -259,6 +293,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
     if include_tools:
         _tools_config()
     images = verify_images(code)
+    recovery_images = verify_images(initial_recovery) if initial_recovery is not None else None
     if include_tools:
         images['tools'] = images['worker']
     before = {service: describe(service) for service in existing}
@@ -294,11 +329,18 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
     def save(name, value):
         (evidence / name).write_text(json.dumps(value, ensure_ascii=False, indent=2))
 
+    if recovery_images is not None:
+        save('initial-preparation.json', initial_release.prepare(database, images, recovery_images,
+                                                                evidence/'initial-preparation'))
+        idle(database)  # Real work may have arrived while the private copy was checked.
     for service in SERVICES:
-        run("docker", "tag", before[service]["image"], f"a-share-research-{service}:rollback-{code}")
+        fallback = recovery_images[service] if recovery_images is not None else before[service]['image']
+        run("docker", "tag", fallback, f"a-share-research-{service}:rollback-{code}")
     save("manifest.json", {"code": revision, "before": before, "new": images, "backup": str(backup),
-                           "backup_bundle": str(backup.with_suffix('.bundle'))})
+                           "backup_bundle": str(backup.with_suffix('.bundle')),
+                           "initial_recovery": recovery_images})
     paused = switched = tools_paused = new_tools_started = False
+    migration_verified = False
     def compose(*args):
         return run('docker','compose',*(('--profile','tools') if include_tools else ()),*args)
     try:
@@ -319,60 +361,46 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             compose('stop','-t','60','tools')
         idle(database)
         original = fingerprints(database)
+        expected = original
         save("tables-before.json", original)
         if backup.exists():
             raise FileExistsError(backup)
         counts = create_release_backup(database,backup)
         switched = True  # Restore both tags even if only the first replacement succeeds.
+        if recovery_images is not None:
+            # No application writer runs until the actual stopped database passes conservation.
+            initial_release.migrate(database, images['worker'], evidence/'initial-migration')
+            migration_verified = True
+            expected = fingerprints(database)
+            save('tables-migrated.json', expected)
         for service in SERVICES:
             run("docker", "tag", images[service], f"a-share-research-{service}:latest")
         final = fingerprints(database)
         save("tables-after.json", final)
-        if final != original:
+        if final != expected:
+            migration_verified = False
             raise RuntimeError("停服窗口内业务表发生变化；保留数据供核对")
         new_tools_started = include_tools and not has_tools
         compose("up", "-d", "--no-build", "--no-deps", *services)
-        wait_ready()
-        if include_tools:
-            save('tools-ready-paused.json',wait_tools_ready(paused=True))
-        runtime = json.loads(run("docker", "exec", "a-share-research-worker", "python", "-c",
-                                 "import json; from a_share_research.model import preflight; print(json.dumps(preflight()))"))
-        save("worker-preflight.json", runtime)
-        after = {service: describe(service) for service in services}
-        for service in existing:
-            expected = before[service] | {"image": images[service]}
-            if allow_config:
-                expected["config_hash"] = after[service]["config_hash"]
-            if after[service] != expected:
-                raise RuntimeError(f"{service} 镜像、运行状态或部署配置不一致")
-        if include_tools:
-            tool = after['tools']
-            if (not tool['running'] or tool['image'] != images['worker']
-                    or tool['mounts'].get('/data') != before['web']['mounts']['/data']
-                    or set(tool['mounts']) != {'/data','/run/ashare-tools'}
-                    or tool['mounts'].get('/run/ashare-tools') != ['tmpfs', True]
-                    or tool['cpus'] != 400_000_000
-                    or tool['ports'] != {'8621/tcp':[{'HostIp':'127.0.0.1','HostPort':'8621'}]}):
-                raise RuntimeError('tools 镜像、资源、挂载或回环端口与约定不符')
-        check = json.loads(run("docker", "exec", "a-share-research-worker", "python", "-m", "a_share_research.integrity"))
-        save("integrity-after.json", check)
-        if not check["ok"]:
-            raise RuntimeError("发布后完整性检查失败")
+        after = _verify_release(images, before, services, allow_config=allow_config, save=save)
         if include_tools:
             tools_paused = False  # Even a lost resume reply may have admitted requests; rollback must drain again.
             if tools_control('resume')['paused']:
                 raise RuntimeError('tools 未恢复受理')
             save('tools-ready.json',wait_tools_ready())
-        pruned = prune_backups(data)  # Only after a verified release; a failed one keeps every backup and image.
-        pruned_images = prune_images(images)
+        # The first migration retains all preparation/recovery evidence and images.
+        pruned = prune_backups(data) if recovery_images is None else []
+        pruned_images = prune_images(images) if recovery_images is None else {}
         save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
                                "backup": str(backup), "backup_bundle": str(backup.with_suffix('.bundle')),
                                "backup_counts": counts, "pruned_backups": pruned,
-                               "pruned_images": pruned_images, "at": db.now()})
+                               "pruned_images": pruned_images, "initial_recovery": recovery_images, "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
         log.exception("发布失败，核对兼容性后回退应用；保留数据、备份与证据")
-        # Application-only rollback: a migration may ship through here only if the old image runs on the new schema.
+        if recovery_images is not None and switched and not migration_verified:
+            raise RuntimeError('首次迁移未通过守恒核对；保持停服和暂停标记，不自动恢复任何镜像')
+        # Default rollback requires the old image; an initial release pins a separate compatible baseline.
         if include_tools and switched and not tools_paused:
             # Never replace a process that may now be handling a newly admitted financial call.
             drained = tools_control('pause')
@@ -387,12 +415,43 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             if include_tools:
                 compose('stop', '-t', '60', 'tools')
             idle(database)
-            compatibility = rollback.assess({service: before[service]['image'] for service in SERVICES},
+            fallback = recovery_images or {service: before[service]['image'] for service in SERVICES}
+            compatibility = rollback.assess(fallback,
                                             database, evidence / 'rollback-probe')
             save('rollback-compatibility.json', compatibility)
             if compatibility['ok'] is not True:
-                raise RuntimeError('旧镜像读取兼容检查未通过；保持当前镜像、停服和 tools 暂停状态，'
+                label = '指定恢复镜像' if recovery_images is not None else '旧镜像'
+                raise RuntimeError(f'{label}读取兼容检查未通过；保持当前镜像、停服和 tools 暂停状态，'
                                    '请核对 rollback-compatibility.json')
+        if switched and recovery_images is not None:
+            # Keep the new tools service and all post-migration writes. This is
+            # compatible recovery, never a return to the old v9 application.
+            recovery_images = recovery_images | {'tools': recovery_images['worker']}
+            def recovery_save(name, value):
+                save('recovery-'+name, value)
+            try:
+                for service in SERVICES:
+                    run('docker', 'tag', recovery_images[service], f'a-share-research-{service}:latest')
+                compose('up', '-d', '--no-build', '--no-deps', *services)
+                recovered = _verify_release(recovery_images, before, services, allow_config=allow_config,
+                                            save=recovery_save)
+                tools_paused = False
+                if tools_control('resume')['paused']:
+                    raise RuntimeError('兼容恢复后 tools 未恢复受理')
+                recovery_save('tools-ready.json', wait_tools_ready())
+                recovery_save('result.json', dict(status='recovered', images=recovery_images, after=recovered))
+            except BaseException:
+                if not tools_paused:
+                    if tools_control('pause') != {'paused': True, 'in_flight': 0}:
+                        raise RuntimeError('兼容恢复失败且未确认排空；不替换当前服务')
+                    tools_paused = True
+                compose('stop', '-t', '30', 'web')
+                idle(database)
+                compose('stop', '-t', '30', 'worker')
+                compose('stop', '-t', '60', 'tools')
+                recovery_save('result.json', dict(status='held', images=recovery_images))
+                raise
+            raise  # The requested release still failed, even when compatible recovery succeeded.
         if new_tools_started:
             compose('rm','-f','-s','tools')
         if switched:
@@ -419,10 +478,13 @@ def main() -> None:
     parser.add_argument("--allow-config", action="store_true",
                         help="allow authorized Compose or environment configuration changes")
     parser.add_argument('--with-tools',action='store_true',help='include the tools service on its first authorized rollout')
+    parser.add_argument('--initial-recovery', metavar='CODE',
+                        help='first v9→v21 release only: verify this compatible recovery build before stopping services')
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    deploy(args.code, args.evidence, allow_config=args.allow_config, with_tools=args.with_tools)
+    deploy(args.code, args.evidence, allow_config=args.allow_config, with_tools=args.with_tools,
+           initial_recovery=args.initial_recovery)
 
 
 if __name__ == "__main__":

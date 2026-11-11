@@ -238,7 +238,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 v21 增加 `scan_requests` 及扫描引用索引，不改已有扫描或研究记录。后续顾问客户端的回退基线必须同时支持 v21、新请求 API 和 tools 就绪；旧 v20 镜像不满足，应用回退检查会明确拒绝，保留停服/暂停现场。准备期新增接口不代表已满足首次生产迁移的发布准入；须先按下文验证兼容镜像，不能将旧代码能读取新增表当作完整回退证明。
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。v9 重建 `runs`、`reports`、`calls` 把大字段放到表尾，增加 `company_key` 等生成列，`runs`、`reports` 改为 `AUTOINCREMENT`，设计与门禁见[数据层治理方案](docs/data-foundation.md)。迁移须另获授权并备份，准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测；做不到的不走发布工具，另写一次性步骤。回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。v9 重建 `runs`、`reports`、`calls` 把大字段放到表尾，增加 `company_key` 等生成列，`runs`、`reports` 改为 `AUTOINCREMENT`，设计与门禁见[数据层治理方案](docs/data-foundation.md)。迁移须另获授权并备份，日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测；做不到的不能使用日常参数，须准备一次性迁移路径，v9→v21 入口见下文。回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
@@ -279,6 +279,19 @@ uv run python -m a_share_research.deploy "$release_code" \
 发布备份保留原 `backup-pre-<提交>-<时间>.db` 入口，同时生成同名 `.bundle/` 完整证据包；两份数据库独立存储，文件哈希一致。清理旧备份时先核对包的完整性及其与 `.db` 的归属，再成对清理；发现额外文件、损坏或归属不符时保留并报告。发布失败仍保留所有备份，不自动恢复数据库。首次启用 tools 时追加 `--with-tools --allow-config`；已有 tools 容器自动纳入发布。部署先通过私有控制 socket 暂停新请求并排空，再停止服务、备份和切换；新进程读取持久暂停标记，数据库就绪、worker 预检、容器配置和完整性检查通过后才恢复 tools 受理。已被其他操作暂停的服务不会被本次发布接管。恢复受理的回执丢失时，回退前会重新排空，排空失败则不替换进程。切换后失败会先停止写入者，对当时数据库、PDF、账户证据和资产侧文件制作私有副本，再以原 web、worker 镜像分别运行禁网、只读的兼容检查；旧代码必须读懂实际账户来源、政策回执和采集上下文，不能仅凭数据库版本号或 `/ready` 判断。结果保存在发布证据目录的 `rollback-compatibility.json`，副本在 `rollback-probe/`。检查失败、超时或无法完成时保留当前镜像、停服及 tools 暂停状态，不删首次新增的 tools 容器、不恢复受理；须依据报告核对副本并准备兼容应用，不能用恢复旧数据库绕过。通过后才清理本次新增 tools 容器或让已有 tools 随 worker 回退，账本不回滚。此门禁只验证读取，正式账户切换前仍须独立验证前一级合并镜像能够读写新账本。
 
 已启用政策服务时，镜像就绪与政策实装一致是两项检查：应用代码参与政策身份，升级或回退后 `policy.current.installed` 可能为 false，新计算会拒绝，已有请求仍可查回原回执。所有者须按[政策本地入口](a_share_research/tools/README.md#完整政策身份生效指针与固定输入重放影子入口)，用核对后的参数在目标镜像下登记身份并追加生效指针；回退同样适用。发布工具不代替所有者切换政策，也不改写既存回执与旧周期参数。
+
+首次 v9→v21 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
+
+```sh
+uv run --offline --no-sync python -m a_share_research.deploy <目标提交> <新的私有证据目录> \
+  --with-tools --allow-config --initial-recovery <兼容恢复提交>
+```
+
+入口先校验两组镜像源码，固定其不可变 ID，对完整一致副本用目标镜像离线迁移并检查所有旧列（含生成列及序列）守恒、权限默认值和完整性，再用恢复镜像检查该副本；这一步失败不停止生产。准备通过后重新查空闲，暂停受理、停止服务并保留完整备份；目标镜像在没有服务写入者时迁移实际数据库，同样核对守恒，通过后才启动三服务。旧 v9 镜像不作为此次恢复目标。
+
+实际迁移未通过核对时保持停服和暂停标记；已通过迁移但启动或恢复受理失败时，先确认在途请求排空，检查包含最新写入的完整副本，再使用指定兼容镜像恢复全部三服务。新 tools 保留，数据库、原始证据和请求回执不倒退；恢复后再次检查镜像/配置、严格就绪、worker 离线预检和领域完整性，通过后才恢复受理。恢复仍失败则保持暂停；排空无法确认时不替换仍在处理请求的服务。`recovery-result.json` 区分 recovered/held，读取兼容检查另存 `rollback-compatibility.json`；即使兼容恢复成功，本次目标发布仍以失败退出，须核对证据再处理，不能盲重跑首次参数。
+
+首次入口保留全部准备证据、备份和镜像，不做日常清理；兼容镜像作为后续回退标签。成功或核实兼容恢复完成后，后续发布回到日常入口；已有 tools 会自动纳入。此入口不切换账户来源、不启用宿主定时任务、不代替所有者激活政策。
 
 最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
 
