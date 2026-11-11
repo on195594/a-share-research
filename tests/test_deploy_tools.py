@@ -385,3 +385,19 @@ def test_first_tools_starts_paused_and_only_resumes_after_checks(operations):
     assert index(state,('describe','tools','new-worker'))<index(state,('control','resume'))
     assert ('control','pause') not in state.events
     assert commands(state,'up')[-1][-3:]==('web','worker','tools')
+
+
+@pytest.mark.parametrize('control_mount', [['tmpfs', False], ['/private/bind-control', True]])
+def test_release_rejects_non_writable_or_non_tmpfs_control_mount(operations, monkeypatch, control_mount):
+    state = operations()
+    original = deploy.describe
+    def describe(service):
+        value = original(service)
+        if service == 'tools':
+            value['mounts']['/run/ashare-tools'] = control_mount
+        return value
+    monkeypatch.setattr(deploy, 'describe', describe)
+    with pytest.raises(RuntimeError, match='tools 镜像、资源、挂载或回环端口与约定不符'):
+        deploy.deploy('revision', state.evidence)
+    assert state.tags == {'web': 'old-web', 'worker': 'old-worker'}
+    assert ('rollback_probe',) in state.events

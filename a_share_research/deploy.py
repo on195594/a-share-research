@@ -155,10 +155,15 @@ def fingerprints(database: Path) -> dict:
 
 def describe(service: str) -> dict:
     container = json.loads(run("docker", "inspect", f"a-share-research-{service}"))[0]
+    mounts = {m['Destination']: ['tmpfs' if m.get('Type') == 'tmpfs' else m['Source'], m['RW']]
+              for m in container['Mounts']}
+    # Docker can list --tmpfs only in HostConfig, omitting it from Mounts even while running.
+    for target, options in (container['HostConfig'].get('Tmpfs') or {}).items():
+        mounts.setdefault(target, ['tmpfs', 'ro' not in options.split(',')])
     return {"image": container["Image"], "running": container["State"]["Running"],
             "config_hash": container["Config"]["Labels"].get("com.docker.compose.config-hash"),
             "cpus": container["HostConfig"]["NanoCpus"], "ports": container["HostConfig"]["PortBindings"],
-            "mounts": {m["Destination"]: [m["Source"], m["RW"]] for m in container["Mounts"]}}
+            "mounts": mounts}
 
 
 def verify_images(code: str) -> dict:
@@ -345,6 +350,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             if (not tool['running'] or tool['image'] != images['worker']
                     or tool['mounts'].get('/data') != before['web']['mounts']['/data']
                     or set(tool['mounts']) != {'/data','/run/ashare-tools'}
+                    or tool['mounts'].get('/run/ashare-tools') != ['tmpfs', True]
                     or tool['cpus'] != 400_000_000
                     or tool['ports'] != {'8621/tcp':[{'HostIp':'127.0.0.1','HostPort':'8621'}]}):
                 raise RuntimeError('tools 镜像、资源、挂载或回环端口与约定不符')

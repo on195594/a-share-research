@@ -1,0 +1,35 @@
+{
+  "Image": "sha256:398214310095c5ed49cd4e90f1d3e2085051d4fdc3c7fd4975188a6876d81c56",
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/private/rehearsal-data",
+      "Destination": "/data",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": "rprivate"
+    }
+  ],
+  "State": {
+    "Running": false
+  },
+  "Config": {
+    "Labels": {
+      "com.docker.compose.config-hash": "65b8de5e35c966d0e98ebf0725982bf5ea458d0443377befcac2645d0ad28693"
+    }
+  },
+  "HostConfig": {
+    "NanoCpus": 400000000,
+    "PortBindings": {
+      "8621/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "45041"
+        }
+      ]
+    },
+    "Tmpfs": {
+      "/run/ashare-tools": "uid=1000,gid=1000,mode=0700"
+    }
+  }
+}

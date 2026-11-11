@@ -97,3 +97,30 @@ def test_closed_batch_is_idle_even_with_old_step(tmp_path):
         deploy.idle(database)
     finally:
         conn.close()
+
+
+def test_describe_includes_tmpfs_missing_from_captured_docker_mounts(monkeypatch):
+    # Actual Compose container inspect; only the private physical /data path is normalized.
+    captured = json.loads((Path(__file__).parent / 'data/deploy-tools-inspect-20261111.json').read_text())
+    assert [item['Destination'] for item in captured['Mounts']] == ['/data']
+    monkeypatch.setattr(deploy, 'run', lambda *args: json.dumps([captured]))
+    assert deploy.describe('tools')['mounts'] == {
+        '/data': ['/private/rehearsal-data', True], '/run/ashare-tools': ['tmpfs', True]}
+
+
+@pytest.mark.parametrize('listed', [False, True])
+def test_describe_preserves_readonly_tmpfs_and_normalizes_both_docker_shapes(monkeypatch, listed):
+    captured = json.loads((Path(__file__).parent / 'data/deploy-tools-inspect-20261111.json').read_text())
+    # Explicit read-only/alternate API-shape variants of the captured metadata, not live mounts.
+    captured['HostConfig']['Tmpfs']['/run/ashare-tools'] += ',ro'
+    if listed:
+        captured['Mounts'].append(dict(Destination='/run/ashare-tools', Type='tmpfs', Source='', RW=False))
+    monkeypatch.setattr(deploy, 'run', lambda *args: json.dumps([captured]))
+    assert deploy.describe('tools')['mounts']['/run/ashare-tools'] == ['tmpfs', False]
+
+
+def test_describe_accepts_null_tmpfs_on_containers_without_it(monkeypatch):
+    captured = json.loads((Path(__file__).parent / 'data/deploy-tools-inspect-20261111.json').read_text())
+    captured['HostConfig']['Tmpfs'] = None
+    monkeypatch.setattr(deploy, 'run', lambda *args: json.dumps([captured]))
+    assert deploy.describe('web')['mounts'] == {'/data': ['/private/rehearsal-data', True]}
