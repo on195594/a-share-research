@@ -425,8 +425,30 @@ def _migrate_v18(conn: sqlite3.Connection) -> None:
     migrate(conn)
 
 
+def _migrate_v19(conn: sqlite3.Connection) -> None:
+    conn.execute('CREATE TABLE IF NOT EXISTS policy_versions ('
+        'identity TEXT PRIMARY KEY, policy TEXT NOT NULL, created_at TEXT NOT NULL, created_by INTEGER NOT NULL,'
+        ' manifest TEXT NOT NULL)')
+    columns = {r[1] for r in conn.execute('PRAGMA table_info(policy_activations)')}
+    for name, kind in (('request_id','TEXT'),('expected_id','INTEGER'),('reason','TEXT')):
+        if name not in columns:
+            conn.execute(f'ALTER TABLE policy_activations ADD COLUMN {name} {kind}')
+    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS policy_activation_request '
+                 'ON policy_activations(activated_by,request_id) WHERE request_id IS NOT NULL')
+    conn.execute('CREATE TABLE IF NOT EXISTS policy_evaluations ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, identity TEXT NOT NULL REFERENCES policy_versions(identity),'
+        ' activation_id INTEGER REFERENCES policy_activations(id), created_at TEXT NOT NULL, created_by INTEGER NOT NULL,'
+        ' request_id TEXT NOT NULL, input_hash TEXT NOT NULL, result_hash TEXT NOT NULL,'
+        ' input TEXT NOT NULL, result TEXT NOT NULL, UNIQUE(created_by,request_id))')
+    for table in ('policy_versions','policy_evaluations'):
+        for event in ('UPDATE','DELETE'):
+            conn.execute(f'CREATE TRIGGER IF NOT EXISTS {table}_no_{event.lower()} BEFORE {event}'
+                         f" ON {table} BEGIN SELECT RAISE(ABORT, 'policy records are append-only'); END")
+
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19)
 
 
 def now() -> str:

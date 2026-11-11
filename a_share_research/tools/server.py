@@ -93,7 +93,8 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
                 if account_shadow_enabled:
                     expected.update(('account_books','account_batches','account_journal','account_voids','account_observations',
                                      'account_analysis_history','account_position_books','account_projection_ids',
-                                     'policy_v0_profiles','policy_v0_account_openings'))
+                                     'policy_v0_profiles','policy_v0_account_openings',
+                                     'policy_versions','policy_activations','policy_evaluations'))
                     conn.execute('SELECT account_id,cycle_id FROM account_analysis_history LIMIT 0')
                 tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 conn.execute('SELECT role FROM api_keys LIMIT 0')

@@ -2,7 +2,7 @@
 
 HTTP 与进程内入口默认只读，单文件 CLI/MCP 客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排已支持 tools 暂停排空，新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
-开发验证使用已迁移至 v18 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
+开发验证使用已迁移至 v19 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
 DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
@@ -31,7 +31,7 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 - `research`：读取研究卡片及报告；看不到也不能调用账户和政策工具。
 - `assistant`：研究读取，加成交时可用研究诊断、v0 五项 R0 读取命令。
-- `owner`：预留管理身份，当前没有开放的管理工具，也不允许调用旧研究 API。
+- `owner`：本地政策登记与切换；影子开关启用时可读取政策身份、指南和保存的评估；没有 HTTP 切换工具，也不允许调用旧研究 API。
 
 旧 Key 迁移后仍为 research。角色不可原地更改；更换角色须创建新 Key 并撤销旧 Key。assistant 发起的旧研究 API 请求仍交由隔离 worker 研究；外部草稿提交和独立记分使用下述单独开启的入口。
 
@@ -134,7 +134,7 @@ v16 新增 `account_position_books`。内部 `position_store.initialize` 在首�
 
 v17 新增不可变周期/事件整数编号、政策投影参数和期初快照。内部 `policy.v0.account_store.initialize` 在首笔金融事件前绑定成本期初与完整旧持仓/事件快照，要求证据、在仓周期、公司、股数、成本、日期一致，并具备参考成本、初始股数、主仓位和已保存止损字段。旧历史所有列原样保留；后续镜像刷新不会自动覆盖期初。
 
-`policy.v0.positions` 接收 account_id，使用 assistant 权限与账户影子开关，返回 holdings/holding_events、账本版本、期初哈希和 profile_identity。该 profile 记录当前投影算法哈希及止损/主仓位参数，仅供此适配器复算；完整投资政策身份、生效指针和真实账户切换尚待后续实现。
+`policy.v0.positions` 接收 account_id，使用 assistant 权限与账户影子开关，返回 holdings/holding_events、账本版本、期初哈希和 profile_identity。该 profile 记录当前投影算法哈希及止损/主仓位参数，仅供此适配器复算；完整投资政策身份与追加生效指针见下节；此投影 profile 不自动升级为完整身份，真实账户切换仍待验收。
 
 新开仓的 position_entries 除 policy_identity 外，须明确 framework，可提供 framework_confident 和 name。policy_identity 须引用已登记 profile；金融事实可独立入账，但缺少这些政策条件时政策读取明确报缺口。旧周期先保留保存的止损线，买入或除权触发参考成本变动时才按绑定参数重算。
 
@@ -153,3 +153,32 @@ v18 在同一 `account_analysis_history` 表增加 account_id/cycle_id 作用域
 已导入分支独立追加，旧镜像或旧分析后续更新不会自动覆盖它。基线不能重建覆盖，旧来源始终可追溯。没有显式导入分支的期初周期继续使用既有旧分析投影；新在仓周期缺少分析基线时，双投影读取明确拒绝，不拼接其他账户或旧周期的分析。双投影先生成持仓，再按账户/周期加载分析，最后封闭写入；已关闭周期保留其分支的最后快照供历史读取。
 
 未识别作用域的旧工具版本会混读新分支，不能作为含新分支数据库的回退目标。按合一方案，正式切换后的前一级回退镜像也必须能读写新账本；回退保留新账本，不恢复旧 Skills 或旧账户库。证据备份与独立目录恢复已接入 [README](../../README.md)，镜像兼容性及切换后回退仍待演练；生产目前沿用旧账户来源。
+
+
+## 完整政策身份、生效指针与固定输入重放（影子入口）
+
+v19 增加不可变 `policy_versions` / `policy_evaluations`，扩展既有只追加的 `policy_activations`。完整身份由当前安装的应用 Python 源码及 `uv.lock`、实际生效参数、规则索引/指南规则和全部指南内容共同确定。代码范围包含共享运行时，所以任何应用源码变更都须显式登记新身份；旧身份保留供历史核验，不会随升级静默改写。原 `v0:` 投影 profile 继续用于历史成本投影，不能代替完整 `policy:` 身份。
+
+登记参数须为 `risk_policy.resolve_risk_parameters(...).risk_policy` 的实际解析结果（固定输入包中的 `risk_policy` 同形），包括来源与适用范围，不能直接把未经解析的原 `risk-policy.json` 当成运行参数。保存参数的本地文件须由当前用户持有且无组/其他用户权限；不得把账户参数提交到仓库。
+
+只有本地命令可登记及切换。以私有环境变量 `ASHARE_OWNER_TOKEN` 传 owner Key，`DATA_DIR` 选已迁移的数据库；命令不会创建库或执行迁移：
+
+```sh
+python -m a_share_research.policy.registry register --parameters /private/effective-parameters.json
+python -m a_share_research.policy.registry current
+python -m a_share_research.policy.registry activate policy:IDENTITY \
+  --expected-id 0 --request-id unique-owner-decision --reason '明确的切换依据'
+```
+
+`register` 不切换指针。`activate` 首次 expected-id 为 0，此后为 current 返回的编号；并发变化拒绝，重复 request-id/内容返回原记录且不会退回旧指针。同一请求标识改内容会冲突。实装哈希不符、参数尚未生效/已到期或账户作用域未确认均拒绝启用。参数的旧历史重放仍按输入包的评估时钟核对。旧无完整身份的指针保存原列和原值，读取明确报缺口，不自动补造身份。
+
+显式账户影子开关下开放四项工具：
+
+- `policy.current`（assistant/owner）：读取生效身份、实际参数、生效时间及 installed 状态；没有指针时返回空，代码变更后 installed=false。
+- `policy.guide`（assistant/owner）：省略 path 发现指南列表，传返回的 path 读取已保存的确切版本；不接受任意文件路径。指南是历史政策资料，文中的旧工作流不能覆盖当前宿主授权。
+- `policy.replay`（assistant）：提交 identity、request_id、bundle，对完整 JSON 固定输入包执行 v0 `build_monitor_snapshot`，原样保存 monitor-v1 输出、原输入、两者哈希及实际政策身份。若该身份正生效，同时记录对应 activation_id。输入风险参数必须与身份完全一致，运行时不接受 pickle、不取行情、不调用模型。
+- `policy.evaluation`（assistant/owner）：按 evaluation_id 读取原输入、结果及不可变回执。
+
+`bundle` 包含 local、quotes、portfolio_value、industry_result、now、risk_policy、denominator_evidence、account_scope_required、research_result；数据类以对应 JSON 字段表示，now 必须带时区，缺失和降级语义沿用 v0。`policy.evaluation.pack` 可把已受信内存输入转为 JSON；它不反序列化可执行内容。重放同请求幂等，参数/输入变化冲突，写入失败整体回滚。
+
+结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，旧生产监控和持仓来源仍沿用切换前入口；实时监控采集、所有评估入口统一留存、网页当前政策展示与宿主激活尚待接入。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
