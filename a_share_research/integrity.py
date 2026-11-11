@@ -11,7 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from a_share_research import db
+from a_share_research import db, gate
 from a_share_research.evidence import material_hash
 
 
@@ -114,7 +114,7 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
                 except ValueError:
                     problems.append(f"批次 {batch['id']}：{column} 不是合法 JSON")
     return problems, {"runs_with_material": len(materials), "calls": calls, "reports": reports,
-                      "reports_without_hash": unhashed, **_check_relations(conn, problems)}
+                      "reports_without_hash": unhashed, **_check_relations(conn, problems), **_check_external(conn, problems)}
 
 
 def _check_relations(conn: sqlite3.Connection, problems: list[str]) -> dict:
@@ -134,6 +134,76 @@ def _check_relations(conn: sqlite3.Connection, problems: list[str]) -> dict:
                             " WHERE u.batch_id IS NOT NULL AND b.id IS NULL ORDER BY u.id").fetchall()
     return {"dangling_parent_reports": [row["id"] for row in dangling],
             "orphan_batch_runs": [row["id"] for row in orphaned]}
+
+
+def _check_external(conn: sqlite3.Connection, problems: list[str]) -> dict:
+    """Frozen external evidence and lifecycle links; revoked keys remain valid historical producers."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'external_research' not in tables:
+        return {}
+    sessions = {r['id']: r for r in conn.execute('SELECT * FROM external_research')}
+    submissions = {r['id']: r for r in conn.execute('SELECT * FROM external_submissions')}
+    for eid, row in sessions.items():
+        snapshot = _object(row['material'])
+        try:
+            valid = (snapshot and isinstance(snapshot.get('data'), dict)
+                     and snapshot.get('sha256') == row['material_sha256']
+                     and material_hash(snapshot['data']) == row['material_sha256'])
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            problems.append(f'外部研究 {eid}：材料快照哈希不符')
+    for sid, row in submissions.items():
+        parent = sessions.get(row['external_id'])
+        draft = _object(row['draft'])
+        try:
+            valid = draft is not None and gate.digest(draft) == row['draft_sha256']
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            problems.append(f'外部提交 {sid}：草稿哈希不符')
+        if parent is None or parent['material_sha256'] != row['material_sha256']:
+            problems.append(f'外部提交 {sid}：材料与所属研究不一致')
+    reviews = []
+    if 'external_reviews' in tables:
+        reviews = conn.execute('SELECT * FROM external_reviews').fetchall()
+        for row in reviews:
+            sid = row['submission_id']
+            submission = submissions.get(sid)
+            parent = sessions.get(submission['external_id']) if submission else None
+            run = conn.execute('SELECT * FROM runs WHERE id=?', (row['run_id'],)).fetchone()
+            expected_status = {'submitted': 'queued', 'reviewing': 'running', 'done': 'done', 'failed': 'failed'}
+            if (not submission or not submission['accepted'] or not parent or not run
+                    or run['kind'] != 'external' or run['company_key'] != parent['company_key']
+                    or run['status'] != expected_status.get(row['status'])):
+                problems.append(f'外部复核 {sid}：提交、任务类型、公司或状态关联不一致')
+                continue
+            if run['material'] != parent['material']:
+                problems.append(f'外部复核 {sid}：任务材料与冻结材料不一致')
+            producer = dict(kind='external', key_id=parent['owner_key_id'],
+                            account_aware=bool(parent['account_aware']), submission_id=sid)
+            identity = _object(run['identity'])
+            if identity and identity.get('producer') != producer:
+                problems.append(f'外部复核 {sid}：任务生产者身份不一致')
+            report = conn.execute('SELECT * FROM reports WHERE run_id=?', (run['id'],)).fetchone()
+            if (row['report_id'] != (report['id'] if report else None)
+                    or (row['status'] == 'done' and not report)):
+                problems.append(f'外部复核 {sid}：发布报告关联不一致')
+            if report:
+                body = _object(report['body'])
+                if (not body or body.get('producer') != producer
+                        or report['company_key'] != parent['company_key']
+                        or bool(report['passed']) != (row['status'] == 'done')
+                        or row['status'] not in ('done', 'failed')):
+                    problems.append(f'外部复核 {sid}：报告生产者、公司或通过状态不一致')
+        linked = {r['run_id'] for r in reviews}
+        for row in conn.execute("SELECT id FROM runs WHERE kind='external'"):
+            if row['id'] not in linked:
+                problems.append(f"外部任务 {row['id']}：缺少复核映射")
+    if not sessions and not submissions and not reviews:
+        return {}  # Preserve the existing count shape before any external work exists.
+    return {'external_research': len(sessions), 'external_submissions': len(submissions),
+            'external_reviews': len(reviews)}
 
 
 def main() -> None:

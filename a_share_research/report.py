@@ -58,6 +58,13 @@ class Judgment(TypedDict):
     reviewer: Model
 
 
+class Producer(TypedDict):
+    kind: Literal['external']
+    key_id: int
+    submission_id: int
+    account_aware: bool
+
+
 class StopReason(TypedDict):
     stage: str
     category: str
@@ -96,6 +103,7 @@ class Report(TypedDict, total=False):
     replay_of: int | None  # Program: replay source task, when present.
     material_sha256: str  # Program: frozen material digest.
     judgment: Judgment  # Program: frozen judgment contract and configured model identities.
+    producer: Producer  # Program: external author provenance, absent on historical worker reports.
     verdict: str  # Model: checked conclusion.
     summary: str  # Model: checked summary.
     risks: list[dict]  # Model: risk and counterevidence entries.
@@ -135,9 +143,9 @@ PUBLISHED_FIELDS = (
 COMPACT_FIELDS = (
     'verdict', 'summary', 'relative', 'valuation', 'valuation_calc', 'stance', 'stance_calc',
     'answer', 'open_questions', 'prior', 'prior_status', 'risks', 'business', 'financial',
-    'methods', 'checkpoints', 'judgment',
+    'methods', 'checkpoints', 'judgment', 'producer',
 )
-FAILED_FIELDS = ('facts', 'facts_reviewed', 'problems')
+FAILED_FIELDS = ('facts', 'facts_reviewed', 'problems', 'producer')
 CARD_FIELDS = ('verdict', 'summary', 'risks', 'checkpoints', 'relative', 'valuation_calc',
                'stance', 'stance_calc', 'open_questions')
 

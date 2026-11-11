@@ -25,6 +25,8 @@ from a_share_research import db, integrity
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
 TABLES = ("runs", "calls", "reports", "prices", "batches", "sessions", "api_keys")
+OPTIONAL_TABLES = (*db.ACCOUNT_TABLES, 'account_source', 'policy_activations',
+                   'external_research', 'external_submissions', 'external_reviews')
 log = logging.getLogger(__name__)
 
 
@@ -114,8 +116,10 @@ def prune_images(current: dict[str, str], keep: int = KEEP_ROLLBACK_IMAGES) -> d
 def fingerprints(database: Path) -> dict:
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         conn.execute("BEGIN")
+        existing = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = (*TABLES, *(name for name in OPTIONAL_TABLES if name in existing))
         return {table: hashlib.sha256(json.dumps(conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall(),
-                                                 ensure_ascii=False).encode()).hexdigest() for table in TABLES}
+                                                 ensure_ascii=False).encode()).hexdigest() for table in tables}
 
 
 def describe(service: str) -> dict:

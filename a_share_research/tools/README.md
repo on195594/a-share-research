@@ -1,6 +1,6 @@
 # 工具入口
 
-目前提供只读的 HTTP 与进程内调用，单文件客户端在 `scripts/ashare.py`。生产服务尚未启用；发布编排、MCP、外部研究提交、账户入账与政策切换按 `docs/consolidation.md` 第 2 段继续实现。
+目前提供只读的 HTTP 与进程内调用，单文件客户端在 `scripts/ashare.py`。生产服务尚未启用；发布编排、MCP、新材料取证、账户入账与政策切换按 `docs/consolidation.md` 第 2 段继续实现。
 
 开发验证使用已迁移至 v11 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
@@ -32,10 +32,20 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 ## 外部研究提交暂存（开发入口，默认关闭）
 
-数据库迁移 v12 新增独立的 `external_research` / `external_submissions`，不会把草稿塞进现有 worker 队列。测试或开发实例须显式调用 `create_app(database, external_enabled=True)`；命令行服务仍默认关闭，未提供生产启用开关。
+数据库迁移 v12 新增独立的 `external_research` / `external_submissions`，默认不把草稿送入 worker 队列。测试或开发实例须显式调用 `create_app(database, external_enabled=True)`；命令行服务仍默认关闭，未提供生产启用开关。
 
-开放 `external.start`、`external.material`、`external.status`、`external.submit`。start 用 `source_run_id` 引用已完成 worker 研究的服务端材料，不接收客户端上传的材料或账户知情标记。当前只支持复用已有材料，新增受控取证尚待接入。材料以原始 JSON 保存（字段/页面顺序属于既有哈希合同）。
+开放 `external.start`、`external.material`、`external.status`、`external.submit` 与 `external.review`（后者还需独立队列开关）。start 用 `source_run_id` 引用已完成 worker 研究的服务端材料，不接收客户端上传的材料或账户知情标记。当前只支持复用已有材料，新增受控取证尚待接入。材料以原始 JSON 保存（字段/页面顺序属于既有哈希合同）。
 
 研究归创建 Key 所有；research 标盲研究、assistant 标账户知情；撤销凭据后不能再访问。提交带 `expected_version` 和 `draft`，机械检查逐项返回问题。草稿和材料哈希、检查结果及回执一起原子保存，每个提交版本不可修改或删除。同内容重提返回原回执（即使携带旧版本）；不同内容须匹配当前版本并生成新版本，旧版不覆盖。草稿幂等哈希使用规范 JSON，不冒充后续独立复核的绑定哈希。
 
-`accepted=true` 仅表示通过机械检查，`review_status=not_queued` 明确尚未独立复核，不可当成正式报告或交易依据。当前完全不写 `runs`、`reports` 或冻结批次，独立复核分派、恢复、生产者记分和最终发布需下一批接通。
+`accepted=true` 仅表示通过机械检查，`review_status=not_queued` 明确尚未独立复核，不可当成正式报告或交易依据。暂存阶段不写 `runs`、`reports` 或冻结批次；显式开启独立复核后按下述流程处理。
+
+## 独立复核与发布（尚未生产启用）
+
+开发实例须同时显式设 `create_app(database, external_enabled=True, external_review_enabled=True)`，才能调用 `external.review`，参数为已通过机械检查的本人 `submission_id`。同一提交只生成一个 `kind=external` 任务。worker 需 `EXTERNAL_REVIEW_ENABLED=1` 才领取；2026-11-29 至 12-04 月批保护期内即使配置开启，也不接受新排队或领取外部任务。
+
+复核只复用固定草稿和材料，不重新取证、成文或自动修稿；格式错误沿用现行协议最多修正一次。每版独立复核与发布，旧版不可覆盖。所有者任务优先，其次外部复核，最后批次研究；复核中断恢复为已提交，已记录调用数继续计入上限。报告和终态在同一事务提交，失败保留可核查问题，不展示未通过的正文。`external.status` 返回最新版本状态及各版复核任务/报告编号；报告仍可通过 `research.report` 读取。
+
+发布正文带 `producer`（外部凭据编号、提交编号、账户知情身份）；作者明确为 external，不伪装成 worker 模型，复核模型另行记录。旧研究实验与论点卡默认池保持只选 `kind=research`。`external_scoring.load_forecasts/load_agenda` 要求生产者编号和账户知情身份，先过滤身份与判断契约再去重，复用既有 V1/V5 记分函数，不混合不同生产者。
+
+完整性巡检检查外部材料/草稿哈希、复核任务与报告关联、生产者身份；发布停服指纹包含新表及已有账户表。第三服务暂停/排空、生产 compose 与回退切换仍未完成，不据模块测试提前启用生产。

@@ -11,7 +11,7 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from a_share_research import api_keys, service, external_research
+from a_share_research import api_keys, service, external_research, external_review
 from a_share_research.account import trades
 
 
@@ -47,6 +47,10 @@ class ExternalId(Arguments):
     external_id: int = Field(gt=0)
 
 
+class ExternalReview(Arguments):
+    submission_id: int = Field(gt=0)
+
+
 class ExternalSubmit(ExternalId):
     expected_version: int = Field(ge=0)
     draft: dict
@@ -72,6 +76,7 @@ class Context:
     database: Path
     principal: api_keys.Principal
     external_enabled: bool = False
+    external_review_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +115,10 @@ def _policy(ctx: Context, args: PolicyRead) -> CommandResult:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('external.review', '将通过机械检查的本人提交交独立复核', _READERS, ExternalReview, Payload,
+         lambda c, a: Payload(data=external_review.enqueue(c.connection, c.principal, a.submission_id,
+                                                           allow=c.external_review_enabled)),
+         access='write', external=True),
     Tool('external.start', '复用服务端材料开启外部研究；不排队、不发布', _READERS, ExternalStart, Payload,
          lambda c, a: Payload(data=external_research.start(c.connection, c.principal, a.request_id, a.source_run_id)),
          access='write', external=True),

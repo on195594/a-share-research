@@ -1,4 +1,4 @@
-"""Owned, immutable external submissions; no worker queue or publication is enabled here."""
+"""Owned, immutable external submissions; review lifecycle lives in external_review."""
 from __future__ import annotations
 
 import json
@@ -53,10 +53,12 @@ def _owned(conn, principal, external_id):
     return row
 
 
-def _receipt(row) -> dict:
+def _receipt(row, conn) -> dict:
+    from a_share_research.external_review import view
+    review = view(conn, row['id'])
     return dict(submission_id=row['id'], version=row['version'], accepted=bool(row['accepted']),
                 draft_sha256=row['draft_sha256'], material_sha256=row['material_sha256'],
-                problems=json.loads(row['problems']), review_status='not_queued')
+                problems=json.loads(row['problems']), review_status=review['status'], review=review)
 
 
 def start(conn: sqlite3.Connection, principal: api_keys.Principal, request_id: str, source_run_id: int) -> dict:
@@ -92,10 +94,14 @@ def start(conn: sqlite3.Connection, principal: api_keys.Principal, request_id: s
 
 def status(conn: sqlite3.Connection, principal: api_keys.Principal, external_id: int) -> dict:
     row = _owned(conn, principal, external_id)
-    receipts = conn.execute('SELECT * FROM external_submissions WHERE external_id=? ORDER BY version', (external_id,))
+    receipts = [_receipt(r, conn) for r in conn.execute(
+        'SELECT * FROM external_submissions WHERE external_id=? ORDER BY version', (external_id,))]
+    current = row['status']
+    if receipts and receipts[-1]['review_status'] in ('reviewing', 'done', 'failed'):
+        current = receipts[-1]['review_status']
     return dict(id=row['id'], company_key=row['company_key'], source_run_id=row['source_run_id'],
-                account_aware=bool(row['account_aware']), status=row['status'], version=row['version'],
-                material_sha256=row['material_sha256'], receipts=[_receipt(r) for r in receipts])
+                account_aware=bool(row['account_aware']), status=current, version=row['version'],
+                material_sha256=row['material_sha256'], receipts=receipts)
 
 
 def material_snapshot(conn, principal, external_id) -> dict:
@@ -117,7 +123,7 @@ def submit(conn: sqlite3.Connection, principal: api_keys.Principal, external_id:
         previous = conn.execute('SELECT * FROM external_submissions WHERE external_id=? AND draft_sha256=?',
                                 (external_id, sha)).fetchone()
         if previous:
-            return _receipt(previous)
+            return _receipt(previous, conn)
         if row['version'] != expected_version:
             raise SubmissionError(f'版本冲突：当前版本为 {row["version"]}')
         problems = gate.check_draft(draft, json.loads(row['material']))
@@ -130,4 +136,4 @@ def submit(conn: sqlite3.Connection, principal: api_keys.Principal, external_id:
         conn.execute('UPDATE external_research SET version=?,status=? WHERE id=?',
                      (version, 'submitted' if not problems else 'collecting', external_id))
         receipt = conn.execute('SELECT * FROM external_submissions WHERE id=?', (submission_id,)).fetchone()
-        return _receipt(receipt)
+        return _receipt(receipt, conn)

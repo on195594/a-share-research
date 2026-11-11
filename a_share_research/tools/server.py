@@ -16,7 +16,7 @@ from a_share_research.tools.registry import Context, ToolError, TOOLS, discover,
 logger = logging.getLogger(__name__)
 
 
-def create_app(database: Path, *, external_enabled: bool = False) -> FastAPI:
+def create_app(database: Path, *, external_enabled: bool = False, external_review_enabled: bool = False) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     slots = threading.BoundedSemaphore(2)
 
@@ -48,7 +48,7 @@ def create_app(database: Path, *, external_enabled: bool = False) -> FastAPI:
             principal = api_keys.authenticate(conn, header[7:])
             if principal is None:
                 raise ToolError('unauthorized', '凭据无效或已撤销', 401)
-            yield Context(conn, database, principal, external_enabled)
+            yield Context(conn, database, principal, external_enabled, external_review_enabled)
         except sqlite3.Error:
             logger.exception('Tool database unavailable')
             raise ToolError('unavailable', '工具数据库不可用', 503) from None

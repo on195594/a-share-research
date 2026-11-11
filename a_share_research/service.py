@@ -170,7 +170,8 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "passed": bool(row["passed"]), "error": row["error"],
             "question": (json.loads(row["request"] or "{}") or {}).get("question", ""),
             "report": body if row["passed"] else {key: body.get(key, default) for key, default in
-                                                   zip(report_body.FAILED_FIELDS, ({}, None, []))},
+                                                   zip(report_body.FAILED_FIELDS, ({}, None, []))} |
+                                                   ({'producer': body['producer']} if 'producer' in body else {}),
             "purpose": row["purpose"], "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
             "model_calls": [{key: identity.get(key) for key in
                              ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}

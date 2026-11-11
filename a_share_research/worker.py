@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import consensus_backfill, db, model, price, research, screening, scans, service
+from a_share_research import consensus_backfill, db, model, price, research, screening, scans, service, external_review
 
 log = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ def recover(conn) -> None:
     """Requeue an interrupted worker run once; CLI runs belong to their own process."""
     with db.transaction(conn):
         rows = conn.execute("SELECT id, error FROM runs WHERE status='running' "
-                            "AND request_id IS NOT NULL").fetchall()
+                            "AND request_id IS NOT NULL AND kind != 'external'").fetchall()
         for row in rows:
             if service.is_monthly_research(conn, row["id"]):
                 db.update_run(conn, row["id"], status="failed", step=None, finished_at=db.now(),
@@ -28,11 +28,19 @@ def recover(conn) -> None:
                               error=AUTO_RESUME_ERROR)
 
 
-def next_run(conn):
-    """A candidate batch queues 20 research runs; the owner's own submissions go ahead of them."""
-    # Preserve the old NULL request-id ordering for queued CLI runs.
-    return conn.execute("SELECT id, kind FROM runs WHERE status = 'queued' AND kind != 'diagnostic'"
-                        " ORDER BY request_id IS NOT NULL, batch_id IS NOT NULL, id LIMIT 1").fetchone()
+def next_run(conn, *, external_enabled: bool = False):
+    """Owner submissions precede external review, which precedes batch research."""
+    allow_external = external_enabled and not external_review.protected()
+    return conn.execute("SELECT id, kind FROM runs WHERE status='queued' AND kind IN ('research','price','external')"
+                        " AND (kind != 'external' OR ?)"
+                        " ORDER BY request_id IS NOT NULL,"
+                        " CASE WHEN kind='external' THEN 1 WHEN batch_id IS NOT NULL THEN 2 ELSE 0 END,id LIMIT 1",
+                        (allow_external,)).fetchone()
+
+
+def execute_run(conn, row):
+    handlers = {'research': research.execute, 'price': price.execute, 'external': external_review.execute}
+    handlers[row['kind']](conn, row['id'])
 
 
 def main() -> None:
@@ -49,11 +57,12 @@ def main() -> None:
         log.info("review model: provider=%s model=%s reasoning=%s", *runtime["review"].values())
     conn = db.connect()
     recover(conn)
+    external_review.recover(conn)
     screening.recover(conn)
     scans.recover(conn)
     log.info("worker ready")
     while True:
-        row = next_run(conn)
+        row = next_run(conn, external_enabled=external_review.enabled())
         if row is None:
             scan = conn.execute("SELECT id FROM scans WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if scan:
@@ -68,7 +77,7 @@ def main() -> None:
                 time.sleep(2)
             continue
         log.info("run %s started", row["id"])
-        (price if row["kind"] == "price" else research).execute(conn, row["id"])
+        execute_run(conn, row)
         log.info("run %s finished", row["id"])
 
 
