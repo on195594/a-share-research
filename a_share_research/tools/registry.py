@@ -165,6 +165,11 @@ def _lifecycle(ctx: Context, args: Analysis) -> Payload:
     return Payload(data=read(ctx.connection, ctx.principal, args.holding_id))
 
 
+def _v0_positions(ctx: Context, args: Account) -> Payload:
+    from a_share_research.policy.v0.account_store import read
+    return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
+
+
 def _evidence_directory(ctx: Context) -> Path:
     return ctx.database.resolve().parent / 'account-evidence'
 
@@ -179,6 +184,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.v0.positions', '按明确政策期初和新账本事件生成旧表形状的只读投影', frozenset({'assistant'}), Account, Payload,
+         _v0_positions, account=True),
     Tool('account.positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,
          lambda c, a: Payload(data=position_store.state(c.connection, c.principal, a.account_id)), account=True),
     Tool('account.lifecycle.replay', '只读重放旧持仓周期成本和政策字段，保留推断与历史差异', frozenset({'assistant'}), Analysis, Payload,

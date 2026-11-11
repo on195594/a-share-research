@@ -117,6 +117,10 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
     problems.extend(inspect_account(conn))
     from a_share_research.account.position_store import inspect as inspect_positions
     problems.extend(inspect_positions(conn))
+    from a_share_research.account.projection_ids import inspect as inspect_projection_ids
+    problems.extend(inspect_projection_ids(conn))
+    from a_share_research.policy.v0.account_store import inspect as inspect_account_policy
+    problems.extend(inspect_account_policy(conn))
     from a_share_research.account.analysis import inspect as inspect_analysis
     problems.extend(inspect_analysis(conn))
     return problems, {"runs_with_material": len(materials), "calls": calls, "reports": reports,

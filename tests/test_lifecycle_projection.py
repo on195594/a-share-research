@@ -177,3 +177,16 @@ def test_malformed_legacy_boundary_returns_incomplete(account,column,value):
     conn.execute(f'UPDATE holding_events SET {column}=? WHERE id=1',(value,))
     result = lifecycle.read(conn,principal,1)
     assert result['status'] == 'incomplete'
+
+
+def test_explicit_dividend_notes_replay_policy_without_duplicate_cash():
+    events=[movement(1,shares=100,price='10'),movement(2,'dividend','2026-01-02',cash='18')]
+    economic=replay(events)
+    projected=project(economic,{2:'dps=0.2;split_ratio=0'})
+    assert projected['reference_cost']==Decimal('9.8')
+    assert economic.dividends==Decimal('18')
+
+
+def test_reverse_split_metadata_matches_signed_quantity_adjustment():
+    events=[movement(1,shares=100,price='10'),movement(2,'adjustment','2026-01-02',shares=-50,price='20')]
+    assert project(replay(events),{2:'dps=0;split_ratio=-0.5'})['reference_cost']==Decimal('20')

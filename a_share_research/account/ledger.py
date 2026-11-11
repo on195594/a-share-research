@@ -27,6 +27,7 @@ class Batch(Value):
     snapshot: Snapshot | None = None
     position_entries: dict[Annotated[str, Field(pattern=r'^(0|[1-9][0-9]*)$')], positions.PositionEntry] = Field(default_factory=dict)
     position_dividends: dict[Annotated[str, Field(pattern=r'^(0|[1-9][0-9]*)$')], positions.Text] = Field(default_factory=dict)
+    position_distributions: dict[Annotated[str, Field(pattern=r'^(0|[1-9][0-9]*)$')], Annotated[Money, Field(ge=0)]] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def entry_indices(self):
@@ -34,6 +35,15 @@ class Batch(Value):
             raise ValueError('新周期元数据须引用本批有效买入事件下标')
         if any(int(i) >= len(self.events) or self.events[int(i)].kind != 'dividend' for i in self.position_dividends):
             raise ValueError('分红周期绑定须引用本批有效分红事件下标')
+        if any(int(i) >= len(self.events) or self.events[int(i)].kind not in ('dividend','adjustment') for i in self.position_distributions):
+            raise ValueError('每股除权金额须引用本批分红或送转事件')
+        for metadata in (self.position_entries, self.position_dividends, self.position_distributions):
+            seen = {}
+            for index, value in metadata.items():
+                key = identity(self.events[int(index)], 'batch')
+                if key in seen and seen[key] != value:
+                    raise ValueError('同一业务事件的元数据不一致')
+                seen[key] = value
         return self
 
     @model_serializer(mode='wrap')
@@ -43,6 +53,8 @@ class Batch(Value):
             data.pop('position_entries', None)  # Preserve hashes for all pre-cost-basis requests.
         if not self.position_dividends:
             data.pop('position_dividends', None)
+        if not self.position_distributions:
+            data.pop('position_distributions', None)
         return data
 
 
@@ -277,16 +289,22 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
         from a_share_research.account import position_store
         cost_book = conn.execute('SELECT * FROM account_position_books WHERE account_id=?',(account_id,)).fetchone()
         cost_projection = None
-        if (batch.position_entries or batch.position_dividends) and cost_book is None:
+        if (batch.position_entries or batch.position_dividends or batch.position_distributions) and cost_book is None:
             return reject('missing_material', [{'field':'cost_basis','expected':'首笔入账前建立明确成本期初'}])
         if cost_book is not None:
             if cost_book['version'] != book['version']:
                 return reject('conflict', [{'field':'cost_version','expected':book['version'],'actual':cost_book['version']}])
+            stored_distributions = position_store.distributions_for(conn, account_id, retained)
+            retained_ids = {r['business_id'] for r in retained}
+            for index, amount in batch.position_distributions.items():
+                key = identity(batch.events[int(index)], account_id)
+                if key in retained_ids and stored_distributions.get(key) != amount:
+                    return reject('conflict', [{'field':'position_distributions','expected':'除权元数据不能覆盖，须作废更正'}])
             entry_map = position_store.entries_for(conn, account_id, retained)
             dividend_map = position_store.dividends_for(conn, account_id, retained)
             for index, cycle_id in batch.position_dividends.items():
                 key = identity(batch.events[int(index)], account_id)
-                if key in dividend_map and dividend_map[key] != cycle_id:
+                if key in retained_ids and dividend_map.get(key) != cycle_id:
                     return reject('conflict', [{'field':'position_dividends','expected':'原分红周期不能覆盖，须作废更正'}])
                 dividend_map[key] = cycle_id
             for index, entry in batch.position_entries.items():
@@ -321,6 +339,8 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
         if cost_projection is not None:
             conn.execute('UPDATE account_position_books SET version=?,projection=? WHERE account_id=?',
                          (version,gate.canonical(cost_projection),account_id))
+            from a_share_research.account.projection_ids import sync
+            sync(conn, account_id, cost_projection)
         return result
 
 

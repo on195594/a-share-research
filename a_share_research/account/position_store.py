@@ -5,7 +5,7 @@ from pathlib import Path
 
 from a_share_research import db, gate
 from a_share_research.account import evidence, ledger, positions
-from a_share_research.account.reconciliation import Event, Opening, identity
+from a_share_research.account.reconciliation import Event, Opening, identity, money
 
 
 def migrate(conn):
@@ -49,6 +49,8 @@ def initialize(conn, principal, account_id: str, seeds: list[positions.PositionS
                 raise ledger.LedgerError('持仓建仓日期晚于账户期初')
             conn.execute('INSERT INTO account_position_books VALUES (?,?,?,?,?,?)',
                          (account_id,0,db.now(),gate.canonical(evidence_hashes),gate.canonical(basis),gate.canonical(projection)))
+            from a_share_research.account.projection_ids import sync
+            sync(conn, account_id, projection)
     return state(conn, principal, account_id)
 
 
@@ -67,6 +69,10 @@ def entries_for(conn, account_id, rows):
 
 def dividends_for(conn, account_id, rows):
     return _context_for(conn, account_id, rows, 'position_dividends', str)
+
+
+def distributions_for(conn, account_id, rows):
+    return _context_for(conn, account_id, rows, 'position_distributions', money)
 
 
 def _context_for(conn, account_id, rows, field, parse):

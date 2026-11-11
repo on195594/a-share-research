@@ -19,7 +19,8 @@ _READ_ONLY_REQUEST = False
 
 
 def is_read_only() -> bool:
-    return _READ_ONLY_REQUEST or os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1"
+    return (_READ_ONLY_REQUEST or os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1"
+            or bool(os.environ.get("POLICY_V0_ACCOUNT_SHADOW")))
 
 
 @contextmanager
@@ -41,13 +42,17 @@ def _read_only_connection(timeout: float) -> sqlite3.Connection:
         timeout=timeout,
     )
     connection.execute(f"PRAGMA busy_timeout={max(1, round(timeout * 1000))}")
-    if os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1":
-        from a_share_research.account.analysis_projection import install
-        try:
-            install(connection)
-        except BaseException:
-            connection.close()
-            raise
+    account = os.environ.get("POLICY_V0_ACCOUNT_SHADOW")
+    try:
+        if os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1":
+            from a_share_research.account.analysis_projection import install
+            install(connection, seal=not bool(account))
+        if account:
+            from a_share_research.policy.v0.account_store import install
+            install(connection, account)
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 

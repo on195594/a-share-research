@@ -196,3 +196,34 @@ def test_cost_version_drift_is_not_silently_repaired(book):
     result=submit(book,batch(book,[event()]))
     assert result['status']=='conflict' and result['problems'][0]['field']=='cost_version'
     assert book[0].execute('SELECT count(*) FROM account_journal').fetchone()[0]==0
+
+
+def test_v16_entry_payload_keeps_its_original_hash(book):
+    value=batch(book,[event()],entries={'0':{'policy_identity':'v16-profile','name':'Structural'}})
+    old=dict(expected_version=0,events=[event().model_dump(mode='json')],void_event_ids=[],
+             evidence_hashes=[book[3]],snapshot=value.snapshot.model_dump(mode='json'),
+             position_entries={'0':{'policy_identity':'v16-profile','name':'Structural'}})
+    assert gate.digest(value.model_dump(mode='json'))==gate.digest(old)
+
+
+def test_posted_dividend_metadata_cannot_be_added_or_replaced_by_duplicate(book):
+    initialize(book)
+    payment=event('dividend',shares=0,price=0,cash='20')
+    value=batch(book,[payment],shares=100,cash='10020')
+    value=value.model_copy(update={'position_distributions':{'0':Decimal('0.2')}})
+    assert submit(book,value)['status']=='posted'
+    before=state(book)
+    for metadata in ({'position_distributions':{'0':Decimal('0.3')}},
+                     {'position_dividends':{'0':'legacy:1'}}):
+        retry=value.model_copy(update={'expected_version':1,**metadata})
+        assert submit(book,retry)['status']=='conflict'
+        assert state(book)==before
+    assert position_store.inspect(book[0])==[]
+
+
+def test_duplicate_business_event_cannot_carry_conflicting_distribution_metadata(book):
+    payment=event('dividend',shares=0,price=0,cash='20')
+    value=batch(book,[payment,payment],shares=100,cash='10020').model_dump(mode='json')
+    value['position_distributions']={'0':'0.2','1':'0.3'}
+    with pytest.raises(ValueError,match='同一业务事件'):
+        ledger.Batch.model_validate(value)

@@ -7,7 +7,7 @@ from a_share_research.account.reconciliation import money
 from a_share_research.policy.v0.domain import get_stop_loss_pct
 
 _NUMBER = r'(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?'
-_CORPORATE = re.compile(rf'dps=({_NUMBER});split_ratio=({_NUMBER})')
+_CORPORATE = re.compile(rf'dps=({_NUMBER});split_ratio=([+-]?{_NUMBER})')
 _FRAMEWORK = re.compile(r'framework:([^\n]+)->([^\n]+)')
 
 
@@ -34,6 +34,16 @@ def _project(replayed, notes):
                 additions += added
                 if additions > basis * Decimal('0.5'):
                     main_date, basis, additions = event.day, step.before_cost * step.before_shares + added, Decimal(0)
+        elif event.kind == 'dividend' and (notes.get(event.id) or '').startswith('dps='):
+            corporate = _CORPORATE.fullmatch(notes[event.id])
+            if not corporate or money(corporate[2]) != 0 or step.before_shares <= 0:
+                raise ValueError(f'事件 {event.id} 分红除权元数据不完整')
+            dps = money(corporate[1])
+            reference -= dps
+            if reference <= 0:
+                raise ValueError(f'事件 {event.id} 调整后参考成本非正')
+            adjustments.append(dict(event_id=event.id,kind='corporate_action',dps=dps,split_ratio=Decimal(0),
+                                    implied_cash=dps*step.before_shares))
         elif event.kind == 'adjustment':
             raw = notes.get(event.id) or ''
             corporate = _CORPORATE.fullmatch(raw)

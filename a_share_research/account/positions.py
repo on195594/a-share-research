@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 from typing import Annotated
 
-from pydantic import Field, StrictInt, StringConstraints
+from pydantic import Field, StrictInt, StrictBool, StringConstraints, model_serializer
 
 from a_share_research.account.reconciliation import Code, Event, Money, Value
 
@@ -28,6 +28,16 @@ class PositionSeed(Value):
 class PositionEntry(Value):
     policy_identity: Text
     name: str | None = None
+    framework: Text | None = None
+    framework_confident: StrictBool = False
+
+    @model_serializer(mode='wrap')
+    def serialize(self, handler):
+        data = handler(self)
+        if self.framework is None:
+            data.pop('framework', None)
+            data.pop('framework_confident', None)
+        return data
 
 
 class MissingBasis(ValueError):

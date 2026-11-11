@@ -410,8 +410,18 @@ def _migrate_v16(conn: sqlite3.Connection) -> None:
     migrate(conn)
 
 
+def _migrate_v17(conn: sqlite3.Connection) -> None:
+    from a_share_research.account.projection_ids import migrate
+    migrate(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS policy_v0_profiles (identity TEXT PRIMARY KEY, created_at TEXT NOT NULL, parameters TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS policy_v0_account_openings (account_id TEXT PRIMARY KEY REFERENCES account_position_books(account_id), profile_identity TEXT NOT NULL REFERENCES policy_v0_profiles(identity), created_at TEXT NOT NULL, evidence_hashes TEXT NOT NULL, source_hash TEXT NOT NULL, snapshot TEXT NOT NULL)")
+    for table in ('policy_v0_profiles','policy_v0_account_openings'):
+        for operation in ('UPDATE','DELETE'):
+            conn.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_no_{operation.lower()} BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT,'policy opening is immutable'); END")
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17)
 
 
 def now() -> str:

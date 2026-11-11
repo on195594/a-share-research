@@ -2,7 +2,7 @@
 
 HTTP 与进程内入口默认只读，单文件客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排、MCP、新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
-开发验证使用已迁移至 v16 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
+开发验证使用已迁移至 v17 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
 DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server
@@ -113,4 +113,16 @@ v16 新增 `account_position_books`。内部 `position_store.initialize` 在首�
 
 分红可以用 batch.position_dividends 将本批事件下标绑定明确 cycle_id。同股票已有多个周期或没有活动周期时必须绑定；允许向已关闭周期记分红，周期须匹配公司且已在付款前存在。股数和退出日期保持原值。业务身份、周期和元数据均保留在不可变批次，重复请求不会重复计入收益。
 
-当前成本投影提供周期与事件映射；policy_evaluation 为 pending。生成供 v0 正式读取的 holdings/holding_events 还需政策期初状态及新旧周期编号映射，生产账户来源继续按切换验收控制。
+当前成本投影的 policy_evaluation 为 pending；账户层不执行投资规则。下面的独立适配层可显式提供 v0 旧表形状，生产账户来源继续按切换验收控制。
+
+## v0 政策期初与旧表读取（影子入口）
+
+v17 新增不可变周期/事件整数编号、政策投影参数和期初快照。内部 `policy.v0.account_store.initialize` 在首笔金融事件前绑定成本期初与完整旧持仓/事件快照，要求证据、在仓周期、公司、股数、成本、日期一致，并具备参考成本、初始股数、主仓位和已保存止损字段。旧历史所有列原样保留；后续镜像刷新不会自动覆盖期初。
+
+`policy.v0.positions` 接收 account_id，使用 assistant 权限与账户影子开关，返回 holdings/holding_events、账本版本、期初哈希和 profile_identity。该 profile 记录当前投影算法哈希及止损/主仓位参数，仅供此适配器复算；完整投资政策身份、生效指针和真实账户切换尚待后续实现。
+
+新开仓的 position_entries 除 policy_identity 外，须明确 framework，可提供 framework_confident 和 name。policy_identity 须引用已登记 profile；金融事实可独立入账，但缺少这些政策条件时政策读取明确报缺口。旧周期先保留保存的止损线，买入或除权触发参考成本变动时才按绑定参数重算。
+
+`batch.position_distributions` 以事件下标提供每股现金除权金额，仅绑定分红或送转事件。到账现金与每股除权是独立事实，不能彼此反推；没有每股信息的分红只计收入。已有元数据不能通过重复事件补加或覆盖，须作废更正；同批同业务事件的元数据冲突会被拒绝。新增可选字段为空时保留旧请求哈希。
+
+显式设置 `POLICY_V0_ACCOUNT_SHADOW=账户编号` 后，v0 连接在同一只读事务内生成 TEMP holdings/holding_events，再启用 query_only；可与 `POLICY_V0_ANALYSIS_SHADOW=1` 联用。主库旧表不改，未设置时沿用旧来源。编号在金融入账事务内固定，读请求不分配编号，作废后也不复用。新 journal 周期的分析基线接入尚未完成，不能把现有周期联用通过视为全部 D7 已验收。

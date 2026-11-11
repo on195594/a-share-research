@@ -21,7 +21,7 @@ def _legacy(conn, holding_id):
                 (holding_id,))] for table in TABLES}
 
 
-def install(conn: sqlite3.Connection) -> None:
+def install(conn: sqlite3.Connection, *, seal: bool = True) -> None:
     """Validate and materialize one consistent shadow read, or raise without exposing partial state.
 
     The caller owns the connection and must close it on failure. This function keeps its read
@@ -71,4 +71,5 @@ def install(conn: sqlite3.Connection) -> None:
                                (table,)).fetchall()
         for (sql,) in indexes:
             conn.execute(re.sub(r'^(CREATE (?:UNIQUE )?INDEX )', r'\1temp.', sql, count=1, flags=re.IGNORECASE))
-    conn.execute('PRAGMA query_only=ON')
+    if seal:
+        conn.execute('PRAGMA query_only=ON')
