@@ -206,6 +206,12 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 基准回执 mode=`service_benchmark_capture`、上下文版本 5，request 绑定 end；同请求换截止日冲突。结果包含 status（ready/no_events/unavailable）、exit_code、stdout、stderr、metrics、failures，可用 `policy.benchmark_evaluation.evaluate` 离线复算。缺失指数、无法选出估值日或缺少股票价格均保存明确失败，metrics 为 null；指数不可用时不继续取股票价格，不补零生成收益。调用者不能提交行情或计算结论。采集仍限 25 秒，使用 tools 的 TUSHARE_TOKEN，成功双指数与实际耗时验收尚未完成；上下文 5 也须纳入兼容回退版本。
 
+`policy.position_size` 是基于既存监控的派生计算，接受 request_id、expected_activation_id、monitor_evaluation_id 与 proposal。proposal 包含六位 code、正数 price、framework（A–F），cash 可省略或为非负数；省略表示沿用 v0“不另加资金约束”，不等于账户实际现金充足。价格和现金是调用者声明的测算条件，不自动充当行情或券商事实。仅 assistant、账户影子开关下开放。
+
+新测算只接受当前生效身份的 `service_monitor_capture` 回执，并核对原输入/结果哈希、当前账户来源及已安装实现；参数重放、日报和其他评估不能充当监控快照。账户、资产观察或政策变化时应先重新监控，不沿用旧风险预算。它不刷新价格、研究卡片或分母，来源一致也不表示行情实时；调用者仍须阅读原快照时点与缺口。有效快照缺已确认分母、风险不完整或板块无权限时保存 unavailable，不生成股数。正常计算直接调用 v0 position_size.size，保留交易单位、原累计分批股数与加仓检查点提示，action_status 仍为 not_formed。
+
+派生回执 mode=`derived_position_size`，capture_context 版本 6 保存请求、账户来源及 derived_at（计算时间，不是行情或资产估值时间）。输入保存实际 snapshot、proposal、risk_policy 及父回执编号/输入哈希/结果哈希；结果为 status、exit_code、stdout、stderr、sizing，可由 `policy.position_evaluation.evaluate` 离线复算。读取与完整性检查还核对父子引用。全部检查和追加在单个无网络事务内，失败整体回滚；重复请求查回原结果，不因后续账户或政策改变而重算，改变 proposal 或父回执必须使用新请求。服务不下单、不记交易；未新增数据库列，兼容回退版须识别上下文 6。
+
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
 mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256。当前只有该绑定的读取和验证，没有生产切换写入器，私有测试中设置绑定不算完成切换。
