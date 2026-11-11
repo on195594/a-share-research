@@ -175,7 +175,7 @@ TOOLS = {tool.name: tool for tool in (
     Tool('account.analysis.history', '分页读取不可变分析历史，旧基线不冒充完整历史', frozenset({'assistant'}), AnalysisHistory, Payload,
          lambda c, a: Payload(data=analysis.history(c.connection, c.principal, a.holding_id,
                               after_id=a.after_id, limit=a.limit)), account=True),
-    Tool('account.analysis.update', '带证据追加L3、预警或Tier状态；不修改旧监控来源', frozenset({'assistant'}), AnalysisUpdate, Payload,
+    Tool('account.analysis.update', '带证据追加论点/L3整组重写、预警与Tier状态；不修改旧监控来源', frozenset({'assistant'}), AnalysisUpdate, Payload,
          lambda c, a: Payload(data=analysis.update(c.connection, c.principal, a.holding_id, a.update,
                               c.database.parent / 'account-evidence')), access='write', account=True),
     Tool('account.evidence', '私有存储截图或交割单，返回内容哈希', frozenset({'assistant'}), EvidenceUpload, Payload,

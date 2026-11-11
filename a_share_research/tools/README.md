@@ -73,6 +73,13 @@ v15 的 `account_analysis_history` 按持仓周期 `holding_id` 保存完整快�
 
 - `account.analysis.current`：读取指定持仓周期最新影子快照。
 - `account.analysis.history`：按修订编号分页读取完整历史及来源。
-- `account.analysis.update`：传 `holding_id` 及 `update`（`expected_version`、`evidence_hashes`、`reason`、`changes`）；支持活动 L3 的状态/证据/复核日期，现有预警转 pending 或 resolved，以及未豁免 Tier 的 pending/completed 状态。一个请求内多项变更全成全败，同请求重提返回原修订，版本冲突返回 409。
+- `account.analysis.update`：传 `holding_id` 及 `update`（`expected_version`、`evidence_hashes`、`reason`、`changes`）；支持活动 L3 的状态/证据/复核日期、论点整组重写、预警开启/更新/pending/resolved，以及未豁免 Tier 的 pending/completed 状态。一个请求内多项变更全成全败，同请求重提返回原修订，版本冲突返回 409。
 
-新写入须引用已存证据；已关闭持仓、退休 L3、已解除预警不能更新。买入时豁免和路径配置不属于普通状态更新。发现旧镜像基线或公司身份已变化时拒绝继续叠加，等待核对，不静默合并。论点整组重写/L3 退休新增、预警新增、旧监控读取切换仍未开放，不能据此取消旧宿主确认流程。所有操作只写影子历史，不改旧四表或成交。
+新写入须引用已存证据；已关闭持仓、退休 L3、已解除预警不能更新。买入时豁免和路径配置不属于普通状态更新。发现旧镜像基线或公司身份已变化时拒绝继续叠加，等待核对，不静默合并。所有操作只写影子历史，不改旧四表或成交。旧宿主仍未切换，不能据此取消生产流程的确认要求。
+
+
+`changes` 中的 `kind=thesis` 接收 `l1`、`l2`、`rewrite_reason`、`retire_l3_ids` 和 `new_l3`。退休编号必须覆盖该持仓周期全部活动条件，整批保存旧论点 superseded、旧 L3 退休及新论点/新 L3；新条件初始为 pending。每个新条件须提供 condition/scope/action/materiality_basis/temporary_exit_rule，可选 evidence_cadence；non_core 只能 review。论点重写与 L3 状态更新分批提交，避免同批先退休再修改的顺序歧义。新实体编号跨持仓唯一，并保留旧库已发放编号的上限。
+
+`kind=alert_open` 接收 level/category/reason_code/reason/evidence/review_due。未解除的同原因预警复用实体，pending 不会被重复开启改为 active；流动性延期预警已有复核期限不延后。已解除后再次出现同原因则创建新实体。复核期限接受日期或带时区时间。
+
+开发验证可显式设置 `POLICY_V0_ANALYSIS_SHADOW=1` 后运行 v0 只读命令。连接内临时表保留旧 schema 和索引，并投影最新分析历史，因此原监控、L3 和预警读者不用改计算规则；主库以只读模式打开，投影完成后禁止临时表写入。所有活动持仓须有一致基线，缺失、身份漂移或快照哈希不一致会拒绝读取；已关闭周期保留旧投影。该开关不自动注入生产或工具子进程，默认旧来源不变。持续镜像后的显式基线协调和生产读源切换仍待完成。

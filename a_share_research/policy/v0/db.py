@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -18,7 +19,7 @@ _READ_ONLY_REQUEST = False
 
 
 def is_read_only() -> bool:
-    return _READ_ONLY_REQUEST
+    return _READ_ONLY_REQUEST or os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1"
 
 
 @contextmanager
@@ -40,6 +41,13 @@ def _read_only_connection(timeout: float) -> sqlite3.Connection:
         timeout=timeout,
     )
     connection.execute(f"PRAGMA busy_timeout={max(1, round(timeout * 1000))}")
+    if os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1":
+        from a_share_research.account.analysis_projection import install
+        try:
+            install(connection)
+        except BaseException:
+            connection.close()
+            raise
     return connection
 
 

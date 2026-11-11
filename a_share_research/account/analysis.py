@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, StrictInt, StringConstraints, model_validator
+from pydantic import Field, StrictInt, StringConstraints, field_validator, model_validator
 
 from a_share_research import db, gate
 from a_share_research.account import evidence, ledger
@@ -42,7 +42,59 @@ class TierUpdate(Value):
     # Entry-time exemptions and exit-path configuration are not ordinary status changes.
 
 
-Change = Annotated[L3Update | AlertUpdate | TierUpdate, Field(discriminator='kind')]
+class Condition(Value):
+    condition: Text
+    scope: Literal['aggregate', 'core_driver', 'non_core', 'governance']
+    action: Literal['review', 'reduce', 'exit']
+    materiality_basis: Text
+    temporary_exit_rule: Text
+    evidence_cadence: Literal['quarterly', 'semiannual', 'annual', 'event', 'unspecified'] = 'unspecified'
+
+    @model_validator(mode='after')
+    def action_scope(self):
+        if self.scope == 'non_core' and self.action != 'review':
+            raise ValueError('non_core 条件仅允许 review')
+        return self
+
+
+class ThesisRewrite(Value):
+    kind: Literal['thesis']
+    l1: Text
+    l2: Text
+    rewrite_reason: Text
+    retire_l3_ids: list[PositiveId]
+    new_l3: list[Condition] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def unique_retirements(self):
+        if len(self.retire_l3_ids) != len(set(self.retire_l3_ids)):
+            raise ValueError('退休条件编号不能重复')
+        return self
+
+
+class AlertOpen(Value):
+    kind: Literal['alert_open']
+    level: Literal['yellow', 'red']
+    category: Literal['holding_deterioration', 'entry_valuation', 'unverified']
+    reason_code: Text
+    reason: Text
+    evidence: Text
+    review_due: str | None = None
+
+    @field_validator('review_due')
+    @classmethod
+    def due_date(cls, value):
+        if value is None:
+            return value
+        if len(value) == 10:
+            return date.fromisoformat(value).isoformat()
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            raise ValueError('预警复核时间须有时区')
+        return parsed.isoformat()
+
+
+Change = Annotated[L3Update | AlertUpdate | TierUpdate | ThesisRewrite | AlertOpen, Field(discriminator='kind')]
 
 
 class Update(Value):
@@ -53,7 +105,11 @@ class Update(Value):
 
     @model_validator(mode='after')
     def unique_targets(self):
-        targets = [(c.kind, c.tier if isinstance(c, TierUpdate) else c.id) for c in self.changes]
+        targets = [(c.kind, c.tier if isinstance(c, TierUpdate) else
+                    c.reason_code if isinstance(c, AlertOpen) else
+                    0 if isinstance(c, ThesisRewrite) else c.id) for c in self.changes]
+        if any(isinstance(c, ThesisRewrite) for c in self.changes) and any(isinstance(c, L3Update) for c in self.changes):
+            raise ValueError('论点重写与 L3 状态更新须分批提交')
         if len(targets) != len(set(targets)):
             raise ValueError('同一批次不能重复更新同一状态')
         return self
@@ -147,8 +203,60 @@ def _one(snapshot, table, identity):
     return rows[0]
 
 
+def _next_id(conn, snapshot, table):
+    # IDs will later populate the legacy-shaped projection, so they must be unique across holdings.
+    historical = conn.execute("SELECT max(json_extract(j.value,'$.id')) FROM account_analysis_history h,"
+                              " json_each(h.snapshot,?) j", ('$.' + table,)).fetchone()[0] or 0
+    legacy = conn.execute(f'SELECT coalesce(max(id),0) FROM {table}').fetchone()[0]
+    sequence = conn.execute('SELECT seq FROM sqlite_sequence WHERE name=?', (table,)).fetchone()
+    issued = sequence[0] if sequence else 0
+    return max(historical, legacy, issued, max((r['id'] for r in snapshot[table]), default=0)) + 1
+
+
+def _rewrite(conn, snapshot, holding_id, change, stamp):
+    conditions = snapshot['holding_l3_conditions']
+    active = [r for r in conditions if r['is_active']]
+    if set(change.retire_l3_ids) != {r['id'] for r in active}:
+        raise ledger.LedgerError('退休编号须完整覆盖本持仓周期全部活动 L3')
+    theses = snapshot['holding_thesis_versions']
+    prior = [r for r in theses if r['status'] == 'active']
+    if len(prior) > 1:
+        raise ledger.LedgerError('活动论点不唯一，须先核对基线')
+    thesis_id = _next_id(conn, snapshot, 'holding_thesis_versions')
+    for row in prior:
+        row['status'] = 'superseded'
+    theses.append(dict(id=thesis_id, holding_id=holding_id, version=max((r['version'] for r in theses), default=0)+1,
+                       l1=change.l1, l2=change.l2, rewrite_reason=change.rewrite_reason, status='active', created_at=stamp))
+    for row in active:
+        row.update(is_active=0, retired_at=stamp, retired_reason=change.rewrite_reason, updated_at=stamp)
+    for item in change.new_l3:
+        conditions.append(dict(id=_next_id(conn, snapshot, 'holding_l3_conditions'), holding_id=holding_id,
+            condition_text=item.condition, origin_type='new_monitoring', status='pending', evidence=None,
+            as_of=None, next_review_date=None, temporary_exit_rule=item.temporary_exit_rule,
+            created_at=stamp, updated_at=stamp, thesis_version_id=thesis_id, is_active=1,
+            retired_at=None, retired_reason=None, condition_scope=item.scope, action_level=item.action,
+            materiality_basis=item.materiality_basis, evidence_cadence=item.evidence_cadence))
+
+
+def _open_alert(conn, snapshot, holding, change, stamp):
+    alerts = snapshot['holding_alerts']
+    matches = [r for r in alerts if r['reason_code'] == change.reason_code and r['status'] != 'resolved']
+    if len(matches) > 1:
+        raise ledger.LedgerError('同一原因的未解除预警不唯一')
+    if matches:
+        row = matches[0]
+        due = row['review_due'] if change.reason_code == 'price_stop2_liquidity_defer' and row['review_due'] is not None else change.review_due
+        row.update(level=change.level, category=change.category, reason=change.reason, evidence=change.evidence,
+                   review_due=due, updated_at=stamp)
+    else:
+        alerts.append(dict(id=_next_id(conn, snapshot, 'holding_alerts'), holding_id=holding['id'], code=holding['code'],
+            level=change.level, category=change.category, reason_code=change.reason_code, reason=change.reason,
+            status='active', evidence=change.evidence, opened_at=stamp, review_due=change.review_due,
+            resolved_at=None, resolution_evidence=None, updated_at=stamp))
+
+
 def update(conn, principal, holding_id: int, request: Update, evidence_directory: Path) -> dict:
-    """Append an atomic status revision. Does not edit entry configuration, rewrite theses or alter legacy state."""
+    """Append an atomic status revision. Does not edit entry configuration or alter legacy state."""
     request = Update.model_validate(request)
     data = request.model_dump(mode='json')
     with db.transaction(conn):
@@ -171,7 +279,7 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
         baseline = conn.execute('SELECT snapshot FROM account_analysis_history WHERE holding_id=? AND version=0',
                                 (holding_id,)).fetchone()
         if json.loads(baseline[0]) != _capture(conn, holding_id):
-            raise ledger.LedgerError('旧分析基线已变化，须先人工核对影子分支')
+            raise ledger.LedgerError('旧分析基线已变化，须先显式核对影子分支')
         for sha in request.evidence_hashes:
             evidence.verify(evidence_directory, sha)
         snapshot = json.loads(latest['snapshot'])
@@ -195,6 +303,10 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
                     row.update(resolved_at=stamp, resolution_evidence=change.evidence)
                 else:
                     row['evidence'] = change.evidence
+            elif isinstance(change, ThesisRewrite):
+                _rewrite(conn, snapshot, holding_id, change, stamp)
+            elif isinstance(change, AlertOpen):
+                _open_alert(conn, snapshot, holding, change, stamp)
             else:
                 row = _one(snapshot, 'holding_tier_state', holding_id)
                 if row[change.tier + '_status'] == 'exempted':
