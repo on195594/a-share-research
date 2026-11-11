@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from a_share_research import api_keys, service, external_research, external_review
 from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store, cycle_analysis
 from a_share_research.policy import registry as policies
+from a_share_research.policy.stop_state import StopState
 
 
 class ToolError(Exception):
@@ -58,6 +59,10 @@ class PolicyEvaluation(Arguments):
 class PolicyMonitor(Arguments):
     request_id: str = Field(min_length=1, max_length=128)
     expected_activation_id: int = Field(gt=0)
+
+
+class PolicyStopAlert(PolicyMonitor):
+    previous_state: StopState
 
 
 class ExternalStart(Arguments):
@@ -212,6 +217,12 @@ def _current_account(ctx: Context, args: Arguments) -> Payload:
     return Payload(data=current(ctx.connection, ctx.principal, ctx.database))
 
 
+def _stop_alert(ctx: Context, args: PolicyStopAlert) -> Payload:
+    from a_share_research.policy.stop_alert import run
+    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id,
+                           args.expected_activation_id, args.previous_state.model_dump(mode='json', exclude_unset=True)))
+
+
 def _v0_positions(ctx: Context, args: Account) -> Payload:
     from a_share_research.policy.v0.account_store import read
     return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
@@ -231,6 +242,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态；不发送通知、不修改账户',
+         frozenset({'assistant'}), PolicyStopAlert, Payload, _stop_alert, access='write', account=True),
     Tool('policy.monitor', '从已核对的账户镜像或明确绑定的账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',
          frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True),
     Tool('policy.current', '读取生效政策身份、参数与实装一致性；未启用时不猜测默认版本',

@@ -58,17 +58,21 @@ def _existing(conn, principal, request_id, request):
 
 
 def capture(database: Path, parameters: dict, *, source: dict | None = None) -> dict:
+    payload = parameters if source is None else dict(parameters=parameters, source=source)
+    return _capture(database, 'a_share_research.policy.capture', payload)
+
+
+def _capture(database: Path, module: str, payload: dict) -> dict:
     """Run the fixed collector with a private empty config and no inherited model credentials."""
     with tempfile.TemporaryDirectory(prefix='ashare-policy-capture-') as directory:
         config = Path(directory)/'runtime.env'
         config.touch(mode=0o600)
         env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','LANG','LC_ALL')}
         env.update(POLICY_V0_DB=str(database.resolve()),A_STOCK_CONFIG_FILE=str(config))
-        process = subprocess.Popen([sys.executable,'-m','a_share_research.policy.capture'],
+        process = subprocess.Popen([sys.executable,'-m',module],
             cwd=Path(__file__).resolve().parents[2],env=env,stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
         try:
-            payload=parameters if source is None else dict(parameters=parameters,source=source)
             output,_ = process.communicate(gate.canonical(payload).encode(),timeout=25)
         except subprocess.TimeoutExpired:
             try:
@@ -98,20 +102,26 @@ def capture(database: Path, parameters: dict, *, source: dict | None = None) -> 
 
 
 def run(conn: sqlite3.Connection, principal, database: Path, request_id: str, expected_activation_id: int) -> dict:
+    from a_share_research.policy.evaluation import evaluate
+    def collect(database, parameters, source):
+        return (capture(database, parameters, source=source) if source['mode'] == 'ledger'
+                else capture(database, parameters))
+    return _run(conn, principal, database, request_id, _request(expected_activation_id), collect, evaluate)
+
+
+def _run(conn, principal, database, request_id, request, collect, evaluate, *, context_version=None):
     """Capture live quotes, recheck source/policy, then append one immutable evaluation receipt.
 
     No write lock spans network acquisition. Concurrent identical requests may both
     acquire quotes, but return the first committed receipt and cannot duplicate it.
     """
-    from a_share_research.policy.evaluation import evaluate
     request_id=registry._text(request_id,'request_id')
-    request=_request(expected_activation_id)
     with db.transaction(conn,immediate=False):
         registry._authorize(conn,principal)
         saved=_existing(conn,principal,request_id,request)
         if saved is not None: return saved
         activation=registry._current(conn)
-        if activation is None or activation['id']!=expected_activation_id:
+        if activation is None or activation['id']!=request['expected_activation_id']:
             raise registry.PolicyError('生效政策已变化或尚未启用，请先读取当前指针')
         manifest=registry._version(conn,activation['identity'])
         try: identity.check_installed(manifest)
@@ -121,15 +131,14 @@ def run(conn: sqlite3.Connection, principal, database: Path, request_id: str, ex
         if source['mode']=='ledger' and manifest['parameters'].get('account_scope')!=source['watermark']['account_scope']:
             raise registry.PolicyError('生效政策的账户范围与账本绑定不一致',409)
     started=db.now()
-    bundle=(capture(database,manifest['parameters'],source=source) if source['mode']=='ledger'
-            else capture(database,manifest['parameters']))
+    bundle=collect(database,manifest['parameters'],source)
     try:
         result=evaluate(bundle,manifest['parameters'])
         identity.check_installed(manifest)
     except ValueError as exc:
         raise registry.PolicyError(f'采集后的政策输入或实现校验失败：{exc}',422) from None
     finished=db.now()
-    context=dict(schema_version=2 if source['mode']=='ledger' else 1,request=request,source=source,
+    context=dict(schema_version=context_version or (2 if source['mode']=='ledger' else 1),request=request,source=source,
                  capture_started_at=started,capture_finished_at=finished)
     with db.transaction(conn):
         registry._authorize(conn,principal)

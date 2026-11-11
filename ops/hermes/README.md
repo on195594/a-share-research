@@ -3,7 +3,7 @@
 任务与计划取自[上线后接入](../../docs/implementation-plan.md#当前部署)（上海时间；该节只记录任务 ID，未记录具名任务名称）。
 | 脚本（共用入口） | Hermes 任务 | 计划 |
 |---|---|---|
-| `a-stock-stop-alert.sh` | 止损提醒 `ca568f56d9ef` | 工作日 09–15 点每 5 分钟，命令内判断交易时段 |
+| `a-stock-stop-alert.sh`（`a-share-stop-alert.py`） | 止损提醒 `ca568f56d9ef` | 工作日 09–15 点每 5 分钟，服务内判断交易时段 |
 | `a-stock-daily-brief.sh` | 持仓日报 `7ab0ded3121c` | 工作日 15:35 |
 | `a-stock-benchmark-monthly.sh` | 账本月度对比 `93c4f5a4d0fc` | 每月 1 日 09:00 |
 | `a-share-advisor.sh`、`a-share-advisor-weekly.sh`（`a-share-advisor.py`） | 顾问扫描 `fbb0cbf6ee60` / 周报 `7845e96f4184` | 工作日 16:37 / 周日 18:07 |
@@ -17,11 +17,11 @@
 
 ## 合一替代调用与切换核对
 
-下表按 2026-11-11 本机任务配置与脚本核对；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本从宿主原样纳入版本管理，内部仍为旧调用，不能当作服务化已完成。
+下表按 2026-11-11 本机任务配置与脚本核对；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本已纳入版本管理，止损入口源码已改为服务调用；日报与月度对比仍为旧调用，不能当作全部服务化已完成。宿主尚未安装这些替代版本。
 
 | 任务 | 调用与替代状态 | 去重状态 | 命令预算与回退边界 |
 |---|---|---|---|
-| 止损提醒 | `a-stock-cache stop-alert`；服务替代待实现，须保留同日按代码升档提醒 | `~/.local/share/a-stock-agent/stop-alert-state.json`（可由旧 runtime.env 的 A_STOCK_STATE_DIR 改路径） | wrapper 无独立超时；准备期保留已安装脚本/状态，切换后只回兼容新账本的合并版 |
+| 止损提醒 | 新脚本 `policy.current` → `policy.stop_alert`；服务保存原始行情、止损线、旧通知状态及评估 | 新 `~/.local/state/ashare-stop-alert/state.json`，切换时从已确认的旧 stop-alert-state.json 导入 | ashare 子进程 40 秒，HTTP 30 秒，服务采集 25 秒；切换后只回兼容新账本及此回执/状态的合并版 |
 | 持仓日报 | `a-stock-cache daily-brief`；替代须同时覆盖监控与漏记分红检查及其失败提示 | 无独立通知去重 | wrapper 无独立超时；不可只改成 policy.monitor 而遗漏分红检查 |
 | 账本月度对比 | `a-stock-cache benchmark-report`；全收益指数与完整事件历史的服务替代待验 | 无独立通知去重 | wrapper 无独立超时；期初后现金流不能冒充完整基准历史 |
 | 顾问扫描 | 新脚本用 `ashare … call account.current` 同步及通知前刷新持仓，`policy.current` + `policy.monitor` 取已留存评估；研究扫描 API 不变 | `opportunities.json`，保留旧机会键并增加待查请求 | ashare 子进程 40 秒、HTTP 30 秒、服务采集 25 秒；扫描 HTTP 每次 60 秒，轮询最多 90×20 秒 |
@@ -38,3 +38,13 @@
 机会去重键仍为 `code|report_id|stance_action|v2_zone`，只保留当次仍存在的键；机会失效后重现可再次提醒。旧 JSON 数组首次使用时升级为 `{schema_version:1,seen:[…],pending:null}`。调用监控前原子保存 `pending` 中的 request_id / expected_activation_id；超时、损坏响应或不匹配回执保留请求，下次复用，不另造编号。锁防止并行改写；损坏状态不覆盖。前日已成功回执只用于清理待查请求，保留 seen，不作为今日机会发送，下次再采集。持久化通知键仍在 stdout 交给 Hermes 之前，未增加送达确认机制，不能宣称通知恰好一次。
 
 若待查请求被服务拒绝，应先以同一凭据重试原请求并核对政策/权限；不要删状态反复制造评估。无法经重试查回时，由维护者按 created_by/request_id 检查 policy_evaluations，确认不存在成功回执后再解除该 pending。状态升级后旧 advisor 不理解此对象，不能直接覆盖回旧脚本；正式切换前须把此客户端兼容性纳入合并版回退演练。当前宿主脚本与原状态尚未替换。
+
+## 止损提醒替代入口
+
+保留任务 ID 和原 shell 入口；新版 wrapper 执行同目录 `a-share-stop-alert.py`，与顾问共用 `ashare_tools.py` 的标准库客户端调用与原子状态写入。使用同一 Hermes assistant 配置，不加载旧 Skills 或旧 runtime.env。`ASHARE_STOP_ALERT_STATE` 可指定新状态文件；默认路径见上表。
+
+切换前先停旧任务、等在途结束，再核对旧配置的实际 A_STOCK_STATE_DIR（默认 `~/.local/share/a-stock-agent`），把其 stop-alert-state.json 保留备份并复制到尚不存在的新状态路径。客户端接受旧 `{date,levels}` 或空对象，首次调用时包成 `{schema_version:1,state,pending}`，保留已提醒档位；不能漏掉旧文件而在同日重新从空状态开始。准备期只对私有副本操作。
+
+服务沿用 v0 的时段判断、同日且绝对时间差不超过 15 分钟的行情、3% 临近线及同日升档去重；午休/非时段、无持仓或无新档位静默，全部行情无效时返回失败，不标成已提醒。服务不发送通知、不写客户端状态；输入中的 previous_state 是调用者提供的通知历史，不是账户事实。输出正文、档位与旧实现一致，客户端只将复核入口文案改为统一 a-share。
+
+客户端先持久化请求编号、启用编号和旧状态，再发起评估；不明结果重试原请求，锁防并发。有效回执到达后原子推进状态再交 stdout 给 Hermes；没有送达确认，仍不能保证恰好一次通知。超过 15 分钟才取回的告警不作为实时提醒，也不推进档位，只清理已完成的待查请求、提示下次重新采集；全部行情无效的已保存回执也会结束本次请求，让下一轮重新采集。坏状态/坏回执保留待查记录并失败；解除待查遵守上面的服务回执核对规则。升级后的本地状态和服务上下文版本 3 都须由回退版本识别，不能回旧客户端或旧 Skills。

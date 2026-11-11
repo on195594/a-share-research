@@ -17,7 +17,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from datetime import datetime
@@ -25,6 +24,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ashare_tools import ToolsError as AdvisorError, save_json, tool
 
 ENV = Path(os.environ.get("A_SHARE_ADVISOR_ENV", Path.home() / ".config/a-share-advisor/runtime.env"))
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
@@ -60,29 +62,6 @@ def call(method: str, path: str, body: dict | None = None) -> dict:
                                      data=json.dumps(body).encode() if body is not None else None, headers=headers)
     with urllib.request.urlopen(request, timeout=60) as response:
         return json.loads(response.read())
-
-
-class AdvisorError(ValueError):
-    """Safe task failure; never turn an unavailable account into an empty portfolio."""
-
-
-def tool(name: str, arguments: dict) -> dict:
-    config = os.environ.get('ASHARE_HERMES_CONFIG', str(Path.home() / '.config/ashare/hermes-assistant.json'))
-    try:
-        result = subprocess.run(['ashare', '--config', config, 'call', name, '--json', json.dumps(arguments)],
-                                capture_output=True, text=True, timeout=40, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
-        raise AdvisorError(f'{name} 客户端不可用或超时；未自动重试') from None
-    if result.returncode:
-        raise AdvisorError(f'{name} 未完成；请检查工具服务、凭据、账户来源与生效政策')
-    try:
-        response = json.loads(result.stdout)
-        data = response['result']['data']
-        if response.get('ok') is not True or not isinstance(data, dict):
-            raise ValueError
-    except (ValueError, KeyError, TypeError):
-        raise AdvisorError(f'{name} 返回格式不兼容') from None
-    return data
 
 
 def holdings() -> list[str]:
@@ -246,17 +225,7 @@ def render_opportunities(prompts: list[dict], seen: set[str], public_base: str =
 
 def save_opportunity_state(state: dict) -> None:
     """Atomically retain the original request before a potentially ambiguous HTTP call."""
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', dir=OPPORTUNITY_STATE.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-            json.dump(state, stream, ensure_ascii=False, allow_nan=False)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, OPPORTUNITY_STATE)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    save_json(OPPORTUNITY_STATE, state)
 
 
 def read_opportunity_state() -> dict:

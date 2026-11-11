@@ -194,6 +194,10 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 `account.current` 接受空对象，要求 assistant 与账户影子开关，返回 `data.codes`（去重排序的六位公司代码）和 `data.source`。同一只读事务内复用监控的来源核验，镜像读取未关闭持仓，账本读取明确绑定账户的已核验资金投影；来源缺失、投影或证据损坏、不可转换的代码均拒绝，不用空持仓掩盖失败。不查询行情、不依赖生效政策、不修改订阅，供宿主在扫描前和通知前刷新当前在仓集合。
 
+`policy.stop_alert` 同样要求 assistant 与账户影子开关，输入为 request_id、expected_activation_id 和 previous_state（旧通知 `{date,levels}`，也接受空对象）。固定子进程只采集未关闭持仓的 canonical 止损线与当前行情；非 v0 交易时段不取行情。服务复用政策/来源/撤销检查、无网络写锁与幂等追加，保存包含参数、时钟、持仓止损线、行情和旧通知状态的原始输入及纯函数结果。回执 mode 为 `service_stop_alert_capture`，capture_context 版本 3 的 request 还绑定 previous_state；同请求不能换状态或与 monitor/replay 混用。结果固定为 status、exit_code、stdout、stderr、state、alerts；state 是下一通知状态，服务不代发通知或改调用方状态。
+
+止损规则不从新监控结论近似推导：直接复用 v0 的 stop_level/new_stop_alerts，保留同日与绝对 15 分钟行情窗、3% 临近线、逐代码每日升档、部分行情有效时只检查有效部分的既有行为。全部行情无效返回已保存的 unavailable 评估（exit_code=1），与采集器异常、来源变动等未保存成功回执的服务错误区分。可用 `policy.evaluation` 查回原输入/结果/身份；纯函数 `policy.stop_evaluation.evaluate` 可离线复算。无数据库列变更，但旧版本不识别上下文 3，不可作为这些记录的直接回退版本；发布前仍须兼容合并镜像演练。
+
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
 mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256。当前只有该绑定的读取和验证，没有生产切换写入器，私有测试中设置绑定不算完成切换。

@@ -147,6 +147,33 @@ def guide(conn, principal, name):
     return dict(identity=manifest['identity'],guide_version=manifest['guide_version'],path=name,content=guides[name])
 
 
+def _capture_mode(context, activation_id, bundle):
+    if not isinstance(context, dict) or type(context.get('schema_version')) is not int:
+        raise PolicyError('未知采集来源版本')
+    version = context['schema_version']
+    request = dict(action='policy.monitor', expected_activation_id=activation_id)
+    mode = 'service_monitor_capture'
+    if version == 3:
+        from a_share_research.policy.stop_state import validate_state
+        previous = validate_state(bundle.get('previous_state'))
+        request = dict(action='policy.stop_alert', expected_activation_id=activation_id, previous_state=previous)
+        mode = 'service_stop_alert_capture'
+    elif version not in (1, 2):
+        raise PolicyError('未知采集来源版本')
+    if context.get('request') != request:
+        raise PolicyError('采集来源或生效指针不一致')
+    source = context.get('source', {})
+    if not isinstance(source, dict):
+        raise PolicyError('采集来源须为对象')
+    if version == 1 or version == 3 and source.get('mode') == 'mirror':
+        if source.get('mode') != 'mirror':
+            raise PolicyError('旧采集来源须为镜像')
+    else:
+        from a_share_research.policy.account_input import validate_source
+        validate_source(source)
+    return mode
+
+
 def _evaluation(row):
     result = dict(id=row[0],identity=row[1],activation_id=row[2],created_at=row[3],created_by=row[4],
                 request_id=row[5],input_hash=row[6],result_hash=row[7],mode='supplied_input_replay',
@@ -155,7 +182,11 @@ def _evaluation(row):
         context=json.loads(row[10])
         if gate.digest(context)!=row[11]:
             raise PolicyError('政策采集来源哈希不一致')
-        result.update(mode='service_monitor_capture',capture_context=context)
+        try:
+            mode = _capture_mode(context, row[2], result['input'])
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise PolicyError('政策采集来源或请求记录损坏') from None
+        result.update(mode=mode,capture_context=context)
     return result
 
 
@@ -223,17 +254,9 @@ def inspect(conn):
         try:
             if len(row)>10 and (row[10] is not None or row[11] is not None):
                 context=json.loads(row[10])
-                source=context.get('source',{})
-                if (gate.digest(context)!=row[11]
-                        or context.get('request')!={'action':'policy.monitor','expected_activation_id':row[2]}):
+                if gate.digest(context)!=row[11]:
                     raise PolicyError('采集来源或生效指针不一致')
-                if context.get('schema_version')==1:
-                    if source.get('mode')!='mirror':raise PolicyError('旧采集来源须为镜像')
-                elif context.get('schema_version')==2:
-                    from a_share_research.policy.account_input import validate_source
-                    validate_source(source)
-                else:
-                    raise PolicyError('未知采集来源版本')
+                _capture_mode(context, row[2], json.loads(row[8]))
             if gate.digest(json.loads(row[8])) != row[6] or gate.digest(json.loads(row[9])) != row[7]:
                 raise PolicyError('输入或结果哈希不一致')
             manifest = _version(conn,row[1])
