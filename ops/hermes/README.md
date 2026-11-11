@@ -17,23 +17,33 @@
 
 ## 合一替代调用与切换核对
 
-下表按 2026-11-11 本机任务配置与脚本核对；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本已纳入版本管理，止损、日报与月度对比源码已改为服务调用；成功上游数据、真实运行耗时和正式送达仍须验收。宿主尚未安装这些替代版本。
+任务配置以 2026-11-11 本机核对为基线，替代源码状态如下；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本已纳入版本管理，止损、日报与月度对比源码已改为服务调用；成功上游数据、真实运行耗时和正式送达仍须验收。宿主尚未安装这些替代版本。
 
 | 任务 | 调用与替代状态 | 去重状态 | 命令预算与回退边界 |
 |---|---|---|---|
 | 止损提醒 | 新脚本 `policy.current` → `policy.stop_alert`；服务保存原始行情、止损线、旧通知状态及评估 | 新 `~/.local/state/ashare-stop-alert/state.json`，切换时从已确认的旧 stop-alert-state.json 导入 | ashare 子进程 40 秒，HTTP 30 秒，服务采集 25 秒；切换后只回兼容新账本及此回执/状态的合并版 |
 | 持仓日报 | 新脚本 `policy.current` → `policy.daily_brief`；监控、逐持仓完整事件与 Provider 分红响应/失败共同留存 | `~/.local/state/ashare-daily-brief/state.json` 仅记录待查请求，无新增每日通知去重 | ashare 子进程 40 秒、HTTP 30 秒、服务整体采集 25 秒；真实成功分红链路耗时尚待验收 |
 | 账本月度对比 | 新脚本 `policy.current` → `policy.benchmark`；完整历史、双全收益指数及估值报价或失败留存 | `~/.local/state/ashare-benchmark/state.json` 仅记录待查请求，无新增月度通知去重 | ashare 子进程 40 秒、HTTP 30 秒、采集 25 秒；双基准真实完整响应与预算尚待验收 |
-| 顾问扫描 | 新脚本用 `ashare … call account.current` 同步及通知前刷新持仓，`policy.current` + `policy.monitor` 取已留存评估；研究扫描 API 不变 | `opportunities.json`，保留旧机会键并增加待查请求 | ashare 子进程 40 秒、HTTP 30 秒、服务采集 25 秒；扫描 HTTP 每次 60 秒，轮询最多 90×20 秒 |
-| 顾问周报 | 原研究 weekly API，无账户命令 | 无独立通知去重 | HTTP 60 秒；脚本仍共用 advisor |
+| 顾问扫描 | `account.current` 同步及通知前刷新持仓；新持久扫描 API；`policy.current` + `policy.monitor` 取已留存评估 | 独立 `scan.json` 保存待查扫描；原 `opportunities.json` 保留机会键及待查政策请求 | 整轮 540 秒，共享持仓、HTTP、轮询、机会检查预算；超时保留待查请求，回退服务须支持 v21 协议 |
+| 顾问周报 | 原研究 weekly API，无账户命令 | 无独立通知去重，独立运行锁 | 同一 advisor 进程监督与 540 秒总预算 |
 | 月批发起 | 原 monthly submit API | `<月>.receipt`，flock 与落盘回执 | 保持原入口；48 小时只用于卡住提示，不是执行超时 |
 | 月批状态 | 原 monthly status API | 共用 `<月>.receipt` 事件去重 | 同上 |
 | 记分 | 新 scoring 执行器，原四组记分算法与通知格式 | 原 `~/.local/state/a-share-scoring/state.json`，增加同目录任务锁 | 四组共用 540 秒截止、最多两路；容器内回收子进程，宿主命令最多再留 10 秒清理 |
 | 里程碑 | 原 milestones 脚本 | 无独立通知去重 | 保持原入口 |
 
-宿主配置的 `cron.script_timeout_seconds=600`，调度器可被 `HERMES_CRON_SCRIPT_TIMEOUT` 覆盖。2026-11-11 只读核对运行中 gateway 未设置该覆盖变量，当前源码正常路径据配置解析为 600 秒；未触发真实任务验证到时终止。新记分执行器已对齐这一预算；顾问的 90×20 秒轮询仍待衔接，持久扫描请求标识和跨轮恢复须一并解决，不能仅缩短等待后丢失原扫描回执。正式任务验收仍须核对完成耗时，未修改宿主设置。
+宿主配置的 `cron.script_timeout_seconds=600`，调度器可被 `HERMES_CRON_SCRIPT_TIMEOUT` 覆盖。2026-11-11 只读核对运行中 gateway 未设置该覆盖变量，当前源码正常路径据配置解析为 600 秒；未触发真实任务验证到时终止。新版记分和顾问源码均以 540 秒给任务清理留出余量。正式启用前仍须确认有效宿主时限、完成耗时与送达，未修改宿主设置或已安装脚本。
 
-服务端已准备 v21 [持久扫描请求 API](../../README.md#顾问闭环批次-a)，顾问客户端尚未接入。后续客户端须先持久化请求键，再提交新端点；超时或响应丢失重试同一键，遇到旧服务 404 保留待查状态，不回落旧 POST。兼容回退镜像必须支持该端点和 v21 tools 就绪，具体基线与验证限制见[实施计划](../../docs/implementation-plan.md)；本条不表示已启用跨轮恢复或改变当前轮询预算。
+新版顾问源码已接入 v21 [持久扫描请求 API](../../README.md#顾问闭环批次-a)。兼容回退镜像必须支持该端点和 v21 tools 就绪，具体基线与验证限制见[实施计划](../../docs/implementation-plan.md)；尚未安装、启用到真实任务。
+
+## 顾问请求恢复与执行预算
+
+`A_SHARE_ADVISOR_STATE`（默认 `~/.local/state/a-share-advisor`）下新增 0600 的 `scan.json`，格式为 `{schema_version:1,pending:null|{request_id,binding,created_at,scan_id}}`。`binding` 是服务 URL、Host 和研究凭据的联合哈希，不保存原令牌；`scan_id` 在有效提交回执到达前为 null。独立 `scan.lock` 由监督进程持有至清理完成，并发调用静默退出；周报另用 `weekly.lock`。
+
+新请求先核对持仓并同步订阅，再持久保存 UUID、绑定和创建时刻，之后才 PUT 新接口。有待查请求时直接重试原键并查询原扫描，不重新同步订阅或另建扫描。有效回执会补存扫描编号；超时、断连、404、坏回执、损坏状态或服务/凭据变化均保留待查信息，不回落旧 POST，不清空后重新开始。取得终态后刷新当前持仓、构造扫描和机会输出，再结束待查；跨日补回的扫描注明原时间，不作为今日观察。机会检查仍使用原 `opportunities.json` 格式和恢复规则。
+
+服务可使用已验证的 `565ced8` v21 镜像基线，但回退服务时仍须保留支持 `scan.json` 的客户端和监督模块；忽略该文件、继续调用旧 POST 的历史 advisor 脚本不是兼容客户端，不能用它处理已有待查请求。
+
+`advisor_budget.py` 用 Linux 子进程和单调时钟限制整轮执行，涵盖阻塞 HTTP、ashare 调用、轮询睡眠和机会检查；HTTP 自身超时不替代总时限。超时或 TERM/INT 后终止进程组，约 4 秒内升级 KILL 并回收后代；正常结束也清理后代，子进程 stdout/stderr 不直接投递，成功返回的文本才交 Hermes。监督进程本身被 SIGKILL 时无法收尾，工具子进程不得另开会话脱离组；正式宿主时限须允许 540 秒预算后的清理。状态写入与 stdout 之间仍无送达 ACK，不能保证恰好一次通知。
 
 ## 记分执行预算
 

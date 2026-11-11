@@ -13,20 +13,25 @@ never from this file. Delivery is Hermes' job; this script only writes to stdout
 """
 import json
 import fcntl
+import hashlib
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
 import uuid
 from datetime import datetime
+from contextlib import contextmanager
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ashare_tools import ToolsError as AdvisorError, save_json, tool
+from advisor_budget import BudgetError, run_bounded
 
 ENV = Path(os.environ.get("A_SHARE_ADVISOR_ENV", Path.home() / ".config/a-share-advisor/runtime.env"))
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
@@ -37,9 +42,10 @@ VALUATION_NOTE = "注：估值参考不是技术支撑位或买卖指令，也�
 ACTIONS = {"covered": "已纳入研究", "queued_review": "已安排研究复核", "deferred": "等待研究复核",
            "no_card": "暂无研究记录", "skipped": "跳过"}
 OPPORTUNITY_STATE = Path(os.environ.get("A_SHARE_ADVISOR_STATE", Path.home() / ".local/state/a-share-advisor")) / "opportunities.json"
+SCAN_STATE = OPPORTUNITY_STATE.with_name('scan.json')
 OPPORTUNITY_NOTE = ("注：机会来自研究立场与按情景概率加权的期望回报，情景尚未记分；"
                     "建仓前通过 a-share 读取生效政策，按风险预算核对仓位，再由所有者决定是否下单。")
-POLL_SECONDS, POLL_LIMIT = 20, 90  # a scan of ~10 codes takes minutes; give up after 30 minutes
+POLL_SECONDS, RUN_SECONDS = 20, 540  # Leave cleanup time below Hermes' 600-second limit.
 
 
 def settings() -> tuple[str, str, str | None]:
@@ -53,14 +59,17 @@ def settings() -> tuple[str, str, str | None]:
     return values["A_SHARE_RESEARCH_URL"].rstrip("/"), values["A_SHARE_RESEARCH_TOKEN"], values.get("A_SHARE_RESEARCH_HOST")
 
 
-def call(method: str, path: str, body: dict | None = None) -> dict:
-    base, token, host = settings()
+def call(method: str, path: str, body: dict | None = None, *, connection=None, deadline=None) -> dict:
+    base, token, host = connection if connection is not None else settings()
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     if host:
         headers["Host"] = host
     request = urllib.request.Request(base + path, method=method,
                                      data=json.dumps(body).encode() if body is not None else None, headers=headers)
-    with urllib.request.urlopen(request, timeout=60) as response:
+    remaining = 60 if deadline is None else min(60, deadline - time.monotonic())
+    if remaining <= 0:
+        raise AdvisorError('本轮等待时限已到；待查请求保留，下次继续查询')
+    with urllib.request.urlopen(request, timeout=remaining) as response:
         return json.loads(response.read())
 
 
@@ -182,23 +191,145 @@ def render_scan(result: dict, held_codes: set[str], public_base: str = "") -> st
     return "\n\n".join(lines)
 
 
-def scan() -> str:
-    call("PUT", "/api/subscriptions", {"codes": holdings()})
-    scan_id = call("POST", "/api/scans")["scan_id"]
-    for _ in range(POLL_LIMIT):
-        result = call("GET", f"/api/scans/{scan_id}")
-        if result["status"] in ("done", "failed"):
+def service_binding(connection) -> str:
+    base, token, host = connection
+    parsed = urlsplit(base)
+    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or not isinstance(token, str) or not token
+            or (host is not None and (not isinstance(host, str) or not host))):
+        raise AdvisorError('研究服务配置不兼容；未提交扫描')
+    # Bind both routing and authenticated identity without storing a token or URL.
+    return hashlib.sha256(json.dumps([base, token, host], ensure_ascii=False).encode()).hexdigest()
+
+
+def aware_time(value):
+    if not isinstance(value, str):
+        raise ValueError('timestamp must be a string')
+    at = datetime.fromisoformat(value)
+    if at.tzinfo is None:
+        raise ValueError('timestamp must have a timezone')
+    return at
+
+
+def read_scan_state() -> dict:
+    def unique(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError('duplicate state key')
+            out[key] = value
+        return out
+    try:
+        descriptor = os.open(SCAN_STATE, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return dict(schema_version=1, pending=None)
+    try:
+        with os.fdopen(descriptor) as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o077 or info.st_size > 32768):
+                raise ValueError('unsafe state file')
+            saved = json.load(stream, object_pairs_hook=unique)
+        if (not isinstance(saved, dict) or set(saved) != {'schema_version', 'pending'}
+                or type(saved['schema_version']) is not int or saved['schema_version'] != 1):
+            raise ValueError('state shape')
+        pending = saved['pending']
+        if pending is not None:
+            if (not isinstance(pending, dict) or set(pending) != {'request_id', 'binding', 'created_at', 'scan_id'}
+                    or not isinstance(pending['request_id'], str)
+                    or re.fullmatch(r'hermes-scan-[0-9a-f]{32}', pending['request_id']) is None
+                    or not isinstance(pending['binding'], str) or re.fullmatch('[0-9a-f]{64}', pending['binding']) is None
+                    or (pending['scan_id'] is not None and (type(pending['scan_id']) is not int or pending['scan_id'] < 1))
+                    or aware_time(pending['created_at']) > datetime.now(ZoneInfo('Asia/Shanghai'))):
+                raise ValueError('pending shape')
+        return saved
+    except (ValueError, TypeError, KeyError):
+        raise AdvisorError('扫描待查记录不兼容；保留原文件，请核对后重试') from None
+
+
+@contextmanager
+def task_lock(mode='scan'):
+    SCAN_STATE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = SCAN_STATE.with_suffix('.lock') if mode == 'scan' else SCAN_STATE.with_name('weekly.lock')
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'a') as lock:
+        info = os.fstat(lock.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid():
+            raise AdvisorError('扫描任务锁不兼容；未执行')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+        else:
+            yield True
+
+
+def scan(deadline=None) -> str:
+    with task_lock() as acquired:
+        return _scan(deadline if deadline is not None else time.monotonic() + RUN_SECONDS) if acquired else ''
+
+
+def _scan(deadline: float) -> str:
+    if deadline <= time.monotonic():
+        raise AdvisorError('本轮等待时限已到；待查请求保留，下次继续查询')
+    saved = read_scan_state()
+    connection = settings()
+    binding = service_binding(connection)
+    def send(method, path, body=None):
+        return call(method, path, body, connection=connection, deadline=deadline)
+    if saved['pending'] is None:
+        send('PUT', '/api/subscriptions', {'codes': holdings()})
+        saved['pending'] = dict(request_id='hermes-scan-' + uuid.uuid4().hex, binding=binding,
+                                created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(), scan_id=None)
+        save_json(SCAN_STATE, saved)
+    pending = saved['pending']
+    if pending['binding'] != binding:
+        raise AdvisorError('研究服务或凭据已变化；保留原扫描请求，请核对后恢复')
+    try:
+        receipt = send('PUT', '/api/scan-requests/' + pending['request_id'])
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise AdvisorError('服务尚不支持可恢复扫描；保留原请求，未回落旧提交入口') from None
+        raise
+    if (not isinstance(receipt, dict) or set(receipt) != {'version', 'request_id', 'scan_id'}
+            or receipt['version'] != 'research-v1' or receipt['request_id'] != pending['request_id']
+            or type(receipt['scan_id']) is not int or receipt['scan_id'] < 1
+            or (pending['scan_id'] is not None and receipt['scan_id'] != pending['scan_id'])):
+        raise AdvisorError('扫描提交回执不兼容；保留原请求供核对')
+    scan_id = receipt['scan_id']
+    if pending['scan_id'] is None:
+        pending['scan_id'] = scan_id
+        save_json(SCAN_STATE, saved)
+    while True:
+        if deadline - time.monotonic() <= 1:
+            return f'【研究扫描】扫描 #{scan_id} 本轮等待已结束，已保留请求，下次继续查询。'
+        result = send('GET', f'/api/scans/{scan_id}')
+        try:
+            if (not isinstance(result, dict) or result.get('version') != 'research-v1'
+                    or type(result.get('id')) is not int or result['id'] != scan_id
+                    or result.get('status') not in ('queued', 'running', 'done', 'failed')
+                    or not isinstance(result.get('summary'), dict) or not isinstance(result.get('notify'), list)
+                    or any(not isinstance(item, dict) for item in result['notify'])):
+                raise ValueError
+            requested = aware_time(result['requested_at'])
+            if requested > datetime.now(ZoneInfo('Asia/Shanghai')):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            raise AdvisorError('扫描查询回执不兼容；保留原请求供核对') from None
+        if result['status'] in ('done', 'failed'):
             break
-        time.sleep(POLL_SECONDS)
-    else:
-        return f"【研究扫描】扫描 #{scan_id} 30 分钟未完成，请查看 Research 服务。"
+        time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic() - 1)))
     # Refresh at delivery time: a position may have been closed while the scan ran.
     held_codes = set(holdings()) if result.get("notify") else set()
-    _, _, host = settings()
+    _, _, host = connection
     public_base = f"https://{host}" if host else ""
     text = render_scan(result | {"scan_id": scan_id}, held_codes, public_base)
+    if text and requested.astimezone(ZoneInfo('Asia/Shanghai')).date() != datetime.now(ZoneInfo('Asia/Shanghai')).date():
+        text = f'【研究扫描补回】原扫描时间 {requested.isoformat()}；以下为历史回执，不代表今日观察。\n\n' + text
     extra = opportunities(public_base)
-    return "\n\n".join(part for part in (text, extra) if part)
+    output = "\n\n".join(part for part in (text, extra) if part)
+    save_json(SCAN_STATE, dict(schema_version=1, pending=None))
+    return output
 
 
 def opportunity_key(prompt: dict) -> str:
@@ -314,19 +445,27 @@ def render_weekly(data: dict) -> str:
     return "\n".join(lines)
 
 
-def weekly() -> str:
-    return render_weekly(call("GET", "/api/scans/weekly"))
+def weekly(deadline=None) -> str:
+    return render_weekly(call("GET", "/api/scans/weekly", deadline=deadline))
 
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "scan"
-    if mode not in ("scan", "weekly"):
+    if len(sys.argv) > 2 or mode not in ("scan", "weekly"):
         # Any other argument (e.g. --help) must not trigger a real scan.
         sys.exit("usage: a-share-advisor.py [scan|weekly]")
+    def task(deadline):
+        try:
+            return weekly(deadline) if mode == 'weekly' else _scan(deadline)
+        except AdvisorError as exc:
+            return f'【研究扫描】任务未能完成：{exc}'
+        except (urllib.error.URLError, subprocess.SubprocessError, KeyError, OSError, ValueError, TypeError, AttributeError):
+            return '【研究扫描】服务或回执不可用；请核对配置与待查记录，未自动清空或重建请求。'
     try:
-        text = weekly() if mode == "weekly" else scan()
-    except (AdvisorError, urllib.error.URLError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError, OSError) as exc:
-        text = f"【研究扫描】任务未能完成：{type(exc).__name__}: {exc}"
+        with task_lock(mode) as acquired:
+            text = run_bounded(task, seconds=RUN_SECONDS) if acquired else ''
+    except (BudgetError, AdvisorError, OSError):
+        text = '【研究扫描】本轮执行中断或超过时限；请核对待查记录，下次继续恢复，不代表扫描无事件。'
     if text:
         print(text)
 

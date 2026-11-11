@@ -17,6 +17,8 @@ from test_ops_hermes import ROOT, load
 def advisor(tmp_path, monkeypatch):
     module = load('a-share-advisor')
     monkeypatch.setattr(module, 'OPPORTUNITY_STATE', tmp_path / 'opportunities.json')
+    monkeypatch.setattr(module, 'SCAN_STATE', tmp_path / 'scan.json')
+    monkeypatch.setattr(module, 'settings', lambda: ('http://127.0.0.1:8620', 'structural-test-token', None))
     return module
 
 
@@ -69,15 +71,16 @@ def test_invalid_holdings_never_clear_subscriptions(advisor, monkeypatch, respon
 def test_scan_refreshes_holdings_at_delivery(advisor, monkeypatch):
     codes = iter([['688578'], []])
     monkeypatch.setattr(advisor, 'holdings', lambda: next(codes))
-    def call(method, path, body=None):
-        if method == 'PUT':
+    def call(method, path, body=None, **kwargs):
+        if path == '/api/subscriptions':
             assert body == {'codes': ['688578']}
             return {}
-        if method == 'POST': return {'scan_id': 1}
-        return {'status': 'done', 'notify': [{}]}
+        if path.startswith('/api/scan-requests/'):
+            return {'version': 'research-v1', 'request_id': path.rsplit('/', 1)[-1], 'scan_id': 1}
+        return {'version': 'research-v1', 'id': 1, 'status': 'done', 'notify': [{}], 'summary': {},
+                'requested_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()}
     monkeypatch.setattr(advisor, 'call', call)
     monkeypatch.setattr(advisor, 'render_scan', lambda result, held, base: 'closed' if held == set() else 'wrong')
-    monkeypatch.setattr(advisor, 'settings', lambda: ('', '', None))
     monkeypatch.setattr(advisor, 'opportunities', lambda base: '')
     assert advisor.scan() == 'closed'
 
