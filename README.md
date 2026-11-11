@@ -122,6 +122,17 @@ Skills 通过 `a-stock-cache research` 接入本 API，先复用旧报告，再�
 
 纠错报告的 `methods` 是已核查的方法线索；`evidence.methods_used` 记录检索召回，不证明实际采用或收益贡献。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
 
+## 账户净值工具
+
+在启用账户工具的实例，以 assistant 凭据通过现有 `ashare` / HTTP / MCP 调用，参数结构以 `GET /tools` 返回的 schema 为准。研究凭据和 owner 凭据不能调用这三个账户工具；默认只读实例不开放它们。计算口径和边界见[合一方案的量尺](docs/consolidation.md#4-现有代码与知识的去向)，上线状态见[实施计划](docs/implementation-plan.md)。
+
+1. `account.nav.capture({account_id})`：读取一致快照，返回 `source` 和 `state_sha256`。从中选起止资产观察/已入账快照及每笔有效出入金的流前观察；`kind` 为 `observation` 或 `batch`，每个引用包含 `id` 与选择理由 `reason`。
+2. 通过 `account.evidence` 保存完整资金流水原件与指数响应。指数 JSON 为 `{schema_version:1, code:"H00906.CSI", currency:"CNY", return_type:"total_return", source:"tushare.index_daily", fetched_at:"含时区的实际采集时间", source_as_of:"YYYY-MM-DD", status:"ok", rows:[{date:"YYYY-MM-DD",close:"实际收盘值"},...]}`；保留原响应金额与时点，失败响应不能标记成 ok。
+3. `account.nav.evaluate({account_id,request})`：`request` 包含 `expected_state_sha256`、`start/end` 估值引用、`flows:[{event_id,before:估值引用}]`、`benchmark_evidence_hash` 和 `coverage`。后者明确 `start/end` 时点、`currency:"CNY"`、`scope:"cash_equity_no_liabilities"`、`complete_external_flows:true`、`no_security_transfers:true`、`evidence_hashes` 与 `explanation`。这些声明必须由原件支持；没有出入金记录不能自动填 true。资料变更返回 409，缺项或口径不符返回 422。
+4. 保存返回的 `artifact_sha256`。相同输入重试得到相同哈希；`account.nav.replay({account_id,artifact_sha256})` 重放原输入并核对原结果，即使后来发生更正也不改写历史。结果保存在 `account-evidence/`，随正式备份包保留；工具不修改账户、政策或旧双基准报告，不发送通知、不请求行情。
+
+`account_return` 与 `benchmark_return` 为小数收益率，`excess_percentage_points` 为百分点；所有计算金额和比率用十进制字符串返回，`flows` 留存逐笔份额变化。完整性是带凭证的调用者声明，指数是上传的证据，重放不是券商/供应商认证，也不是当前账户状态或完整历史验收。请保留回执哈希以便检索，当前不提供净值历史列表或自动日报。
+
 ## 运行身份与材料重放
 
 每次研究在 `runs.identity` 记录应用文件内容哈希、Python/Lib 版本和材料哈希，在 `calls.identity` 记录模型、pi/Node 版本、调用参数和提示词哈希；未知一律留空，不用当前版本回填。`runs.material` 保存实际送入流程的财务表、行情时点、文档身份和原文页。

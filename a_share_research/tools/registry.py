@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from a_share_research import api_keys, service, external_research, external_review
 from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store, cycle_analysis
+from a_share_research.account import nav
 from a_share_research.policy import registry as policies
 from a_share_research.policy.stop_state import StopState
 from a_share_research.policy.position_request import Proposal
@@ -119,6 +120,14 @@ class AccountReceipt(Account):
 class AccountObserve(Account):
     observation: ledger.Observation
     evidence_hash: str
+
+
+class AccountNav(Account):
+    request: nav.Request
+
+
+class AccountNavReplay(Account):
+    artifact_sha256: nav.Hash
 
 
 class Analysis(Arguments):
@@ -285,6 +294,17 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('account.nav.capture', '冻结账户账本与估值出处，返回资料哈希；不认定资金流水完整',
+         frozenset({'assistant'}), Account, Payload,
+         lambda c,a: Payload(data=nav.capture(c.connection,c.principal,a.account_id)), account=True),
+    Tool('account.nav.evaluate', '按完整资金声明、明确流前估值和H00906收盘证据保存精确单位净值对照；缺项拒绝',
+         frozenset({'assistant'}), AccountNav, Payload,
+         lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,_evidence_directory(c))),
+         access='write', account=True),
+    Tool('account.nav.replay', '按哈希重放保存的净值输入与结果；不代表当前账户状态或券商认证',
+         frozenset({'assistant'}), AccountNavReplay, Payload,
+         lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
+         account=True),
     Tool('policy.holdings_check', '采集并保存原持仓检查、风险门和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
          frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True),
     Tool('policy.portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
