@@ -68,14 +68,16 @@ def _binding(value):
 def _asset(value, scope):
     if value is None: return
     _object(value,('portfolio_value','account_scope','recorded_at','portfolio_value_as_of','source','record_id','evidence_hashes'))
-    if value['account_scope']!=scope or value['portfolio_value_as_of'] is not None:
-        raise AccountInputError('账本资产范围不符或估值时点未经证明')
+    if value['account_scope']!=scope:
+        raise AccountInputError('账本资产范围不符')
     if value['source'] not in ('account_observation','account_batch') or type(value['record_id']) is not int or value['record_id']<1:
         raise AccountInputError('账本资产记录身份无效')
     if not isinstance(value['portfolio_value'],str): raise AccountInputError('账本资产金额须为字符串')
     amount=Decimal(value['portfolio_value'])
     if not amount.is_finite() or amount<0: raise AccountInputError('账本资产金额无效')
-    _timestamp(value['recorded_at'])
+    recorded=_timestamp(value['recorded_at'])
+    if value['portfolio_value_as_of'] is not None and _timestamp(value['portfolio_value_as_of'])>recorded:
+        raise AccountInputError('账本估值时点晚于记录时间')
     hashes=value['evidence_hashes']
     if not isinstance(hashes,list) or not hashes: raise AccountInputError('账本资产缺少证据')
     for sha in hashes: _sha(sha)
@@ -181,17 +183,20 @@ def _read(conn, directory, row):
     for code in codes:
         state['stock_fundamentals']+=_rows(conn,'SELECT * FROM main.stock_fundamentals WHERE code=? ORDER BY code',(code,))
     candidates=[]
-    def asset(kind,item,total,refs):
+    def asset(kind,item,total,refs,as_of):
         if total is not None:
+            if as_of is not None and as_of>_timestamp(item['created_at']):
+                raise AccountInputError('保存的资产估值时点晚于记录时间')
             candidates.append(dict(portfolio_value=str(total),account_scope=binding['account_scope'],
-                recorded_at=item['created_at'],portfolio_value_as_of=None,source=kind,record_id=item['id'],
+                recorded_at=item['created_at'],portfolio_value_as_of=as_of.isoformat() if as_of is not None else None,
+                source=kind,record_id=item['id'],
                 evidence_hashes=sorted(set(refs))))
     for item in state['account_observations']:
         raw=_json(item['observation']);observation=ledger.Observation.model_validate(raw)
         if gate.digest(dict(observation=raw,evidence_hash=item['evidence']))!=item['request_hash']:
             raise AccountInputError('账户资产观察哈希不一致')
         hashes.add(item['evidence'])
-        asset('account_observation',item,observation.total_assets,[item['evidence']])
+        asset('account_observation',item,observation.total_assets,[item['evidence']],observation.portfolio_value_as_of)
     for item in state['account_batches']:
         raw=_json(item['request']);batch=ledger.Batch.model_validate(raw);receipt=_json(item['receipt'])
         expected=dict(receipt_id=item['id'],account_id=account,request_hash=item['request_hash'],status='posted',mode='shadow',evidence_hashes=batch.evidence_hashes)
@@ -203,7 +208,7 @@ def _read(conn, directory, row):
         if reconcile(Opening.model_validate(receipt['after']),batch.snapshot,Decimal(book['tolerance'])):
             raise AccountInputError('账户已入账快照未与回执资金股数对平')
         hashes.update(batch.evidence_hashes)
-        asset('account_batch',item,batch.snapshot.total_assets,batch.evidence_hashes)
+        asset('account_batch',item,batch.snapshot.total_assets,batch.evidence_hashes,batch.snapshot.portfolio_value_as_of)
     for sha in sorted(hashes):
         _sha(sha);evidence.verify(directory/'account-evidence',sha)
     # Record time selects the latest saved evidence; it never becomes a valuation time.

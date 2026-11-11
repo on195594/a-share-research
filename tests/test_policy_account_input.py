@@ -118,7 +118,7 @@ def test_saved_source_validation_is_strict_and_offline(bound_book,variant):
     if variant=='extra': saved['unrecognized']=True
     elif variant=='hash': saved['state_sha256']='invalid'
     elif variant=='version': saved['account_version']=True
-    elif variant=='asset-time': saved['asset']['portfolio_value_as_of']='2026-11-01T15:00:00+08:00'
+    elif variant=='asset-time': saved['asset']['portfolio_value_as_of']='2026-11-01'
     elif variant=='asset-scope': saved['asset']['account_scope']='different'
     elif variant=='asset-amount': saved['asset']['portfolio_value']='NaN'
     elif variant=='asset-evidence': saved['asset']['evidence_hashes']=[]
@@ -173,3 +173,27 @@ def test_scoped_analysis_append_changes_source_without_account_version(bound_boo
     after=source(bound_book)
     assert after['account_version']==before['account_version']==0
     assert after['state_sha256']!=before['state_sha256']
+
+
+@pytest.mark.parametrize('kind',['observation','batch'])
+def test_explicit_valuation_time_survives_verified_source_read(bound_book,kind):
+    _,conn,principal,directory,sha=bound_book
+    stamp='2026-11-01T15:00:00+08:00'
+    if kind=='observation':
+        ledger.observe(conn,principal,'a',ledger.Observation(observed_at='2026-11-01T16:00:00+08:00',
+            total_assets='11200',portfolio_value_as_of=stamp),directory,sha)
+    else:
+        value=batch((conn,principal,directory,sha),[],shares=100,cash='10000').model_dump(mode='json')
+        value['snapshot']['portfolio_value_as_of']=stamp
+        assert ledger.submit(conn,principal,'a',ledger.Batch.model_validate(value),directory)['status']=='posted'
+    selected=source(bound_book)
+    assert selected['asset']['portfolio_value_as_of']==stamp
+    assert selected['asset']['source']=='account_'+kind
+    account_input.validate_source(selected)
+
+
+def test_asset_cannot_claim_valuation_after_recording(bound_book):
+    observe(bound_book)
+    saved=source(bound_book)
+    saved['asset']['portfolio_value_as_of']='2099-01-01T15:00:00+08:00'
+    with pytest.raises(account_input.AccountInputError,match='晚于记录'):account_input.validate_source(saved)

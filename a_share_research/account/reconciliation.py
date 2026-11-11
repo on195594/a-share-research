@@ -26,6 +26,20 @@ Code = Annotated[str, Field(pattern=r'^[0-9]{6}$')]
 Quantity = Annotated[StrictInt, Field(ge=0)]
 
 
+def valuation_time(value):
+    """An explicit asset valuation instant; never infer a date's time or timezone."""
+    if isinstance(value,str):
+        if 'T' not in value and ' ' not in value:
+            raise ValueError('资产估值时点须为完整日期时间并包含时区')
+        value=datetime.fromisoformat(value)
+    if not isinstance(value,datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError('资产估值时点须为完整日期时间并包含时区')
+    return value.astimezone(ZoneInfo('Asia/Shanghai'))
+
+
+ValuationTime = Annotated[datetime, BeforeValidator(valuation_time)]
+
+
 class Value(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -46,6 +60,7 @@ Projection = Opening
 class Snapshot(Opening):
     total_assets: Annotated[Money, Field(ge=0)]
     market_values: dict[Code, Annotated[Money, Field(ge=0)]]
+    portfolio_value_as_of: ValuationTime | None = Field(default=None,exclude_if=lambda value:value is None)
 
     @model_validator(mode='after')
     def complete_values(self):

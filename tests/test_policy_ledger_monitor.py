@@ -120,3 +120,18 @@ def test_saved_ledger_context_remains_valid_after_later_observation(configured):
     observe(book)
     assert registry.inspect(book[1])==[]
     assert run(configured)==receipt
+
+
+def test_recorded_valuation_time_reaches_collector_and_saved_evaluation(configured):
+    from a_share_research.account import ledger
+    book,_,_,_=configured
+    _,conn,principal,directory,sha=book
+    stamp='2026-11-01T15:00:00+08:00'
+    ledger.observe(conn,principal,'a',ledger.Observation(observed_at='2026-11-01T16:00:00+08:00',
+        total_assets='11200',portfolio_value_as_of=stamp),directory,sha)
+    receipt=run(configured)
+    assert receipt['capture_context']['source']['asset']['portfolio_value_as_of']==stamp
+    assert receipt['input']['denominator_evidence']['portfolio_value_as_of']==stamp
+    assert receipt['input']['denominator_evidence']['denominator_freshness_status']=='as_of_provided'
+    assert registry.evaluation(conn,principal,receipt['id'])==receipt
+    assert registry.inspect(conn)==[]

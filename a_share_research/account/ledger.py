@@ -16,7 +16,7 @@ from pydantic import Field, StrictInt, model_serializer, model_validator
 
 from a_share_research import api_keys, db, gate
 from a_share_research.account import evidence, positions
-from a_share_research.account.reconciliation import Event, Money, Opening, Snapshot, Value, identity, money, project, reconcile
+from a_share_research.account.reconciliation import Event, Money, Opening, Snapshot, Value, ValuationTime, identity, money, project, reconcile
 
 
 class Batch(Value):
@@ -63,6 +63,18 @@ class Observation(Value):
     total_assets: Annotated[Money, Field(ge=0)] | None = None
     cash: Annotated[Money, Field(ge=0)] | None = None
     market_values: dict[str, Annotated[Money, Field(ge=0)]] = Field(default_factory=dict)
+    portfolio_value_as_of: ValuationTime | None = Field(default=None,exclude_if=lambda value:value is None)
+
+    @model_validator(mode='after')
+    def valuation_evidence(self):
+        if self.portfolio_value_as_of is not None:
+            if self.total_assets is None:
+                raise ValueError('资产估值时点须随总资产金额提供')
+            if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+                raise ValueError('带估值时点的资产观察须明确观察时间的时区')
+            if self.portfolio_value_as_of>self.observed_at:
+                raise ValueError('资产估值时点不能晚于观察时间')
+        return self
 
 
 class LedgerError(ValueError):
@@ -156,8 +168,10 @@ def _save_receipt(conn, account_id, request_hash, result, request):
     batch_id = conn.execute('SELECT coalesce(max(id),0)+1 FROM account_batches').fetchone()[0]
     result = result | {'receipt_id': batch_id, 'request_hash': request_hash, 'mode': 'shadow',
                        'account_id': account_id, 'evidence_hashes': request['evidence_hashes']}
+    # Preserve sub-second causality for explicit valuation timestamps; old requests keep their format.
+    stamp=(datetime.now(db.SHANGHAI).isoformat() if (request.get('snapshot') or {}).get('portfolio_value_as_of') else db.now())
     conn.execute('INSERT INTO account_batches(id,account_id,request_hash,status,created_at,receipt,request) VALUES (?,?,?,?,?,?,?)',
-                 (batch_id, account_id, request_hash, result['status'], db.now(), gate.canonical(result), gate.canonical(request)))
+                 (batch_id, account_id, request_hash, result['status'], stamp, gate.canonical(result), gate.canonical(request)))
     return result
 
 
@@ -278,6 +292,12 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
                 new.append((business_id, event))
         if problems:
             return reject('conflict', problems)
+        if batch.snapshot.portfolio_value_as_of is not None:
+            as_of=batch.snapshot.portfolio_value_as_of
+            latest=max([opening_time]+[event.occurred_at for event in by_business.values()])
+            if as_of<latest or as_of>datetime.now(db.SHANGHAI):
+                return reject('conflict',[{'field':'snapshot.portfolio_value_as_of',
+                    'expected':'不早于期初和本次有效事件，且不晚于当前时间','actual':as_of.isoformat()}])
         try:
             projected = project(Opening.model_validate_json(book['opening']),
                                 [Event.model_validate_json(r['event']) for r in retained] + [e for _, e in new])
@@ -356,8 +376,12 @@ def observe(conn, principal, account_id: str, observation: Observation, evidence
     with db.transaction(conn):
         authorize(conn, principal)
         evidence.verify(evidence_directory, evidence_hash)
+        now=datetime.now(db.SHANGHAI)
+        if observation.portfolio_value_as_of is not None and observation.portfolio_value_as_of>now:
+            raise LedgerError('资产估值时点不能晚于当前时间',422)
+        stamp=now.isoformat() if observation.portfolio_value_as_of is not None else db.now()
         conn.execute('INSERT OR IGNORE INTO account_observations(account_id,request_hash,created_at,evidence,observation)'
-                     ' VALUES (?,?,?,?,?)', (account_id, request_hash, db.now(), evidence_hash, gate.canonical(data)))
+                     ' VALUES (?,?,?,?,?)', (account_id, request_hash, stamp, evidence_hash, gate.canonical(data)))
         row = conn.execute('SELECT id FROM account_observations WHERE account_id=? AND request_hash=?',
                            (account_id, request_hash)).fetchone()
         return {'status': 'observed', 'observation_id': row[0], 'trades_recorded': False, 'request_hash': request_hash}
