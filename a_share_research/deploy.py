@@ -259,7 +259,8 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
     if not all(item["running"] for item in before.values()):
         raise RuntimeError("现有服务未同时运行，请先查明状态")
     for service in existing:
-        if not allow_config and run("docker", "compose", "config", "--hash", service).split() != [service, before[service]["config_hash"]]:
+        if not allow_config and run("docker", "compose", *(('--profile','tools') if include_tools else ()),
+                                    "config", "--hash", service).split() != [service, before[service]["config_hash"]]:
             raise RuntimeError(f"{service} 的 Compose 或环境配置发生变化；须另行准备配置回退")
     if has_tools:
         if before['tools']['image'] != before['worker']['image']:

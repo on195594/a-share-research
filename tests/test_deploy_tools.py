@@ -39,6 +39,9 @@ def operations(monkeypatch,tmp_path):
                     'mounts':{'/data':[str(data),True],'/run/ashare-tools':['tmpfs',True]}}
 
         def run(*args):
+            if args[:2]==('docker','compose') and '--hash' in args and args[-1]=='tools':
+                # Real Compose 5.7.0 rejects this profiled service without explicitly enabling its profile.
+                assert args[2:4]==('--profile','tools')
             if args[:4]==('docker','compose','--profile','tools'):
                 args=(*args[:2],*args[4:])
             record('run',*args)
