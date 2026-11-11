@@ -29,3 +29,13 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 政策命令使用固定参数列表的子进程，不接收 shell、任意 argv 或环境参数；超时 30 秒，原 stdout、stderr 与退出码保留在结果中。HTTP 成功表示命令已执行，调用者还须检查 `exit_code`。当前不开放 R1 缓存刷新或任何 W1 写入。数据库由服务以 SQLite `mode=ro` 打开。
 
 `/health` 仅表示进程响应，不等价于数据库就绪或发布验收；生产发布接入时还需迁移、在途排空、就绪核对与回退演练。
+
+## 外部研究提交暂存（开发入口，默认关闭）
+
+数据库迁移 v12 新增独立的 `external_research` / `external_submissions`，不会把草稿塞进现有 worker 队列。测试或开发实例须显式调用 `create_app(database, external_enabled=True)`；命令行服务仍默认关闭，未提供生产启用开关。
+
+开放 `external.start`、`external.material`、`external.status`、`external.submit`。start 用 `source_run_id` 引用已完成 worker 研究的服务端材料，不接收客户端上传的材料或账户知情标记。当前只支持复用已有材料，新增受控取证尚待接入。材料以原始 JSON 保存（字段/页面顺序属于既有哈希合同）。
+
+研究归创建 Key 所有；research 标盲研究、assistant 标账户知情；撤销凭据后不能再访问。提交带 `expected_version` 和 `draft`，机械检查逐项返回问题。草稿和材料哈希、检查结果及回执一起原子保存，每个提交版本不可修改或删除。同内容重提返回原回执（即使携带旧版本）；不同内容须匹配当前版本并生成新版本，旧版不覆盖。草稿幂等哈希使用规范 JSON，不冒充后续独立复核的绑定哈希。
+
+`accepted=true` 仅表示通过机械检查，`review_status=not_queued` 明确尚未独立复核，不可当成正式报告或交易依据。当前完全不写 `runs`、`reports` 或冻结批次，独立复核分派、恢复、生产者记分和最终发布需下一批接通。

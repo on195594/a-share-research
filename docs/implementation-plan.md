@@ -25,6 +25,8 @@
 
 第 2 段首批（未发布）：迁移 v11 为旧 Key 默认赋 research 角色，新增 assistant/owner 且角色不可原地更改；[工具入口](../a_share_research/tools/README.md)开放 5 个只读工具，HTTP 与进程内入口共用权限和参数校验，标准库 `ashare` 客户端已就绪。生产库的第 1 段快照副本上，真实本机 HTTP/CLI 的工具发现、论点卡读取、账户越权拒绝、v0 持仓输出对照与无写入校验通过（`consolidation/stage2/tools-smoke.json`）。尚不具备第 2 段完整退出条件：工具写入、MCP、外部研究入账与记分隔离、账户对账/追加状态、发布排空和回退均待实现；未安装宿主客户端，未迁移生产库。
 
+第 2 段第二批（未发布）：v12 增加独立外部研究/提交版本表，复用服务端已完成研究材料，绑定创建凭据与账户知情身份，提供原子机械检查、不可变回执、同内容幂等与版本冲突拒绝；4 个暂存工具默认关闭。40 项定向测试通过；真实快照中 run 212 / 208 经本机 HTTP 验证伪造引文拒绝、正确草稿通过、越权拒绝、陈旧版本冲突及重复回执，既有研究/报告/批次/账户事件逐行不变（`consolidation/stage2/external-smoke.json`）。这不是独立复核或正式入账；尚不支持新取证，不进 worker 队列，冻结契约未改。
+
 已完成且无后续项：D0、I1–I6、R0–R3（[项目契约](project-contract.md)、[路线图](roadmap.md)，Skills 长期 API Key 见其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record)）、数据层治理（[方案](data-foundation.md#6-已验证)，迁移 v9 获所有者 msg 4264 授权）、公司研究进展退役、统一来源与跨轮复核（[方案 5.1](proposal.md#51-统一来源与跨轮复核)）、数字阈值与遗漏关闭边界、技术债 T1–T3、取证与修正闭环、初筛解耦与图表防护及 Pi 预检、结构与存储整理、公司研究进展分类边界、性能整改与校验误伤、机会成本分红口径与验证边界、月批自动发起（详情见上述历史版本）。
 
 ### 固定里程碑

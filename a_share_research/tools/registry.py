@@ -11,7 +11,7 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from a_share_research import api_keys, service
+from a_share_research import api_keys, service, external_research
 from a_share_research.account import trades
 
 
@@ -38,6 +38,20 @@ class PolicyRead(Arguments):
     command: Literal['holdings', 'retro-pending', 'retro-stats', 'watchlist', 'list']
 
 
+class ExternalStart(Arguments):
+    request_id: str = Field(min_length=1, max_length=128)
+    source_run_id: int = Field(gt=0)
+
+
+class ExternalId(Arguments):
+    external_id: int = Field(gt=0)
+
+
+class ExternalSubmit(ExternalId):
+    expected_version: int = Field(ge=0)
+    draft: dict
+
+
 class Payload(BaseModel):
     data: dict
 
@@ -57,6 +71,7 @@ class Context:
     connection: sqlite3.Connection
     database: Path
     principal: api_keys.Principal
+    external_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,10 +83,13 @@ class Tool:
     result: type[BaseModel]
     handler: Callable[[Context, Arguments], BaseModel]
 
+    access: str = 'read'
+    external: bool = False
+
     def describe(self) -> dict:
         return dict(name=self.name, version=1, description=self.description,
                     input_schema=self.arguments.model_json_schema(), output_schema=self.result.model_json_schema(),
-                    access='read', idempotent=True,
+                    access=self.access, idempotent=True,
                     errors=['invalid_arguments', 'forbidden', 'not_found', 'unavailable', 'timeout'])
 
 
@@ -92,6 +110,16 @@ def _policy(ctx: Context, args: PolicyRead) -> CommandResult:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('external.start', '复用服务端材料开启外部研究；不排队、不发布', _READERS, ExternalStart, Payload,
+         lambda c, a: Payload(data=external_research.start(c.connection, c.principal, a.request_id, a.source_run_id)),
+         access='write', external=True),
+    Tool('external.status', '查询本人研究及不可变提交回执', _READERS, ExternalId, Payload,
+         lambda c, a: Payload(data=external_research.status(c.connection, c.principal, a.external_id)), external=True),
+    Tool('external.material', '读取本人研究绑定的服务端材料', _READERS, ExternalId, Payload,
+         lambda c, a: Payload(data=external_research.material_snapshot(c.connection, c.principal, a.external_id)), external=True),
+    Tool('external.submit', '机械检查并冻结草稿；通过不代表独立复核通过', _READERS, ExternalSubmit, Payload,
+         lambda c, a: Payload(data=external_research.submit(c.connection, c.principal, a.external_id,
+                                                          a.expected_version, a.draft)), access='write', external=True),
     Tool('research.cards', '读取论点卡', _READERS, Arguments, Payload,
          lambda c, a: Payload(data=service.company_cards(c.connection))),
     Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,
@@ -106,14 +134,15 @@ TOOLS = {tool.name: tool for tool in (
 )}
 
 
-def discover(principal: api_keys.Principal) -> list[dict]:
-    return [tool.describe() for tool in TOOLS.values() if principal.role in tool.roles]
+def discover(principal: api_keys.Principal, *, external_enabled: bool = False) -> list[dict]:
+    return [tool.describe() for tool in TOOLS.values()
+            if principal.role in tool.roles and (not tool.external or external_enabled)]
 
 
 def invoke(ctx: Context, name: str, arguments: dict) -> dict:
     """Reject scope/shape errors before invoking a handler; never upgrades caller privileges."""
     tool = TOOLS.get(name)
-    if tool is None:
+    if tool is None or (tool.external and not ctx.external_enabled):
         raise ToolError('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
@@ -123,5 +152,8 @@ def invoke(ctx: Context, name: str, arguments: dict) -> dict:
         raise ToolError('invalid_arguments', '参数不符合工具 input_schema', 422) from None
     try:
         return tool.result.model_validate(tool.handler(ctx, parsed)).model_dump(mode='json')
+    except external_research.SubmissionError as exc:
+        code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments'}[exc.status]
+        raise ToolError(code, str(exc), exc.status) from None
     except service.RequestError as exc:
         raise ToolError('not_found' if exc.status == 404 else 'invalid_arguments', str(exc), exc.status) from None
