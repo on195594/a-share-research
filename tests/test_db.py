@@ -179,6 +179,50 @@ def test_future_additive_version_remains_usable(tmp_path):
     conn.close()
 
 
+def test_scan_request_migration_preserves_v20_data_and_is_reentrant(tmp_path, monkeypatch):
+    path = tmp_path / 'app.db'
+    migrations = db.MIGRATIONS
+    with monkeypatch.context() as old:
+        old.setattr(db, 'MIGRATIONS', migrations[:20])
+        conn = db.connect(path)
+        load(conn)
+        conn.execute("INSERT INTO scans(status,requested_at,summary) VALUES ('done',?,'{}')", (db.now(),))
+        before = list(conn.iterdump())
+        conn.close()
+    conn = db.connect(path)
+    after = list(conn.iterdump())
+    # The additive table/index must not rewrite any captured research or scan row.
+    assert all(line in after for line in before)
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == 21
+    assert conn.execute('SELECT count(*) FROM scan_requests').fetchone()[0] == 0
+    with db.transaction(conn):
+        db._migrate_v21(conn)
+    assert list(conn.iterdump()) == after
+    with pytest.raises(sqlite3.IntegrityError, match='FOREIGN KEY'):
+        conn.execute('INSERT INTO scan_requests VALUES (?,?,?,?)', ('key:'+'a'*64, 'structural', 999, db.now()))
+    conn.close()
+    conn = db.connect(path)
+    assert list(conn.iterdump()) == after and conn.total_changes == 0
+    conn.close()
+
+
+def test_scan_request_migration_failure_preserves_version_and_no_partial_table(tmp_path, monkeypatch):
+    path = tmp_path / 'app.db'
+    with monkeypatch.context() as old:
+        old.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:20])
+        conn = db.connect(path)
+        load(conn)
+        # Structural naming collision makes the index statement fail after CREATE TABLE.
+        conn.execute('CREATE TABLE scan_requests_by_scan(unused TEXT)')
+        before = list(conn.iterdump())
+        conn.close()
+    with pytest.raises(sqlite3.OperationalError, match='already a table'):
+        db.connect(path)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 20
+        assert list(conn.iterdump()) == before
+
+
 def test_v6_indexes_preserve_records_and_are_idempotent(tmp_path):
     path = tmp_path / "app.db"
     conn = db.connect(path)

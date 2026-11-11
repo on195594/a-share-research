@@ -454,8 +454,16 @@ def _migrate_v20(conn: sqlite3.Connection) -> None:
             conn.execute(f'ALTER TABLE policy_evaluations ADD COLUMN {column} TEXT')
 
 
+def _migrate_v21(conn: sqlite3.Connection) -> None:
+    conn.execute('CREATE TABLE IF NOT EXISTS scan_requests ('
+                 'requester TEXT NOT NULL, request_id TEXT NOT NULL,'
+                 ' scan_id INTEGER NOT NULL REFERENCES scans(id), created_at TEXT NOT NULL,'
+                 ' PRIMARY KEY(requester,request_id))')
+    conn.execute('CREATE INDEX IF NOT EXISTS scan_requests_by_scan ON scan_requests(scan_id)')
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21)
 
 
 def now() -> str:

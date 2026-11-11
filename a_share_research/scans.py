@@ -147,12 +147,36 @@ def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None
     return subscriptions(conn)
 
 
+def _submit(conn) -> int:
+    row = conn.execute("SELECT id FROM scans WHERE status IN ('queued','running')").fetchone()
+    if row:
+        return row['id']
+    return conn.execute("INSERT INTO scans(status,requested_at) VALUES ('queued',?)", (db.now(),)).lastrowid
+
+
 def submit(conn) -> int:
     with db.transaction(conn):
-        row = conn.execute("SELECT id FROM scans WHERE status IN ('queued','running')").fetchone()
+        return _submit(conn)
+
+
+def submit_request(conn, requester: str, request_id: str) -> int:
+    """Recover a scan by authenticated caller and durable key, including terminal scans.
+
+    Identity comes from the API authenticator, never a client body. Invalid keys
+    fail before writing; scan creation and the mapping commit together.
+    """
+    if (not isinstance(requester, str) or re.fullmatch(r'(key|agent):[0-9a-f]{64}', requester) is None
+            or not isinstance(request_id, str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', request_id) is None):
+        raise service.RequestError('扫描请求身份或编号格式无效', 400)
+    with db.transaction(conn):
+        row = conn.execute('SELECT scan_id FROM scan_requests WHERE requester=? AND request_id=?',
+                           (requester, request_id)).fetchone()
         if row:
-            return row['id']
-        return conn.execute("INSERT INTO scans(status,requested_at) VALUES ('queued',?)", (db.now(),)).lastrowid
+            return row['scan_id']
+        scan_id = _submit(conn)
+        conn.execute('INSERT INTO scan_requests(requester,request_id,scan_id,created_at) VALUES (?,?,?,?)',
+                     (requester, request_id, scan_id, db.now()))
+        return scan_id
 
 
 def recover(conn) -> None:

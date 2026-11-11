@@ -39,7 +39,7 @@ def test_ready_checks_schema_without_writing_or_migrating(database, options, mod
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize('damage', ['missing', 'version', 'api_keys', 'account_schema'])
+@pytest.mark.parametrize('damage', ['missing', 'version', 'api_keys', 'account_schema', 'scan_requests'])
 def test_not_ready_never_creates_or_repairs_database(database, damage):
     path, _ = database
     if damage == 'missing':
@@ -50,6 +50,8 @@ def test_not_ready_never_creates_or_repairs_database(database, damage):
                 conn.execute(f'PRAGMA user_version={len(db.MIGRATIONS)-1}')
             elif damage == 'api_keys':
                 conn.execute('DROP TABLE api_keys')
+            elif damage == 'scan_requests':
+                conn.execute('DROP TABLE scan_requests')
             else:
                 conn.execute('DROP TABLE account_journal')
     before = path.read_bytes() if path.exists() else None

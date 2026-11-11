@@ -27,6 +27,13 @@ def probe(directory: Path) -> dict:
                 or conn.execute('PRAGMA foreign_key_check').fetchone()):
             return {'ok': False, 'reason': 'sqlite_integrity_failed'}
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'scan_requests' in tables:
+            from a_share_research import db, scans
+            # Readable additive tables are insufficient: old tools reject the new
+            # schema, and old web cannot recover a request after a lost response.
+            if (conn.execute('PRAGMA user_version').fetchone()[0] != len(db.MIGRATIONS)
+                    or not callable(getattr(scans, 'submit_request', None))):
+                return {'ok': False, 'reason': 'scan_requests_unsupported'}
         modern = any(conn.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone() for table in (
             'account_books', 'account_source', 'account_analysis_history', 'policy_v0_profiles',
             'policy_versions', 'policy_evaluations', 'policy_activations'

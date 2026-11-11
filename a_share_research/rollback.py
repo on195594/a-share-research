@@ -72,7 +72,7 @@ def _assess_image(image: str, evidence_directory: Path) -> ImageReport:
         result = json.loads(process.stdout)
         reasons = {'read_compatible', 'image_integrity_failed', 'sqlite_integrity_failed',
                    'account_policy_integrity_failed', 'account_source_invalid',
-                   'mirror_digest_mismatch', 'image_reader_failed'}
+                   'mirror_digest_mismatch', 'image_reader_failed', 'scan_requests_unsupported'}
         if (not isinstance(result, dict) or type(result.get('ok')) is not bool
                 or not isinstance(result.get('reason'), str)
                 or result.get('reason') not in reasons

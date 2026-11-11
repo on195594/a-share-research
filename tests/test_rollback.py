@@ -188,6 +188,31 @@ def test_pre_capture_reader_cannot_ignore_new_receipt_columns(source, tmp_path, 
         rollback_probe.probe(target)
 
 
+@pytest.mark.parametrize('older', ['schema', 'endpoint'])
+def test_readable_scan_request_table_requires_compatible_runtime(source, tmp_path, monkeypatch, older):
+    from a_share_research import db, scans
+    target = tmp_path / 'probe'
+    rollback.snapshot(source[0] / 'app.db', target)
+    before = database_rows(target / 'bundle/app.db')
+    if older == 'schema':
+        monkeypatch.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:20])
+    else:
+        monkeypatch.delattr(scans, 'submit_request')
+    assert rollback_probe.probe(target) == dict(ok=False, reason='scan_requests_unsupported')
+    assert database_rows(target / 'bundle/app.db') == before
+
+
+def test_scan_protocol_incompatibility_is_a_valid_rejection(tmp_path, monkeypatch):
+    def run(command, **kwargs):
+        if command[1] == 'rm':
+            return subprocess.CompletedProcess(command, 0, '', '')
+        return subprocess.CompletedProcess(command, 1,
+            json.dumps(dict(ok=False, reason='scan_requests_unsupported')), '')
+    monkeypatch.setattr(subprocess, 'run', run)
+    assert rollback._assess_image('sha256:old', tmp_path) == dict(
+        ok=False, reason='scan_requests_unsupported', image='sha256:old')
+
+
 def test_cleanup_failure_also_refuses_rollback(tmp_path, monkeypatch):
     def run(command, **kwargs):
         if command[1] == 'rm':

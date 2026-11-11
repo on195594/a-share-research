@@ -655,6 +655,14 @@ def api_submit_scan(request: Request):
     return {'version': service.VERSION, 'scan_id': scans.submit(conn)}
 
 
+@app.put('/api/scan-requests/{request_id}', status_code=202)
+def api_submit_scan_request(request: Request, request_id: str):
+    requester = api_session(request)
+    from a_share_research import scans
+    return {'version': service.VERSION, 'request_id': request_id,
+            'scan_id': scans.submit_request(conn, requester, request_id)}
+
+
 @app.get('/api/scans/weekly')
 def api_weekly_scan(request: Request):
     api_session(request)

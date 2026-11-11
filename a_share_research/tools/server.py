@@ -87,7 +87,7 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
                 result['schema_version'] = conn.execute('PRAGMA user_version').fetchone()[0]
                 if result['schema_version'] != len(db.MIGRATIONS):
                     return JSONResponse(result,status_code=503)
-                expected = {'api_keys','runs','reports','prices','batches',*db.ACCOUNT_TABLES}
+                expected = {'api_keys','runs','reports','prices','batches','scan_requests',*db.ACCOUNT_TABLES}
                 if external_enabled:
                     expected.update(('external_research','external_submissions','external_reviews'))
                 if account_shadow_enabled:

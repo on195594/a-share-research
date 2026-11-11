@@ -227,6 +227,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --dat
 - **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
 - **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码（Research 不存持仓标签），扫描范围另含最近冻结批次的 L5；`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回事件、失败与 `notify`，`GET /api/scans/weekly` 返回周报数据。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
+- **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 客户端的持久状态与跨轮恢复仍待接入。
 - **区间条件收益诊断**（只读，不调模型）：
 
 ```bash
@@ -234,6 +235,8 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 ```
 
 ## 部署
+
+v21 增加 `scan_requests` 及扫描引用索引，不改已有扫描或研究记录。后续顾问客户端的回退基线必须同时支持 v21、新请求 API 和 tools 就绪；旧 v20 镜像不满足，应用回退检查会明确拒绝，保留停服/暂停现场。准备期新增接口不代表已满足首次生产迁移的发布准入；须先按下文验证兼容镜像，不能将旧代码能读取新增表当作完整回退证明。
 
 `db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。v9 重建 `runs`、`reports`、`calls` 把大字段放到表尾，增加 `company_key` 等生成列，`runs`、`reports` 改为 `AUTOINCREMENT`，设计与门禁见[数据层治理方案](docs/data-foundation.md)。迁移须另获授权并备份，准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测；做不到的不走发布工具，另写一次性步骤。回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
 
