@@ -163,6 +163,8 @@ uv run python -m a_share_research.cutover --database /absolute/new-data/app.db -
   --account-id confirmed-account --account-scope confirmed-scope
 uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json fence
 uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json commit
+uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json transfer-stop-state \
+  --destination /absolute/private/new-stop/state.json
 ```
 
 `prepare` 只读既有数据库，计划以 0600 新建于 0700 私有目录，不覆盖旧计划。`--state-directory` 必须是旧运行时实际提醒状态目录，可与旧库目录不同。若旧应用目录还存放备份、日志或发布记录，逐项追加 `--preserve-entry /absolute/old-state/entry`，明确保留每个顶层旁支；不递归读取或修改其内容和权限，也不证明旁支内写入者已停。未列明的新条目、缺失保留项、符号链接数据库、共享目录和 HOME 均拒绝，不能把账户文件列为保留项。新库和计划必须位于封锁目录之外。
@@ -170,6 +172,8 @@ uv run python -m a_share_research.cutover --database /absolute/new-data/app.db -
 `fence` 再核对镜像指针、源哈希、期初/分析摘要、提醒状态及生效政策，给旧业务表和迁移表安装持久写入拒绝触发器，排空 WAL、转为 DELETE 日志，并将账户文件改为 0400、专用目录改为 0500；不会改旧运行时源码。`commit` 必须证明完整封锁仍在，并在新库事务内比较更新镜像指针为明确的账户/范围绑定。不新增表、不迁移、不自动启用政策或服务；准备后数据、政策或文件身份变化即拒绝。期初或旧分析基线过期时须重新协调和准备，不改写冻结历史。
 
 中途失败保持已有封锁，排空连接或修复原因后可重试；需要新准备时使用新的计划文件名。同一已绑定账户的 `commit` 重试只返回原绑定时间，不覆盖后续入账或政策；不同绑定被拒。重复回执不表示重新验收当前账本。切换成功后镜像入口拒绝运行，应用回退继续使用新账本，不能恢复旧写入口。权限与触发器用于防止旧进程误写，不防御属主主动改权限、重命名目录或删除触发器。
+
+启用新 Hermes 止损任务前，以同一计划执行 `transfer-stop-state`；目标须为新客户端实际使用的状态路径（默认 `~/.local/state/ashare-stop-alert/state.json`，示例路径须相应调整）。命令重验 owner、已完成的相同账本绑定、旧封锁及旧提醒状态哈希，持有客户端锁后原子新建 0600 状态，原文件日期与档位逐字节保留。只有计划记录缺失且封锁后仍缺失时才初始化空对象，回执明确 `source_absent=true`；不补日期或档位。相同内容重试不写文件；目标已有不同内容、已升级格式或待查请求时拒绝覆盖。顾问/月批/记分沿用原状态路径，无需导入；后续安装与任务验收见 [Hermes 交接](ops/hermes/README.md)。命令不安装脚本、启用任务或发送通知。
 
 价格参考支持沪深主板、创业板（300/301）和科创板（688），继续排除 ST、退市风险股及北交所；公式与旧 `price-reference-v2` 记录保持兼容。
 

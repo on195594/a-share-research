@@ -31,7 +31,7 @@
 | 记分 | 原 scoring 脚本 | `~/.local/state/a-share-scoring/state.json` 原子替换 | Docker 子进程各 1,200 秒 |
 | 里程碑 | 原 milestones 脚本 | 无独立通知去重 | 保持原入口 |
 
-宿主配置的 `cron.script_timeout_seconds=600`，调度器可被 `HERMES_CRON_SCRIPT_TIMEOUT` 覆盖，不能仅凭配置断言进程实际预算。扫描轮询、记分子进程与此配置已有不一致；正式任务验收须核对实际进程环境和完成耗时，未在本批修改宿主设置。
+宿主配置的 `cron.script_timeout_seconds=600`，调度器可被 `HERMES_CRON_SCRIPT_TIMEOUT` 覆盖。2026-11-11 只读核对运行中 gateway 未设置该覆盖变量，当前源码正常路径据配置解析为 600 秒；未触发真实任务验证到时终止。扫描轮询、记分子进程与此预算已有不一致；正式任务验收仍须核对完成耗时，未修改宿主设置。
 
 顾问脚本需要已安装的标准库 `ashare` 和私有 `~/.config/ashare/hermes-assistant.json`；可用 `ASHARE_HERMES_CONFIG` 指向其他绝对路径文件，格式见[客户端准备](../clients/README.md)。不读取旧账户库、不在服务失败时回落旧命令；没有已核对来源就报告失败，不用空持仓覆盖订阅。`account.current` 与 `policy.monitor` 目前仍要求服务显式账户影子开关，准备期只在私有副本验收。
 
@@ -43,7 +43,17 @@
 
 保留任务 ID 和原 shell 入口；新版 wrapper 执行同目录 `a-share-stop-alert.py`，与顾问共用 `ashare_tools.py` 的标准库客户端调用与原子状态写入。使用同一 Hermes assistant 配置，不加载旧 Skills 或旧 runtime.env。`ASHARE_STOP_ALERT_STATE` 可指定新状态文件；默认路径见上表。
 
-切换前先停旧任务、等在途结束，再核对旧配置的实际 A_STOCK_STATE_DIR（默认 `~/.local/share/a-stock-agent`），把其 stop-alert-state.json 保留备份并复制到尚不存在的新状态路径。客户端接受旧 `{date,levels}` 或空对象，首次调用时包成 `{schema_version:1,state,pending}`，保留已提醒档位；不能漏掉旧文件而在同日重新从空状态开始。准备期只对私有副本操作。
+切换前先停旧任务、等在途结束，再核对旧配置的实际 A_STOCK_STATE_DIR（默认 `~/.local/share/a-stock-agent`），以该目录完成[账户切换准备、持久封锁和绑定](../../README.md#运行身份与材料重放)。随后从仓库根目录使用同一私有计划交接状态，`ASHARE_OWNER_TOKEN` 由私有环境提供：
+
+```sh
+uv run python -m a_share_research.cutover --database /absolute/new-data/app.db \
+  --plan /absolute/private/cutover.json transfer-stop-state \
+  --destination /home/lin/.local/state/ashare-stop-alert/state.json
+```
+
+命令重验账户绑定、旧封锁和准备时的提醒状态哈希，取得与新客户端相同的 `.lock` 后原子新建目标；原始日期和档位逐字节保留。旧文件不存在时，须同时匹配计划中的 `state_sha256=null` 和封锁后的实际缺失，才写入空对象并在回执标明 `source_absent=true`。客户端接受旧 `{date,levels}` 或空对象，首次调用时包成 `{schema_version:1,state,pending}`。同内容重复导入不写目标；已有不同状态、升级后的对象或 pending 一律保留并拒绝导入，不能通过删文件重新开始。目标为 0600、目录为属主私有；命令不改脚本、调度或通知。
+
+顾问 `opportunities.json`、月批 `<月>.receipt` 和记分 `state.json` 继续使用原路径，保留原通知键及回执，不迁移或清空。上线前保存状态副本，按前一级合并版客户端验证升级后的格式；不能回退到不识别新对象的旧 Skills 客户端。准备期仅操作私有副本，实际任务停用、安装、启用及送达仍按合一退出条件验收。
 
 服务沿用 v0 的时段判断、同日且绝对时间差不超过 15 分钟的行情、3% 临近线及同日升档去重；午休/非时段、无持仓或无新档位静默，全部行情无效时返回失败，不标成已提醒。服务不发送通知、不写客户端状态；输入中的 previous_state 是调用者提供的通知历史，不是账户事实。输出正文、档位与旧实现一致，客户端只将复核入口文案改为统一 a-share。
 
