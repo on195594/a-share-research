@@ -207,6 +207,11 @@ def _monitor(ctx: Context, args: PolicyMonitor) -> Payload:
     return Payload(data=run(ctx.connection,ctx.principal,ctx.database,args.request_id,args.expected_activation_id))
 
 
+def _current_account(ctx: Context, args: Arguments) -> Payload:
+    from a_share_research.policy.account_view import current
+    return Payload(data=current(ctx.connection, ctx.principal, ctx.database))
+
+
 def _v0_positions(ctx: Context, args: Account) -> Payload:
     from a_share_research.policy.v0.account_store import read
     return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
@@ -255,6 +260,8 @@ TOOLS = {tool.name: tool for tool in (
          _v0_positions, account=True),
     Tool('account.positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,
          lambda c, a: Payload(data=position_store.state(c.connection, c.principal, a.account_id)), account=True),
+    Tool('account.current', '读取已核对镜像或明确绑定账本的在仓公司代码与来源；不猜测账户、不采集行情',
+         frozenset({'assistant'}), Arguments, Payload, _current_account, account=True),
     Tool('account.lifecycle.replay', '只读重放旧持仓周期成本和政策字段，保留推断与历史差异', frozenset({'assistant'}), Analysis, Payload,
          _lifecycle, account=True),
     Tool('account.analysis.preview', '对照旧基线、当前镜像与影子结果，取得协调版本和哈希', frozenset({'assistant'}), Analysis, Payload,

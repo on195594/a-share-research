@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Hermes no-agent job for a-share-research batch A (A4).
 
-scan:   sync open holdings (a-stock-cache, read-only) into Research subscriptions, run one disclosure
+scan:   sync verified open holdings (account.current) into Research subscriptions, run one disclosure
         scan, print the notify items. Prints nothing when there is nothing to report.
-        Then append new Research opportunities (Skills monitor-snapshot `research_opportunity`
+        Then append new Research opportunities (policy.monitor `research_opportunity`
         prompts for researched, not-held candidates); each is pushed once until it lapses.
 weekly: print the weekly digest.
 
@@ -12,13 +12,19 @@ A_SHARE_RESEARCH_HOST (set by the .sh wrapper) is the public host name the servi
 never from this file. Delivery is Hermes' job; this script only writes to stdout.
 """
 import json
+import fcntl
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
+from datetime import datetime
 import urllib.error
 import urllib.request
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ENV = Path(os.environ.get("A_SHARE_ADVISOR_ENV", Path.home() / ".config/a-share-advisor/runtime.env"))
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
@@ -30,7 +36,7 @@ ACTIONS = {"covered": "已纳入研究", "queued_review": "已安排研究复核
            "no_card": "暂无研究记录", "skipped": "跳过"}
 OPPORTUNITY_STATE = Path(os.environ.get("A_SHARE_ADVISOR_STATE", Path.home() / ".local/state/a-share-advisor")) / "opportunities.json"
 OPPORTUNITY_NOTE = ("注：机会来自研究立场与按情景概率加权的期望回报，情景尚未记分；"
-                    "建仓前在 Claude 用 a-stock-research 按风险预算定仓（position-size），确认后才下单。")
+                    "建仓前通过 a-share 读取生效政策，按风险预算核对仓位，再由所有者决定是否下单。")
 POLL_SECONDS, POLL_LIMIT = 20, 90  # a scan of ~10 codes takes minutes; give up after 30 minutes
 
 
@@ -56,10 +62,36 @@ def call(method: str, path: str, body: dict | None = None) -> dict:
         return json.loads(response.read())
 
 
+class AdvisorError(ValueError):
+    """Safe task failure; never turn an unavailable account into an empty portfolio."""
+
+
+def tool(name: str, arguments: dict) -> dict:
+    config = os.environ.get('ASHARE_HERMES_CONFIG', str(Path.home() / '.config/ashare/hermes-assistant.json'))
+    try:
+        result = subprocess.run(['ashare', '--config', config, 'call', name, '--json', json.dumps(arguments)],
+                                capture_output=True, text=True, timeout=40, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        raise AdvisorError(f'{name} 客户端不可用或超时；未自动重试') from None
+    if result.returncode:
+        raise AdvisorError(f'{name} 未完成；请检查工具服务、凭据、账户来源与生效政策')
+    try:
+        response = json.loads(result.stdout)
+        data = response['result']['data']
+        if response.get('ok') is not True or not isinstance(data, dict):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise AdvisorError(f'{name} 返回格式不兼容') from None
+    return data
+
+
 def holdings() -> list[str]:
-    out = subprocess.run(["a-stock-cache", "holdings", "--json", "--active-only"],
-                         check=True, capture_output=True, text=True).stdout
-    return sorted({row["code"][:6] for row in json.loads(out)})
+    data = tool('account.current', {})
+    codes = data.get('codes')
+    if (not isinstance(codes, list) or any(not isinstance(c, str) or re.fullmatch('[0-9]{6}', c) is None for c in codes)
+            or not isinstance(data.get('source'), dict) or data['source'].get('mode') not in ('mirror', 'ledger')):
+        raise AdvisorError('账户代码或来源格式不兼容；未更新订阅')
+    return sorted(set(codes))
 
 
 def pct(value) -> str:
@@ -212,18 +244,86 @@ def render_opportunities(prompts: list[dict], seen: set[str], public_base: str =
     return "\n\n".join([*lines, OPPORTUNITY_NOTE])
 
 
-def opportunities(public_base: str = "") -> str:
-    done = subprocess.run(["a-stock-cache", "monitor-snapshot", "--json"], capture_output=True, text=True, timeout=300)
+def save_opportunity_state(state: dict) -> None:
+    """Atomically retain the original request before a potentially ambiguous HTTP call."""
+    temporary = None
     try:
-        prompts = [p for p in json.loads(done.stdout).get("review_prompts", []) if p["kind"] == "research_opportunity"]
-    except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
-        return f"【建仓机会】检查未完成：monitor-snapshot 退出码 {done.returncode}，输出不可解析。"
-    seen = set(json.loads(OPPORTUNITY_STATE.read_text())) if OPPORTUNITY_STATE.exists() else set()
-    text = render_opportunities(prompts, seen, public_base)
-    # Keep only current keys so an opportunity that lapses and returns is pushed again.
-    OPPORTUNITY_STATE.parent.mkdir(parents=True, exist_ok=True)
-    OPPORTUNITY_STATE.write_text(json.dumps(sorted(opportunity_key(p) for p in prompts)))
+        with tempfile.NamedTemporaryFile(mode='w', dir=OPPORTUNITY_STATE.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(state, stream, ensure_ascii=False, allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, OPPORTUNITY_STATE)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def read_opportunity_state() -> dict:
+    value = json.loads(OPPORTUNITY_STATE.read_text()) if OPPORTUNITY_STATE.exists() else []
+    # Preserve the existing notification keys when installing the replacement.
+    if isinstance(value, list):
+        value = dict(schema_version=1, seen=value, pending=None)
+    if (not isinstance(value, dict) or set(value) != {'schema_version', 'seen', 'pending'}
+            or type(value['schema_version']) is not int or value['schema_version'] != 1
+            or not isinstance(value['seen'], list) or any(not isinstance(k, str) for k in value['seen'])):
+        raise AdvisorError('机会去重记录不兼容；未覆盖原记录')
+    pending = value['pending']
+    if pending is not None and (not isinstance(pending, dict)
+            or set(pending) != {'request_id', 'expected_activation_id'}
+            or not isinstance(pending['request_id'], str) or not pending['request_id']
+            or type(pending['expected_activation_id']) is not int or pending['expected_activation_id'] < 1):
+        raise AdvisorError('待查政策请求记录不兼容；未覆盖原记录')
+    return value
+
+
+def _opportunities(public_base: str) -> str:
+    state = read_opportunity_state()
+    if state['pending'] is None:
+        current = tool('policy.current', {})
+        activation = current.get('activation') or {}
+        if current.get('installed') is not True or type(activation.get('id')) is not int or activation['id'] < 1:
+            raise AdvisorError('尚无与实装一致的生效政策，未采集建仓机会')
+        state['pending'] = dict(request_id='hermes-advisor-' + uuid.uuid4().hex,
+                                expected_activation_id=activation['id'])
+        save_opportunity_state(state)
+    saved = tool('policy.monitor', state['pending'])
+    try:
+        if (saved['mode'] != 'service_monitor_capture' or saved['request_id'] != state['pending']['request_id']
+                or saved['activation_id'] != state['pending']['expected_activation_id']):
+            raise ValueError
+        captured = datetime.fromisoformat(saved['capture_context']['capture_finished_at'])
+        now = datetime.now(ZoneInfo('Asia/Shanghai'))
+        if captured.tzinfo is None or captured > now:
+            raise ValueError
+        if captured.astimezone(now.tzinfo).date() != now.date():
+            save_opportunity_state(dict(schema_version=1, seen=state['seen'], pending=None))
+            return '【建仓机会】已查回前日评估回执，未作为今日机会推送；下次检查重新采集。'
+        prompts = saved['result']['review_prompts']
+        if not isinstance(prompts, list):
+            raise ValueError
+        prompts = [p for p in prompts if p['kind'] == 'research_opportunity']
+        text = render_opportunities(prompts, set(state['seen']), public_base)
+        keys = sorted(opportunity_key(p) for p in prompts)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise AdvisorError('政策回执不兼容；保留原请求供核对，不清空去重记录') from None
+    # Keep only current keys so a lapsed opportunity can be notified again.
+    save_opportunity_state(dict(schema_version=1, seen=keys, pending=None))
     return text
+
+
+def opportunities(public_base: str = "") -> str:
+    OPPORTUNITY_STATE.parent.mkdir(parents=True, exist_ok=True)
+    with OPPORTUNITY_STATE.with_suffix('.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return '【建仓机会】已有检查在运行，本次未重复采集。'
+        try:
+            return _opportunities(public_base)
+        except (AdvisorError, OSError, ValueError) as exc:
+            message = str(exc) if isinstance(exc, AdvisorError) else '去重状态读写失败；保留原记录，请核对后重试'
+            return f'【建仓机会】检查未完成：{message}'
 
 
 def render_weekly(data: dict) -> str:
@@ -256,7 +356,7 @@ def main() -> None:
         sys.exit("usage: a-share-advisor.py [scan|weekly]")
     try:
         text = weekly() if mode == "weekly" else scan()
-    except (urllib.error.URLError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError, OSError) as exc:
+    except (AdvisorError, urllib.error.URLError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError, OSError) as exc:
         text = f"【研究扫描】任务未能完成：{type(exc).__name__}: {exc}"
     if text:
         print(text)
