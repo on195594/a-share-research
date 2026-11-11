@@ -14,7 +14,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from a_share_research import api_keys, service, external_research, external_review
-from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase
+from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store
 
 
 class ToolError(Exception):
@@ -179,6 +179,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('account.positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,
+         lambda c, a: Payload(data=position_store.state(c.connection, c.principal, a.account_id)), account=True),
     Tool('account.lifecycle.replay', '只读重放旧持仓周期成本和政策字段，保留推断与历史差异', frozenset({'assistant'}), Analysis, Payload,
          _lifecycle, account=True),
     Tool('account.analysis.preview', '对照旧基线、当前镜像与影子结果，取得协调版本和哈希', frozenset({'assistant'}), Analysis, Payload,

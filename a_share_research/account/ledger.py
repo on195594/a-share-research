@@ -12,10 +12,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, StrictInt
+from pydantic import Field, StrictInt, model_serializer, model_validator
 
 from a_share_research import api_keys, db, gate
-from a_share_research.account import evidence
+from a_share_research.account import evidence, positions
 from a_share_research.account.reconciliation import Event, Money, Opening, Snapshot, Value, identity, money, project, reconcile
 
 
@@ -25,6 +25,25 @@ class Batch(Value):
     void_event_ids: list[Annotated[StrictInt, Field(gt=0)]] = Field(default_factory=list)
     evidence_hashes: list[str] = Field(default_factory=list)
     snapshot: Snapshot | None = None
+    position_entries: dict[Annotated[str, Field(pattern=r'^(0|[1-9][0-9]*)$')], positions.PositionEntry] = Field(default_factory=dict)
+    position_dividends: dict[Annotated[str, Field(pattern=r'^(0|[1-9][0-9]*)$')], positions.Text] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    def entry_indices(self):
+        if any(int(i) >= len(self.events) or self.events[int(i)].kind != 'buy' for i in self.position_entries):
+            raise ValueError('新周期元数据须引用本批有效买入事件下标')
+        if any(int(i) >= len(self.events) or self.events[int(i)].kind != 'dividend' for i in self.position_dividends):
+            raise ValueError('分红周期绑定须引用本批有效分红事件下标')
+        return self
+
+    @model_serializer(mode='wrap')
+    def serialize(self, handler):
+        data = handler(self)
+        if not self.position_entries:
+            data.pop('position_entries', None)  # Preserve hashes for all pre-cost-basis requests.
+        if not self.position_dividends:
+            data.pop('position_dividends', None)
+        return data
 
 
 class Observation(Value):
@@ -116,7 +135,8 @@ def state(conn, principal, account_id: str) -> dict:
     if row is None:
         raise LedgerError('尚未建立影子账本期初', 404)
     return dict(account_id=row['account_id'], version=row['version'], mode='shadow',
-                projection=json.loads(row['projection']), tolerance=row['tolerance'])
+                projection=json.loads(row['projection']), tolerance=row['tolerance'],
+                cost_basis_configured=bool(conn.execute('SELECT 1 FROM account_position_books WHERE account_id=?', (row['account_id'],)).fetchone()))
 
 
 def _save_receipt(conn, account_id, request_hash, result, request):
@@ -254,6 +274,37 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
         problems = reconcile(projected, batch.snapshot, Decimal(book['tolerance']))
         if problems:
             return reject('conflict', problems)
+        from a_share_research.account import position_store
+        cost_book = conn.execute('SELECT * FROM account_position_books WHERE account_id=?',(account_id,)).fetchone()
+        cost_projection = None
+        if (batch.position_entries or batch.position_dividends) and cost_book is None:
+            return reject('missing_material', [{'field':'cost_basis','expected':'首笔入账前建立明确成本期初'}])
+        if cost_book is not None:
+            if cost_book['version'] != book['version']:
+                return reject('conflict', [{'field':'cost_version','expected':book['version'],'actual':cost_book['version']}])
+            entry_map = position_store.entries_for(conn, account_id, retained)
+            dividend_map = position_store.dividends_for(conn, account_id, retained)
+            for index, cycle_id in batch.position_dividends.items():
+                key = identity(batch.events[int(index)], account_id)
+                if key in dividend_map and dividend_map[key] != cycle_id:
+                    return reject('conflict', [{'field':'position_dividends','expected':'原分红周期不能覆盖，须作废更正'}])
+                dividend_map[key] = cycle_id
+            for index, entry in batch.position_entries.items():
+                key = identity(batch.events[int(index)], account_id)
+                if key in entry_map and entry_map[key] != entry:
+                    return reject('conflict', [{'field':'position_entries','expected':'原周期上下文不能覆盖，须作废更正'}])
+                entry_map[key] = entry
+            try:
+                seeds = [positions.PositionSeed.model_validate(s) for s in json.loads(cost_book['basis'])]
+                records = [(r['business_id'],Event.model_validate_json(r['event'])) for r in retained] + new
+                cost_projection = positions.replay(seeds, records, entry_map, dividend_cycles=dividend_map)
+                if cost_projection['positions'] != projected.positions:
+                    raise ValueError('成本与资金投影股数不一致')
+            except positions.MissingBasis as exc:
+                return reject('missing_material', [{'field':'position_context','expected':str(exc)}])
+            except ValueError as exc:
+                return reject('conflict', [{'field':'positions','expected':str(exc)}])
+            result |= {'position_before':json.loads(cost_book['projection']), 'position_after':cost_projection}
         version = book['version'] + int(bool(new or voids))
         result = _save_receipt(conn, account_id, request_hash, result | dict(status='posted', version=version,
                               added=len(new), duplicates=duplicates, voided=len(voids),
@@ -267,6 +318,9 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
                          event.occurred_at.isoformat(), gate.canonical(event.model_dump(mode='json'))))
         conn.execute('UPDATE account_books SET version=?,projection=? WHERE account_id=?',
                      (version, gate.canonical(projected.model_dump(mode='json')), account_id))
+        if cost_projection is not None:
+            conn.execute('UPDATE account_position_books SET version=?,projection=? WHERE account_id=?',
+                         (version,gate.canonical(cost_projection),account_id))
         return result
 
 

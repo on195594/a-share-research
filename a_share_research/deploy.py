@@ -28,7 +28,7 @@ TABLES = ("runs", "calls", "reports", "prices", "batches", "sessions", "api_keys
 OPTIONAL_TABLES = (*db.ACCOUNT_TABLES, 'account_source', 'policy_activations',
                    'external_research', 'external_submissions', 'external_reviews',
                    'account_books', 'account_batches', 'account_journal', 'account_voids', 'account_observations',
-                   'account_analysis_history')
+                   'account_analysis_history', 'account_position_books')
 log = logging.getLogger(__name__)
 
 
