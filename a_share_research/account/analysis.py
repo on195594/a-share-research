@@ -326,7 +326,9 @@ def inspect(conn) -> list[str]:
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_analysis_history'").fetchone():
         return []
     problems, previous, rebases = [], {}, {}
-    cursor = conn.execute('SELECT * FROM account_analysis_history ORDER BY account_id,holding_id,version')
+    fields = {row[1] for row in conn.execute('PRAGMA table_info(account_analysis_history)')}
+    defaults = ''.join(f", '' AS {name}" for name in ('account_id', 'cycle_id') if name not in fields)
+    cursor = conn.execute(f'SELECT *{defaults} FROM account_analysis_history ORDER BY account_id,holding_id,version')
     columns = [c[0] for c in cursor.description]
     for values in cursor:
         row = dict(zip(columns, values))

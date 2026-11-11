@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import tarfile
@@ -20,7 +21,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from a_share_research import db, integrity
+from a_share_research import backup as recovery, db
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
@@ -53,10 +54,36 @@ KEEP_BACKUPS = 3
 def prune_backups(data: Path, keep: int = KEEP_BACKUPS) -> list[str]:
     """Keep the newest release backups (owner's standing rule, 10-31); never touches app.db."""
     backups = sorted(data.glob("backup-pre-*.db"), key=lambda path: path.stat().st_mtime, reverse=True)
+    removed = []
     for old in backups[keep:]:
+        bundle = old.with_suffix('.bundle')
+        if bundle.exists() or bundle.is_symlink():
+            try:
+                checked = recovery.verify(bundle)
+                if recovery._copy(old) != checked['manifest']['files']['app.db']:
+                    raise recovery.BackupError('独立数据库与备份包不匹配')
+            except (recovery.BackupError, OSError) as exc:
+                log.warning('保留无法核对归属的发布备份 %s：%s',old,exc)
+                continue
+            shutil.rmtree(bundle)
         for path in (old, old.with_name(old.name + "-shm"), old.with_name(old.name + "-wal")):
             path.unlink(missing_ok=True)
-    return [old.name for old in backups[keep:]]
+        removed.append(old.name)
+    return removed
+
+
+def create_release_backup(database: Path, destination: Path) -> dict:
+    """Keep the existing .db recovery entry alongside its verified raw-evidence bundle."""
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(destination)
+    manifest = recovery.create(database,destination.with_suffix('.bundle'))
+    # A standalone copy preserves the documented .db entry and cannot mutate bundle bytes.
+    if recovery._copy(destination.with_suffix('.bundle')/'app.db',destination) != manifest['files']['app.db']:
+        raise recovery.BackupError('发布备份数据库复制不一致')
+    recovery._sync_directory(destination.parent)
+    return dict(bundle=str(destination.with_suffix('.bundle')),files=len(manifest['files']),
+                pdfs=sum(name.startswith('pdf/') for name in manifest['files']),
+                account_evidence=sum(name.startswith('account-evidence/') for name in manifest['files']))
 
 
 KEEP_ROLLBACK_IMAGES = 2
@@ -197,7 +224,8 @@ def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
 
     for service in SERVICES:
         run("docker", "tag", before[service]["image"], f"a-share-research-{service}:rollback-{code}")
-    save("manifest.json", {"code": revision, "before": before, "new": images, "backup": str(backup)})
+    save("manifest.json", {"code": revision, "before": before, "new": images, "backup": str(backup),
+                           "backup_bundle": str(backup.with_suffix('.bundle'))})
     paused = switched = False
     try:
         paused = True
@@ -209,12 +237,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
         save("tables-before.json", original)
         if backup.exists():
             raise FileExistsError(backup)
-        with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as source, closing(sqlite3.connect(backup)) as target:
-            source.backup(target)
-        backup.chmod(0o600)
-        problems, counts = integrity.check(backup, data / "pdf")
-        if problems:
-            raise RuntimeError(f"备份完整性检查失败：{problems}")
+        counts = create_release_backup(database,backup)
         switched = True  # Restore both tags even if only the first replacement succeeds.
         for service in SERVICES:
             run("docker", "tag", images[service], f"a-share-research-{service}:latest")
@@ -241,7 +264,8 @@ def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
         pruned = prune_backups(data)  # Only after a verified release; a failed one keeps every backup and image.
         pruned_images = prune_images(images)
         save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
-                               "backup": str(backup), "backup_counts": counts, "pruned_backups": pruned,
+                               "backup": str(backup), "backup_bundle": str(backup.with_suffix('.bundle')),
+                               "backup_counts": counts, "pruned_backups": pruned,
                                "pruned_images": pruned_images, "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:

@@ -138,6 +138,16 @@ docker exec a-share-research-worker python -m a_share_research.integrity   # 生
 DATA_DIR=/tmp/research-eval uv run python -m a_share_research.integrity     # 本地
 ```
 
+数据库与原始证据使用独立备份包保存，包含 SQLite 一致快照、PDF 原件和账户证据；清单记录文件哈希、数据库版本、序列及已提交证据引用，不包含可重建的 PDF 文本缓存或宿主凭据。缺少已引用原件、哈希不符或巡检失败时拒绝完成备份，失败请求中从未入账的缺失材料不计为已提交引用。
+
+```bash
+uv run python -m a_share_research.backup create /absolute/data/app.db /absolute/private/new-backup
+uv run python -m a_share_research.backup verify /absolute/private/new-backup
+uv run python -m a_share_research.backup restore /absolute/private/new-backup /absolute/private/new-recovery
+```
+
+默认从数据库同目录的 `pdf/`、`account-evidence/` 读取原件；副本验收可用 `--pdf-directory`、`--evidence-directory` 明确来源。目标目录必须不存在，目录/文件分别为 0700/0600；操作不会覆盖现库。恢复只是生成经校验的独立副本，不启动服务、不自动迁移、不抬升序列，也不代表允许丢弃备份之后的写入。实际数据恢复仍按[数据层回退步骤](docs/data-foundation.md#7-验收与治理规则)处理高水位与引用；合一切换后应用回退保持新账本为唯一事实来源，见[合一回退规则](docs/consolidation.md#7-回退与文档收敛)。
+
 价格参考支持沪深主板、创业板（300/301）和科创板（688），继续排除 ST、退市风险股及北交所；公式与旧 `price-reference-v2` 记录保持兼容。
 
 ## 候选初筛
@@ -234,6 +244,8 @@ uv run python -m a_share_research.deploy "$release_code" \
 工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次与扫描）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)），并删除比当前镜像及最近两级 `rollback-*` 目标更早的 web/worker 镜像标签（较新但未发布的构建不动，删除失败只记入 `manifest.json` 的 `pruned_images`）；失败恢复原应用镜像，保留数据、证据、全部备份和镜像，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和旧镜像跑不了新结构的迁移需要单独安排回退，不使用此工具；旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。工具的表指纹比较都在迁移之前，不证明迁移后数据守恒，迁移发布须另外复查。
 
 业务表指纹只在两服务停止的窗口内比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `MODEL_REASONING` 分别记录，模型与推理强度未变时不追加模型配置检查或研究调用。
+
+发布备份保留原 `backup-pre-<提交>-<时间>.db` 入口，同时生成同名 `.bundle/` 完整证据包；两份数据库独立存储，文件哈希一致。清理旧备份时先核对包的完整性及其与 `.db` 的归属，再成对清理；发现额外文件、损坏或归属不符时保留并报告。发布失败仍保留所有备份，不自动恢复数据库。此入口目前仍只管理 web/worker，tools 第三服务的暂停与排空待整段接入。
 
 最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
 
