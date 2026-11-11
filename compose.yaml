@@ -36,6 +36,30 @@ services:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
       - /home/lin/.pi:/home/lin/.pi
 
+  # Explicit opt-in during consolidation; shares worker image, never its model credentials.
+  tools:
+    profiles: ["tools"]
+    image: a-share-research-worker
+    container_name: a-share-research-tools
+    command: ["python", "-m", "a_share_research.tools.server", "--host", "0.0.0.0"]
+    restart: unless-stopped
+    cpus: 0.4
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    env_file:
+      - path: .env.tools
+        required: false
+    environment:
+      DATA_DIR: /data
+      ASHARE_TOOLS_EXTERNAL_ENABLED: ${ASHARE_TOOLS_EXTERNAL_ENABLED:-0}
+      ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED: ${ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED:-0}
+      ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED: ${ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED:-0}
+    volumes:
+      - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
+    tmpfs:
+      - /run/ashare-tools:uid=1000,gid=1000,mode=0700
+    ports: ["127.0.0.1:8621:8621"]
+
 networks:
   nginx-network:
     external: true

@@ -1,11 +1,12 @@
 # 工具入口
 
-HTTP 与进程内入口默认只读，单文件客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排、MCP、新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
+HTTP 与进程内入口默认只读，单文件客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排已支持 tools 暂停排空，MCP、新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
 开发验证使用已迁移至 v18 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
-DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server
+DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
+  --control-socket /absolute/private/control/control.sock
 ```
 
 凭据由现有本地 `api_keys create NAME --role research|assistant|owner` 命令创建，只显示一次明文；开发时同样指定副本的 `DATA_DIR`。通过环境变量 `ASHARE_TOKEN` 提供给客户端，不在命令参数中传令牌：
@@ -28,7 +29,11 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 政策命令使用固定参数列表的子进程，不接收 shell、任意 argv 或环境参数；超时 30 秒，原 stdout、stderr 与退出码保留在结果中。HTTP 成功表示命令已执行，调用者还须检查 `exit_code`。当前不开放 R1 缓存刷新或任何 W1 写入。只读调用以 SQLite `mode=ro` 打开数据库；显式开启的写工具按请求使用 `mode=rw`。
 
-`/health` 仅表示进程响应，不等价于数据库就绪或发布验收；生产发布接入时还需迁移、在途排空、就绪核对与回退演练。
+`/health` 只表示进程存活。`/ready` 只读核对数据库版本、公共表及已启用工具需要的表，返回 database_ready/schema_version/paused/in_flight；暂停或数据库未就绪时为 503，不创建或迁移库。
+
+进程内最多两个调用。运维经私有 Unix socket（目录 0700、socket 0600）调用 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`；普通 HTTP 凭据没有暂停/恢复入口。pause 先拒绝新发现/调用，再等待在途请求归零，超时仍保持暂停。`.tools-paused` 标记在数据目录保存并跨重启生效；resume 核对并移除标记后恢复受理，未知文件或符号链接不会被覆盖/删除。
+
+Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。三个功能开关 `ASHARE_TOOLS_EXTERNAL_ENABLED`、`ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED`、`ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认均为 0，仅接受 0/1，复核须同时启用外部研究。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产启用仍需整段验收。
 
 ## 外部研究提交暂存（开发入口，默认关闭）
 
@@ -48,7 +53,7 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 发布正文带 `producer`（外部凭据编号、提交编号、账户知情身份）；作者明确为 external，不伪装成 worker 模型，复核模型另行记录。旧研究实验与论点卡默认池保持只选 `kind=research`。`external_scoring.load_forecasts/load_agenda` 要求生产者编号和账户知情身份，先过滤身份与判断契约再去重，复用既有 V1/V5 记分函数，不混合不同生产者。
 
-完整性巡检检查外部材料/草稿哈希、复核任务与报告关联、生产者身份；发布停服指纹包含新表及已有账户表。第三服务暂停/排空、生产 compose 与回退切换仍未完成，不据模块测试提前启用生产。
+完整性巡检检查外部材料/草稿哈希、复核任务与报告关联、生产者身份；发布停服指纹包含新表及已有账户表。第三服务暂停/排空和 Compose 配置已接入固定发布入口；真实生产发布、宿主与切换后回退仍待验收，不据模块测试提前启用生产。
 
 ## 账户影子账本（开发入口，默认关闭）
 

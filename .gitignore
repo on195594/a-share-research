@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.tools.example
 .venv/
 .pytest_cache/
 .ruff_cache/

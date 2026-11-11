@@ -19,7 +19,7 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler
 
 from a_share_research import backup as recovery, db
 
@@ -195,26 +195,91 @@ def wait_ready() -> None:
             time.sleep(0.5)
 
 
-def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
+def tools_control(action: str) -> dict:
+    result = json.loads(run('docker','exec','a-share-research-tools','python','-m',
+                           'a_share_research.tools.control',action,'--timeout','30'))
+    if (set(result) != {'paused','in_flight'} or type(result['paused']) is not bool
+            or type(result['in_flight']) is not int or result['in_flight'] < 0):
+        raise RuntimeError('tools 控制回执无效')
+    return result
+
+
+def wait_tools_ready(*, paused=False) -> dict:
+    deadline = time.monotonic()+30
+    opener = build_opener(ProxyHandler({}))
+    while True:
+        try:
+            try:
+                response = opener.open('http://127.0.0.1:8621/ready',timeout=2)
+            except HTTPError as exc:
+                if exc.code != 503:
+                    raise
+                response = exc
+            with response:
+                result = json.load(response)
+            if (result.get('database_ready') is True and result.get('schema_version') == len(db.MIGRATIONS)
+                    and result.get('paused') is paused and (not paused or result.get('in_flight') == 0)):
+                return result
+        except HTTPError:
+            raise
+        except (URLError,TimeoutError,ConnectionError,ValueError):
+            pass  # Startup readiness may lag worker migration; the same endpoint is bounded below.
+        if time.monotonic() >= deadline:
+            raise RuntimeError('tools 数据库或暂停状态未就绪')
+        time.sleep(.5)
+
+
+def _tools_config():
+    configured = json.loads(run('docker','compose','--profile','tools','config','--format','json'))['services']['tools']
+    allowed = {'DATA_DIR','TUSHARE_TOKEN','ASHARE_TOOLS_EXTERNAL_ENABLED',
+               'ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED','ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'}
+    if set(configured.get('environment',{})) - allowed:
+        raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录和显式功能开关')
+    return configured
+
+
+def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bool = False) -> None:
     revision = run("git", "rev-parse", f"{code}^{{commit}}")
     if revision != run("git", "rev-parse", "HEAD") or revision != run("git", "rev-parse", "origin/main"):
         raise RuntimeError("只能发布已提交并已推送到 origin/main 的 HEAD")
     if run("git", "status", "--porcelain", "--", "a_share_research", "Dockerfile", "compose.yaml", "pyproject.toml", "uv.lock"):
         raise RuntimeError("应用或部署文件有未提交修改；无关文档改动不阻断发布")
+    has_tools = bool(run('docker','ps','-a','--filter','name=^/a-share-research-tools$','--format','{{.ID}}'))
+    include_tools = with_tools or has_tools
+    services = (*SERVICES,'tools') if include_tools else SERVICES
+    existing = (*SERVICES,'tools') if has_tools else SERVICES
+    if with_tools and not has_tools and not allow_config:
+        raise RuntimeError('首次纳入 tools 须使用已授权配置变更入口 --allow-config')
+    if include_tools:
+        _tools_config()
     images = verify_images(code)
-    before = {service: describe(service) for service in SERVICES}
+    if include_tools:
+        images['tools'] = images['worker']
+    before = {service: describe(service) for service in existing}
     if not all(item["running"] for item in before.values()):
-        raise RuntimeError("现有 web/worker 未同时运行，请先查明状态")
-    for service in SERVICES:
+        raise RuntimeError("现有服务未同时运行，请先查明状态")
+    for service in existing:
         if not allow_config and run("docker", "compose", "config", "--hash", service).split() != [service, before[service]["config_hash"]]:
             raise RuntimeError(f"{service} 的 Compose 或环境配置发生变化；须另行准备配置回退")
-    if all(before[service]["image"] == images[service] for service in SERVICES):
+    if has_tools:
+        if before['tools']['image'] != before['worker']['image']:
+            raise RuntimeError('现有 tools 与 worker 不同镜像，须先核对部分发布状态')
+        if tools_control('status')['paused']:
+            raise RuntimeError('tools 已被暂停；本次发布不接管已有暂停状态')
+    if set(existing) == set(services) and all(before[service]["image"] == images[service] for service in existing):
+        if has_tools:
+            wait_tools_ready()
         log.info("目标镜像已运行，无需重复切换")
         return
     data = Path(before["web"]["mounts"]["/data"][0])
     if before["web"]["mounts"]["/data"] != before["worker"]["mounts"]["/data"]:
         raise RuntimeError("web/worker 数据目录不一致")
     database = data / "app.db"
+    if has_tools and before['tools']['mounts'].get('/data') != before['web']['mounts']['/data']:
+        raise RuntimeError('tools 数据目录与 web/worker 不一致')
+    marker = data/'.tools-paused'
+    if include_tools and not has_tools and (marker.exists() or marker.is_symlink()):
+        raise RuntimeError('首次启动前存在 tools 暂停标记，须先核对未完成发布')
     idle(database)
     evidence.mkdir(mode=0o700, parents=True, exist_ok=False)
     backup = data / f"backup-pre-{code}-{datetime.now(db.SHANGHAI):%Y%m%d-%H%M%S}.db"
@@ -226,12 +291,25 @@ def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
         run("docker", "tag", before[service]["image"], f"a-share-research-{service}:rollback-{code}")
     save("manifest.json", {"code": revision, "before": before, "new": images, "backup": str(backup),
                            "backup_bundle": str(backup.with_suffix('.bundle'))})
-    paused = switched = False
+    paused = switched = tools_paused = new_tools_started = False
+    def compose(*args):
+        return run('docker','compose',*(('--profile','tools') if include_tools else ()),*args)
     try:
+        if include_tools:
+            tools_paused = True
+            if has_tools:
+                drained = tools_control('pause')
+                if drained != {'paused':True,'in_flight':0}:
+                    raise RuntimeError('tools 尚未排空，不得停服')
+            else:
+                from a_share_research.tools.control import pause_offline
+                pause_offline(marker)
         paused = True
-        run("docker", "compose", "stop", "-t", "30", "web")
+        compose("stop", "-t", "30", "web")
         idle(database)
-        run("docker", "compose", "stop", "-t", "30", "worker")
+        compose("stop", "-t", "30", "worker")
+        if has_tools:
+            compose('stop','-t','60','tools')
         idle(database)
         original = fingerprints(database)
         save("tables-before.json", original)
@@ -245,22 +323,38 @@ def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
         save("tables-after.json", final)
         if final != original:
             raise RuntimeError("停服窗口内业务表发生变化；保留数据供核对")
-        run("docker", "compose", "up", "-d", "--no-build", "--no-deps", *SERVICES)
+        new_tools_started = include_tools and not has_tools
+        compose("up", "-d", "--no-build", "--no-deps", *services)
         wait_ready()
+        if include_tools:
+            save('tools-ready-paused.json',wait_tools_ready(paused=True))
         runtime = json.loads(run("docker", "exec", "a-share-research-worker", "python", "-c",
                                  "import json; from a_share_research.model import preflight; print(json.dumps(preflight()))"))
         save("worker-preflight.json", runtime)
-        after = {service: describe(service) for service in SERVICES}
-        for service in SERVICES:
+        after = {service: describe(service) for service in services}
+        for service in existing:
             expected = before[service] | {"image": images[service]}
             if allow_config:
                 expected["config_hash"] = after[service]["config_hash"]
             if after[service] != expected:
                 raise RuntimeError(f"{service} 镜像、运行状态或部署配置不一致")
+        if include_tools:
+            tool = after['tools']
+            if (not tool['running'] or tool['image'] != images['worker']
+                    or tool['mounts'].get('/data') != before['web']['mounts']['/data']
+                    or set(tool['mounts']) != {'/data','/run/ashare-tools'}
+                    or tool['cpus'] != 400_000_000
+                    or tool['ports'] != {'8621/tcp':[{'HostIp':'127.0.0.1','HostPort':'8621'}]}):
+                raise RuntimeError('tools 镜像、资源、挂载或回环端口与约定不符')
         check = json.loads(run("docker", "exec", "a-share-research-worker", "python", "-m", "a_share_research.integrity"))
         save("integrity-after.json", check)
         if not check["ok"]:
             raise RuntimeError("发布后完整性检查失败")
+        if include_tools:
+            tools_paused = False  # Even a lost resume reply may have admitted requests; rollback must drain again.
+            if tools_control('resume')['paused']:
+                raise RuntimeError('tools 未恢复受理')
+            save('tools-ready.json',wait_tools_ready())
         pruned = prune_backups(data)  # Only after a verified release; a failed one keeps every backup and image.
         pruned_images = prune_images(images)
         save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
@@ -271,12 +365,28 @@ def deploy(code: str, evidence: Path, allow_config: bool = False) -> None:
     except BaseException:
         log.exception("发布失败，恢复原应用镜像；保留备份与证据")
         # Application-only rollback: a migration may ship through here only if the old image runs on the new schema.
+        if include_tools and switched and not tools_paused:
+            # Never replace a process that may now be handling a newly admitted financial call.
+            drained = tools_control('pause')
+            if drained != {'paused':True,'in_flight':0}:
+                raise RuntimeError('tools 回退前排空失败；保持当前镜像和暂停状态')
+            tools_paused = True
+        if new_tools_started:
+            compose('rm','-f','-s','tools')
         if switched:
             for service in SERVICES:
                 run("docker", "tag", before[service]["image"], f"a-share-research-{service}:latest")
-            run("docker", "compose", "up", "-d", "--no-build", "--no-deps", *SERVICES)
+            compose("up", "-d", "--no-build", "--no-deps", *existing)
         elif paused:
-            run("docker", "compose", "start", *SERVICES)
+            compose("start", *existing)
+        if tools_paused:
+            if has_tools:
+                if switched or paused:
+                    wait_tools_ready(paused=True)
+                tools_control('resume')
+            else:
+                from a_share_research.tools.control import Gate
+                Gate(marker=marker).resume()
         raise
 
 
@@ -286,10 +396,11 @@ def main() -> None:
     parser.add_argument("evidence", type=Path, help="new private directory for backup and release evidence")
     parser.add_argument("--allow-config", action="store_true",
                         help="allow authorized Compose or environment configuration changes")
+    parser.add_argument('--with-tools',action='store_true',help='include the tools service on its first authorized rollout')
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    deploy(args.code, args.evidence, allow_config=args.allow_config)
+    deploy(args.code, args.evidence, allow_config=args.allow_config, with_tools=args.with_tools)
 
 
 if __name__ == "__main__":
