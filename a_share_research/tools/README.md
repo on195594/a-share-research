@@ -187,7 +187,7 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 `bundle` 包含 local、quotes、portfolio_value、industry_result、now、risk_policy、denominator_evidence、account_scope_required、research_result；数据类以对应 JSON 字段表示，now 必须带时区，缺失和降级语义沿用 v0。`policy.evaluation.pack` 可把已受信内存输入转为 JSON；它不反序列化可执行内容。重放同请求幂等，参数/输入变化冲突，写入失败整体回滚。
 
-结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，旧生产监控和持仓来源仍沿用切换前入口；所有生产评估入口统一留存、网页当前政策展示与宿主激活尚待接入。镜像与明确绑定账本的采集见下节。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
+结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，所有者网页 `/policy` 只读展示登记、参数与账户来源；旧生产监控和持仓来源仍沿用切换前入口，所有生产评估入口统一留存与宿主激活尚待接入。镜像与明确绑定账本的采集见下节。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
 
 
 ## 服务端监控采集（镜像或明确绑定账本，开发入口）

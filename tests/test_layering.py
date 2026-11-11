@@ -35,6 +35,22 @@ for name in ("pandas", "tushare", "akshare", "a_share_research.core.providers", 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_policy_page_read_loads_metadata_without_policy_runtime_or_market(tmp_path):
+    result=subprocess.run([sys.executable,'-c','''
+import sys
+import a_share_research.web as web
+from a_share_research.policy.presentation import owner_view
+assert owner_view(web.conn)['status']=='inactive'
+for name in ('pandas','numpy','tushare','akshare','a_share_research.policy.v0',
+             'a_share_research.policy.evaluation','a_share_research.policy.capture',
+             'a_share_research.core.providers'):
+    assert name not in sys.modules, f'policy page loaded {name}'
+'''],cwd=PACKAGE.parent,env={'DATA_DIR':str(tmp_path),'PUBLIC_BASE_URL':'http://127.0.0.1',
+        'SESSION_SECRET':'layering-test-secret-32-characters','DEV_LOGIN':'1'},
+        capture_output=True,text=True,timeout=30)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
 def _module_imports(node):
     # Include conditional module imports, but not imports inside functions or classes.
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

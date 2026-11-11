@@ -6,9 +6,11 @@ Holds no model or market credentials; the worker does all research.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
+import sqlite3
 import threading
 import time
 import uuid
@@ -263,6 +265,22 @@ def logout(request: Request, csrf: str = Form("")):
 
 
 # ---------- pages ----------
+
+@app.get("/policy")
+def policy_page(request: Request):
+    if not (session := current_session(request)):
+        return login_required()
+    # This read uses the existing owner session. No API credential or policy runtime is created.
+    from a_share_research.policy.presentation import owner_view
+    try:
+        view=owner_view(conn)
+    except sqlite3.Error:
+        logging.getLogger(__name__).exception('Policy page storage read failed')
+        return message(request,session,"暂时无法读取政策","政策记录暂时无法读取，请稍后重试。",503)
+    parameters=(view['manifest'] or {}).get('parameters',{})
+    return render(request,"policy.html",session,policy=view,parameters=parameters,
+                  parameters_json=json.dumps(parameters,ensure_ascii=False,indent=2))
+
 
 @app.get("/research-library")
 def research_library(request: Request, q: str = "", content: str = "", history: bool = False, scope: str = "",

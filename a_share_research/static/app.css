@@ -45,6 +45,23 @@ body {
 .shell-nav { display: flex; gap: 16px; margin: 0 16px 0 auto; }
 .shell-nav a { display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; text-decoration: none; }
 .shell-nav a:hover { text-decoration: underline; }
+.shell-nav a[aria-current="page"] { font-weight: 650; text-decoration: underline; }
+@media (max-width: 540px) {
+  .shell { flex-wrap: wrap; }
+  .shell-nav { order: 3; flex-basis: 100%; margin: 0; gap: 20px; }
+}
+
+.policy-section { margin-top: 28px; }
+.policy-section h2 { margin-top: 0; }
+.policy-facts { margin: 12px 0 0; }
+.policy-facts > div { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: 8px 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.policy-facts dt { color: var(--muted); }
+.policy-facts dd { margin: 0; overflow-wrap: anywhere; }
+.policy-identities dd { font-size: 14px; }
+.policy-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
+@media (max-width: 540px) {
+  .policy-facts > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
 
 h1 { font-size: 26px; line-height: 1.3; letter-spacing: -0.01em; margin: 20px 0 4px; text-wrap: balance; }
 h2 { font-size: 19px; line-height: 1.4; letter-spacing: -0.005em; margin: 36px 0 12px; }

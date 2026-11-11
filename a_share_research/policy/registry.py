@@ -63,20 +63,25 @@ def _current(conn):
     return dict(zip([c[0] for c in cursor.description],row)) if row else None
 
 
+def _read_state(conn):
+    """Read in an already authorized caller's transaction; never infer a legacy fallback."""
+    activation = _current(conn)
+    if activation is None:
+        return dict(activation=None,manifest=None,installed=False)
+    manifest = _version(conn,activation['identity'])
+    try:
+        identity.check_installed(manifest)
+        installed = True
+    except identity.IdentityError:
+        installed = False
+    return dict(activation=activation,manifest=manifest,installed=installed)
+
+
 def _state(conn, principal):
     """No implicit v0 fallback: a missing or legacy pointer stays visible as a gap."""
     with db.transaction(conn,immediate=False):
         _authorize(conn,principal)
-        activation = _current(conn)
-        if activation is None:
-            return dict(activation=None,manifest=None,installed=False)
-        manifest = _version(conn,activation['identity'])
-        try:
-            identity.check_installed(manifest)
-            installed = True
-        except identity.IdentityError:
-            installed = False
-        return dict(activation=activation,manifest=manifest,installed=installed)
+        return _read_state(conn)
 
 
 def current(conn, principal):

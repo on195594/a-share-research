@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}投资政策 · 个股研究{% endblock %}
+{% block main %}
+<h1>投资政策</h1>
+<p class="muted">查看当前登记的政策、适用范围与账户数据来源。</p>
+
+<section aria-labelledby="policy-status" class="policy-section">
+  <h2 id="policy-status">{{ policy.title }}</h2>
+  <p{% if policy.status not in ['active', 'inactive'] %} class="notice caution"{% endif %}>{{ policy.message }}</p>
+  {% if policy.manifest %}
+  <dl class="policy-facts">
+    <div><dt>政策名称</dt><dd>{{ parameters.get('policy_id') or '未记录' }}</dd></div>
+    <div><dt>规则版本</dt><dd>{{ policy.manifest.policy }}</dd></div>
+    <div><dt>启用时间</dt><dd><time datetime="{{ policy.activation.activated_at }}">{{ policy.activation.activated_at|replace('T', ' ') }}</time></dd></div>
+    <div><dt>适用账户范围</dt><dd>{{ parameters.get('account_scope') or '未记录' }}</dd></div>
+  </dl>
+  {% endif %}
+</section>
+
+{% if policy.manifest %}
+<section aria-labelledby="policy-parameters">
+  <h2 id="policy-parameters">风险参数</h2>
+  <dl class="policy-facts">
+    <div><dt>单一持仓风险上限</dt><dd>{% if parameters.get('max_position_risk_pct') is not none %}{{ parameters.max_position_risk_pct }}%{% else %}未记录{% endif %}</dd></div>
+    <div><dt>组合风险上限</dt><dd>{% if parameters.get('max_portfolio_risk_pct') is not none %}{{ parameters.max_portfolio_risk_pct }}%{% else %}未记录{% endif %}</dd></div>
+    <div><dt>生效起点</dt><dd>{{ (parameters.get('effective_from') or '未记录')|replace('T', ' ') }}</dd></div>
+    <div><dt>生效截止</dt><dd>{{ (parameters.get('effective_to') or '未设截止时间')|replace('T', ' ') }}</dd></div>
+    <div><dt>确认时间</dt><dd>{{ (parameters.get('confirmed_at') or '未记录')|replace('T', ' ') }}</dd></div>
+    <div><dt>确认依据</dt><dd>{{ parameters.get('confirmation_ref') or '未记录' }}</dd></div>
+    {% if 'off_account_strategy_cash' in parameters %}<div><dt>账户外策略现金</dt><dd>{{ parameters.off_account_strategy_cash }} {{ parameters.get('currency') or '' }}</dd></div>{% endif %}
+    {% if 'untradable_boards' in parameters %}<div><dt>不可交易板块</dt><dd>{% for board in parameters.untradable_boards %}{{ {'STAR':'科创板（STAR）','BSE':'北交所（BSE）'}.get(board, board) }}{{ '、' if not loop.last else '' }}{% else %}未设置{% endfor %}</dd></div>{% endif %}
+  </dl>
+</section>
+{% endif %}
+
+<section aria-labelledby="policy-source">
+  <h2 id="policy-source">账户数据来源</h2>
+  <p><strong>{{ policy.source.title }}</strong></p>
+  <p{% if policy.source.status in ['invalid', 'scope_mismatch'] %} class="notice caution"{% else %} class="muted"{% endif %}>{{ policy.source.message }}</p>
+  <dl class="policy-facts">
+    {% if policy.source.updated_at %}<div><dt>来源登记时间</dt><dd>{{ policy.source.updated_at|replace('T', ' ') }}</dd></div>{% endif %}
+    {% if policy.source.account_id %}<div><dt>账本账户</dt><dd>{{ policy.source.account_id }}</dd></div>{% endif %}
+    {% if policy.source.account_scope %}<div><dt>账本账户范围</dt><dd>{{ policy.source.account_scope }}</dd></div>{% endif %}
+  </dl>
+</section>
+
+{% if policy.manifest %}
+<details class="block policy-details">
+  <summary>核对版本与完整参数</summary>
+  <dl class="policy-facts policy-identities">
+    <div><dt>完整政策身份</dt><dd>{{ policy.manifest.identity }}</dd></div>
+    <div><dt>代码版本</dt><dd>{{ policy.manifest.code_hash }}</dd></div>
+    <div><dt>规则版本摘要</dt><dd>{{ policy.manifest.rules_hash }}</dd></div>
+    <div><dt>指南版本摘要</dt><dd>{{ policy.manifest.guide_version }}</dd></div>
+  </dl>
+  <h3>已保存的全部参数</h3>
+  <pre class="policy-json">{{ parameters_json }}</pre>
+</details>
+{% endif %}
+<p class="actions"><a href="/">返回首页</a></p>
+{% endblock %}
