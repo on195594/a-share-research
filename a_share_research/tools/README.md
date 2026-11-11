@@ -62,15 +62,17 @@ v14 新增期初与投影、批次回执、事件、作废记录、资产观察�
 
 提交结果的 `data.status` 为 `posted`、`missing_material`、`conflict` 或 `service_failure`。HTTP 200 只表示返回了业务回执，必须检查此状态。成功同请求重提复用原回执；失败批次可补齐条件后重试。SQL 入账失败先回滚，数据库仍可写时单独持久化失败回执；数据库不可用时返回 HTTP 503，不声称已存回执。所有失败均不改变交易投影。HTTP 拒绝重复 JSON 键和非有限数字，避免重复持仓键被静默覆盖。
 
-完整性巡检检查事件归属、业务身份、作废关系、回执和投影重放，发布数据库指纹覆盖五张新表。物理证据备份/恢复、旧成本与持仓生命周期投影、分析状态追加、完整券商流水对账和生产切换验收仍需完成。
+完整性巡检检查事件归属、业务身份、作废关系、回执和投影重放，发布数据库指纹覆盖五张新表。物理证据备份/恢复、旧成本与持仓生命周期投影、分析状态生产接入、完整券商流水对账和生产切换验收仍需完成。
 
 
 ## 分析状态追加历史（影子入口）
 
 v15 的 `account_analysis_history` 按持仓周期 `holding_id` 保存完整快照，包含 L3、预警、Tier 和论点版本；每次追加关联前一版本、创建凭据、请求/快照哈希和证据。当前值取最新追加行，历史不可更新或删除。同公司不同持仓周期不会合并。内部 `analysis.initialize` 原样保存一次旧表基线，明确标为 `legacy_baseline`，保留空证据和退休条件，不把当前快照当成已恢复的历史。
 
-三个工具沿用 `account_shadow_enabled` 开关，仅 assistant 可用：
+五个工具沿用 `account_shadow_enabled` 开关，仅 assistant 可用：
 
+- `account.analysis.preview`：读取已确认基线、当前镜像、影子快照及当前版本/镜像哈希，供协调前核对。
+- `account.analysis.rebase`：按持仓周期显式选择保留影子或采用镜像，带证据与理由原子追加协调历史。
 - `account.analysis.current`：读取指定持仓周期最新影子快照。
 - `account.analysis.history`：按修订编号分页读取完整历史及来源。
 - `account.analysis.update`：传 `holding_id` 及 `update`（`expected_version`、`evidence_hashes`、`reason`、`changes`）；支持活动 L3 的状态/证据/复核日期、论点整组重写、预警开启/更新/pending/resolved，以及未豁免 Tier 的 pending/completed 状态。一个请求内多项变更全成全败，同请求重提返回原修订，版本冲突返回 409。
@@ -82,4 +84,9 @@ v15 的 `account_analysis_history` 按持仓周期 `holding_id` 保存完整快�
 
 `kind=alert_open` 接收 level/category/reason_code/reason/evidence/review_due。未解除的同原因预警复用实体，pending 不会被重复开启改为 active；流动性延期预警已有复核期限不延后。已解除后再次出现同原因则创建新实体。复核期限接受日期或带时区时间。
 
-开发验证可显式设置 `POLICY_V0_ANALYSIS_SHADOW=1` 后运行 v0 只读命令。连接内临时表保留旧 schema 和索引，并投影最新分析历史，因此原监控、L3 和预警读者不用改计算规则；主库以只读模式打开，投影完成后禁止临时表写入。所有活动持仓须有一致基线，缺失、身份漂移或快照哈希不一致会拒绝读取；已关闭周期保留旧投影。该开关不自动注入生产或工具子进程，默认旧来源不变。持续镜像后的显式基线协调和生产读源切换仍待完成。
+开发验证可显式设置 `POLICY_V0_ANALYSIS_SHADOW=1` 后运行 v0 只读命令。连接内临时表保留旧 schema 和索引，并投影最新分析历史，因此原监控、L3 和预警读者不用改计算规则；主库以只读模式打开，投影完成后禁止临时表写入。所有活动持仓须有一致基线，缺失、身份漂移或快照哈希不一致会拒绝读取；已关闭周期保留旧投影。该开关不自动注入生产或工具子进程，默认旧来源不变。生产读源切换仍待验收。
+
+
+镜像刷新后的协调先调用 `account.analysis.preview`，再向 `account.analysis.rebase` 提交 `rebase` 对象：`choices` 每项包含 holding_id/expected_version/legacy_hash/select（legacy 或 shadow），批次提供 evidence_hashes/reason。每个周期选择整组状态；需要组合判断时，可先采用镜像，再用有证据的状态更新或论点重写表达保留意见。服务按请求时版本和预览哈希核对，任何漂移或失败整批回滚；同请求重试复用原回执，即使镜像之后再次更新。
+
+协调以 `legacy_rebase` 追加，保存本次镜像全文、选择、来源凭据和证据，最初基线与旧影子版本保持可查。后续更新和只读投影核对最近确认的镜像。新增编号若与其他持仓周期冲突，会列出冲突周期，允许在同一批协调多个周期；整批候选投影的实体编号必须唯一。公司身份变化、已关闭周期或损坏的基线拒绝协调。完整性巡检检查协调内容及跨周期回执齐全。

@@ -440,9 +440,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 
 @contextmanager
-def transaction(conn: sqlite3.Connection):
+def transaction(conn: sqlite3.Connection, *, immediate: bool = True):
     """Commit every statement inside together, or none (connections are in autocommit mode)."""
-    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN DEFERRED")
     try:
         yield
         conn.execute("COMMIT")

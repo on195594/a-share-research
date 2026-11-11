@@ -276,9 +276,8 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
         if request.expected_version != latest['version']:
             raise ledger.LedgerError(f"分析状态版本冲突，当前版本 {latest['version']}")
         # A mirror refresh must not silently make a shadow revision refer to another legacy state.
-        baseline = conn.execute('SELECT snapshot FROM account_analysis_history WHERE holding_id=? AND version=0',
-                                (holding_id,)).fetchone()
-        if json.loads(baseline[0]) != _capture(conn, holding_id):
+        from a_share_research.account.analysis_rebase import baseline
+        if baseline(conn, holding_id) != _capture(conn, holding_id):
             raise ledger.LedgerError('旧分析基线已变化，须先显式核对影子分支')
         for sha in request.evidence_hashes:
             evidence.verify(evidence_directory, sha)
@@ -319,7 +318,7 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
 def inspect(conn) -> list[str]:
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_analysis_history'").fetchone():
         return []
-    problems, previous = [], {}
+    problems, previous, rebases = [], {}, {}
     cursor = conn.execute('SELECT * FROM account_analysis_history ORDER BY holding_id,version')
     columns = [c[0] for c in cursor.description]
     for values in cursor:
@@ -349,9 +348,24 @@ def inspect(conn) -> list[str]:
                 parsed = Update.model_validate(request)
                 if row['version'] == 0 or parsed.expected_version != row['version'] - 1 or hashes != parsed.evidence_hashes:
                     problems.append(label + '：追加请求版本或证据不一致')
+            elif row['source'] == 'legacy_rebase':
+                from a_share_research.account.analysis_rebase import Rebase
+                parsed = Rebase.model_validate(request['rebase'])
+                choice = next((c for c in parsed.choices if c.holding_id == row['holding_id']), None)
+                group = rebases.setdefault(request['rebase_hash'], ({c.holding_id for c in parsed.choices}, set()))
+                group[1].add(row['holding_id'])
+                expected_snapshot = request['legacy_snapshot'] if choice and choice.select == 'legacy' else json.loads(parent['snapshot']) if parent else None
+                if (not choice or not parent or choice.expected_version != row['version']-1
+                        or choice.legacy_hash != gate.digest(request['legacy_snapshot'])
+                        or request['rebase_hash'] != gate.digest(request['rebase'])
+                        or hashes != parsed.evidence_hashes or snapshot != expected_snapshot):
+                    problems.append(label + '：基线协调内容或版本不一致')
             else:
                 problems.append(label + '：未知来源')
         except (ValueError, TypeError, KeyError):
             problems.append(label + '：请求或快照非法')
         previous[row['holding_id']] = row
+    for expected, actual in rebases.values():
+        if expected != actual:
+            problems.append('分析协调批次缺少持仓周期回执')
     return problems

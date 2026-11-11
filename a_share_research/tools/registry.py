@@ -14,7 +14,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from a_share_research import api_keys, service, external_research, external_review
-from a_share_research.account import trades, ledger, evidence, analysis
+from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase
 
 
 class ToolError(Exception):
@@ -91,6 +91,10 @@ class AnalysisHistory(Analysis):
 
 class AnalysisUpdate(Analysis):
     update: analysis.Update
+
+
+class AnalysisRebase(Arguments):
+    rebase: analysis_rebase.Rebase
 
 
 class EvidenceUpload(Arguments):
@@ -170,6 +174,11 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('account.analysis.preview', '对照旧基线、当前镜像与影子结果，取得协调版本和哈希', frozenset({'assistant'}), Analysis, Payload,
+         lambda c, a: Payload(data=analysis_rebase.preview(c.connection, c.principal, a.holding_id)), account=True),
+    Tool('account.analysis.rebase', '显式选择镜像或影子结果，原子追加基线协调历史', frozenset({'assistant'}), AnalysisRebase, Payload,
+         lambda c, a: Payload(data=analysis_rebase.rebase(c.connection, c.principal, a.rebase,
+                              c.database.parent / 'account-evidence')), access='write', account=True),
     Tool('account.analysis.current', '读取持仓周期最新影子分析状态', frozenset({'assistant'}), Analysis, Payload,
          lambda c, a: Payload(data=analysis.current(c.connection, c.principal, a.holding_id)), account=True),
     Tool('account.analysis.history', '分页读取不可变分析历史，旧基线不冒充完整历史', frozenset({'assistant'}), AnalysisHistory, Payload,

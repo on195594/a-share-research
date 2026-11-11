@@ -11,6 +11,7 @@ import sqlite3
 
 from a_share_research import gate
 from a_share_research.account.analysis import TABLES
+from a_share_research.account.analysis_rebase import baseline
 from a_share_research.account.mirror import MANIFEST
 
 
@@ -43,7 +44,7 @@ def install(conn: sqlite3.Connection) -> None:
             parsed = [json.loads(row[2]) for row in rows]
             if any(gate.digest(snapshot) != row[3] for snapshot, row in zip(parsed, rows)):
                 raise ValueError('快照哈希不一致')
-            if parsed[0] != _legacy(conn, holding_id):
+            if baseline(conn, holding_id) != _legacy(conn, holding_id):
                 raise ValueError('旧分析基线已变化')
             latest = parsed[-1]
             if not isinstance(latest, dict) or set(latest) != set(TABLES):
