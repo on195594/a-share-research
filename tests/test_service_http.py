@@ -87,3 +87,17 @@ def test_report_schema_is_authenticated_and_describes_public_views(server):
                       "judgment_contract": JUDGMENT_CONTRACT, "report": report.json_schema(),
                       "views": {"compact": list(report.COMPACT_FIELDS), "card": list(report.CARD_FIELDS),
                                 "failed": list(report.FAILED_FIELDS)}}
+
+
+def test_persistent_roles_cannot_use_owner_token_for_research(server):
+    from a_share_research import api_keys
+    conn, client, url, *_ = server
+    for role in api_keys.ROLES:
+        token = api_keys.create(conn, 'role-' + role, role=role)
+        response = client.get(url + '/api/research/budget',
+                              headers={'Authorization': 'Bearer ' + token}, timeout=3)
+        assert response.status_code == (403 if role == 'owner' else 200)
+        key = api_keys.authenticate(conn, token)
+        conn.execute('DELETE FROM api_keys WHERE id=?', (key.key_id,))
+        assert client.get(url + '/api/research/budget',
+                          headers={'Authorization': 'Bearer ' + token}, timeout=3).status_code == 401

@@ -380,8 +380,13 @@ def _migrate_v10(conn: sqlite3.Connection) -> None:
                      " ON policy_activations BEGIN SELECT RAISE(ABORT, 'policy_activations is append-only'); END")
 
 
+def _migrate_v11(conn: sqlite3.Connection) -> None:
+    from a_share_research.api_keys import migrate_roles
+    migrate_roles(conn)
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10)
+              _migrate_v9, _migrate_v10, _migrate_v11)
 
 
 def now() -> str:

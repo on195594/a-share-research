@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
-from a_share_research import stock_codes
+from a_share_research import stock_codes, api_keys
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 
@@ -477,7 +477,9 @@ def api_session(request: Request) -> str:
     if not header.startswith("Bearer "):
         raise HTTPException(401, "需要研究 API bearer token")
     digest = _hash(header[7:])
-    if conn.execute("SELECT id FROM api_keys WHERE token_hash = ?", (digest,)).fetchone():
+    if principal := api_keys.authenticate(conn, header[7:]):
+        if principal.role == "owner":
+            raise HTTPException(403, "所有者管理凭据不能调用研究 API")
         key = "key:" + digest
     else:
         key = "agent:" + digest
