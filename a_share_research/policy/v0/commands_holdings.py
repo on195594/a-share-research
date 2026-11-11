@@ -2263,104 +2263,14 @@ def cmd_check_holdings(args: list[str] | None = None) -> None:
                WHERE reason_code='price_stop2_liquidity_defer'
                  AND status != 'resolved'"""
         ).fetchall()
+    from a_share_research.policy.v0.holdings_check_input import calculate
     if not holdings:
         print("暂无持仓")
         return
-
     now = domain.cst_now()
-    today_str = now.strftime("%Y-%m-%d")
-
-    print(f"\n{'─' * 72}")
-    print(f"  持仓止损检查  现价查询时间: {now.strftime('%Y-%m-%d %H:%M')}")
-    print(f"{'─' * 72}")
-
-    codes = [h[1] for h in holdings]
+    codes = [row[1] for row in holdings]
     quotes = market_quotes.fetch_current_price_quotes(codes)
     market_snapshot = market_quotes.fetch_market_limit_down_snapshot()
-    existing_defers = {}
-    for holding_id, evidence, review_due in defer_rows:
-        try:
-            parsed = json.loads(evidence) if evidence else {}
-        except (TypeError, json.JSONDecodeError):
-            parsed = {}
-        if isinstance(parsed, dict):
-            existing_defers[holding_id] = {
-                key: value
-                for key, value in {
-                    "defer_started_at": parsed.get("defer_started_at"),
-                    "review_due": parsed.get("review_due") or review_due,
-                    "original_price": parsed.get("original_price"),
-                    "original_stop_loss_20": parsed.get("original_stop_loss_20"),
-                }.items()
-                if value is not None
-            }
-
-    alerts = []
-    governance_alerts = []
-    for holding_id, code, name, _cost, sl15, sl20 in holdings:
-        label, status, is_alert = domain.evaluate_holding_status(
-            code, name, sl15, sl20, quotes.get(code), today_str, now
-        )
-        fundamentals = store.get_fundamentals(code)
-        gate_values = (
-            [
-                fundamentals.get(name)
-                for name in ("regulatory_gate", "roe_structural_gate", "cash_flow_gate")
-            ]
-            if fundamentals
-            else []
-        )
-        failed_gates = [
-            gate
-            for gate in gate_values
-            if isinstance(gate, dict)
-            and gate.get("status") not in {"clear", "not_applicable"}
-        ]
-        if failed_gates:
-            reasons = ", ".join(
-                str(gate.get("reason_code", "incomplete")) for gate in failed_gates
-            )
-            governance_alerts.append((label, reasons))
-            status += f" | 🔴 风险门冻结加仓({reasons})"
-        quote = quotes.get(code)
-        existing_defer = existing_defers.get(holding_id)
-        p3 = risk_gates.liquidity_shock_gate(
-            {
-                "stop_loss_triggered": bool(
-                    existing_defer or is_alert and quote and quote.price <= sl20
-                ),
-                "stop_loss_20": sl20,
-                "quote": {
-                    "price": quote.price,
-                    "source": quote.source,
-                    "suspended": quote.suspended,
-                    "limit_down_locked": quote.limit_down_locked,
-                    "trading_status": quote.trading_status,
-                }
-                if quote
-                else {},
-                "market_snapshot": market_snapshot,
-                "existing_defer": existing_defer,
-                "now": now,
-            }
-        )
-        if p3["status"] in {"deferred", "untradeable", "incomplete"}:
-            status = status.replace("建议立即止损", "暂不可执行")
-            status += f" | P3:{p3['status']}({p3['reason_code']})"
-            is_alert = True
-        if is_alert:
-            alerts.append((label, status))
-        print(f"  {label:<16} {status}")
-
-    print()
-    if alerts:
-        print(f"  共 {len(alerts)} 项预警，请及时处理：")
-        for label, status in alerts:
-            print(f"    {label}: {status}")
-    if governance_alerts:
-        print(f"  共 {len(governance_alerts)} 项风险门复核，已冻结新增风险敞口：")
-        for label, reasons in governance_alerts:
-            print(f"    {label}: {reasons}（不自动卖出/清仓）")
-    if not alerts and not governance_alerts:
-        print("  无预警，所有持仓价格在止损线之上")
-    print()
+    fundamentals = {code: store.get_fundamentals(code) for code in codes}
+    result = calculate(holdings, defer_rows, quotes, fundamentals, market_snapshot, now)
+    print(result['stdout'], end='')

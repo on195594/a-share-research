@@ -244,6 +244,11 @@ def _daily_brief(ctx: Context, args: PolicyMonitor) -> Payload:
     return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id))
 
 
+def _holdings_check(ctx: Context, args: PolicyMonitor) -> Payload:
+    from a_share_research.policy.holdings_check import run
+    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id))
+
+
 def _benchmark(ctx: Context, args: PolicyBenchmark) -> Payload:
     from a_share_research.policy.benchmark import run
     return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id, args.end))
@@ -280,6 +285,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.holdings_check', '采集并保存原持仓检查、风险门和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
+         frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True),
     Tool('policy.portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
          frozenset({'assistant'}), PolicyPortfolioScenario, Payload, _portfolio_scenario, access='write', account=True),
     Tool('policy.position_size', '引用已保存的服务端监控评估，按拟买入条件保存风险预算定仓；不刷新行情、不形成交易动作',

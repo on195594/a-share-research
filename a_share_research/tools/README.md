@@ -218,6 +218,12 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 情景回执 mode=`derived_portfolio_scenario`、上下文版本 7，输入保存同样的 snapshot/父回执引用/参数/提案，结果字段为 status、exit_code、stdout、stderr、scenario，可用 `policy.scenario_evaluation.evaluate` 离线复算。同请求不能在仓位与情景工具之间复用，账户或政策变化后新计算必须重新监控，已保存回执仍可查询。两种派生计算共用 policy.derived 的父子一致性检查及原子留存；旧上下文 6 记录保持可读。未新增数据库列，兼容回退版须同时支持版本 6、7。
 
+`policy.holdings_check` 保存原 check-holdings 的独立检查语义，参数为 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。固定只读采集进程保存未关闭持仓的原成本/两档止损线、未解决的流动性延迟记录（evidence 和 review_due）、逐代码报价、实际使用的基本面缓存 payload（含命中时的 _cache_meta，未命中或过期为 null）、全市场快照及检查时钟。原数据库允许的空值与数值边界不另行伪造成新政策；不能执行原计算或不能规范化保存的输入拒绝。
+
+新旧入口共用 v0 holdings_check_input 纯函数，保留盘中/收盘/旧日报价提示、三类风险门、已有延迟起点与 review_due 回退、24 小时后恢复或不可交易等分支。当前 v0 全市场快照接口实际返回 null，服务保留这一缺口，不假造跌停家数或据测试中的 501 家场景宣称已有实时市场证据。已有延迟记录可独立参与原复核流程；此检查不自动新增、推进或解决预警记录。
+
+回执 mode=`service_holdings_check_capture`、上下文版本 8；输入与逐项 checks（含 p3 和 governance_gates）、stdout/stderr/exit_code 一并留存，可用 `policy.holdings_check_evaluation.evaluate` 离线复算。status=ready 只表示检查完成，不表示行情齐全或允许交易，须读取逐项状态、P3 缺口与原时点；无持仓为 no_holdings。旧 CLI 正文保持原样，不能把它与普通 monitor 的聚合输出视为逐字等价。采集沿用 25 秒隔离预算，不传行情或模型凭据，不取研究卡片；政策/来源漂移与重试规则同 monitor。未增加数据库列，回退合并版须理解上下文 8。
+
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
 mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256。当前只有该绑定的读取和验证，没有生产切换写入器，私有测试中设置绑定不算完成切换。

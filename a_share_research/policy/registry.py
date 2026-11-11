@@ -165,6 +165,9 @@ def _capture_mode(context, activation_id, bundle):
         from a_share_research.policy.benchmark import _end
         request = dict(action='policy.benchmark', expected_activation_id=activation_id, end=_end(bundle.get('end')))
         mode = 'service_benchmark_capture'
+    elif version == 8:
+        request = dict(action='policy.holdings_check', expected_activation_id=activation_id)
+        mode = 'service_holdings_check_capture'
     elif version in (6, 7):
         from a_share_research.policy.position_request import Reference
         if version == 6:
@@ -188,7 +191,7 @@ def _capture_mode(context, activation_id, bundle):
     source = context.get('source', {})
     if not isinstance(source, dict):
         raise PolicyError('采集来源须为对象')
-    if version == 1 or version in (3, 4, 5, 6, 7) and source.get('mode') == 'mirror':
+    if version == 1 or version in (3, 4, 5, 6, 7, 8) and source.get('mode') == 'mirror':
         if source.get('mode') != 'mirror':
             raise PolicyError('旧采集来源须为镜像')
     else:
