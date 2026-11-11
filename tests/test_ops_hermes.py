@@ -51,7 +51,8 @@ def test_invalid_state_rejected(milestones, plan):
 @pytest.mark.parametrize("branch", ["overdue", "soon", "unreleased"])
 def test_render_real_rows(milestones, plan, branch):
     rows = milestones.parse_milestones(plan)
-    row = rows[0]
+    # Delivered stages legitimately leave the overdue/upcoming lists as the plan advances.
+    row = rows[0] if branch == "unreleased" else next(item for item in rows if item["state"] != "已交付")
     today = row["due"]
     if branch == "overdue":
         today += timedelta(days=1)

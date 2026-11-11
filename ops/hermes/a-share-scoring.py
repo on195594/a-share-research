@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Weekly Hermes no-agent scoring; stdout is delivered by Hermes, silence means no change."""
 import json
+import fcntl
 import os
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +15,105 @@ CONTAINER = 'a-share-research-worker'
 CACHE = '/tmp/a-share-scoring'
 STATE = Path.home() / '.local/state/a-share-scoring/state.json'
 HORIZONS = ('20d', '60d', '120d')
+RUN_SECONDS = 540
+CLEANUP_MARGIN = 10
+OUTPUT_ARGUMENT = '__ASHARE_SCORING_OUTPUT__'
+
+# Runs inside the container, so killing the host docker CLI cannot orphan an
+# unbounded scorer. Stdlib only: also usable with prior compatible worker images.
+SUPERVISOR = r'''
+import ctypes, json, math, os, signal, subprocess, sys, tempfile, time
+from pathlib import Path
+
+deadline = float(sys.argv[1])
+if not math.isfinite(deadline) or deadline <= time.time():
+    sys.exit(124)
+# Adopt forked descendants so cleanup can reap them, even when the scorer exits first.
+if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+    sys.exit(125)
+
+cancelled = False
+
+def cancel(signum, frame):
+    global cancelled
+    cancelled = True
+
+def signal_group(process, signum):
+    try:
+        os.killpg(process.pid, signum)
+    except ProcessLookupError:
+        pass
+
+def reap():
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return True
+        if pid == 0:
+            return False
+
+def stop(process):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal_group(process, signal.SIGTERM)
+    grace = time.monotonic() + 3
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        pass
+    # Do not reap Popen's own child behind its back.
+    if process.poll() is not None:
+        while time.monotonic() < grace:
+            if reap():
+                return
+            time.sleep(.01)
+    signal_group(process, signal.SIGKILL)
+    process.wait(timeout=2)
+    end = time.monotonic() + 2
+    while time.monotonic() < end:
+        if reap():
+            return
+        time.sleep(.01)
+    raise RuntimeError('descendant cleanup incomplete')
+
+signal.signal(signal.SIGTERM, cancel)
+signal.signal(signal.SIGINT, cancel)
+status = 125
+try:
+    with tempfile.TemporaryDirectory(prefix='ashare-score-') as folder:
+        directory = Path(folder)
+        output = directory / 'result.json'
+        if os.environ.get('DATA_DIR'):
+            Path(os.environ['DATA_DIR']).mkdir(mode=0o700, parents=True, exist_ok=True)
+        command = [str(output) if arg == '__ASHARE_SCORING_OUTPUT__' else arg for arg in sys.argv[2:]]
+        remaining = deadline - time.time()
+        if remaining <= 0 or cancelled:
+            sys.exit(124)
+        end = time.monotonic() + remaining
+        process = subprocess.Popen(command,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            while True:
+                remaining = end - time.monotonic()
+                if cancelled or remaining <= 0:
+                    status = 124
+                    break
+                try:
+                    status = process.wait(timeout=min(.1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            stop(process)
+        if status == 0:
+            # No separate cat request, and no previous invocation's output can be reused.
+            data = json.loads(output.read_text())
+            print(json.dumps(data, ensure_ascii=False, allow_nan=False))
+except Exception:
+    status = 125
+sys.exit(status if status >= 0 else 128 - status)
+'''
 
 
 def signature(name, data):
@@ -101,17 +202,18 @@ def digest(data, previous, day):
     return '\n'.join(lines)
 
 
-def command(args):
-    return subprocess.run(['docker', 'exec', *args], check=True, capture_output=True,
-                          text=True, timeout=20 * 60).stdout
-
-
-def score(name, module, flags):
-    output = f'{CACHE}/{name}.json'
-    # Separate cache dirs: the scorers run concurrently and must not share cache writes.
-    command(['-e', f'DATA_DIR={CACHE}/{name}', CONTAINER, 'python', '-m',
-             f'a_share_research.{module}', '--database', '/data/app.db', *flags, '--json', output])
-    return json.loads(command([CONTAINER, 'cat', output]))
+def score(name, module, flags, wall_deadline, monotonic_deadline):
+    remaining = monotonic_deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(name, RUN_SECONDS)
+    result = subprocess.run(['docker', 'exec', '-e', f'DATA_DIR={CACHE}/{name}',
+        CONTAINER, 'python', '-c', SUPERVISOR, str(wall_deadline),
+        'python', '-m', f'a_share_research.{module}', '--database', '/data/app.db', *flags,
+        '--json', OUTPUT_ARGUMENT], capture_output=True, text=True, timeout=remaining + CLEANUP_MARGIN)
+    if result.returncode == 124:
+        raise subprocess.TimeoutExpired(name, RUN_SECONDS)
+    result.check_returncode()
+    return json.loads(result.stdout)
 
 
 def save_state(current):
@@ -130,19 +232,19 @@ def save_state(current):
             os.unlink(path)
 
 
-def main():
+def run():
     stage = 'state'
+    wall_deadline, monotonic_deadline = time.time() + RUN_SECONDS, time.monotonic() + RUN_SECONDS
     try:
         previous = json.loads(STATE.read_text()) if STATE.exists() else None
         if previous is not None and not isinstance(previous, dict):
             raise ValueError('state must be an object')
-        stage = '初始化'
         stages = (('V0', 'validation', []), ('V1', 'validation', ['--forecasts']),
                   ('H1/H3', 'validation', ['--hypotheses']), ('A3', 'zones', []))
-        command([CONTAINER, 'mkdir', '-p', *(f"{CACHE}/{s.replace('/', '-')}" for s, _, _ in stages)])
-        # Hermes kills cron scripts after cron.script_timeout_seconds (600 s since 11-02); parallel keeps it near 3 min.
-        with ThreadPoolExecutor(len(stages)) as pool:
-            futures = [pool.submit(score, s.replace('/', '-'), module, flags) for s, module, flags in stages]
+        # Every cohort shares one deadline; queued work cannot restart its budget.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(score, s.replace('/', '-'), module, flags, wall_deadline, monotonic_deadline)
+                       for s, module, flags in stages]
         data = {}
         for (stage, _, _), future in zip(stages, futures):
             result = future.result()
@@ -161,7 +263,7 @@ def main():
             print(text)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError, StopIteration) as exc:
         if isinstance(exc, subprocess.TimeoutExpired):
-            reason = '命令超时（20分钟）'
+            reason = '整次记分超过 540 秒预算；原通知状态未推进'
         elif isinstance(exc, subprocess.CalledProcessError):
             reason = f'命令退出码 {exc.returncode}'
         elif isinstance(exc, FileNotFoundError):
@@ -171,6 +273,20 @@ def main():
         else:
             reason = 'JSON 格式或字段无效'
         print(f'【判断记分】任务未完成：{stage} {reason}')
+
+
+def main():
+    try:
+        STATE.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(STATE.with_suffix('.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
+        with os.fdopen(descriptor, 'a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return  # Another invocation owns the caches and notification state.
+            run()
+    except OSError as exc:
+        print(f'【判断记分】任务未完成：状态锁系统读写失败（errno={exc.errno}）')
 
 
 if __name__ == '__main__':
