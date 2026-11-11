@@ -154,6 +154,23 @@ uv run python -m a_share_research.backup restore /absolute/private/new-backup /a
 
 默认从数据库同目录的 `pdf/`、`account-evidence/` 读取原件；副本验收可用 `--pdf-directory`、`--evidence-directory` 明确来源。目标目录必须不存在，目录/文件分别为 0700/0600；操作不会覆盖现库。恢复只是生成经校验的独立副本，不启动服务、不自动迁移、不抬升序列，也不代表允许丢弃备份之后的写入。实际数据恢复仍按[数据层回退步骤](docs/data-foundation.md#7-验收与治理规则)处理高水位与引用；合一切换后应用回退保持新账本为唯一事实来源，见[合一回退规则](docs/consolidation.md#7-回退与文档收敛)。
 
+账户切换使用本地 owner 入口，要求 `ASHARE_OWNER_TOKEN` 已通过私有环境提供。按[合一退出条件](docs/consolidation.md)完成验收、停用并排空旧宿主与定时任务后，先运行末次镜像，核对资金/成本零版本期初、全部旧持仓及事件历史、账户周期分析与原始证据，再登记并启用匹配当前代码及账户范围的政策。正式切换日期和阶段状态见[实施计划](docs/implementation-plan.md)；命令只检查技术状态，不证明券商资金完整、五交易日对照通过或允许提前启用宿主。
+
+```bash
+DATA_DIR=/absolute/new-data uv run python -m a_share_research.account.mirror --source /absolute/old-state/cache.db
+uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json prepare \
+  --source /absolute/old-state/cache.db --state-directory /absolute/old-state \
+  --account-id confirmed-account --account-scope confirmed-scope
+uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json fence
+uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json commit
+```
+
+`prepare` 只读既有数据库，计划以 0600 新建于 0700 私有目录，不覆盖旧计划。`--state-directory` 必须是旧运行时实际提醒状态目录，可与旧库目录不同。若旧应用目录还存放备份、日志或发布记录，逐项追加 `--preserve-entry /absolute/old-state/entry`，明确保留每个顶层旁支；不递归读取或修改其内容和权限，也不证明旁支内写入者已停。未列明的新条目、缺失保留项、符号链接数据库、共享目录和 HOME 均拒绝，不能把账户文件列为保留项。新库和计划必须位于封锁目录之外。
+
+`fence` 再核对镜像指针、源哈希、期初/分析摘要、提醒状态及生效政策，给旧业务表和迁移表安装持久写入拒绝触发器，排空 WAL、转为 DELETE 日志，并将账户文件改为 0400、专用目录改为 0500；不会改旧运行时源码。`commit` 必须证明完整封锁仍在，并在新库事务内比较更新镜像指针为明确的账户/范围绑定。不新增表、不迁移、不自动启用政策或服务；准备后数据、政策或文件身份变化即拒绝。期初或旧分析基线过期时须重新协调和准备，不改写冻结历史。
+
+中途失败保持已有封锁，排空连接或修复原因后可重试；需要新准备时使用新的计划文件名。同一已绑定账户的 `commit` 重试只返回原绑定时间，不覆盖后续入账或政策；不同绑定被拒。重复回执不表示重新验收当前账本。切换成功后镜像入口拒绝运行，应用回退继续使用新账本，不能恢复旧写入口。权限与触发器用于防止旧进程误写，不防御属主主动改权限、重命名目录或删除触发器。
+
 价格参考支持沪深主板、创业板（300/301）和科创板（688），继续排除 ST、退市风险股及北交所；公式与旧 `price-reference-v2` 记录保持兼容。
 
 ## 候选初筛

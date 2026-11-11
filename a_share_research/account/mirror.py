@@ -83,6 +83,24 @@ def digest(content: dict) -> str:
                                 sorted(content["files"].items()))).encode()).hexdigest()
 
 
+def _check_source(conn: sqlite3.Connection) -> None:
+    """Validate the legacy manifest inside an existing caller transaction."""
+    found = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
+    expected = set(MANIFEST) | SKIPPED_TABLES
+    if found != expected:
+        raise MirrorError(f"来源表与迁移清单不一致：多出 {sorted(found - expected)}，缺少 {sorted(expected - found)}")
+    for table, columns in MANIFEST.items():
+        actual = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        listed = set(columns) | set(DROPPED.get(table, ()))
+        if actual != listed:
+            raise MirrorError(f"来源表 {table} 的列与迁移清单不一致：多出 {sorted(actual - listed)}，"
+                              f"缺少 {sorted(listed - actual)}")
+        for column in DROPPED.get(table, ()):
+            if conn.execute(f"SELECT 1 FROM {table} WHERE {column} IS NOT NULL LIMIT 1").fetchone():
+                raise MirrorError(f"来源列 {table}.{column} 出现数据，清单把它列为不迁移，需要先更新清单")
+
+
 def read_source(path: Path) -> dict:
     """One consistent snapshot of the old account database, after checking it still has the manifest's shape."""
     if not path.is_file():
@@ -90,20 +108,7 @@ def read_source(path: Path) -> dict:
     source = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
     try:
         source.execute("BEGIN")  # every read below sees the same committed state
-        found = {row[0] for row in source.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")}
-        expected = set(MANIFEST) | SKIPPED_TABLES
-        if found != expected:
-            raise MirrorError(f"来源表与迁移清单不一致：多出 {sorted(found - expected)}，缺少 {sorted(expected - found)}")
-        for table, columns in MANIFEST.items():
-            actual = {row[1] for row in source.execute(f"PRAGMA table_info({table})")}
-            listed = set(columns) | set(DROPPED.get(table, ()))
-            if actual != listed:
-                raise MirrorError(f"来源表 {table} 的列与迁移清单不一致：多出 {sorted(actual - listed)}，"
-                                  f"缺少 {sorted(listed - actual)}")
-            for column in DROPPED.get(table, ()):
-                if source.execute(f"SELECT 1 FROM {table} WHERE {column} IS NOT NULL LIMIT 1").fetchone():
-                    raise MirrorError(f"来源列 {table}.{column} 出现数据，清单把它列为不迁移，需要先更新清单")
+        _check_source(source)
         return _read(source, path.resolve().parent)
     finally:
         source.close()
