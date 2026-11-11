@@ -9,10 +9,10 @@ import tempfile
 import time
 from dataclasses import dataclass
 from functools import cache
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+from a_share_research import core
 from a_share_research.contract import JUDGMENT_CONTRACT, SURFACE_SHA256
 
 SCRIPT = Path(__file__).with_name("pi_infer.mjs")
@@ -62,7 +62,7 @@ def application_identity() -> dict:
              if path.is_file() and path.suffix in (".py", ".mjs", ".html", ".css")}
     return {
         "application_sha256": hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest(),
-        "a_stock_lib_version": version("a-stock-lib"),
+        "a_stock_lib_version": core.__version__,  # merged library, frozen at its last release
         "python_version": platform.python_version(),
     }
 

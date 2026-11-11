@@ -55,6 +55,6 @@ def _check_dependency(path: Path, target: str) -> None:
         return
     dependency = target.split(".")[1]
     if path.name == "market.py":
-        assert dependency in {"db", "companies"}, target
+        assert dependency in {"db", "companies", "core"}, target  # core is the merged provider library
     if path.name == "sources.py":
         assert dependency != "screening", target

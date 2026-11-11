@@ -15,12 +15,13 @@ name = "a-share-research"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "a-stock-lib", extra = ["tushare"] },
     { name = "fastapi" },
     { name = "jinja2" },
+    { name = "pandas" },
     { name = "pydantic" },
     { name = "python-multipart" },
     { name = "requests" },
+    { name = "tushare" },
     { name = "uvicorn" },
 ]
 
@@ -32,12 +33,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "a-stock-lib", extras = ["tushare"], url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.156.4" },
     { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "pandas" },
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.32" },
+    { name = "tushare", specifier = "==1.4.29" },
     { name = "uvicorn", specifier = ">=0.54.0" },
 ]
 
@@ -46,30 +48,6 @@ dev = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.1.1" },
 ]
-
-[[package]]
-name = "a-stock-lib"
-version = "0.10.2"
-source = { url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl" }
-dependencies = [
-    { name = "pandas" },
-]
-wheels = [
-    { url = "https://github.com/on195594/a-stock-lib/releases/download/v0.10.2/a_stock_lib-0.10.2-py3-none-any.whl", hash = "sha256:630d9aac557a62a6c475b51d7a6c3e94d1953928dd9473f4604c1d910b301bcf" },
-]
-
-[package.optional-dependencies]
-tushare = [
-    { name = "tushare" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pandas" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "tushare", marker = "extra == 'tushare'", specifier = "==1.4.29" },
-]
-provides-extras = ["tushare", "dev"]
 
 [[package]]
 name = "annotated-doc"

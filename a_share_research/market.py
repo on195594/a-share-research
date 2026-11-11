@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 import tushare as ts
-from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
+from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
 
 from a_share_research import db
 from a_share_research.db import SHANGHAI

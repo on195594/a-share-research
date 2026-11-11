@@ -29,6 +29,6 @@ def infer_ts_code(code: str) -> str:
     if suffix is not None:
         return f"{key}.{suffix}"
     # Deferred: the provider module pulls pandas, which code parsing does not otherwise need.
-    from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
+    from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
 
     return to_tushare_stock_code(key)

@@ -12,9 +12,9 @@ from functools import cache
 from pathlib import Path
 
 import pandas as pd
-from a_stock_lib.providers.tushare_financials import TushareFinancialProvider
-from a_stock_lib.providers.tushare_quotes import to_tushare_stock_code
-from a_stock_lib.providers.tushare_valuation import TushareValuationProvider
+from a_share_research.core.providers.tushare_financials import TushareFinancialProvider
+from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
+from a_share_research.core.providers.tushare_valuation import TushareValuationProvider
 
 from a_share_research.db import DATA, SHANGHAI
 from a_share_research import market, stock_codes

@@ -20,7 +20,7 @@ def test_web_does_not_load_market_dependencies(tmp_path):
         [sys.executable, "-c", """
 import sys
 import a_share_research.web
-for name in ("pandas", "tushare", "a_stock_lib", "numpy"):
+for name in ("pandas", "tushare", "a_share_research.core.providers", "numpy"):
     assert name not in sys.modules, f"web loaded {name}"
 """],
         cwd=PACKAGE.parent,
