@@ -26,16 +26,16 @@
 | 财务序列与报表核验 | `test_financial_series.py` |
 | 价格参考与技术纪律 | `test_price.py` |
 | 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py`、`test_company_card.py` |
-| 引文、复核账本、接续报告与公司法定事项 | `test_check.py`、`test_review_evidence.py`、`test_open_questions.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_companies.py` |
-| 精确计算与研究工具 | `test_research_tools.py`、`test_calculation_assumptions.py`、`test_valuation.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证假设链传播、长期补充回报、分情景引用、共享补证、修订调用储备、来源冲突及跨材料账本；不代表真实模型语义验收或研究通过率） |
+| 引文、复核账本、接续报告与公司法定事项 | `test_check.py`、`test_review_evidence.py`、`test_open_questions.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_companies.py`、`test_company_identity.py`、`test_stock_codes.py` |
+| 精确计算、报告载荷与研究工具 | `test_research_tools.py`、`test_calculation_assumptions.py`、`test_conditions.py`、`test_report.py`、`test_valuation.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证假设链传播、长期补充回报、分情景引用、共享补证、修订调用储备、来源冲突及跨材料账本；不代表真实模型语义验收或研究通过率） |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py`、`test_batch_c.py`、`test_monthly_batch.py` |
 | 历史回测 | `test_backtest.py` |
-| 判断记分、投资立场与估值诊断（V0–V3、V5、A1、A3、A4） | `test_validation.py`、`test_agenda.py`、`test_stance.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py`、`test_r2_queries.py` |
+| 判断记分、投资立场与估值诊断（V0–V3、V5、A1、A3、A4、契约面锁定） | `test_validation.py`、`test_judgment_contract.py`、`test_agenda.py`、`test_stance.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py`、`test_r2_queries.py` |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py`、`test_content_search.py` |
-| 数据库迁移与调用日志存储 | `test_db.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、巡检互变） |
-| TuShare 缓存与任务恢复 | `test_tushare_cache.py`、`test_worker_recovery.py`、`test_material_cache.py`（真实财报响应、SQLite 恢复事务和材料快照；`test_integrity.py` 核对 PDF 文本缓存复用与重建） |
-| 模型运行时 | `test_model_preflight.py`、`test_model_complete.py`（在 worker 环境下运行，验证 Node 预检、单次推理的错误与运行身份；付费实测需 `PI_LIVE_TEST=1`） |
-| API、会话与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py`、`test_web_connection.py` |
+| 数据库迁移、治理基底与历史隔离 | `test_db.py`、`test_data_foundation.py`、`test_diagnostic_isolation.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、巡检互变） |
+| TuShare 缓存与任务恢复 | `test_tushare_cache.py`、`test_market_boundary.py`、`test_worker_recovery.py`、`test_material_cache.py`（真实财报响应、SQLite 恢复事务和材料快照；`test_integrity.py` 核对 PDF 文本缓存复用与重建） |
+| 模型运行时与运行上限保护 | `test_model_preflight.py`、`test_model_complete.py`、`test_limits.py`（在 worker 环境下运行，验证 Node 预检、单次推理的错误、运行身份与分层预算上限；付费实测需 `PI_LIVE_TEST=1`） |
+| API、会话、分层隔离与部署运维 | `test_service_http.py`、`test_service_delivery.py`、`test_layering.py`、`test_api_keys.py`、`test_login_token.py`、`test_integrity.py`、`test_deploy.py`、`test_ops_hermes.py`、`test_web_connection.py` |
 
 完整离线回归：`nice -n 15 uv run pytest -x -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。已有 `.venv` 但离线缓存缺失时，可用 `uv run --no-sync --offline pytest ...` 复用已安装依赖；这不验证锁文件安装。
 
