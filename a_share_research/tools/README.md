@@ -90,3 +90,12 @@ v15 的 `account_analysis_history` 按持仓周期 `holding_id` 保存完整快�
 镜像刷新后的协调先调用 `account.analysis.preview`，再向 `account.analysis.rebase` 提交 `rebase` 对象：`choices` 每项包含 holding_id/expected_version/legacy_hash/select（legacy 或 shadow），批次提供 evidence_hashes/reason。每个周期选择整组状态；需要组合判断时，可先采用镜像，再用有证据的状态更新或论点重写表达保留意见。服务按请求时版本和预览哈希核对，任何漂移或失败整批回滚；同请求重试复用原回执，即使镜像之后再次更新。
 
 协调以 `legacy_rebase` 追加，保存本次镜像全文、选择、来源凭据和证据，最初基线与旧影子版本保持可查。后续更新和只读投影核对最近确认的镜像。新增编号若与其他持仓周期冲突，会列出冲突周期，允许在同一批协调多个周期；整批候选投影的实体编号必须唯一。公司身份变化、已关闭周期或损坏的基线拒绝协调。完整性巡检检查协调内容及跨周期回执齐全。
+
+
+## 旧持仓周期重放诊断
+
+`account.lifecycle.replay` 接收 `holding_id`，沿用 assistant 权限与 `account_shadow_enabled` 开关，只读返回原持仓/事件、重放字段、逐字段差异及卖出盈亏差异。经济引擎按原 event_date/id 顺序用 Decimal 计算加权成本、股数、分红、卖出净额及已实现盈亏；v0 适配层计算参考成本和主仓位字段。买入费用进入经济成本，单独现金分红保留为收入。日期精度、推断事件标记与原 notes 随结果保留。
+
+除权调整需可解释的 DPS/送转记录，并交叉核对实际股数和调整后参考成本；无法解释时返回 `status=incomplete`。同日分红逐笔保留，同时列出 DPS 推导额与同日现金记录差异，关联状态为未记录。旧止损线从原快照保留，当前政策重算只用于列出差异；历史政策身份未记录时不会假定已知。
+
+结果的 `projection_scope=historical_lifecycle`。经济金额以十进制字符串输出；保存字段和事件推导字段分别列明。关闭周期原表残留股数会在 differences 中显示。此入口是旧历史诊断；新 journal 的持续投影还需显式期初成本、周期身份和新开仓政策元数据。历史回放一致不能补足账户期初现金、资金划转或真实费用证据，也不能替代完整券商对账。
