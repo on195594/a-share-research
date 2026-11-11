@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from a_share_research.policy.v0 import paths
@@ -20,11 +18,10 @@ def isolated_cache_database(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("A_STOCK_CONFIG_FILE", str(tmp_path / "missing-runtime.env"))
-    external_path = paths.cache_db_path()
+    monkeypatch.delenv("POLICY_V0_DB", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))  # child processes resolve the default from it
+    assert paths.cache_db_path() == tmp_path / "data" / "app.db"  # tests/conftest.py isolates db.DATA
     database = tmp_path / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert paths.cache_db_path() == database
-    assert paths.cache_db_path() != external_path
     yield database
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
-    assert os.environ["CACHE_DB_PATH"] != str(external_path)

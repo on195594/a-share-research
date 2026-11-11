@@ -1,10 +1,12 @@
-"""Portable XDG paths and external configuration for the runtime."""
+"""Database location and external configuration for the runtime."""
 
 from __future__ import annotations
 
 import os
 import stat
 from pathlib import Path
+
+from a_share_research import db as app_db
 
 
 def _config_path() -> Path:
@@ -72,29 +74,16 @@ def research_connection() -> tuple[str, str]:
     return _setting("A_STOCK_RESEARCH_URL", ""), _setting("A_STOCK_RESEARCH_TOKEN", "")
 
 
-def _data_home() -> Path:
-    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+def cache_db_path() -> Path:
+    """The application database, where the account tables live beside the research tables.
+
+    POLICY_V0_DB selects another file for isolated tests and for evaluating a copied snapshot.
+    """
+    _read_config()  # a runtime config that is not private still fails closed before any database use
+    explicit = os.environ.get("POLICY_V0_DB")
+    return Path(explicit).expanduser() if explicit else Path(app_db.DATA) / "app.db"
 
 
 def state_dir() -> Path:
-    return Path(
-        _setting("A_STOCK_STATE_DIR", _data_home() / "a-stock-agent")
-    ).expanduser()
-
-
-def cache_db_path() -> Path:
-    return Path(_setting("CACHE_DB_PATH", state_dir() / "cache.db")).expanduser()
-
-
-def artifact_dir() -> Path:
-    return Path(
-        _setting("A_STOCK_ARTIFACT_DIR", state_dir() / "artifacts")
-    ).expanduser()
-
-
-def ensure_db_parent(path: str | Path) -> None:
-    """Create a private database parent without changing existing directories."""
-    parent = Path(path).expanduser().resolve().parent
-    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if parent.stat().st_mode & 0o077:
-        raise PermissionError(f"database parent must be private (0700): {parent}")
+    """Runtime state files (asset observation, alert de-duplication) stay beside the database."""
+    return cache_db_path().parent

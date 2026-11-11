@@ -1,13 +1,16 @@
 """One-way mirror of the old account database into the account tables, usable only before the cutover.
 
 A run reads every source table inside one read transaction, replaces the target tables inside one
-write transaction and commits only if the copied content hashes equal to what was read.
+write transaction and commits only if the copied content hashes equal to what was read. The asset
+observation file the old runtime keeps beside its database is carried along; a file cannot join the
+database transaction, so it is replaced last and a failed commit after that is repaired by the next run.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -48,14 +51,20 @@ MANIFEST = {
 DROPPED = {"analysis_results": ("data_date",)}
 # Source tables left behind: the old runtime's own migration ledger (this repository's migrations own the schema).
 SKIPPED_TABLES = frozenset({"schema_migrations"})
+# Files beside the source database that the old runtime reads as account state.
+SIDE_FILES = ("account-snapshot.json",)
 
 
 class MirrorError(RuntimeError):
     """The mirror refused to run or to commit; the target is unchanged."""
 
 
-def _read(conn: sqlite3.Connection) -> dict:
-    """Rows of every manifest table plus AUTOINCREMENT counters, in a stable order."""
+def _files(directory: Path) -> dict:
+    return {name: (directory / name).read_bytes() if (directory / name).is_file() else None for name in SIDE_FILES}
+
+
+def _read(conn: sqlite3.Connection, directory: Path) -> dict:
+    """Rows of every manifest table, AUTOINCREMENT counters and side files, in a stable order."""
     tables = {}
     for table, columns in MANIFEST.items():
         names = ", ".join(columns)
@@ -65,13 +74,13 @@ def _read(conn: sqlite3.Connection) -> dict:
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_sequence'").fetchone():
         sequences = {name: seq for name, seq in conn.execute("SELECT name, seq FROM sqlite_sequence")
                      if name in MANIFEST}
-    return {"tables": tables, "sequences": dict(sorted(sequences.items()))}
+    return {"tables": tables, "sequences": dict(sorted(sequences.items())), "files": _files(directory)}
 
 
 def digest(content: dict) -> str:
     # repr keeps int/float/None/str distinct, which a JSON round trip would not.
-    return hashlib.sha256(repr((sorted(content["tables"].items()), sorted(content["sequences"].items())))
-                          .encode()).hexdigest()
+    return hashlib.sha256(repr((sorted(content["tables"].items()), sorted(content["sequences"].items()),
+                                sorted(content["files"].items()))).encode()).hexdigest()
 
 
 def read_source(path: Path) -> dict:
@@ -95,9 +104,25 @@ def read_source(path: Path) -> dict:
             for column in DROPPED.get(table, ()):
                 if source.execute(f"SELECT 1 FROM {table} WHERE {column} IS NOT NULL LIMIT 1").fetchone():
                     raise MirrorError(f"来源列 {table}.{column} 出现数据，清单把它列为不迁移，需要先更新清单")
-        return _read(source)
+        return _read(source, path.resolve().parent)
     finally:
         source.close()
+
+
+def target_directory(conn: sqlite3.Connection) -> Path:
+    return Path(conn.execute("PRAGMA database_list").fetchone()[2]).parent
+
+
+def _replace_file(path: Path, data: bytes | None) -> None:
+    if data is None:
+        path.unlink(missing_ok=True)
+        return
+    temporary = path.with_name(path.name + ".mirror-tmp")
+    with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)  # the old runtime only reads this file when it is private (0600)
 
 
 def mirror(conn: sqlite3.Connection, source_path: Path) -> dict:
@@ -115,15 +140,20 @@ def mirror(conn: sqlite3.Connection, source_path: Path) -> dict:
         # Counters follow the source so an id it once issued is never issued again here.
         conn.execute(f"DELETE FROM sqlite_sequence WHERE name IN ({', '.join('?' * len(MANIFEST))})", tuple(MANIFEST))
         conn.executemany("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", content["sequences"].items())
-        if digest(_read(conn)) != sha:
+        directory = target_directory(conn)
+        if digest({**_read(conn, directory), "files": content["files"]}) != sha:
             raise MirrorError("镜像后的内容与来源不一致，已回滚")
         watermark = {"rows": {table: len(rows) for table, rows in content["tables"].items()},
-                     "sequences": content["sequences"]}
+                     "sequences": content["sequences"],
+                     "files": {name: data and hashlib.sha256(data).hexdigest()
+                               for name, data in content["files"].items()}}
         conn.execute("INSERT INTO account_source (id, mode, source_sha256, updated_at, watermark)"
                      " VALUES (1, 'mirror', ?, ?, ?) ON CONFLICT(id) DO UPDATE SET"
                      " source_sha256 = excluded.source_sha256, updated_at = excluded.updated_at,"
                      " watermark = excluded.watermark",
                      (sha, db.now(), json.dumps(watermark, ensure_ascii=False)))
+        for name, data in content["files"].items():
+            _replace_file(directory / name, data)
     return {"source_sha256": sha, **watermark}
 
 

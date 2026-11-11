@@ -9,8 +9,6 @@
 """
 
 import json
-import sqlite3
-import threading
 from datetime import datetime, timedelta
 from io import StringIO
 from unittest.mock import MagicMock
@@ -39,7 +37,7 @@ from policy_v0.helpers import (
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     db_file = tmp_path / "test_extra.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_file))
+    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
     yield str(db_file)
 
 
@@ -795,65 +793,6 @@ class TestCloseHoldingCustomDate:
 
 # ═══════════════════════════════════════════════════════════════════
 #  cache.py — 并发 get_db() 迁移安全性
-# ═══════════════════════════════════════════════════════════════════
-
-
-def test_get_db_concurrent_migration_preserves_data(tmp_path, monkeypatch):
-    """Two threads running get_db() on old-schema DB must not lose holding data."""
-    db_path = str(tmp_path / "concurrent.db")
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_path))
-
-    # Prepare old-style holdings table (no id column = pre-migration schema)
-    conn0 = sqlite3.connect(db_path)
-    conn0.executescript("""
-        CREATE TABLE IF NOT EXISTS stock_fundamentals (
-            code TEXT PRIMARY KEY, name TEXT, industry TEXT, data JSON,
-            updated_at TEXT, ttl_hours INTEGER DEFAULT 24);
-        CREATE TABLE IF NOT EXISTS analysis_results (
-            code TEXT, date TEXT, name TEXT, result TEXT, created_at TEXT,
-            score INTEGER, flags TEXT, score_breakdown TEXT,
-            return_pct REAL, holding_days INT, PRIMARY KEY (code, date));
-        CREATE TABLE holdings (
-            code TEXT PRIMARY KEY, name TEXT, cost_price REAL, shares INTEGER,
-            buy_date TEXT, buy_score INTEGER, stop_loss_15 REAL,
-            stop_loss_20 REAL, notes TEXT, updated_at TEXT,
-            exit_price REAL, exit_date TEXT);
-        INSERT INTO holdings (code, cost_price) VALUES ('600519', 1800.0);
-    """)
-    conn0.commit()
-    conn0.close()
-
-    errors: list[Exception] = []
-    barrier = threading.Barrier(2)
-
-    def run():
-        try:
-            barrier.wait()  # both threads enter get_db at roughly the same time
-            c = db.get_db()
-            c.close()
-        except Exception as e:
-            errors.append(e)
-
-    threads = [threading.Thread(target=run) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=10)
-
-    assert not errors, f"Concurrent migration raised: {errors}"
-
-    conn = sqlite3.connect(db_path)
-    row = conn.execute("SELECT cost_price FROM holdings WHERE code='600519'").fetchone()
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(holdings)").fetchall()]
-    conn.close()
-
-    assert row is not None, "holding data was lost during concurrent migration"
-    assert row[0] == 1800.0
-    assert "id" in cols, "id column missing after migration"
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — _market_prefix
 # ═══════════════════════════════════════════════════════════════════
 
 

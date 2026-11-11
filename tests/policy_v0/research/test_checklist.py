@@ -12,7 +12,7 @@ from a_share_research.policy.v0 import framework_catalog, framework_metadata
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     db_file = tmp_path / "test_checklist_cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_file))
+    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
     yield str(db_file)
 
 

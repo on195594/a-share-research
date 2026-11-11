@@ -47,12 +47,18 @@ def source_database(path):
     conn.execute("INSERT INTO schema_migrations VALUES ('001-core-tables', '2026-03-27')")
     conn.commit()
     conn.close()
+    path.with_name("account-snapshot.json").write_text('{"schema_version": 1, "portfolio_value": 500000}')
     return path
 
 
 @pytest.fixture
 def source(tmp_path):
-    return source_database(tmp_path / "cache.db")
+    (tmp_path / "old").mkdir()
+    return source_database(tmp_path / "old" / "cache.db")
+
+
+def target_digest(conn):
+    return mirror.digest(mirror._read(conn, mirror.target_directory(conn)))
 
 
 @pytest.fixture
@@ -62,7 +68,7 @@ def conn(tmp_path):
     conn.close()
 
 
-def test_mirror_copies_every_listed_column_and_keeps_id_counters(conn, source):
+def test_mirror_copies_every_listed_column_and_keeps_id_counters(conn, source, tmp_path):
     result = mirror.mirror(conn, source)
 
     old = sqlite3.connect(source)
@@ -77,6 +83,9 @@ def test_mirror_copies_every_listed_column_and_keeps_id_counters(conn, source):
     assert conn.execute("INSERT INTO holdings (code) VALUES ('601318')").lastrowid == 4
     state = conn.execute("SELECT * FROM account_source").fetchone()
     assert (state["mode"], state["source_sha256"]) == ("mirror", result["source_sha256"])
+    copied = tmp_path / "account-snapshot.json"
+    assert copied.read_bytes() == source.with_name("account-snapshot.json").read_bytes()
+    assert copied.stat().st_mode & 0o777 == 0o600
 
 
 def test_rerun_replaces_target_changes_with_the_source(conn, source):
@@ -95,6 +104,11 @@ def test_rerun_replaces_target_changes_with_the_source(conn, source):
     assert second["rows"]["holding_events"] == 2 and second["source_sha256"] != first["source_sha256"]
     assert second["sequences"]["holding_events"] == 3
 
+    source.with_name("account-snapshot.json").unlink()
+    third = mirror.mirror(conn, source)
+    assert third["files"] == {"account-snapshot.json": None} and third["source_sha256"] != second["source_sha256"]
+    assert not (mirror.target_directory(conn) / "account-snapshot.json").exists()
+
 
 def _source_change(statement):
     def change(path):
@@ -111,15 +125,15 @@ def _source_change(statement):
     (_source_change("CREATE TABLE cash_flows (id INTEGER PRIMARY KEY)"), "多出 ['cash_flows']"),
     (_source_change("UPDATE analysis_results SET data_date = '2026-10-07' WHERE code = '600519'"), "analysis_results.data_date"),
     (lambda path: path.unlink(), "来源账户库不存在"),
-])
+])  # each is a minimal variant of the real schema that the manifest does not describe
 def test_source_that_left_the_manifest_is_refused_and_target_is_untouched(conn, source, change, message):
     mirror.mirror(conn, source)
-    before = mirror.digest(mirror._read(conn))
+    before = target_digest(conn)
     change(source)
     with pytest.raises(mirror.MirrorError) as error:
         mirror.mirror(conn, source)
     assert message in str(error.value)
-    assert mirror.digest(mirror._read(conn)) == before
+    assert target_digest(conn) == before
 
 
 def test_copy_that_does_not_match_the_source_is_rolled_back(conn, source):
@@ -129,7 +143,7 @@ def test_copy_that_does_not_match_the_source_is_rolled_back(conn, source):
                  " UPDATE holdings SET shares = shares + 1 WHERE id = NEW.id; END")
     with pytest.raises(mirror.MirrorError, match="已回滚"):
         mirror.mirror(conn, source)
-    assert mirror.digest(mirror._read(conn)) == first["source_sha256"]
+    assert target_digest(conn) == first["source_sha256"]
     assert conn.execute("SELECT source_sha256 FROM account_source").fetchone()[0] == first["source_sha256"]
 
 

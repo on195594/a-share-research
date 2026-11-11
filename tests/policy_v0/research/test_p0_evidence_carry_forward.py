@@ -3,11 +3,13 @@
 import io
 import json
 import sqlite3
+from pathlib import Path
 from datetime import date
 
 import pytest
 
-from a_share_research.policy.v0 import cache, risk_gates, schema, store
+from a_share_research import db as app_db
+from a_share_research.policy.v0 import cache, risk_gates, store
 
 TODAY = date(2026, 10, 22)
 FACTS = {
@@ -81,8 +83,8 @@ def test_preset_sub_check_cannot_override_facts():
 
 
 def _seed_fundamentals(database, data_period="2025年报"):
+    app_db.connect(Path(database)).close()
     with sqlite3.connect(database) as conn:
-        schema.bootstrap_database_schema(conn)
         conn.execute(
             """INSERT INTO stock_fundamentals
                (code, name, industry, data, updated_at, ttl_hours)

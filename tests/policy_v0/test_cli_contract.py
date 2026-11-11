@@ -179,7 +179,7 @@ def test_w1_requires_prefix_confirmation_without_opening_database(
     tmp_path, monkeypatch, capsys
 ) -> None:
     database = tmp_path / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert cache.main(["add-holding", "000001", "10", "100"]) == 3
     assert not database.exists()
     assert "--confirm-write" in capsys.readouterr().err
@@ -187,7 +187,7 @@ def test_w1_requires_prefix_confirmation_without_opening_database(
 
 def test_confirmed_fixture_write_is_transactional(tmp_path, monkeypatch) -> None:
     database = tmp_path / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert cache.main(["--confirm-write", "add-holding", "000001", "10", "100"]) == 0
     with sqlite3.connect(database) as conn:
         assert conn.execute("SELECT shares FROM holdings").fetchone() == (100,)
@@ -203,7 +203,7 @@ def test_holdings_missing_database_is_unavailable_not_not_held(
     tmp_path, monkeypatch, capsys
 ) -> None:
     database = tmp_path / "missing.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
 
     assert cache.main(["holdings", "603606"]) == 1
 
@@ -215,7 +215,7 @@ def test_holdings_missing_database_is_unavailable_not_not_held(
 
 def test_holdings_invalid_schema_is_unavailable(tmp_path, monkeypatch, capsys) -> None:
     database = tmp_path / "invalid.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     with sqlite3.connect(database) as conn:
         conn.execute("CREATE TABLE unrelated(value TEXT)")
 
@@ -230,7 +230,7 @@ def test_json_monitoring_views_fail_when_database_is_missing(
     tmp_path, monkeypatch, capsys
 ) -> None:
     database = tmp_path / "missing.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
 
     for argv, marker in (
         (["alerts", "600036", "--active", "--json"], "ALERTS_UNAVAILABLE"),

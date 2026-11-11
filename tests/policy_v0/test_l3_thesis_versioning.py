@@ -69,69 +69,6 @@ def test_schema_migration_is_idempotent_for_empty_fixture(monkeypatch) -> None:
             ).fetchone() == (0,)
 
 
-def test_schema_migration_is_idempotent_for_legacy_fixture(
-    isolated_cache_database, monkeypatch
-) -> None:
-    legacy = isolated_cache_database
-    with sqlite3.connect(legacy) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE holdings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL, name TEXT,
-                cost_price REAL, shares INTEGER, buy_date TEXT, buy_score INTEGER,
-                stop_loss_15 REAL, stop_loss_20 REAL, notes TEXT, updated_at TEXT,
-                exit_price REAL, exit_date TEXT, framework TEXT, initial_shares INTEGER,
-                main_entry_date TEXT, main_entry_basis REAL,
-                additions_since_main REAL NOT NULL DEFAULT 0, reference_cost REAL,
-                framework_confident INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE holding_l3_conditions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, holding_id INTEGER NOT NULL,
-                condition_text TEXT NOT NULL, origin_type TEXT NOT NULL DEFAULT 'original',
-                status TEXT NOT NULL DEFAULT 'pending', evidence TEXT, as_of TEXT,
-                next_review_date TEXT, temporary_exit_rule TEXT,
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-            );
-            CREATE TABLE schema_migrations (
-                migration_id TEXT PRIMARY KEY, applied_at TEXT NOT NULL
-            );
-            INSERT INTO holdings
-                (code, cost_price, shares, buy_date, initial_shares)
-                VALUES ('000963', 30, 800, '2025-01-02', 800);
-            INSERT INTO holding_l3_conditions
-                (holding_id, condition_text, status, created_at, updated_at)
-                VALUES (1, '医美收入连续两季下降→清仓', 'triggered', 'old', 'old');
-            """
-        )
-        conn.executemany(
-            "INSERT INTO schema_migrations VALUES (?, 'old')",
-            [(f"{number:03d}-legacy",) for number in range(1, 27)],
-        )
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED_PATH", "")
-
-    with db.db_session() as conn:
-        columns = {
-            row[1]: row
-            for row in conn.execute("PRAGMA table_info(holding_l3_conditions)")
-        }
-        assert columns["condition_scope"][4] == "'legacy_unclassified'"
-        assert columns["evidence_cadence"][4] == "'unspecified'"
-        assert conn.execute(
-            "SELECT evidence_cadence FROM holding_l3_conditions"
-        ).fetchone() == ("unspecified",)
-        assert conn.execute(
-            "SELECT condition_scope, action_level, is_active FROM holding_l3_conditions"
-        ).fetchone() == ("legacy_unclassified", "legacy_unclassified", 1)
-        assert conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='holding_thesis_versions'"
-        ).fetchone() == ("holding_thesis_versions",)
-
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
-    with db.db_session() as conn:
-        assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
-
-
 def test_partial_unique_index_allows_only_one_active_thesis() -> None:
     commands_holdings.cmd_add_holding(["000963", "30", "800"])
     with db.db_session() as conn:

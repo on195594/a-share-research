@@ -420,7 +420,7 @@ def test_check_ledger_missing_database_is_explicit_gap(tmp_path, monkeypatch, ca
     path = tmp_path / "account.json"
     path.write_text(json.dumps(_account()), encoding="utf-8")
     database = tmp_path / "missing.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert (
         cache.main(
             ["performance-report", "--input", str(path), "--check-ledger", "--json"]
@@ -440,7 +440,7 @@ def test_check_ledger_existing_database_without_schema_is_explicit_gap(
     path.write_text(json.dumps(_account()), encoding="utf-8")
     database = tmp_path / "empty.db"
     sqlite3.connect(database).close()
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert (
         cache.main(
             ["performance-report", "--input", str(path), "--check-ledger", "--json"]
@@ -466,7 +466,7 @@ def test_check_ledger_marks_inferred_history_as_limited_provisional(
     connection.execute("INSERT INTO holding_events (inferred) VALUES (1)")
     connection.commit()
     connection.close()
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert (
         cache.main(
             ["performance-report", "--input", str(path), "--check-ledger", "--json"]

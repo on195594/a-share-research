@@ -32,7 +32,6 @@ def test_alerts_once_per_day_per_worsening_level():
 
 
 def _run(monkeypatch, tmp_path, capsys, now, price, quote_time="10:30:00"):
-    monkeypatch.setenv("A_STOCK_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(domain, "cst_now", lambda: now)
     monkeypatch.setattr(
         market_quotes,
@@ -44,7 +43,7 @@ def _run(monkeypatch, tmp_path, capsys, now, price, quote_time="10:30:00"):
     return code, capsys.readouterr()
 
 
-def test_command_alerts_then_stays_silent_and_keeps_state_in_state_dir(
+def test_command_alerts_then_stays_silent_and_keeps_state_beside_the_database(
     isolated_cache_database, monkeypatch, tmp_path, capsys
 ):
     from policy_v0.monitor.test_monitor_snapshot import _seed_holding
@@ -54,7 +53,7 @@ def test_command_alerts_then_stays_silent_and_keeps_state_in_state_dir(
     now = datetime(2026, 10, 22, 10, 31, tzinfo=CST)
     code, out = _run(monkeypatch, tmp_path, capsys, now, 84.0)
     assert code == 0 and "已跌破第一档止损85.000" in out.out
-    state = json.loads((tmp_path / "state" / "stop-alert-state.json").read_text())
+    state = json.loads((tmp_path / "stop-alert-state.json").read_text())
     assert state == {"date": "2026-10-22", "levels": {"000963": "stop1"}}
     assert _run(monkeypatch, tmp_path, capsys, now, 84.0)[1].out == ""
 

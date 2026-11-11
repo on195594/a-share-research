@@ -21,7 +21,7 @@ from policy_v0.helpers import set_valid_fundamentals
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     db_file = tmp_path / "test_fetcher_cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_file))
+    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
     # fetcher 内部也引用 list_codes，需要同步 patch
     monkeypatch.setattr(store, "list_codes", lambda: ["600519", "000001"])
     fetcher._fetch_tushare_industry_map.cache_clear()

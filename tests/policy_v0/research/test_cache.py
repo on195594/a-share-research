@@ -5,7 +5,6 @@ cache.py 单元测试
 
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -22,7 +21,6 @@ from a_share_research.policy.v0 import (
     db,
     domain,
     market_quotes,
-    schema,
     store,
 )
 from policy_v0.helpers import (
@@ -42,7 +40,7 @@ LEGACY_CYCLE_STAGE_TAG = '周期位置[阶段=上行期；依据="煤价中枢�
 def isolated_db(tmp_path, monkeypatch):
     """每个测试用独立临时数据库，不影响生产 cache.db"""
     db_file = tmp_path / "test_cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_file))
+    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
     monkeypatch.setattr(
         store,
         "get_latest_quote_snapshot",
@@ -338,7 +336,7 @@ def test_cli_valid_command_smoke(isolated_db):
     """Subprocess smoke test for the real CLI dispatch path."""
     result = subprocess.run(
         [sys.executable, str(CACHE_PY), "check", "999999"],
-        env={**os.environ, "CACHE_DB_PATH": isolated_db},
+        env={**os.environ, "POLICY_V0_DB": isolated_db},
         text=True,
         capture_output=True,
         check=False,
@@ -349,13 +347,14 @@ def test_cli_valid_command_smoke(isolated_db):
     assert isolated_db in result.stderr
 
 
-def test_default_db_path_uses_xdg_home_without_creating_state(tmp_path):
-    """默认数据库位于外部 XDG HOME，解析路径不创建状态目录。"""
+def test_default_db_path_is_the_application_database_without_creating_state(tmp_path):
+    """默认数据库是数据目录下的应用库，解析路径不创建任何目录。"""
     tmp_home = tmp_path / "home"
-    expected_db = tmp_home / ".local" / "share" / "a-stock-agent" / "cache.db"
+    expected_db = tmp_path / "data" / "app.db"
     env = os.environ.copy()
-    env.pop("CACHE_DB_PATH", None)
+    env.pop("POLICY_V0_DB", None)
     env["HOME"] = str(tmp_home)
+    env["DATA_DIR"] = str(expected_db.parent)
 
     result = subprocess.run(
         [
@@ -372,14 +371,14 @@ def test_default_db_path_uses_xdg_home_without_creating_state(tmp_path):
 
     assert result.returncode == 0
     assert result.stdout.strip() == str(expected_db)
-    assert not tmp_home.exists(), "路径解析不应创建状态目录"
+    assert not tmp_home.exists() and not expected_db.parent.exists(), "路径解析不应创建状态目录"
 
 
 def test_cli_invalid_command_fails(isolated_db):
     """Unknown CLI commands should fail visibly."""
     result = subprocess.run(
         [sys.executable, str(CACHE_PY), "not-a-command"],
-        env={**os.environ, "CACHE_DB_PATH": isolated_db},
+        env={**os.environ, "POLICY_V0_DB": isolated_db},
         text=True,
         capture_output=True,
         check=False,
@@ -915,71 +914,6 @@ def test_a_framework_without_cycle_stage_stays_valid(monkeypatch, capsys):
 
 
 # ── 旧表迁移：无 id 列时触发 AUTOINCREMENT 迁移 ──────────────────────────────
-
-
-def test_holdings_migration_adds_id_column(tmp_path, monkeypatch):
-    """模拟旧版 holdings 表（无 id 列），get_db 应自动迁移"""
-    db_path = str(tmp_path / "old_schema.db")
-    monkeypatch.setenv("CACHE_DB_PATH", db_path)
-
-    # 手动创建旧版表结构（code TEXT PRIMARY KEY，无 id 列）
-    conn = sqlite3.connect(db_path)
-    conn.execute("""CREATE TABLE holdings (
-        code TEXT PRIMARY KEY,
-        name TEXT, cost_price REAL, shares INTEGER, buy_date TEXT,
-        buy_score INTEGER, stop_loss_15 REAL, stop_loss_20 REAL,
-        notes TEXT, updated_at TEXT, exit_price REAL, exit_date TEXT
-    )""")
-    conn.execute(
-        "INSERT INTO holdings (code, cost_price, shares) VALUES ('600519', 100.0, 100)"
-    )
-    conn.commit()
-    conn.close()
-
-    # get_db 应触发迁移
-    conn = db.get_db()
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(holdings)").fetchall()]
-    conn.close()
-
-    assert "id" in cols, "迁移后 holdings 表应有 id 列"
-
-    # 原有数据应保留
-    conn = db.get_db()
-    row = conn.execute("SELECT cost_price FROM holdings WHERE code='600519'").fetchone()
-    event = conn.execute(
-        """SELECT event_type, inferred, notes FROM holding_events
-           WHERE code='600519'"""
-    ).fetchone()
-    conn.close()
-    assert row is not None
-    assert row[0] == 100.0
-    assert event == ("buy", 1, "legacy_inferred_from_holding")
-
-
-def test_schema_migration_ignores_only_duplicate_column():
-    """Duplicate-column migrations are harmless; other OperationalError cases surface."""
-
-    class DuplicateColumnConn:
-        def execute(self, _sql):
-            raise sqlite3.OperationalError("duplicate column name: name")
-
-        def commit(self):
-            raise AssertionError("the migration ledger owns commits, not this helper")
-
-    schema.apply_column_migration(DuplicateColumnConn(), schema.SCHEMA_MIGRATIONS[0][1])
-
-    class LockedConn:
-        def execute(self, _sql):
-            raise sqlite3.OperationalError("database is locked")
-
-        def commit(self):
-            raise AssertionError("commit should not run after failed execute")
-
-    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
-        schema.apply_column_migration(LockedConn(), schema.SCHEMA_MIGRATIONS[0][1])
-
-
-# ── update-return ──────────────────────────────────────────────────────────────
 
 
 def test_update_return_writes_pct_and_days(capsys, monkeypatch):
@@ -1580,141 +1514,6 @@ def test_structured_alert_deduplicates_and_resolves():
     ).fetchone()
     conn.close()
     assert row == ("resolved", "净息差恢复")
-
-
-def test_legacy_flags_migrate_as_pending_unverified_without_being_lost():
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100"])
-    conn = db.get_db()
-    conn.execute(
-        """INSERT INTO analysis_results (code, date, flags)
-           VALUES ('600036', '2026-07-01', ?)""",
-        (
-            json.dumps(
-                [
-                    {"level": "yellow", "reason": "净息差待核实", "date": "2026-07-01"},
-                ],
-                ensure_ascii=False,
-            ),
-        ),
-    )
-    conn.commit()
-    schema.backfill_legacy_alerts(conn)
-    row = conn.execute(
-        """SELECT level, category, status, reason FROM holding_alerts"""
-    ).fetchone()
-    conn.close()
-    assert row == ("yellow", "unverified", "pending", "净息差待核实")
-
-
-def test_legacy_flags_migration_uses_only_latest_analysis():
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100"])
-    conn = db.get_db()
-    conn.executemany(
-        """INSERT INTO analysis_results (code, date, flags)
-           VALUES ('600036', ?, ?)""",
-        [
-            (
-                "2026-06-01",
-                json.dumps(
-                    [{"level": "red", "reason": "已经过期的旧预警"}],
-                    ensure_ascii=False,
-                ),
-            ),
-            (
-                "2026-07-01",
-                json.dumps(
-                    [{"level": "yellow", "reason": "最新一期待核实"}],
-                    ensure_ascii=False,
-                ),
-            ),
-        ],
-    )
-    conn.commit()
-    schema.backfill_legacy_alerts(conn)
-    rows = conn.execute(
-        """SELECT level, reason FROM holding_alerts ORDER BY id"""
-    ).fetchall()
-    conn.close()
-
-    assert rows == [("yellow", "最新一期待核实")]
-
-
-def test_legacy_flags_migration_resolves_previously_migrated_stale_alert():
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100"])
-    conn = db.get_db()
-    holding_id = conn.execute("SELECT id FROM holdings WHERE code='600036'").fetchone()[
-        0
-    ]
-    conn.executemany(
-        """INSERT INTO analysis_results (code, date, flags)
-           VALUES ('600036', ?, ?)""",
-        [
-            (
-                "2026-06-01",
-                json.dumps(
-                    [{"level": "red", "reason": "已经过期的旧预警"}],
-                    ensure_ascii=False,
-                ),
-            ),
-            (
-                "2026-07-01",
-                json.dumps(
-                    [{"level": "yellow", "reason": "最新一期待核实"}],
-                    ensure_ascii=False,
-                ),
-            ),
-        ],
-    )
-    conn.execute(
-        """INSERT INTO holding_alerts
-           (holding_id, code, level, category, reason_code, reason, status,
-            evidence, opened_at, updated_at)
-           VALUES (?, '600036', 'red', 'unverified', 'legacy-stale',
-                   '已经过期的旧预警', 'pending',
-                   'legacy analysis_results.flags; requires classification',
-                   '2026-06-01', '2026-06-01')""",
-        (holding_id,),
-    )
-    conn.commit()
-    schema.backfill_legacy_alerts(conn)
-    rows = conn.execute(
-        """SELECT reason, status, resolution_evidence
-           FROM holding_alerts ORDER BY id"""
-    ).fetchall()
-    conn.close()
-
-    assert rows == [
-        ("已经过期的旧预警", "resolved", "superseded by latest analysis"),
-        ("最新一期待核实", "pending", None),
-    ]
-
-
-def test_legacy_flags_migration_does_not_revive_old_flags_when_latest_is_clear():
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100"])
-    conn = db.get_db()
-    conn.executemany(
-        """INSERT INTO analysis_results (code, date, flags)
-           VALUES ('600036', ?, ?)""",
-        [
-            (
-                "2026-06-01",
-                json.dumps(
-                    [{"level": "red", "reason": "已经解除的旧预警"}],
-                    ensure_ascii=False,
-                ),
-            ),
-            ("2026-07-01", None),
-        ],
-    )
-    conn.commit()
-    schema.backfill_legacy_alerts(conn)
-    count = conn.execute("SELECT COUNT(*) FROM holding_alerts").fetchone()[0]
-    conn.close()
-
-    assert count == 0
-
-
-# ── portfolio-risk ─────────────────────────────────────────────────────────────
 
 
 def test_portfolio_risk_no_holdings(capsys):

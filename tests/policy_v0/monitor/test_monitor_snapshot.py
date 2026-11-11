@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from a_share_research import db as app_db
 from a_share_research.policy.v0 import (
     cache,
     commands_holdings,
@@ -17,7 +18,6 @@ from a_share_research.policy.v0 import (
     domain,
     market_quotes,
     monitor_contract,
-    schema,
 )
 from policy_v0.helpers import mock_price_quotes
 
@@ -46,8 +46,8 @@ def _seed_holding(
     l3_action: str = "review",
     next_review: str = "2999-01-01",
 ) -> int:
+    app_db.connect(Path(database)).close()
     with sqlite3.connect(database) as conn:
-        schema.bootstrap_database_schema(conn)
         cursor = conn.execute(
             """INSERT INTO holdings
                (id, code, name, cost_price, shares, buy_date, stop_loss_15,
@@ -608,7 +608,7 @@ def test_missing_database_returns_machine_readable_unavailable_without_creating_
     tmp_path, monkeypatch, capsys
 ) -> None:
     database = tmp_path / "missing.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
 
     first, first_payload = _run(capsys, ["--portfolio-value", "100000"])
     second, second_payload = _run(capsys, ["--portfolio-value", "100000"])

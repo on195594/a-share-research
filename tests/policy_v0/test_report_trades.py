@@ -4,7 +4,7 @@ import pytest
 import requests
 from a_share_research.core.market_data import MarketDataResult
 
-from a_share_research.policy.v0 import cache, commands_holdings, db, research_client, schema
+from a_share_research.policy.v0 import cache, commands_holdings, db, research_client
 
 REAL_REQUIRE_REPORT = commands_holdings._require_report
 
@@ -77,18 +77,6 @@ def test_price_only_lot_cannot_claim_a_report(capsys):
     with pytest.raises(SystemExit):
         commands_holdings.cmd_add_holding(["000001", "10.0", "--report-id", "7"])
     assert "必须提供股数" in capsys.readouterr().err
-
-
-def test_migration_adds_the_column_and_keeps_old_events_unlinked():
-    commands_holdings.cmd_add_holding(["000001", "10.0", "500"])
-    with db.db_session() as conn:
-        conn.execute("ALTER TABLE holding_events DROP COLUMN report_id")
-        conn.execute(
-            "DELETE FROM schema_migrations WHERE migration_id='037-holding-events-report-id'"
-        )
-        conn.commit()
-        schema.bootstrap_database_schema(conn)
-    assert _events() == [("buy", 500, None)]
 
 
 def _close(value, freshness=0):

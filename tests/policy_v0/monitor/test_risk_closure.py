@@ -18,7 +18,6 @@ from a_share_research.policy.v0 import (
     market_quotes,
     monitor_contract,
     risk_budget,
-    schema,
 )
 from policy_v0.helpers import mock_price_quotes
 from policy_v0.monitor.test_monitor_snapshot import _quotes, _run, _seed_holding
@@ -327,9 +326,7 @@ def test_text_missing_database_does_not_bootstrap(
     if missing_schema:
         with sqlite3.connect(isolated_cache_database) as conn:
             conn.execute("CREATE TABLE sentinel (value)")
-    monkeypatch.setattr(
-        schema, "bootstrap_database_schema", lambda *a: pytest.fail("migration")
-    )
+    monkeypatch.setattr(db, "_ensure_schema", lambda *a: pytest.fail("migration"))
     mock_price_quotes(monkeypatch, lambda *a: pytest.fail("network"))
     assert cache.main(["portfolio-risk"]) == 1
     assert "不可用" in capsys.readouterr().err
@@ -372,9 +369,7 @@ def test_risk_commands_do_not_write_migrate_or_network(
             yield conn
 
     monkeypatch.setattr(db, "read_only_db_session", checked)
-    monkeypatch.setattr(
-        schema, "bootstrap_database_schema", lambda *a: pytest.fail("migration")
-    )
+    monkeypatch.setattr(db, "_ensure_schema", lambda *a: pytest.fail("migration"))
     monkeypatch.setattr(socket.socket, "connect", lambda *a: pytest.fail("network"))
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **k: pytest.fail("external command/notification")

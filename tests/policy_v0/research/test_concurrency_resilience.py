@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
-import subprocess
-import sys
 import threading
 from contextlib import closing, contextmanager
 from datetime import timedelta
@@ -14,7 +10,6 @@ from datetime import timedelta
 import pytest
 
 from a_share_research.policy.v0 import (
-    cache,
     commands_admin,
     commands_holdings,
     commands_monitor,
@@ -28,7 +23,7 @@ from policy_v0.helpers import valid_fundamentals_payload
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     db_file = tmp_path / "concurrency-resilience.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_file))
+    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
     yield db_file
 
 
@@ -386,62 +381,3 @@ def test_many_concurrent_close_requests_consume_distinct_lots() -> None:
         120.0 + index for index in range(worker_count)
     }
 
-
-def test_schema_migration_is_safe_across_processes(tmp_path) -> None:
-    db_path = tmp_path / "cross-process-migration.db"
-    with closing(sqlite3.connect(db_path)) as conn:
-        conn.executescript("""
-            CREATE TABLE stock_fundamentals (
-                code TEXT PRIMARY KEY, name TEXT, industry TEXT, data JSON,
-                updated_at TEXT, ttl_hours INTEGER DEFAULT 24);
-            CREATE TABLE analysis_results (
-                code TEXT, date TEXT, result TEXT, created_at TEXT,
-                PRIMARY KEY (code, date));
-            CREATE TABLE holdings (
-                code TEXT PRIMARY KEY, name TEXT, cost_price REAL, shares INTEGER,
-                buy_date TEXT, buy_score INTEGER, stop_loss_15 REAL,
-                stop_loss_20 REAL, notes TEXT, updated_at TEXT,
-                exit_price REAL, exit_date TEXT);
-            INSERT INTO holdings (code, cost_price) VALUES ('600519', 1800.0);
-        """)
-
-    env = os.environ.copy()
-    env["CACHE_DB_PATH"] = str(db_path)
-    command = [
-        sys.executable,
-        "-c",
-        "from a_share_research.policy.v0 import db; connection = db.get_db(); connection.close()",
-    ]
-    processes = [
-        subprocess.Popen(
-            command,
-            cwd=os.fspath(os.path.dirname(cache.__file__)),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        for _ in range(4)
-    ]
-    results = [process.communicate(timeout=30) for process in processes]
-
-    failures = [
-        (process.returncode, stderr)
-        for process, (_, stderr) in zip(processes, results)
-        if process.returncode != 0
-    ]
-    assert not failures
-    with closing(sqlite3.connect(db_path)) as conn:
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(holdings)").fetchall()
-        }
-        holding = conn.execute(
-            "SELECT cost_price FROM holdings WHERE code='600519'"
-        ).fetchone()
-        qualitative_table = conn.execute(
-            """SELECT 1 FROM sqlite_master
-               WHERE type='table' AND name='qualitative_only_securities' """
-        ).fetchone()
-    assert "id" in columns
-    assert holding == (1800.0,)
-    assert qualitative_table == (1,)

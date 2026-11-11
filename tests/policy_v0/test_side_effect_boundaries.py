@@ -31,7 +31,7 @@ def test_isolation_path_propagates_to_child_process(tmp_path) -> None:
 
 def test_read_only_lookup_does_not_create_database(tmp_path, monkeypatch) -> None:
     database = tmp_path / "missing" / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert fetcher._lookup_cached_industry("600000") is None
     assert fetcher._lookup_cached_name("600000") is None
     assert not database.parent.exists()
@@ -55,7 +55,7 @@ def test_read_only_database_path_is_literal(tmp_path, monkeypatch, suffix) -> No
         connection.execute("INSERT INTO identity VALUES (?)", (value,))
         connection.commit()
         connection.close()
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     before = set(tmp_path.iterdir())
     with db.read_only_db_session() as connection:
         assert connection.execute("SELECT value FROM identity").fetchone() == (
@@ -71,20 +71,9 @@ def test_read_only_database_path_is_literal(tmp_path, monkeypatch, suffix) -> No
     assert set(tmp_path.iterdir()) == before - {database}
 
 
-def test_w1_refuses_public_parent_without_changing_it(tmp_path, monkeypatch, capsys):
-    parent = tmp_path / "shared"
-    parent.mkdir(mode=0o755)
-    parent.chmod(0o755)
-    monkeypatch.setenv("CACHE_DB_PATH", str(parent / "cache.db"))
-    assert cache.main(["--confirm-write", "add-holding", "600036", "40", "100"]) == 1
-    assert "0700" in capsys.readouterr().err
-    assert parent.stat().st_mode & 0o777 == 0o755
-    assert list(parent.iterdir()) == []
-
-
 def test_missing_w1_confirmation_keeps_fixture_hash(tmp_path, monkeypatch) -> None:
     database = tmp_path / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     before = (
         hashlib.sha256(database.read_bytes()).hexdigest() if database.exists() else None
     )
@@ -98,7 +87,7 @@ def test_missing_w1_confirmation_keeps_fixture_hash(tmp_path, monkeypatch) -> No
 def test_r0_command_never_bootstraps_or_changes_database(tmp_path, monkeypatch) -> None:
     database = tmp_path / "cache.db"
     sqlite3.connect(database).close()
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     before = hashlib.sha256(database.read_bytes()).hexdigest()
 
     assert cache.main(["holdings"]) == 1
@@ -113,7 +102,7 @@ def test_r0_command_never_bootstraps_or_changes_database(tmp_path, monkeypatch) 
 
 def test_populated_r0_commands_keep_fixture_hash(tmp_path, monkeypatch) -> None:
     database = tmp_path / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     commands_holdings.cmd_add_holding(["600036", "40", "100", "--notes", "fixture"])
 
     for command in (["holdings"], ["retro-pending"], ["retro-outliers"]):
@@ -134,7 +123,7 @@ def test_business_content_has_no_legacy_client_paths() -> None:
 
 
 def test_tests_never_undo_the_autouse_database_isolation():
-    # Undoing monkeypatch also reverts conftest's CACHE_DB_PATH, so later CLI calls
+    # Undoing monkeypatch also reverts conftest's POLICY_V0_DB, so later CLI calls
     # in that test reach the real ~/.local/share database (happened 2026-10-22).
     root = Path(__file__).resolve().parent
     pattern = "monkeypatch" + ".undo("

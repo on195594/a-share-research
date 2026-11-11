@@ -87,7 +87,7 @@ def test_cli_never_creates_account_database(snapshot, tmp_path, monkeypatch, cap
     source = tmp_path / "snapshot.json"
     source.write_text(json.dumps(snapshot))
     database = tmp_path / "absent.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     monkeypatch.setenv("A_STOCK_CONFIG_FILE", str(tmp_path / "absent.env"))
     args = ["portfolio-scenario", "--snapshot", str(source), "--sell", "600000:100", "--fees", "0"]
     assert cache.main(args) == 0

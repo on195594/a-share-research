@@ -202,7 +202,7 @@ def test_stored_assets_require_private_permissions_and_ledger_locality(
     path.chmod(0o644)
     with pytest.raises(risk_policy.RiskPolicyError, match="cannot read"):
         _resolve()
-    monkeypatch.setenv("CACHE_DB_PATH", str(tmp_path / "other" / "cache.db"))
+    monkeypatch.setenv("POLICY_V0_DB", str(tmp_path / "other" / "cache.db"))
     assert _resolve().portfolio_value is None
 
 

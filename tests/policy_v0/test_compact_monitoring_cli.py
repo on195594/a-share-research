@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0
 
 def _add_holding(tmp_path, monkeypatch, capsys, *, notes: str = "long private note"):
     database = tmp_path / "cache.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(database))
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
     assert (
         cache.main(
             [

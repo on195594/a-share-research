@@ -30,7 +30,7 @@ def test_research_cli_requires_idempotency_and_does_not_open_account_db(
     tmp_path, monkeypatch, capsys
 ):
     path = tmp_path / "absent.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(path))
+    monkeypatch.setenv("POLICY_V0_DB", str(path))
     monkeypatch.setenv("A_STOCK_CONFIG_FILE", str(tmp_path / "absent.env"))
     monkeypatch.delenv("A_STOCK_RESEARCH_URL", raising=False)
     monkeypatch.delenv("A_STOCK_RESEARCH_TOKEN", raising=False)

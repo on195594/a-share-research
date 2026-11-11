@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
@@ -11,13 +10,11 @@ from pathlib import Path
 import pytest
 
 from a_share_research.policy.v0 import (
-    cache,
     commands_admin,
     commands_analysis,
     db,
     domain,
     fetcher,
-    schema,
     store,
 )
 from policy_v0.helpers import (
@@ -41,7 +38,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3] / "a_share_research/policy/v0
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     db_file = tmp_path / "p0.db"
-    monkeypatch.setenv("CACHE_DB_PATH", str(db_file))
+    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
     monkeypatch.setattr(domain, "utc_now", lambda: NOW)
     yield str(db_file)
 
@@ -117,106 +114,6 @@ def test_schema_migration_adds_quote_tables_and_analysis_columns() -> None:
         "market_indicator_snapshots",
         "qualitative_only_securities",
     } <= tables
-
-
-def test_schema_migration_ledger_skips_done_work_but_applies_new_item(
-    monkeypatch,
-) -> None:
-    """Later releases run newly added migrations without reopening old work."""
-    with db.db_session() as conn:
-        migration_ids = {
-            row[0] for row in conn.execute("SELECT migration_id FROM schema_migrations")
-        }
-    assert {"001-core-tables", "022-holding-events-inferred"} <= migration_ids
-
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED_PATH", "")
-    monkeypatch.setattr(
-        schema,
-        "_create_core_tables",
-        lambda _conn: pytest.fail("durable migration ledger should skip bootstrap"),
-    )
-    with db.db_session() as conn:
-        assert conn.execute("SELECT 1").fetchone() == (1,)
-
-    monkeypatch.setattr(
-        schema,
-        "SCHEMA_MIGRATIONS",
-        [
-            *schema.SCHEMA_MIGRATIONS,
-            (
-                "999-test-incremental-column",
-                "ALTER TABLE stock_fundamentals ADD COLUMN future_field TEXT",
-            ),
-        ],
-    )
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED_PATH", "")
-    with db.db_session() as conn:
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(stock_fundamentals)")
-        }
-        new_row = conn.execute(
-            "SELECT migration_id FROM schema_migrations WHERE migration_id=?",
-            ("999-test-incremental-column",),
-        ).fetchone()
-    assert "future_field" in columns
-    assert new_row == ("999-test-incremental-column",)
-
-
-def test_interrupted_migration_batch_is_recovered_by_replay(monkeypatch) -> None:
-    """An incremental release whose second migration dies must still self-heal.
-
-    Python's sqlite3 opens an implicit transaction only before DML, so the first
-    pending migration's DDL autocommits before any ledger INSERT exists to open a
-    transaction.  Its column therefore survives a failure later in the batch while
-    its ledger row does not, leaving the schema ahead of the ledger.  Recovery is
-    not atomicity -- it is `apply_column_migration` swallowing `duplicate column
-    name` when the ledger replays that item on the next run.
-    """
-    with db.db_session():  # bring the fixture database to the current release
-        pass
-
-    released = list(schema.SCHEMA_MIGRATIONS)
-    good = (
-        "998-test-recovery",
-        "ALTER TABLE stock_fundamentals ADD COLUMN recovery_field TEXT",
-    )
-    doomed = (
-        "999-test-doomed",
-        "ALTER TABLE stock_fundamentals ADD COLUMN bad TEXT, NOT SQL",
-    )
-
-    monkeypatch.setattr(schema, "SCHEMA_MIGRATIONS", [*released, good, doomed])
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED_PATH", "")
-    with pytest.raises(sqlite3.OperationalError):
-        with db.db_session():
-            pass
-
-    probe = sqlite3.connect(cache.paths.cache_db_path())
-    try:
-        columns = {
-            row[1] for row in probe.execute("PRAGMA table_info(stock_fundamentals)")
-        }
-        recorded = probe.execute(
-            "SELECT 1 FROM schema_migrations WHERE migration_id=?", (good[0],)
-        ).fetchone()
-    finally:
-        probe.close()
-    assert "recovery_field" in columns, (
-        "first pending DDL autocommits outside the ledger transaction"
-    )
-    assert recorded is None, "its ledger row is rolled back with the rest of the batch"
-
-    # Replay without the doomed item: the duplicate column must not be fatal.
-    monkeypatch.setattr(schema, "SCHEMA_MIGRATIONS", [*released, good])
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
-    monkeypatch.setattr(db, "_SCHEMA_INITIALIZED_PATH", "")
-    with db.db_session() as conn:
-        assert conn.execute(
-            "SELECT 1 FROM schema_migrations WHERE migration_id=?", (good[0],)
-        ).fetchone() == (1,)
 
 
 def test_runtime_version_is_frozen_at_last_release() -> None:
