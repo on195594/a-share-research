@@ -64,8 +64,8 @@ def capture(database: Path, parameters: dict, *, source: dict | None = None) -> 
 
 def _capture(database: Path, module: str, payload: dict, *, market_token: bool = False) -> dict:
     """Run the fixed collector with a private empty config and no inherited model credentials."""
-    if market_token and module != 'a_share_research.policy.daily_brief':
-        raise ValueError('market credentials are only allowed for the dividend collector')
+    if market_token and module not in ('a_share_research.policy.daily_brief', 'a_share_research.policy.benchmark'):
+        raise ValueError('market credentials are only allowed for the configured market collectors')
     with tempfile.TemporaryDirectory(prefix='ashare-policy-capture-') as directory:
         config = Path(directory)/'runtime.env'
         config.touch(mode=0o600)

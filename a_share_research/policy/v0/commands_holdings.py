@@ -25,11 +25,10 @@ from a_share_research.policy.v0 import (
     store,
 )
 from a_share_research.policy.v0.market_quotes import PriceQuote
+from a_share_research.policy.v0.benchmark_input import BENCHMARKS
 from a_share_research.policy.v0.position_ledger import (
     LifecycleReturn,
     calculate_lifecycle_return,
-    ledger_cash_flows,
-    public_market_equivalent,
 )
 
 from a_share_research.policy.v0.trading_costs import STAMP_TAX_RATE
@@ -1166,9 +1165,6 @@ def cmd_stop_alert(args: list[str]) -> None:
     tmp.replace(state_path)
 
 
-BENCHMARKS = (("H00300.CSI", "沪深300全收益"), ("H00922.CSI", "中证红利全收益"))
-
-
 def _index_closes(ts_code: str, start: str, end: str) -> dict[str, float]:
     result = TushareMarketDataProvider(token=paths.tushare_token()).fetch_index_bars(
         ts_code, start, end
@@ -1217,38 +1213,12 @@ def cmd_benchmark_report(args: list[str]) -> None:
         sys.exit(1)
     first = events[0][2]
     benchmarks = {code: _index_closes(code, first, end) for code, _ in BENCHMARKS}
-    valuation_day = min(max(closes) for closes in benchmarks.values())
-    rows = [row[1:] for row in events if row[2] <= valuation_day]
-    flows = ledger_cash_flows(rows)
-    open_shares: dict[str, int] = {}
-    for code, event_type, day, shares, *_ in events:
-        if day <= valuation_day and event_type in ("buy", "sell", "adjustment"):
-            delta = (shares or 0) * (-1 if event_type == "sell" else 1)
-            open_shares[code] = open_shares.get(code, 0) + delta
-    market_value = sum(
-        shares * _close_on(code, valuation_day)
-        for code, shares in open_shares.items()
-        if shares
-    )
-    gross_buys = -sum(flow for _, flow in flows if flow < 0)
-    pnl = sum(flow for _, flow in flows) + market_value
-    print(
-        f"账本 vs 指数（{first} 至 {valuation_day} 收盘）| 累计买入 {gross_buys:,.0f} 元 | "
-        f"在仓市值 {market_value:,.0f} 元"
-    )
-    print(f"  账本净盈亏：{pnl:+,.0f} 元（{pnl / gross_buys:+.2%}）")
-    for code, label in BENCHMARKS:
-        closes = {
-            day: px for day, px in benchmarks[code].items() if day <= valuation_day
-        }
-        bench = public_market_equivalent(flows, closes)
-        print(
-            f"  同样现金流买{label}：{bench:+,.0f} 元（{bench / gross_buys:+.2%}）"
-            f" | 账本超额 {pnl - bench:+,.0f} 元"
-        )
-    if any(row[8] for row in events):
-        print("  ⚠️ 含推断补录的早期事件：结果为近似值，须与券商流水核对")
-    print("  样本期短、交易少时只说明期间相对表现，不证明方法有效")
+    from a_share_research.policy.v0.benchmark_input import calculate, prepare
+
+    prepared = prepare(events, benchmarks)
+    prices = {code: _close_on(code, prepared['valuation_day'])
+              for code, shares in prepared['open_shares'].items() if shares}
+    print(calculate(events, benchmarks, prices)['stdout'], end='')
 
 
 def total_return(

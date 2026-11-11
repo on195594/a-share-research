@@ -200,7 +200,11 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 `policy.daily_brief` 接受 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。采集沿用监控输入但不加入旧 daily-brief 未读取的研究卡片；另保留每个未关闭持仓的完整生命周期事件、Provider 规范化分红行、来源/获取时间/源日期与安全错误类别、分红检查日和格式化日。成功空行集与失败 null 行集区分；逐持仓身份、代码、名称、股数必须与监控输入一致，遗漏或重复核查项拒绝。新旧入口共用从旧函数原样抽出的 implemented_rows，再由 unrecorded_dividends 和 format_daily_brief 复算，不采用调用方提供的计算结论。
 
-日报回执 mode=`service_daily_brief_capture`、上下文版本 4，原始输入根部仍保存 risk_policy。结果包含 status（ready/silent）、exit_code、stdout、stderr、snapshot 及 dividends.checked/findings/failures；无当日报价时保留 v0 静默行为，失败项仍可查。可由 `policy.daily_evaluation.evaluate` 离线复算，避免旧监控对嵌套 L3 的注解改变原始留存输入。采集仍在固定 25 秒预算内；只有此固定子进程允许从 tools 的环境接收 TUSHARE_TOKEN，其余模型/owner/宿主配置不传入。分红 Provider 异常逐持仓记录安全类别，不回显异常正文；数据库/来源/政策漂移等仍使整体回执失败。未新增数据库列，兼容回退版本必须识别上下文 4。
+日报回执 mode=`service_daily_brief_capture`、上下文版本 4，原始输入根部仍保存 risk_policy。结果包含 status（ready/silent）、exit_code、stdout、stderr、snapshot 及 dividends.checked/findings/failures；无当日报价时保留 v0 静默行为，失败项仍可查。可由 `policy.daily_evaluation.evaluate` 离线复算，避免旧监控对嵌套 L3 的注解改变原始留存输入。采集仍在固定 25 秒预算内；日报与基准两个固定子进程允许从 tools 的环境接收 TUSHARE_TOKEN，其余模型/owner/宿主配置不传入。分红 Provider 异常逐持仓记录安全类别，不回显异常正文；数据库/来源/政策漂移等仍使整体回执失败。未新增数据库列，兼容回退版本必须识别上下文 4。
+
+`policy.benchmark` 接受 request_id / expected_activation_id / end（严格 YYYY-MM-DD），同为 assistant、账户影子开关及评估追加入口。服务从已核验镜像或显式绑定账本读取截至 end 的完整 holding_events，包含期初前历史和已关闭持仓；不能用新增事件流替代完整现金流。固定子进程获取 H00300.CSI（沪深 300 全收益）、H00922.CSI（中证红利全收益）和估值日在仓股票收盘价，留存规范化行、来源时点与安全失败类别。两个指数最晚可用日期的较早者作为估值日；同日重复行沿用最后一行，费用、分红、调整与相同现金流比较共用 v0 纯函数，降级股票报价沿用原警告。保留原计算口径不表示供应商历史已经完整，须另核对实际原件和日期覆盖。
+
+基准回执 mode=`service_benchmark_capture`、上下文版本 5，request 绑定 end；同请求换截止日冲突。结果包含 status（ready/no_events/unavailable）、exit_code、stdout、stderr、metrics、failures，可用 `policy.benchmark_evaluation.evaluate` 离线复算。缺失指数、无法选出估值日或缺少股票价格均保存明确失败，metrics 为 null；指数不可用时不继续取股票价格，不补零生成收益。调用者不能提交行情或计算结论。采集仍限 25 秒，使用 tools 的 TUSHARE_TOKEN，成功双指数与实际耗时验收尚未完成；上下文 5 也须纳入兼容回退版本。
 
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 

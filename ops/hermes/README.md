@@ -5,7 +5,7 @@
 |---|---|---|
 | `a-stock-stop-alert.sh`（`a-share-stop-alert.py`） | 止损提醒 `ca568f56d9ef` | 工作日 09–15 点每 5 分钟，服务内判断交易时段 |
 | `a-stock-daily-brief.sh`（`a-share-daily-brief.py`） | 持仓日报 `7ab0ded3121c` | 工作日 15:35 |
-| `a-stock-benchmark-monthly.sh` | 账本月度对比 `93c4f5a4d0fc` | 每月 1 日 09:00 |
+| `a-stock-benchmark-monthly.sh`（`a-share-benchmark.py`） | 账本月度对比 `93c4f5a4d0fc` | 每月 1 日 09:00 |
 | `a-share-advisor.sh`、`a-share-advisor-weekly.sh`（`a-share-advisor.py`） | 顾问扫描 `fbb0cbf6ee60` / 周报 `7845e96f4184` | 工作日 16:37 / 周日 18:07 |
 | `a-share-monthly-submit.sh`、`a-share-monthly-status.sh`（`a-share-monthly.sh`、`a-share-monthly.py`） | 月批发起 `3d8b860808e4` / 状态 `112633a18054` | 每月 1 日 20:00 / 每月 1–3 日每小时 :30 |
 | `a-share-scoring.sh`、`a-share-scoring.py` | 记分 `2c0e2f798501` | 周日 19:07 |
@@ -17,13 +17,13 @@
 
 ## 合一替代调用与切换核对
 
-下表按 2026-11-11 本机任务配置与脚本核对；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本已纳入版本管理，止损与日报源码已改为服务调用；月度对比仍为旧调用，不能当作全部服务化已完成。宿主尚未安装这些替代版本。
+下表按 2026-11-11 本机任务配置与脚本核对；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本已纳入版本管理，止损、日报与月度对比源码已改为服务调用；成功上游数据、真实运行耗时和正式送达仍须验收。宿主尚未安装这些替代版本。
 
 | 任务 | 调用与替代状态 | 去重状态 | 命令预算与回退边界 |
 |---|---|---|---|
 | 止损提醒 | 新脚本 `policy.current` → `policy.stop_alert`；服务保存原始行情、止损线、旧通知状态及评估 | 新 `~/.local/state/ashare-stop-alert/state.json`，切换时从已确认的旧 stop-alert-state.json 导入 | ashare 子进程 40 秒，HTTP 30 秒，服务采集 25 秒；切换后只回兼容新账本及此回执/状态的合并版 |
 | 持仓日报 | 新脚本 `policy.current` → `policy.daily_brief`；监控、逐持仓完整事件与 Provider 分红响应/失败共同留存 | `~/.local/state/ashare-daily-brief/state.json` 仅记录待查请求，无新增每日通知去重 | ashare 子进程 40 秒、HTTP 30 秒、服务整体采集 25 秒；真实成功分红链路耗时尚待验收 |
-| 账本月度对比 | `a-stock-cache benchmark-report`；全收益指数与完整事件历史的服务替代待验 | 无独立通知去重 | wrapper 无独立超时；期初后现金流不能冒充完整基准历史 |
+| 账本月度对比 | 新脚本 `policy.current` → `policy.benchmark`；完整历史、双全收益指数及估值报价或失败留存 | `~/.local/state/ashare-benchmark/state.json` 仅记录待查请求，无新增月度通知去重 | ashare 子进程 40 秒、HTTP 30 秒、采集 25 秒；双基准真实完整响应与预算尚待验收 |
 | 顾问扫描 | 新脚本用 `ashare … call account.current` 同步及通知前刷新持仓，`policy.current` + `policy.monitor` 取已留存评估；研究扫描 API 不变 | `opportunities.json`，保留旧机会键并增加待查请求 | ashare 子进程 40 秒、HTTP 30 秒、服务采集 25 秒；扫描 HTTP 每次 60 秒，轮询最多 90×20 秒 |
 | 顾问周报 | 原研究 weekly API，无账户命令 | 无独立通知去重 | HTTP 60 秒；脚本仍共用 advisor |
 | 月批发起 | 原 monthly submit API | `<月>.receipt`，flock 与落盘回执 | 保持原入口；48 小时只用于卡住提示，不是执行超时 |
@@ -56,3 +56,9 @@
 日报读取新 `policy.daily_brief` 完整结果，保留漏记分红及分红获取失败提示。Provider 成功空表表示未发现实施记录，失败的 null 表表示尚未核对，两者不会混用。服务正文沿用 v0，客户端仅把“运行 dividend-check”提示改为通过统一 a-share 核对券商流水，不自动入账。无当日报价时原格式静默，分红失败仍在评估回执的 dividends.failures 中可查。
 
 成功分红采集需要 tools 专用 `.env.tools` 中已有的 TUSHARE_TOKEN；日报子进程仅额外传递这一行情令牌，不读取旧 runtime.env，也不传模型或 owner 凭据。服务未配置令牌时保留 AUTH_MISSING 失败项。离线历史行情、无令牌失败支路和既有分红历史样本已验证；真实 Provider 成功响应、整体 25 秒采集预算及定时送达仍须正式验收。上下文版本 4 和待查文件格式须由回退合并版本支持。本批未安装脚本或改动宿主凭据。
+
+## 账本月度对比替代入口
+
+原 shell 入口执行同目录 `a-share-benchmark.py`，使用相同的 Hermes assistant 配置。`ASHARE_BENCHMARK_STATE` 可指定待查文件。调用前原子保存 request_id、expected_activation_id 与上海当前日期 end，锁防并发，响应不明时复用原请求和截止日。有效回执结束待查，再输出报告或明确失败；其他日期的已完成请求只清理待查，不当作当日报告发送。坏状态/坏回执不覆盖，不增加月度通知去重或送达 ACK。
+
+完整交易历史包含期初前事件与已关闭持仓，服务按原现金流算法比较沪深 300 全收益和中证红利全收益。成功才加原“📊 A股账本月度对比”前缀，报价降级警告保留；无交易、指数/股票价格缺失时退出 1 并提示失败，不显示伪造收益。tools 专用行情令牌传递规则同日报；无令牌的真实 Provider 失败会保存。上下文版本 5 与待查格式需要兼容合并版回退。准备期不安装宿主脚本，也不把局部指数缓存和结构算例计作真实完整双基准验收。

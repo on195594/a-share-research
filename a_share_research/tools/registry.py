@@ -65,6 +65,10 @@ class PolicyStopAlert(PolicyMonitor):
     previous_state: StopState
 
 
+class PolicyBenchmark(PolicyMonitor):
+    end: str = Field(pattern=r'^\d{4}-\d{2}-\d{2}$')
+
+
 class ExternalStart(Arguments):
     request_id: str = Field(min_length=1, max_length=128)
     source_run_id: int = Field(gt=0)
@@ -228,6 +232,11 @@ def _daily_brief(ctx: Context, args: PolicyMonitor) -> Payload:
     return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id))
 
 
+def _benchmark(ctx: Context, args: PolicyBenchmark) -> Payload:
+    from a_share_research.policy.benchmark import run
+    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id, args.end))
+
+
 def _v0_positions(ctx: Context, args: Account) -> Payload:
     from a_share_research.policy.v0.account_store import read
     return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
@@ -247,6 +256,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.benchmark', '按指定截止日采集完整交易历史与双全收益指数，保存相同现金流比较及失败证据；不发送通知、不修改账户',
+         frozenset({'assistant'}), PolicyBenchmark, Payload, _benchmark, access='write', account=True),
     Tool('policy.daily_brief', '采集持仓监控和分红核查，保存原始输入、失败项与盘后日报；不发送通知、不记分红账',
          frozenset({'assistant'}), PolicyMonitor, Payload, _daily_brief, access='write', account=True),
     Tool('policy.stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态；不发送通知、不修改账户',
