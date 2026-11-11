@@ -226,7 +226,7 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
-    Tool('policy.monitor', '从核对过的账户镜像采集当前行情，按生效政策保存评估与原始输入；来源时点随回执返回',
+    Tool('policy.monitor', '从已核对的账户镜像或明确绑定的账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',
          frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True),
     Tool('policy.current', '读取生效政策身份、参数与实装一致性；未启用时不猜测默认版本',
          frozenset({'assistant','owner'}), Arguments, Payload,

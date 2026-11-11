@@ -218,10 +218,17 @@ def inspect(conn):
         try:
             if len(row)>10 and (row[10] is not None or row[11] is not None):
                 context=json.loads(row[10])
-                if (gate.digest(context)!=row[11] or context.get('schema_version')!=1
-                        or context.get('request')!={'action':'policy.monitor','expected_activation_id':row[2]}
-                        or context.get('source',{}).get('mode')!='mirror'):
+                source=context.get('source',{})
+                if (gate.digest(context)!=row[11]
+                        or context.get('request')!={'action':'policy.monitor','expected_activation_id':row[2]}):
                     raise PolicyError('采集来源或生效指针不一致')
+                if context.get('schema_version')==1:
+                    if source.get('mode')!='mirror':raise PolicyError('旧采集来源须为镜像')
+                elif context.get('schema_version')==2:
+                    from a_share_research.policy.account_input import validate_source
+                    validate_source(source)
+                else:
+                    raise PolicyError('未知采集来源版本')
             if gate.digest(json.loads(row[8])) != row[6] or gate.digest(json.loads(row[9])) != row[7]:
                 raise PolicyError('输入或结果哈希不一致')
             manifest = _version(conn,row[1])

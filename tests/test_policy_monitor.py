@@ -190,7 +190,8 @@ def test_v20_additive_columns_preserve_prior_replay_and_rerun(setup):
     assert registry.evaluation(conn,principals['assistant'],before[0])['mode']=='supplied_input_replay'
 
 
-def test_fixed_child_transport_drops_inherited_credentials_and_config(tmp_path,monkeypatch):
+@pytest.mark.parametrize('source',[None,{'mode':'ledger','watermark':{'account_id':'structural-transport-only'}}])
+def test_fixed_child_transport_drops_inherited_credentials_and_config(tmp_path,monkeypatch,source):
     for key in ('ASHARE_OWNER_TOKEN','OPENAI_API_KEY','TUSHARE_TOKEN','POLICY_V0_ACCOUNT_SHADOW','A_STOCK_CONFIG_FILE'):
         monkeypatch.setenv(key,'must-not-propagate')
     database=tmp_path/'app.db'
@@ -208,9 +209,10 @@ def test_fixed_child_transport_drops_inherited_credentials_and_config(tmp_path,m
         assert config.read_bytes()==b'' and config.stat().st_mode&0o777==0o600
         return Process()
     monkeypatch.setattr(monitor.subprocess,'Popen',popen)
-    assert monitor.capture(database,parameters)=={'transport_fixture':True}
+    assert monitor.capture(database,parameters,source=source)=={'transport_fixture':True}
     assert seen['argv']==[sys.executable,'-m','a_share_research.policy.capture']
-    assert seen['payload']==parameters and seen['timeout']==25
+    assert seen['payload']==(parameters if source is None else dict(parameters=parameters,source=source))
+    assert seen['timeout']==25
     env=seen['kwargs']['env']
     assert set(env)<= {'PATH','HOME','LANG','LC_ALL','POLICY_V0_DB','A_STOCK_CONFIG_FILE'}
     assert env['POLICY_V0_DB']==str(database.resolve())

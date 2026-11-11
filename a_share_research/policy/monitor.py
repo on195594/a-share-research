@@ -1,4 +1,4 @@
-"""Acquire and retain a v0 evaluation from the verified pre-cutover account mirror."""
+"""Acquire and retain a v0 evaluation from a verified mirror or explicitly bound ledger."""
 import json
 import os
 from pathlib import Path
@@ -29,6 +29,17 @@ def _mirror(conn: sqlite3.Connection, directory: Path) -> dict:
     return dict(mode='mirror',source_sha256=row[1],updated_at=row[2],watermark=watermark)
 
 
+def _source(conn: sqlite3.Connection, directory: Path) -> dict:
+    row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source WHERE id=1').fetchone()
+    if row is None or row[0]=='mirror':
+        return _mirror(conn,directory)
+    from a_share_research.policy import account_input
+    try:
+        return account_input.read(conn,directory,row)
+    except (ValueError,OSError,sqlite3.Error):
+        raise registry.PolicyError('账户账本绑定、投影或证据无法核对；不能保存评估，请检查账户来源',409) from None
+
+
 def _request(expected_activation_id):
     if type(expected_activation_id) is not int or expected_activation_id < 1:
         raise registry.PolicyError('expected_activation_id 须为当前生效指针编号',422)
@@ -46,7 +57,7 @@ def _existing(conn, principal, request_id, request):
     return saved
 
 
-def capture(database: Path, parameters: dict) -> dict:
+def capture(database: Path, parameters: dict, *, source: dict | None = None) -> dict:
     """Run the fixed collector with a private empty config and no inherited model credentials."""
     with tempfile.TemporaryDirectory(prefix='ashare-policy-capture-') as directory:
         config = Path(directory)/'runtime.env'
@@ -57,7 +68,8 @@ def capture(database: Path, parameters: dict) -> dict:
             cwd=Path(__file__).resolve().parents[2],env=env,stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
         try:
-            output,_ = process.communicate(gate.canonical(parameters).encode(),timeout=25)
+            payload=parameters if source is None else dict(parameters=parameters,source=source)
+            output,_ = process.communicate(gate.canonical(payload).encode(),timeout=25)
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(process.pid,signal.SIGKILL)
@@ -105,23 +117,27 @@ def run(conn: sqlite3.Connection, principal, database: Path, request_id: str, ex
         try: identity.check_installed(manifest)
         except identity.IdentityError:
             raise registry.PolicyError('当前代码与生效政策身份不一致，须由 owner 登记并切换') from None
-        source=_mirror(conn,database.resolve().parent)
+        source=_source(conn,database.resolve().parent)
+        if source['mode']=='ledger' and manifest['parameters'].get('account_scope')!=source['watermark']['account_scope']:
+            raise registry.PolicyError('生效政策的账户范围与账本绑定不一致',409)
     started=db.now()
-    bundle=capture(database,manifest['parameters'])
+    bundle=(capture(database,manifest['parameters'],source=source) if source['mode']=='ledger'
+            else capture(database,manifest['parameters']))
     try:
         result=evaluate(bundle,manifest['parameters'])
         identity.check_installed(manifest)
     except ValueError as exc:
         raise registry.PolicyError(f'采集后的政策输入或实现校验失败：{exc}',422) from None
     finished=db.now()
-    context=dict(schema_version=1,request=request,source=source,capture_started_at=started,capture_finished_at=finished)
+    context=dict(schema_version=2 if source['mode']=='ledger' else 1,request=request,source=source,
+                 capture_started_at=started,capture_finished_at=finished)
     with db.transaction(conn):
         registry._authorize(conn,principal)
         saved=_existing(conn,principal,request_id,request)
         if saved is not None: return saved
         if registry._current(conn)!=activation:
             raise registry.PolicyError('采集期间生效政策改变，未保存评估，请重新发现当前指针')
-        if _mirror(conn,database.resolve().parent)!=source:
+        if _source(conn,database.resolve().parent)!=source:
             raise registry.PolicyError('采集期间账户来源改变，未保存评估，请重新采集')
         cursor=conn.execute('INSERT INTO policy_evaluations '
             '(identity,activation_id,created_at,created_by,request_id,input_hash,result_hash,input,result,capture_context,capture_context_hash) '
