@@ -165,17 +165,22 @@ def _capture_mode(context, activation_id, bundle):
         from a_share_research.policy.benchmark import _end
         request = dict(action='policy.benchmark', expected_activation_id=activation_id, end=_end(bundle.get('end')))
         mode = 'service_benchmark_capture'
-    elif version == 6:
-        from a_share_research.policy.position_request import Reference, validate_proposal
+    elif version in (6, 7):
+        from a_share_research.policy.position_request import Reference
+        if version == 6:
+            from a_share_research.policy.position_request import validate_proposal
+            action, mode = 'policy.position_size', 'derived_position_size'
+        else:
+            from a_share_research.policy.scenario_request import validate_proposal
+            action, mode = 'policy.portfolio_scenario', 'derived_portfolio_scenario'
         ref = Reference.model_validate(bundle.get('monitor_evaluation'))
-        request = dict(action='policy.position_size', expected_activation_id=activation_id,
+        request = dict(action=action, expected_activation_id=activation_id,
                        monitor_evaluation_id=ref.id, proposal=validate_proposal(bundle.get('proposal')))
         if set(context) != {'schema_version', 'request', 'source', 'derived_at'}:
-            raise PolicyError('定仓来源字段不一致')
+            raise PolicyError('派生评估来源字段不一致')
         stamp = datetime.fromisoformat(context['derived_at'])
         if stamp.tzinfo is None or stamp.utcoffset() is None:
-            raise PolicyError('定仓时间须带时区')
-        mode = 'derived_position_size'
+            raise PolicyError('派生评估时间须带时区')
     elif version not in (1, 2):
         raise PolicyError('未知采集来源版本')
     if context.get('request') != request:
@@ -183,7 +188,7 @@ def _capture_mode(context, activation_id, bundle):
     source = context.get('source', {})
     if not isinstance(source, dict):
         raise PolicyError('采集来源须为对象')
-    if version == 1 or version in (3, 4, 5, 6) and source.get('mode') == 'mirror':
+    if version == 1 or version in (3, 4, 5, 6, 7) and source.get('mode') == 'mirror':
         if source.get('mode') != 'mirror':
             raise PolicyError('旧采集来源须为镜像')
     else:
@@ -247,14 +252,14 @@ def evaluation(conn, principal, evaluation_id):
     if row is None:
         raise PolicyError('评估记录不存在',404)
     saved = _evaluation(row)
-    if saved['mode'] == 'derived_position_size':
-        from a_share_research.policy.position_sizing import verify_parent
+    if saved['mode'] in ('derived_position_size', 'derived_portfolio_scenario'):
+        from a_share_research.policy.derived import verify_parent
         try:
             verify_parent(conn, saved)
         except PolicyError:
             raise
         except (ValueError, KeyError, TypeError):
-            raise PolicyError('定仓评估关联记录损坏') from None
+            raise PolicyError('派生评估关联记录损坏') from None
     return saved
 
 
@@ -284,8 +289,8 @@ def inspect(conn):
                 if gate.digest(context)!=row[11]:
                     raise PolicyError('采集来源或生效指针不一致')
                 _capture_mode(context, row[2], json.loads(row[8]))
-                if context.get('schema_version') == 6:
-                    from a_share_research.policy.position_sizing import verify_parent
+                if context.get('schema_version') in (6, 7):
+                    from a_share_research.policy.derived import verify_parent
                     verify_parent(conn, _evaluation(row))
             if gate.digest(json.loads(row[8])) != row[6] or gate.digest(json.loads(row[9])) != row[7]:
                 raise PolicyError('输入或结果哈希不一致')

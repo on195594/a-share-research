@@ -18,6 +18,7 @@ from a_share_research.account import trades, ledger, evidence, analysis, analysi
 from a_share_research.policy import registry as policies
 from a_share_research.policy.stop_state import StopState
 from a_share_research.policy.position_request import Proposal
+from a_share_research.policy.scenario_request import Proposal as ScenarioProposal
 
 
 class ToolError(Exception):
@@ -73,6 +74,11 @@ class PolicyBenchmark(PolicyMonitor):
 class PolicyPositionSize(PolicyMonitor):
     monitor_evaluation_id: int = Field(gt=0)
     proposal: Proposal
+
+
+class PolicyPortfolioScenario(PolicyMonitor):
+    monitor_evaluation_id: int = Field(gt=0)
+    proposal: ScenarioProposal
 
 
 class ExternalStart(Arguments):
@@ -249,6 +255,12 @@ def _position_size(ctx: Context, args: PolicyPositionSize) -> Payload:
                            args.monitor_evaluation_id, args.proposal.model_dump(mode='json')))
 
 
+def _portfolio_scenario(ctx: Context, args: PolicyPortfolioScenario) -> Payload:
+    from a_share_research.policy.portfolio_scenario import run
+    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id,
+                           args.monitor_evaluation_id, args.proposal.model_dump(mode='json')))
+
+
 def _v0_positions(ctx: Context, args: Account) -> Payload:
     from a_share_research.policy.v0.account_store import read
     return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
@@ -268,6 +280,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
+         frozenset({'assistant'}), PolicyPortfolioScenario, Payload, _portfolio_scenario, access='write', account=True),
     Tool('policy.position_size', '引用已保存的服务端监控评估，按拟买入条件保存风险预算定仓；不刷新行情、不形成交易动作',
          frozenset({'assistant'}), PolicyPositionSize, Payload, _position_size, access='write', account=True),
     Tool('policy.benchmark', '按指定截止日采集完整交易历史与双全收益指数，保存相同现金流比较及失败证据；不发送通知、不修改账户',

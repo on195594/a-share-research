@@ -212,6 +212,12 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 派生回执 mode=`derived_position_size`，capture_context 版本 6 保存请求、账户来源及 derived_at（计算时间，不是行情或资产估值时间）。输入保存实际 snapshot、proposal、risk_policy 及父回执编号/输入哈希/结果哈希；结果为 status、exit_code、stdout、stderr、sizing，可由 `policy.position_evaluation.evaluate` 离线复算。读取与完整性检查还核对父子引用。全部检查和追加在单个无网络事务内，失败整体回滚；重复请求查回原结果，不因后续账户或政策改变而重算，改变 proposal 或父回执必须使用新请求。服务不下单、不记交易；未新增数据库列，兼容回退版须识别上下文 6。
 
+`policy.portfolio_scenario` 与定仓共用同一父回执核验和无网络事务。输入为 request_id、expected_activation_id、monitor_evaluation_id、proposal；proposal 必须包含非空 sales（六位代码到正整数股数的映射）及非负 fees（零也须显式填写），cash 可省略或为非负数。卖出数量由调用者明确指定，费用为估计；未提供现金时保留 cash_before/cash_after 为 null，不从资产差额推算。不得把假设数量或价格当作已成交、可卖数量或当前行情。
+
+服务复用 v0 portfolio_scenario.compare，不自动选股或推荐数量。卖出所得只转成现金，总资产仅扣估计费用，不重复加上卖出金额；原数据缺口、L3、门禁及复核状态保留。报价、股数、止损线、完整估值或已确认分母不足，以及过量卖出、费用或汇总冲突，按原规则拒绝计算。格式合法但不能计算时保存 unavailable 和原错误文本，result.scenario 为 null；有效情景仍标记 action_status=not_formed、execution_status=not_checked、writes=false。
+
+情景回执 mode=`derived_portfolio_scenario`、上下文版本 7，输入保存同样的 snapshot/父回执引用/参数/提案，结果字段为 status、exit_code、stdout、stderr、scenario，可用 `policy.scenario_evaluation.evaluate` 离线复算。同请求不能在仓位与情景工具之间复用，账户或政策变化后新计算必须重新监控，已保存回执仍可查询。两种派生计算共用 policy.derived 的父子一致性检查及原子留存；旧上下文 6 记录保持可读。未新增数据库列，兼容回退版须同时支持版本 6、7。
+
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
 mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256。当前只有该绑定的读取和验证，没有生产切换写入器，私有测试中设置绑定不算完成切换。
