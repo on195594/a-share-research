@@ -1,12 +1,13 @@
 """Local read-only tools service. Schema migration belongs to the release process."""
 import logging
+import json
 import os
 import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
@@ -16,7 +17,8 @@ from a_share_research.tools.registry import Context, ToolError, TOOLS, discover,
 logger = logging.getLogger(__name__)
 
 
-def create_app(database: Path, *, external_enabled: bool = False, external_review_enabled: bool = False) -> FastAPI:
+def create_app(database: Path, *, external_enabled: bool = False, external_review_enabled: bool = False,
+               account_shadow_enabled: bool = False) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     slots = threading.BoundedSemaphore(2)
 
@@ -39,7 +41,8 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
         conn = None
         try:
             tool = TOOLS.get(name)
-            writable = external_enabled and tool is not None and tool.external and tool.access == 'write'
+            writable = tool is not None and tool.access == 'write' and (
+                external_enabled and tool.external or account_shadow_enabled and tool.account)
             mode = 'rw' if writable else 'ro'
             conn = sqlite3.connect(database.resolve().as_uri() + '?mode=' + mode, uri=True,
                                    timeout=5, isolation_level=None)
@@ -48,10 +51,11 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
             principal = api_keys.authenticate(conn, header[7:])
             if principal is None:
                 raise ToolError('unauthorized', '凭据无效或已撤销', 401)
-            yield Context(conn, database, principal, external_enabled, external_review_enabled)
+            yield Context(conn, database, principal, external_enabled, external_review_enabled, account_shadow_enabled)
         except sqlite3.Error:
             logger.exception('Tool database unavailable')
-            raise ToolError('unavailable', '工具数据库不可用', 503) from None
+            raise ToolError('service_failure' if name and name.startswith('account.') else 'unavailable',
+                            '工具数据库不可用；未返回成功回执，可用原请求重试', 503) from None
         finally:
             if conn is not None:
                 conn.close()
@@ -59,15 +63,33 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
 
     @app.get('/health')
     def health():
-        return {'status': 'ok', 'mode': 'external-staging' if external_enabled else 'read-only'}
+        return {'status': 'ok', 'mode': 'account-shadow' if account_shadow_enabled else 'external-staging' if external_enabled else 'read-only'}
 
     @app.get('/tools')
     def tools(request: Request):
         with context(request) as ctx:
-            return {'tools': discover(ctx.principal, external_enabled=external_enabled)}
+            return {'tools': discover(ctx.principal, external_enabled=external_enabled, account_shadow_enabled=account_shadow_enabled)}
+
+    async def arguments_json(request: Request):
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError('duplicate JSON key')
+                result[key] = value
+            return result
+        def invalid_constant(value):
+            raise ValueError('nonfinite JSON number')
+        try:
+            arguments = json.loads(await request.body(), object_pairs_hook=unique, parse_constant=invalid_constant)
+            if not isinstance(arguments, dict):
+                raise ValueError('object required')
+            return arguments
+        except (ValueError, UnicodeError):
+            raise ToolError('invalid_arguments', '请求须为无重复键、无非有限数字的JSON对象', 422) from None
 
     @app.post('/tools/{name}')
-    def call(name: str, arguments: dict, request: Request):
+    def call(name: str, request: Request, arguments: dict = Depends(arguments_json)):
         with context(request, name) as ctx:
             return {'ok': True, 'result': invoke(ctx, name, arguments)}
 

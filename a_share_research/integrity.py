@@ -113,6 +113,8 @@ def _check_rows(conn: sqlite3.Connection) -> tuple[list[str], dict]:
                         json.loads(batch[column])
                 except ValueError:
                     problems.append(f"批次 {batch['id']}：{column} 不是合法 JSON")
+    from a_share_research.account.audit import inspect as inspect_account
+    problems.extend(inspect_account(conn))
     return problems, {"runs_with_material": len(materials), "calls": calls, "reports": reports,
                       "reports_without_hash": unhashed, **_check_relations(conn, problems), **_check_external(conn, problems)}
 

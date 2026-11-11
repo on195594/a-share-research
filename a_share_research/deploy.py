@@ -26,7 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
 TABLES = ("runs", "calls", "reports", "prices", "batches", "sessions", "api_keys")
 OPTIONAL_TABLES = (*db.ACCOUNT_TABLES, 'account_source', 'policy_activations',
-                   'external_research', 'external_submissions', 'external_reviews')
+                   'external_research', 'external_submissions', 'external_reviews',
+                   'account_books', 'account_batches', 'account_journal', 'account_voids', 'account_observations')
 log = logging.getLogger(__name__)
 
 
