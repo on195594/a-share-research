@@ -283,7 +283,7 @@ Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默
 
 主模型使用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；独立复核可同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID`，仅 `review` 阶段使用该模型，其他阶段仍用主模型。`MODEL_REVIEW_REASONING` 未设置时继承主模型思考强度；未配置独立复核时沿用主模型。当前生产选择只在[实施记录](docs/implementation-plan.md#当前部署)维护。
 
-worker 启动时先离线预检 Node、Pi 安装目录、模型存储、主模型及可选复核模型的本地凭据配置，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `python -c 'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。兼容缺省存储（使用内置模型或环境凭据）与带 BOM 的 JSON；文件损坏、模型不存在或没有可用凭据配置仍会阻断。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、存储或凭据环境，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
+worker 启动时先离线预检 Node、Pi 安装目录、模型存储、主模型及可选复核模型的本地凭据配置，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `python -c 'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。扩展注册后等待本地目录恢复完成，再选择模型；目录刷新失败同样阻断。兼容缺省存储（使用内置模型或环境凭据）与带 BOM 的 JSON；文件损坏、模型不存在或没有可用凭据配置仍会阻断。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、存储或凭据环境，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
 
 预检失败期间，价格任务与批次处理也会暂停，遗留的 `running` 任务保留原状。应先修复运行环境再恢复 worker；这些任务仍受发布空闲检查约束，不能改状态绕过检查。
 

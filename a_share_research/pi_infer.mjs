@@ -98,11 +98,14 @@ try {
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
-  async function resolveModel(request, result) {
+  async function refreshCatalog(request) {
     const refreshed = await runtime.refresh({ providers: [request.provider], allowNetwork: false,
       signal: AbortSignal.timeout(request.timeout * 1000) });
     if (refreshed.aborted) throw new Error("Model catalog refresh timed out");
     if (refreshed.errors.has(request.provider)) throw refreshed.errors.get(request.provider);
+  }
+  async function resolveModel(request, result) {
+    await refreshCatalog(request);
     let model = runtime.getModel(request.provider, request.model);
     if (model) result.model_source = "catalog";
     if (!model && process.env.PI_EXTENSION) {
@@ -122,6 +125,8 @@ try {
       for (const entry of loaded.runtime.pendingProviderRegistrations) {
         if (entry.name === request.provider) runtime.registerProvider(entry.name, entry.config);
       }
+      // Registration starts a background refresh; wait for persisted provider state and errors.
+      await refreshCatalog(request);
       model = runtime.getModel(request.provider, request.model);
       if (model) result.model_source = "extension";
     }

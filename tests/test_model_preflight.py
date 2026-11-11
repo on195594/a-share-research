@@ -159,3 +159,66 @@ def test_incomplete_or_unknown_review_model_blocks_startup(configured, monkeypat
         monkeypatch.setenv(key, value)
     with pytest.raises(RuntimeError, match="MODEL_REVIEW_ID" if len(review) == 1 else "not found"):
         model.preflight()
+
+
+@pytest.fixture
+def async_catalog_extension(configured, tmp_path):
+    """Real Pi lifecycle contract only: private catalog, dummy auth, no financial evidence."""
+    _, isolated = isolated_agent(configured, tmp_path)
+    provider = "runtime-lifecycle-fixture"
+    model = {"id": "cached-model", "name": "Lifecycle fixture", "reasoning": False,
+             "input": ["text"], "contextWindow": 1024, "maxTokens": 128,
+             "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}
+    (tmp_path / "auth.json").write_text(json.dumps({
+        provider: {"type": "api_key", "key": "dummy-lifecycle-test-not-a-real-key"}}))
+    (tmp_path / "models-store.json").write_text(json.dumps({
+        provider: {"models": [], "lifecycleFixture": [model]}}))
+    extension = tmp_path / "lifecycle-extension.mjs"
+    extension.write_text("""
+import {writeFileSync} from 'node:fs';
+export default function(pi) {
+  const bootstrap = {
+    id: 'bootstrap-model', name: 'Lifecycle bootstrap fixture', reasoning: false,
+    input: ['text'], contextWindow: 1024, maxTokens: 128,
+    cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0},
+  };
+  pi.registerProvider('runtime-lifecycle-fixture', {
+    api: 'openai-completions', baseUrl: 'https://lifecycle-fixture.invalid',
+    models: [bootstrap],
+    async refreshModels(context) {
+      if (context.allowNetwork) throw new Error('Lifecycle fixture must stay offline');
+      // Force an asynchronous boundary in the real provider publication lifecycle.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      writeFileSync(process.env.LIFECYCLE_MARKER, 'refresh completed');
+      if (process.env.LIFECYCLE_FAIL === '1') throw new Error('Lifecycle catalog refresh failed');
+      return context.stored.lifecycleFixture;
+    },
+    streamSimple() { throw new Error('Lifecycle fixture forbids inference'); },
+  });
+}
+""")
+    # Do not inherit provider secrets or extensions from the host environment.
+    env = {"PATH": os.environ["PATH"], "PI_RUNTIME": isolated["PI_RUNTIME"],
+           "PI_AGENT_DIR": str(tmp_path), "PI_CODING_AGENT_DIR": str(tmp_path),
+           "PI_EXTENSION": str(extension), "MODEL_PROVIDER": provider,
+           "MODEL_ID": "cached-model", "LIFECYCLE_MARKER": str(tmp_path / "refreshed")}
+    return env
+
+
+def test_extension_waits_for_async_cached_catalog(async_catalog_extension):
+    env = async_catalog_extension
+    status, out = check(env)
+    assert status == 0, out
+    assert Path(env["LIFECYCLE_MARKER"]).read_text() == "refresh completed"
+    assert out["ready"] is True and out["model"] == "cached-model"
+    assert out["model_source"] == "extension"
+    assert "usage" not in out and "message" not in out
+
+
+def test_extension_refresh_failure_blocks_bootstrap_model(async_catalog_extension):
+    env = async_catalog_extension | {"MODEL_ID": "bootstrap-model", "LIFECYCLE_FAIL": "1"}
+    status, out = check(env)
+    assert status != 0, out
+    assert not out.get("ready")
+    assert "Lifecycle catalog refresh failed" in out["error"]
+    assert Path(env["LIFECYCLE_MARKER"]).read_text() == "refresh completed"
