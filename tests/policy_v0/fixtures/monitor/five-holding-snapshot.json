@@ -1,0 +1,10 @@
+{
+  "portfolio_value": 117086.09,
+  "holdings": [
+    {"code": "600036", "shares": 500},
+    {"code": "600900", "shares": 800},
+    {"code": "603606", "shares": 500, "review_due": true},
+    {"code": "000963", "shares": 800},
+    {"code": "002050", "shares": 500, "review_due": true}
+  ]
+}

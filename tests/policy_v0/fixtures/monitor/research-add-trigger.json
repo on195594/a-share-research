@@ -1,0 +1,19 @@
+{
+  "provenance": "a-share-research tests/support/reports.py report().stance, real Guizhou Maotai annual report support fixture; new checkpoint shape used as an explicit contract perturbation of captured cards.",
+  "stance": {
+    "action": "现在分批",
+    "text": "经营现金流明显下降，首批之后观察下一期现金转化是否恢复。",
+    "cites": [
+      {
+        "ref": "T.op_cash",
+        "period": "2025-12-31"
+      }
+    ],
+    "add_trigger": {
+      "metric": "T.op_cash",
+      "period": "2026-03-31",
+      "op": ">=",
+      "value": 200
+    }
+  }
+}

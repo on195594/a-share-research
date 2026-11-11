@@ -1,0 +1,152 @@
+{
+ "provenance": "Research company_card for 688578 (艾力斯) from the 2026-11-04 stance/v2 smoke research (report 1 in the evaluation data dir stance-v2-smoke-20261104, model run with real TuShare/announcement material); current is valuation.at() at the report close 83.08 on 2026-11-03, as production cards roll it. Not a production card.",
+ "card": {
+  "version": "research-v1",
+  "code": "688578",
+  "name": "艾力斯",
+  "report_id": 1,
+  "period": "2026-09-30",
+  "created_at": "2026-11-04T12:17:05+08:00",
+  "completed_at": "2026-11-04T12:17:05+08:00",
+  "pending_events": [],
+  "current": {
+   "last_close": 83.08,
+   "last_close_date": "2026-11-03",
+   "valuation": {
+    "annual_returns": {
+     "保守": -0.17647041580291647,
+     "中性": 0.20747900702821534,
+     "乐观": 0.4323124917374268
+    },
+    "neutral_return_without_dividends": 0.1971035043291856,
+    "support_below": 40.42337310513597,
+    "stretched_above": 123.4021309250723,
+    "inverted": false,
+    "zone": "中性区",
+    "horizon": 2.48870636550308,
+    "as_of": "2026-11-03",
+    "close": 83.08,
+    "assumption": "按冻结累计分红尚未支付测算。",
+    "v2": {
+     "rule": "valuation-v2",
+     "probabilities": {
+      "保守": 0.25,
+      "中性": 0.55,
+      "乐观": 0.2
+     },
+     "annual_return": 0.1840264176679583,
+     "support_below": 99.78315071886827,
+     "stretched_above": 117.52313531173546,
+     "zone": "测算支持区"
+    }
+   },
+   "current_zone": "中性区"
+  },
+  "status": "有效",
+  "verdict": "值得继续研究",
+  "summary": "值得继续研究，前三季度扣非净利润21.34亿元、同比增长47.04%，但关键临床失败后，应以现有商业化业务而非海外成功预期作为估值基础。",
+  "risks": [
+   "最重要的反证已经发生：伏美替尼用于20外显子插入突变的一线治疗试验未达到主要终点。次要终点获益、尚未成熟的总生存期趋势不能替代主要终点成功，相关适应症及海外拓展不宜按确定性收入估值。不过，这也不等于既有获批适应症失效；相关研发支出此前已经费用化，不能把未来增长受损与当期新增减值混为一谈。",
+   "产品集中风险仍然突出：伏美替尼贡献前三季度营业总收入的94.46%，新品尚不足以分散核心产品遭遇竞争、医保价格或临床替代的冲击。同期毛利率下降1.90个百分点；半年报将成本增长快于收入解释为产品组合变化，因此不能直接认定核心产品已经降价，也不能假设新品放量必然提高利润率。",
+   "增长仍强，但已经减速：营业收入累计同比增速从一季度44.19%降至前三季度37.57%，第三季度单季为33.58%。这尚不是收入下降，却意味着不能把此前高速增长直接外推；若核心产品增长继续放缓，新品又因较低毛利率无法补足利润，将削弱当前判断。"
+  ],
+  "checkpoints": [
+   {
+    "text": "观察全年营业总收入能否延续增长，并结合产品拆分检查增长是否仍主要依赖伏美替尼；若收入增长继续减弱、新品无法补位，将削弱现有商业化业务可持续增长的判断。",
+    "forecast": {
+     "metric": "T.revenue",
+     "period": "2026-12-31",
+     "low": 67.5,
+     "high": 72.5,
+     "confidence": 75
+    }
+   },
+   {
+    "text": "观察全年扣非归母净利润能否保持增长，并核对毛利率下降是否仍由销售费用摊薄抵消；若收入增加却不能转化为扣非利润，或利润越来越依赖研发资本化，将削弱当前估值依据。",
+    "forecast": {
+     "metric": "T.core_profit",
+     "period": "2026-12-31",
+     "low": 28,
+     "high": 31.5,
+     "confidence": 75
+    }
+   }
+  ],
+  "relative": null,
+  "valuation_calc": {
+   "rule": "valuation-v1",
+   "zone": "中性区",
+   "zones": {
+    "support_below": 40.42337310513597,
+    "stretched_above": 123.4021309250723,
+    "inverted": false
+   },
+   "implied": {
+    "profit": 30.749324346044176,
+    "cagr": 0.15005732276417477
+   },
+   "consensus": {
+    "status": "unavailable",
+    "years": {},
+    "coverage": {
+     "trading_days": 59,
+     "covered_days": 0,
+     "truncated_days": []
+    },
+    "reason": "TuShare report_rc: 抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+    "neutral_vs_median": {}
+   },
+   "as_of": "2026-11-03",
+   "scenarios": {
+    "保守": {
+     "annual_return": -0.17647041580291647
+    },
+    "中性": {
+     "annual_return": 0.20747900702821534
+    },
+    "乐观": {
+     "annual_return": 0.4323124917374268
+    }
+   },
+   "v2": {
+    "rule": "valuation-v2",
+    "probabilities": {
+     "保守": 0.25,
+     "中性": 0.55,
+     "乐观": 0.2
+    },
+    "annual_return": 0.1840264176679583,
+    "zone": "测算支持区"
+   }
+  },
+  "stance": {
+   "action": "现在分批",
+   "text": "可以以现有商业化业务为基础开始分批，而不是等待失败适应症出现转机：当前市值已有已兑现的扣非盈利和现金回收支撑。现在行动的主要风险是产品集中及后续盈利下修；等待全部临床不确定性消除，则可能错过现有业务继续兑现的阶段。",
+   "cites": [
+    {
+     "ref": "M.total_mv",
+     "period": "2026-11-03"
+    },
+    {
+     "ref": "T.core_profit",
+     "period": "2026-09-30"
+    },
+    {
+     "ref": "C.4"
+    },
+    {
+     "ref": "C.6"
+    },
+    {
+     "source": "D16",
+     "page": 1,
+     "quote": "公司同 ArriVent 一起，正在评\n估 FURVENT 的完整数据集，以确定后续方案。"
+    }
+   ]
+  },
+  "stance_calc": {
+   "action": "现在分批"
+  },
+  "origin": "l5"
+ }
+}

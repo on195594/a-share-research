@@ -1,0 +1,228 @@
+{
+  "provenance": {
+    "source": "/home/lin/a-share-research-data/app.db",
+    "access": "SQLite mode=ro; reports 70–78; captured 2026-11-02",
+    "projection": "Card-shaped offline projection, not an API capture. Numeric current/valuation fields copied unchanged from body.valuation_calc; completed_at copied from reports.created_at. Verdict/name/code are stored report fields. status=有效, origin and pending_events are test scope assignments. Date/missing-field variants in tests are synthetic; no valuation numbers are invented.",
+    "dividend_sensitivity": "Derived offline by Research valuation.at from matching saved reports in Research tests/data/hypotheses_v3.json; original annual_returns matched exactly; no live fetch."
+  },
+  "response": {
+    "version": "research-v1",
+    "cards": [
+      {
+        "code": "600900",
+        "name": "长江电力",
+        "report_id": 70,
+        "verdict": "需要谨慎",
+        "completed_at": "2026-11-02T17:44:50+08:00",
+        "status": "有效",
+        "origin": "external",
+        "pending_events": [],
+        "current": {
+          "last_close": 29.5,
+          "last_close_date": "2026-11-02",
+          "current_zone": "测算透支区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.05978119862133791,
+              "中性": 0.007760814249692967,
+              "乐观": 0.055248941462973974
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 19.952431387372698,
+            "stretched_above": 27.938541408583703,
+            "neutral_return_without_dividends": -0.017928729327182952
+          }
+        }
+      },
+      {
+        "code": "000963",
+        "name": "华东医药",
+        "report_id": 71,
+        "verdict": "需要谨慎",
+        "completed_at": "2026-11-02T17:49:48+08:00",
+        "status": "有效",
+        "origin": "external",
+        "pending_events": [],
+        "current": {
+          "last_close": 26.52,
+          "last_close_date": "2026-11-02",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.06174962300423961,
+              "中性": 0.10585605942868073,
+              "乐观": 0.2788696850582552
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 17.84348407005272,
+            "stretched_above": 31.656501661589935,
+            "neutral_return_without_dividends": 0.08506586254271893
+          }
+        }
+      },
+      {
+        "code": "002050",
+        "name": "三花智控",
+        "report_id": 72,
+        "verdict": "需要谨慎",
+        "completed_at": "2026-11-02T17:58:19+08:00",
+        "status": "有效",
+        "origin": "external",
+        "pending_events": [],
+        "current": {
+          "last_close": 33.53,
+          "last_close_date": "2026-11-02",
+          "current_zone": "测算透支区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.16396612474920555,
+              "中性": 0.004211992718393905,
+              "乐观": 0.13818998500554963
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 16.92509482385446,
+            "stretched_above": 31.4773537951808,
+            "neutral_return_without_dividends": -0.0031213839933960747
+          }
+        }
+      },
+      {
+        "code": "603606",
+        "name": "东方电缆",
+        "report_id": 73,
+        "verdict": "需要谨慎",
+        "completed_at": "2026-11-02T18:01:27+08:00",
+        "status": "有效",
+        "origin": "external",
+        "pending_events": [],
+        "current": {
+          "last_close": 37.9,
+          "last_close_date": "2026-11-02",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.09817098159242378,
+              "中性": 0.10963025102329749,
+              "乐观": 0.15781968988287862
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 23.105007059771438,
+            "stretched_above": 45.626290916639995,
+            "neutral_return_without_dividends": 0.0995683093887262
+          }
+        }
+      },
+      {
+        "code": "002648",
+        "name": "卫星化学",
+        "report_id": 74,
+        "verdict": "值得继续研究",
+        "completed_at": "2026-11-02T18:06:20+08:00",
+        "status": "有效",
+        "origin": "l5",
+        "pending_events": [],
+        "current": {
+          "last_close": 25.12,
+          "last_close_date": "2026-11-02",
+          "current_zone": null,
+          "valuation": null
+        }
+      },
+      {
+        "code": "300750",
+        "name": "宁德时代",
+        "report_id": 75,
+        "verdict": "值得继续研究",
+        "completed_at": "2026-11-02T18:10:13+08:00",
+        "status": "有效",
+        "origin": "l5",
+        "pending_events": [],
+        "current": {
+          "last_close": 240.19,
+          "last_close_date": "2026-11-02",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.0164224909075611,
+              "中性": 0.19821906269128858,
+              "乐观": 0.39207668995078604
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 181.7650406073478,
+            "stretched_above": 350.1388616118416,
+            "neutral_return_without_dividends": 0.17186654797642467
+          }
+        }
+      },
+      {
+        "code": "601600",
+        "name": "中国铝业",
+        "report_id": 76,
+        "verdict": "值得继续研究",
+        "completed_at": "2026-11-02T18:14:00+08:00",
+        "status": "有效",
+        "origin": "l5",
+        "pending_events": [],
+        "current": {
+          "last_close": 8.54,
+          "last_close_date": "2026-11-02",
+          "current_zone": null,
+          "valuation": null
+        }
+      },
+      {
+        "code": "002946",
+        "name": "新乳业",
+        "report_id": 77,
+        "verdict": "值得继续研究",
+        "completed_at": "2026-11-02T18:18:26+08:00",
+        "status": "有效",
+        "origin": "l5",
+        "pending_events": [],
+        "current": {
+          "last_close": 15.8,
+          "last_close_date": "2026-11-02",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.04515670399951494,
+              "中性": 0.11606764752901373,
+              "乐观": 0.2636256053613528
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 11.105330185958104,
+            "stretched_above": 19.297103469748915,
+            "neutral_return_without_dividends": 0.09811281207325295
+          }
+        }
+      },
+      {
+        "code": "688578",
+        "name": "艾力斯",
+        "report_id": 78,
+        "verdict": "值得继续研究",
+        "completed_at": "2026-11-02T18:23:15+08:00",
+        "status": "有效",
+        "origin": "l5",
+        "pending_events": [],
+        "current": {
+          "last_close": 82.44,
+          "last_close_date": "2026-11-02",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.14689004605086894,
+              "中性": 0.16551028852023725,
+              "乐观": 0.3805091506551774
+            },
+            "horizon": 2.4914442162902124,
+            "support_below": 43.76362081177593,
+            "stretched_above": 112.16979738498878,
+            "neutral_return_without_dividends": 0.15568509101123565
+          }
+        }
+      }
+    ],
+    "missing": []
+  }
+}

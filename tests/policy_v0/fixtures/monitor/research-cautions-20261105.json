@@ -1,0 +1,1201 @@
+{
+  "provenance": "Generated offline by the candidate Research company_cards() from tests/data/valuation-warning-reports-20261105.json and existing open-question publication fixtures; these are contract replays, not observed live notifications. IDs inside projected cards belong to isolated DBs.",
+  "valuation_cases": [
+    {
+      "source_id": 1,
+      "card": {
+        "version": "research-v1",
+        "code": "601899",
+        "name": "紫金矿业",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-05T15:16:19+08:00",
+        "completed_at": "2026-11-05T15:16:19+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": 29.25,
+          "last_close_date": "2026-11-04",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.04287652554975633,
+              "中性": 0.10806722737307964,
+              "乐观": 0.23347437723260836
+            },
+            "neutral_return_without_dividends": 0.0883585205037733,
+            "support_below": 20.69721569966021,
+            "stretched_above": 35.07542005786296,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.485968514715948,
+            "as_of": "2026-11-04",
+            "close": 29.25,
+            "assumption": "按冻结累计分红尚未支付测算。",
+            "v2": {
+              "rule": "valuation-v2",
+              "probabilities": {
+                "保守": 0.25,
+                "中性": 0.5,
+                "乐观": 0.25
+              },
+              "annual_return": 0.10810052972152868,
+              "support_below": 29.788412058059343,
+              "stretched_above": 35.078040755715456,
+              "zone": "测算支持区"
+            },
+            "boundary": true
+          },
+          "current_zone": "中性区"
+        },
+        "status": "有效",
+        "verdict": "值得继续研究",
+        "summary": "值得继续研究，前三季度扣非归母净利润558.42亿元、现金流强劲，但行业弱势与商品回落削弱了安全边际，当前只适合分批而非押注周期继续上行。",
+        "risks": [
+          "最重要的反证是售价红利正在减弱，而成本未同步回落。第三季度金锭毛利率由第二季度63.10%降至58.86%，单位销售成本反而上升；叠加黄金、碳酸锂期货回落，不能把前三季度高利润率直接外推。价格风险仍在，锂业务增产不必然带来同比例增利。",
+          "铜扩产不能掩盖卡莫阿恢复风险。半年报已因淹井和复产爬坡下调其全年产量计划，三季报仍强调剔除卡莫阿后的增长，尚不足以证明拖累已消除；境内项目此前还存在配合安全检查停产检修的情况。产能兑现风险仍存在。",
+          "海外经营风险不能由地域分散完全抵消。年报显示归母利润58%来自境外，并明确提示资源民族主义、矿业税负及投资环境恶化。最新资料未提供足以认定这些风险已经缓解的证据。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年扣非归母利润能否在商品回落后保持韧性，并核对黄金售价、单位成本和新增矿山贡献；若低于预测区间，应削弱产能增量能够抵消价格压力的判断，而非用并表收入增长解释。",
+            "forecast": {
+              "metric": "T.core_profit",
+              "period": "2026-12-31",
+              "low": 690,
+              "high": 770,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流是否延续利润兑现，并区分经营获现、投资支出及少数股东分配；若低于预测区间，尤其同时出现应收和存货积压，应降低对现金安全边际的评价。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 1030,
+              "high": 1180,
+              "confidence": 75
+            }
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 20.69721569966021,
+            "stretched_above": 35.07542005786296,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 784.9420116556604,
+            "cagr": 0.15666984019157734
+          },
+          "consensus": {
+            "status": "unavailable",
+            "years": {},
+            "coverage": {
+              "trading_days": 59,
+              "covered_days": 0,
+              "truncated_days": []
+            },
+            "reason": "TuShare report_rc: 抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+            "neutral_vs_median": {}
+          },
+          "as_of": "2026-11-04",
+          "close": 29.25,
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.04287652554975633
+            },
+            "中性": {
+              "annual_return": 0.10806722737307964
+            },
+            "乐观": {
+              "annual_return": 0.23347437723260836
+            }
+          },
+          "v2": {
+            "rule": "valuation-v2",
+            "probabilities": {
+              "保守": 0.25,
+              "中性": 0.5,
+              "乐观": 0.25
+            },
+            "annual_return": 0.10810052972152868,
+            "zone": "测算支持区",
+            "support_below": 29.788412058059343
+          },
+          "boundary": true
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "按本报告三情景及概率假设，现价已低于期望年化10%的程序门槛，期望年化回报10.81%，可以开始分批；但保守情景仍可能亏损，行业弱势和锂价下跌意味着首批也有继续回撤风险。等待全部经营信号转强可能错过产能兑现带来的重估，后续批次应随年报利润与现金流验证调整。",
+          "cites": [
+            {
+              "ref": "C.25"
+            },
+            {
+              "ref": "C.26"
+            },
+            {
+              "ref": "C.27"
+            },
+            {
+              "ref": "C.1"
+            },
+            {
+              "ref": "C.19"
+            }
+          ]
+        },
+        "stance_calc": {
+          "action": "现在分批"
+        },
+        "open_questions": [],
+        "origin": "l5"
+      }
+    },
+    {
+      "source_id": 2,
+      "card": {
+        "version": "research-v1",
+        "code": "002946",
+        "name": "新乳业",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-05T15:21:38+08:00",
+        "completed_at": "2026-11-05T15:21:38+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": 16.9,
+          "last_close_date": "2026-11-04",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.10239245324122515,
+              "中性": 0.12792681009339518,
+              "乐观": 0.2833095631361982
+            },
+            "neutral_return_without_dividends": 0.11109036423623239,
+            "support_below": 10.194367769035612,
+            "stretched_above": 21.18080629216536,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.485968514715948,
+            "as_of": "2026-11-04",
+            "close": 16.9,
+            "assumption": "按冻结累计分红尚未支付测算。",
+            "v2": {
+              "rule": "valuation-v2",
+              "probabilities": {
+                "保守": 0.25,
+                "中性": 0.5,
+                "乐观": 0.25
+              },
+              "annual_return": 0.12166878322568118,
+              "support_below": 17.739758409597446,
+              "stretched_above": 20.889867082392755,
+              "zone": "测算支持区"
+            },
+            "boundary": true
+          },
+          "current_zone": "中性区"
+        },
+        "status": "有效",
+        "verdict": "值得继续研究",
+        "summary": "值得继续研究：前三季度归母净利润7.05亿元，行业相对抗跌和低估值支持现在分批，但税负、毛利率和到期债务限制了安全边际。",
+        "risks": [
+          "最重要的反证是增长放缓和毛利率下降仍在发生：第三季度扣非净利润同比仅增长4.35%；前三季度毛利率28.71%，同比下降0.76个百分点。低温品类增长不能自动证明整体产品盈利能力改善，后续若费用节约不足以抵消毛利压力，利润预测需要下修。",
+          "税收风险已从年报提示变为实际利润压力。前三季度所得税费用同比增加98.00%，公司解释为税收法律法规执行标准更新；有效所得税率由同期10.60%升至17.26%。目前不能假设这项压力会自行消失，也不能把全部增量认定为一次性补税。",
+          "杠杆风险已有缓解，但短期偿付压力没有解除：资产负债率由2025年末56.51%降至53.61%，四项债务减货币资金仍为17.82亿元。可转债转股期截至2026年12月17日，9月末剩余金额71,776.70万元；管理层表示能够偿还只是表态，不能替代资金安排核验。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年归母净利润是否继续增长，并核对增长来自主营经营还是费用、减值和税负变化；若利润增长进一步失速且毛利率未改善，将削弱中性情景。",
+            "forecast": {
+              "metric": "T.net_profit",
+              "period": "2026-12-31",
+              "low": 8.1,
+              "high": 8.9,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流能否保持现金创造能力；若利润增长而现金流转弱、同时应收款继续积累，应降低对盈利质量和偿债能力的判断。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 14.3,
+              "high": 16.2,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "核对可转债最终转股或偿付结果，以及新增借款和H股发行条件；若依赖高成本再融资、明显摊薄每股收益或现金储备承压，应重新定价。"
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 10.194367769035612,
+            "stretched_above": 21.18080629216536,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 9.841384930369362,
+            "cagr": 0.10412231961390458
+          },
+          "consensus": {
+            "status": "unavailable",
+            "years": {},
+            "coverage": {
+              "trading_days": 59,
+              "covered_days": 0,
+              "truncated_days": []
+            },
+            "reason": "卖方预测冷却至 2026-11-06T00:00:00+08:00：抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+            "neutral_vs_median": {}
+          },
+          "as_of": "2026-11-04",
+          "close": 16.9,
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.10239245324122515
+            },
+            "中性": {
+              "annual_return": 0.12792681009339518
+            },
+            "乐观": {
+              "annual_return": 0.2833095631361982
+            }
+          },
+          "v2": {
+            "rule": "valuation-v2",
+            "probabilities": {
+              "保守": 0.25,
+              "中性": 0.5,
+              "乐观": 0.25
+            },
+            "annual_return": 0.12166878322568118,
+            "zone": "测算支持区",
+            "support_below": 17.739758409597446
+          },
+          "boundary": true
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "在本报告三情景及派息假设下，现价对应期望年化回报12.17%，可以开始分批，不必等待行业全面转强。但保守情景年化回报-10.24%，首批必须承受盈利放缓和偿债事件风险；后续批次以利润兑现为参考，未达条件则复核，而非仅因股价下跌加仓。",
+          "cites": [
+            {
+              "ref": "C.25"
+            },
+            {
+              "ref": "C.37"
+            },
+            {
+              "source": "D9",
+              "page": 3,
+              "quote": "截至 2026 年 9 月 30 日，剩余可转债金额为 71,776.70\n万元，剩余可转债数量 717.767 万张。"
+            }
+          ],
+          "add_trigger": {
+            "metric": "T.net_profit",
+            "period": "2026-12-31",
+            "op": ">=",
+            "value": 8.4
+          }
+        },
+        "stance_calc": {
+          "action": "现在分批",
+          "add_trigger": {
+            "metric": "T.net_profit",
+            "period": "2026-12-31",
+            "op": ">=",
+            "value": 8.4
+          }
+        },
+        "open_questions": [],
+        "origin": "l5"
+      }
+    },
+    {
+      "source_id": 3,
+      "card": {
+        "version": "research-v1",
+        "code": "601899",
+        "name": "紫金矿业",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-05T15:27:14+08:00",
+        "completed_at": "2026-11-05T15:27:14+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": 29.25,
+          "last_close_date": "2026-11-04",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.09431523229036265,
+              "中性": 0.14252401495627548,
+              "乐观": 0.23347437723260836
+            },
+            "neutral_return_without_dividends": 0.12397151981319435,
+            "support_below": 18.041443936047894,
+            "stretched_above": 37.84986551770986,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.485968514715948,
+            "as_of": "2026-11-04",
+            "close": 29.25,
+            "assumption": "按冻结累计分红尚未支付测算。",
+            "v2": {
+              "rule": "valuation-v2",
+              "probabilities": {
+                "保守": 0.25,
+                "中性": 0.5,
+                "乐观": 0.25
+              },
+              "annual_return": 0.11575388264577993,
+              "support_below": 30.30250418995413,
+              "stretched_above": 35.68342195964301,
+              "zone": "测算支持区"
+            },
+            "boundary": true
+          },
+          "current_zone": "中性区"
+        },
+        "status": "有效",
+        "verdict": "值得继续研究",
+        "summary": "值得继续研究：前三季度扣非归母净利润558.42亿元，但行业弱势和商品回落限制乐观程度，现价下适合分批而非重仓。",
+        "risks": [
+          "最重要的反证仍是售价回落与成本刚性：第三季度金锭单位销售成本环比上升3.99%，毛利率下降4.24个百分点；碳酸锂主力连续价格近20个交易日下降26.99%。增产不等于同比例增利。",
+          "静态压力测试显示，假设金锭实际售价较第三季度再下降10%、单位成本维持376.99元/克，单位毛利将由539.40元/克降至447.76元/克。这不是归母利润预测，但说明不能直接外推当期高盈利。",
+          "卡莫阿恢复风险仍存在。半年报已因淹井和复产爬坡下调产量计划；前三季度含卡莫阿权益的矿产铜产量同比下降1.71%，不能用其他矿山扩产掩盖整体产量压力。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年扣非归母利润能否在售价压力下维持韧性，并拆分售价、成本和新增矿山贡献；若低于预测区间下沿，应削弱扩产能够抵消价格压力的判断。",
+            "forecast": {
+              "metric": "T.core_profit",
+              "period": "2026-12-31",
+              "low": 700,
+              "high": 780,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流是否延续利润兑现，并结合应收、存货和投资支出核查；若低于预测区间下沿且营运资金继续积压，应降低现金安全边际评价。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 1070,
+              "high": 1200,
+              "confidence": 75
+            }
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 18.041443936047894,
+            "stretched_above": 37.84986551770986,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 725.0233953744558,
+            "cagr": 0.12645598606380107
+          },
+          "consensus": {
+            "status": "unavailable",
+            "years": {},
+            "coverage": {
+              "trading_days": 59,
+              "covered_days": 0,
+              "truncated_days": []
+            },
+            "reason": "卖方预测冷却至 2026-11-06T00:00:00+08:00：抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+            "neutral_vs_median": {}
+          },
+          "as_of": "2026-11-04",
+          "close": 29.25,
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.09431523229036265
+            },
+            "中性": {
+              "annual_return": 0.14252401495627548
+            },
+            "乐观": {
+              "annual_return": 0.23347437723260836
+            }
+          },
+          "v2": {
+            "rule": "valuation-v2",
+            "probabilities": {
+              "保守": 0.25,
+              "中性": 0.5,
+              "乐观": 0.25
+            },
+            "annual_return": 0.11575388264577993,
+            "zone": "测算支持区",
+            "support_below": 30.30250418995413
+          },
+          "boundary": true
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "按本报告三情景、概率及派息假设，29.25元现价低于程序计算的30.30元期望回报门槛价，期望年化回报11.58%，可以开始分批，但余量并不宽。保守情景年化回报为-9.43%、累计回报为-21.83%，不是最坏情景；现在行动须承受商品继续下跌的风险，等待则可能错过盈利兑现。",
+          "cites": [
+            {
+              "ref": "C.26"
+            },
+            {
+              "ref": "C.27"
+            },
+            {
+              "ref": "C.28"
+            },
+            {
+              "ref": "C.29"
+            }
+          ],
+          "add_trigger": {
+            "metric": "T.core_profit",
+            "period": "2026-12-31",
+            "op": ">=",
+            "value": 740
+          }
+        },
+        "stance_calc": {
+          "action": "现在分批",
+          "add_trigger": {
+            "metric": "T.core_profit",
+            "period": "2026-12-31",
+            "op": ">=",
+            "value": 740
+          }
+        },
+        "open_questions": [],
+        "origin": "l5"
+      }
+    },
+    {
+      "source_id": 4,
+      "card": {
+        "version": "research-v1",
+        "code": "002946",
+        "name": "新乳业",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-05T15:31:56+08:00",
+        "completed_at": "2026-11-05T15:31:56+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": 16.9,
+          "last_close_date": "2026-11-04",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.10525662503770361,
+              "中性": 0.09076144540603535,
+              "乐观": 0.238837569006067
+            },
+            "neutral_return_without_dividends": 0.07324736236088535,
+            "support_below": 10.113692916187128,
+            "stretched_above": 19.48806907167019,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.485968514715948,
+            "as_of": "2026-11-04",
+            "close": 16.9,
+            "assumption": "按冻结累计分红尚未支付测算。",
+            "v2": {
+              "rule": "valuation-v2",
+              "probabilities": {
+                "保守": 0.25,
+                "中性": 0.55,
+                "乐观": 0.2
+              },
+              "annual_return": 0.08070297474842751,
+              "support_below": 16.172557717046512,
+              "stretched_above": 19.044373282369477,
+              "zone": "中性区"
+            },
+            "boundary": true
+          },
+          "current_zone": "中性区"
+        },
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：行业相对抗跌、估值偏低，但盈利放缓和税负压力未解除，按本报告假设测算期望年化回报为8.07%，当前选择等价格。",
+        "risks": [
+          "最可能推翻盈利预测的是毛利压力与增长放缓持续。前三季度毛利率28.71%，同比下降0.76个百分点；第三季度扣非利润同比仅增长4.35%。如果费用压降不能持续，净利润增长可能进一步失速。",
+          "税负压力已经实现，而非年报中的一般提示。前三季度所得税费用同比增加98.00%，有效所得税率为17.26%；缺少税务调整明细，不能假设压力自行消失。",
+          "降杠杆并未消除到期偿付风险。9月末货币资金3.34亿元，而剩余可转债71,776.70万元；转股价为17.50元，行情收盘价为16.90元，不能预先假定债券全部转股，仍需核验可动用资金和授信安排。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年归母净利润及增长来源。预测结合前三季度已实现利润和去年第四季度利润结构，允许季末费用、减值及税负波动；若全年增长明显失速且毛利率仍未改善，将削弱中性情景。",
+            "forecast": {
+              "metric": "T.net_profit",
+              "period": "2026-12-31",
+              "low": 8.1,
+              "high": 8.9,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流能否延续现金创造能力，结合去年第四季度现金回笼结构判断；若利润增长而现金流走弱，并伴随应收账龄恶化，将下调盈利质量与偿债能力评价。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 14.8,
+              "high": 16.4,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "核对可转债最终转股或偿付结果、可动用资金及新增借款，并检查H股发行条件；若偿付显著挤压经营现金，或融资摊薄未换来相称收益，应重新定价。"
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 10.113692916187128,
+            "stretched_above": 19.48806907167019,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 10.424995808626383,
+            "cagr": 0.12553001029360145
+          },
+          "consensus": {
+            "status": "unavailable",
+            "years": {},
+            "coverage": {
+              "trading_days": 59,
+              "covered_days": 0,
+              "truncated_days": []
+            },
+            "reason": "卖方预测冷却至 2026-11-06T00:00:00+08:00：抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+            "neutral_vs_median": {}
+          },
+          "as_of": "2026-11-04",
+          "close": 16.9,
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.10525662503770361
+            },
+            "中性": {
+              "annual_return": 0.09076144540603535
+            },
+            "乐观": {
+              "annual_return": 0.238837569006067
+            }
+          },
+          "v2": {
+            "rule": "valuation-v2",
+            "probabilities": {
+              "保守": 0.25,
+              "中性": 0.55,
+              "乐观": 0.2
+            },
+            "annual_return": 0.08070297474842751,
+            "zone": "中性区",
+            "support_below": 16.172557717046512
+          },
+          "boundary": true
+        },
+        "stance": {
+          "action": "等价格",
+          "text": "等待程序按本报告三情景和概率计算的期望年化10%门槛价，不因行业相对抗跌追涨。假设成立时，现价期望年化回报为8.07%，保守情景为-10.53%；等待的代价是低温业务若加速兑现，可能错过上涨，届时应依据新披露重估，而非维持旧价格判断。",
+          "cites": [
+            {
+              "ref": "C.24"
+            },
+            {
+              "ref": "C.25"
+            },
+            {
+              "ref": "C.26"
+            },
+            {
+              "source": "D7",
+              "page": 1,
+              "quote": "前三季度低温品类收\n入保持双位数的同比增长速度"
+            }
+          ]
+        },
+        "stance_calc": {
+          "action": "等价格",
+          "price": 16.172557717046512,
+          "valid_until": "2027-05-04"
+        },
+        "open_questions": [],
+        "origin": "l5"
+      }
+    },
+    {
+      "source_id": 5,
+      "card": {
+        "version": "research-v1",
+        "code": "601899",
+        "name": "紫金矿业",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-05T15:37:19+08:00",
+        "completed_at": "2026-11-05T15:37:19+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": 29.25,
+          "last_close_date": "2026-11-04",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.013837479300315064,
+              "中性": 0.10800061821395975,
+              "乐观": 0.2578778057932059
+            },
+            "neutral_return_without_dividends": 0.0883585205037733,
+            "support_below": 22.293646100580236,
+            "stretched_above": 35.07017866215796,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.485968514715948,
+            "as_of": "2026-11-04",
+            "close": 29.25,
+            "assumption": "按冻结累计分红尚未支付测算。",
+            "v2": {
+              "rule": "valuation-v2",
+              "probabilities": {
+                "保守": 0.25,
+                "中性": 0.5,
+                "乐观": 0.25
+              },
+              "annual_return": 0.121184070589657,
+              "support_below": 30.670454691281424,
+              "stretched_above": 36.11671067125638,
+              "zone": "测算支持区"
+            },
+            "boundary": true
+          },
+          "current_zone": "中性区"
+        },
+        "status": "有效",
+        "verdict": "值得继续研究",
+        "summary": "值得继续研究，前三季度扣非归母利润558.42亿元和现金流支持现在分批，但行业弱势与商品回落不支持重仓外推高盈利。",
+        "risks": [
+          "最可能推翻判断的是售价下降快于增产和降本。第三季度金锭单位成本环比上升3.99%、毛利率下降4.24个百分点；黄金与碳酸锂近期价格回落，使利润正常化风险仍在，不能用低PE替代盈利压力检验。",
+          "铜矿复产与新项目兑现仍有风险。半年报已因淹井和复产爬坡下调卡莫阿产量计划；前三季度公司矿产铜同比仍下降1.71%。其他矿山增长只能部分对冲，不能证明整体产量压力已解除。",
+          "海外税负、社区和安全风险仍可能造成停产或收益归属变化。年报披露58%的归母净利润来自境外；半年报还披露境内个别重点项目配合区域性安全检查停产检修。供应链冲击已有缓解，但不等于监管和运营风险已消失。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年扣非归母利润能否在售价承压时保持韧性，并拆分售价、单位成本及新增矿山贡献；若低于预测区间下沿，将削弱扩产可以抵消价格压力的判断。",
+            "forecast": {
+              "metric": "T.core_profit",
+              "period": "2026-12-31",
+              "low": 690,
+              "high": 785,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流是否继续兑现利润，并联合核查应收、存货及投资现金支出；若低于预测区间下沿且营运资金继续积压，应降低现金安全边际评价。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 1030,
+              "high": 1210,
+              "confidence": 75
+            }
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 22.293646100580236,
+            "stretched_above": 35.07017866215796,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 785.0670116556604,
+            "cagr": 0.15673123583341816
+          },
+          "consensus": {
+            "status": "unavailable",
+            "years": {},
+            "coverage": {
+              "trading_days": 59,
+              "covered_days": 0,
+              "truncated_days": []
+            },
+            "reason": "卖方预测冷却至 2026-11-06T00:00:00+08:00：抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+            "neutral_vs_median": {}
+          },
+          "as_of": "2026-11-04",
+          "close": 29.25,
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.013837479300315064
+            },
+            "中性": {
+              "annual_return": 0.10800061821395975
+            },
+            "乐观": {
+              "annual_return": 0.2578778057932059
+            }
+          },
+          "v2": {
+            "rule": "valuation-v2",
+            "probabilities": {
+              "保守": 0.25,
+              "中性": 0.5,
+              "乐观": 0.25
+            },
+            "annual_return": 0.121184070589657,
+            "zone": "测算支持区",
+            "support_below": 30.670454691281424
+          },
+          "boundary": true
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "按本报告三情景假设，现价29.25元低于程序测算的期望年化10%门槛价，期望年化回报12.12%，可以开始分批，但安全边际不厚。保守情景累计回报为-3.40%，且不是最坏情景；现在行动要承担商品继续下跌的风险，完全等待则可能错过项目兑现带来的重估。",
+          "cites": [
+            {
+              "ref": "M.close",
+              "period": "2026-11-04"
+            },
+            {
+              "ref": "C.28"
+            },
+            {
+              "ref": "C.29"
+            },
+            {
+              "ref": "C.31"
+            },
+            {
+              "ref": "C.19"
+            },
+            {
+              "source": "D1",
+              "page": 5,
+              "quote": "阿基姆金矿、瑞果多金矿等增量项目产能持续释放。"
+            }
+          ]
+        },
+        "stance_calc": {
+          "action": "现在分批"
+        },
+        "open_questions": [],
+        "origin": "l5"
+      }
+    },
+    {
+      "source_id": 6,
+      "card": {
+        "version": "research-v1",
+        "code": "002946",
+        "name": "新乳业",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-05T15:42:26+08:00",
+        "completed_at": "2026-11-05T15:42:26+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": 16.9,
+          "last_close_date": "2026-11-04",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.07737496621798297,
+              "中性": 0.0756956115754916,
+              "乐观": 0.2198118617417557
+            },
+            "neutral_return_without_dividends": 0.056114403687588,
+            "support_below": 10.915399266368931,
+            "stretched_above": 18.825764043115477,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.485968514715948,
+            "as_of": "2026-11-04",
+            "close": 16.9,
+            "assumption": "按冻结累计分红尚未支付测算。",
+            "v2": {
+              "rule": "valuation-v2",
+              "probabilities": {
+                "保守": 0.25,
+                "中性": 0.55,
+                "乐观": 0.2
+              },
+              "annual_return": 0.07312784464513424,
+              "support_below": 15.892212603398034,
+              "stretched_above": 18.714246342300967,
+              "zone": "中性区"
+            },
+            "boundary": false
+          },
+          "current_zone": "中性区"
+        },
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：行业相对大盘抗跌、估值偏低，但不足以抵消盈利放缓；三情景假设下现价期望年化回报7.31%，当前选择等价格。",
+        "risks": [
+          "毛利压力与增长放缓仍是首要反证。前三季度毛利率28.71%，同比下降0.76个百分点；第三季度扣非利润同比仅增长4.35%。费用节约若不能延续，利润增长可能进一步失速。",
+          "税负压力已经发生，不能假设自动消退。前三季度所得税费用同比增加98.00%，有效所得税率17.26%；公司归因为税收法律法规执行标准更新，而非单纯经营规模扩大。",
+          "降杠杆缓解了债务压力，但到期资金安排仍未核实。期末货币资金3.34亿元，剩余可转债71,776.70万元；现价16.90元低于17.50元转股价，不能预设全部转股。管理层称可一次性偿还，但这不等于已验证可动用资金和授信。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年归母利润及增长来源，重点核对毛利、费用、税负和减值。若增长继续失速，且主要依靠压费用或少提减值维持，将削弱中性情景；区间预测结合前三季度实绩和去年末季利润贡献。",
+            "forecast": {
+              "metric": "T.net_profit",
+              "period": "2026-12-31",
+              "low": 8.0,
+              "high": 8.65,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流能否延续现金创造能力，并核对应收账款账龄、回款和偿债安排。预测参考去年末季现金回笼；若利润增长而现金流走弱、账龄恶化，将削弱盈利质量判断。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 14.6,
+              "high": 16.2,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "核对可转债最终转股或偿付、可动用资金及新增借款，并跟踪H股发行条件。若偿付挤压经营资金，或摊薄未换来相称收益，应重新定价，不能只依据管理层的偿付信心。"
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 10.915399266368931,
+            "stretched_above": 18.825764043115477,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 10.38587816156756,
+            "cagr": 0.12412047273081644
+          },
+          "consensus": {
+            "status": "unavailable",
+            "years": {},
+            "coverage": {
+              "trading_days": 59,
+              "covered_days": 0,
+              "truncated_days": []
+            },
+            "reason": "卖方预测冷却至 2026-11-06T00:00:00+08:00：抱歉，您访问接口(report_rc)频率超限(10次/天)，具体频次详情：https://tushare.pro/document/1?doc_id=108。",
+            "neutral_vs_median": {}
+          },
+          "as_of": "2026-11-04",
+          "close": 16.9,
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.07737496621798297
+            },
+            "中性": {
+              "annual_return": 0.0756956115754916
+            },
+            "乐观": {
+              "annual_return": 0.2198118617417557
+            }
+          },
+          "v2": {
+            "rule": "valuation-v2",
+            "probabilities": {
+              "保守": 0.25,
+              "中性": 0.55,
+              "乐观": 0.2
+            },
+            "annual_return": 0.07312784464513424,
+            "zone": "中性区",
+            "support_below": 15.892212603398034
+          },
+          "boundary": false
+        },
+        "stance": {
+          "action": "等价格",
+          "text": "按本报告三情景、概率及派息假设，现价16.90元的期望年化回报为7.31%，未达到期望年化10%的行动门槛，等待程序门槛价再行动。等待可能错过低温业务增长和行业估值修复，但目前不以相对强势代替回报要求。",
+          "cites": [
+            {
+              "ref": "M.close",
+              "period": "2026-11-04"
+            },
+            {
+              "ref": "C.19"
+            },
+            {
+              "ref": "C.20"
+            },
+            {
+              "source": "D1",
+              "page": 3,
+              "quote": "（6）前三季度公司低温品类保持双位数增长，新品收入占比保持双位数，供应链效率提升，盈利能力增强，销售净利润\n率持续提升；"
+            }
+          ]
+        },
+        "stance_calc": {
+          "action": "等价格",
+          "price": 15.892212603398034,
+          "valid_until": "2027-05-04"
+        },
+        "open_questions": [],
+        "origin": "l5"
+      }
+    }
+  ],
+  "question_cases": [
+    {
+      "captured_issue_report": "106",
+      "agenda_location_mutation": false,
+      "card": {
+        "version": "research-v1",
+        "code": "600519",
+        "name": "贵州茅台",
+        "report_id": 1,
+        "period": "2025-12-31",
+        "created_at": "2026-11-05T21:07:49+08:00",
+        "completed_at": "2026-11-05T21:07:49+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": null,
+          "last_close_date": null,
+          "valuation": null,
+          "current_zone": null
+        },
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：2025年营业总收入1720.54亿元，低于上年。",
+        "risks": [
+          "经营现金流从924.64亿元降至615.22亿元。"
+        ],
+        "checkpoints": [
+          {
+            "text": "下一期经营现金流若仍低于615.22亿元，说明现金转化尚未恢复。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-03-31",
+              "low": 100,
+              "high": 260,
+              "confidence": 60
+            }
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "error": "缺少有效的 M.close[2026-10-20]，请补齐报告财务或行情表",
+          "boundary": null
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "经营现金流明显下降，首批之后观察下一期现金转化是否恢复。",
+          "cites": [
+            {
+              "ref": "T.op_cash",
+              "period": "2025-12-31"
+            }
+          ],
+          "add_trigger": {
+            "metric": "T.op_cash",
+            "period": "2026-03-31",
+            "op": ">=",
+            "value": 200
+          }
+        },
+        "stance_calc": {
+          "action": "现在分批",
+          "add_trigger": {
+            "metric": "T.op_cash",
+            "period": "2026-03-31",
+            "op": ">=",
+            "value": 200
+          }
+        },
+        "open_questions": [
+          {
+            "id": "issue-1-7fb7dbb975df-2",
+            "where": "answer[2]",
+            "problem": "用户要求判断持有3至5年的风险回报，但当前唯一量化模型于2029-04-30退出，实际期限约2.49年，未覆盖目标持有期。报告只说明它不是完整五年预测，并在gaps中承认缺口，仍未给出至少覆盖三年的情景回报或目标持有期的补充分析。"
+          }
+        ],
+        "origin": "l5"
+      }
+    },
+    {
+      "captured_issue_report": "108",
+      "agenda_location_mutation": false,
+      "card": {
+        "version": "research-v1",
+        "code": "600519",
+        "name": "贵州茅台",
+        "report_id": 1,
+        "period": "2025-12-31",
+        "created_at": "2026-11-05T21:07:49+08:00",
+        "completed_at": "2026-11-05T21:07:49+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": null,
+          "last_close_date": null,
+          "valuation": null,
+          "current_zone": null
+        },
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：2025年营业总收入1720.54亿元，低于上年。",
+        "risks": [
+          "经营现金流从924.64亿元降至615.22亿元。"
+        ],
+        "checkpoints": [
+          {
+            "text": "下一期经营现金流若仍低于615.22亿元，说明现金转化尚未恢复。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-03-31",
+              "low": 100,
+              "high": 260,
+              "confidence": 60
+            }
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "error": "缺少有效的 M.close[2026-10-20]，请补齐报告财务或行情表",
+          "boundary": null
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "经营现金流明显下降，首批之后观察下一期现金转化是否恢复。",
+          "cites": [
+            {
+              "ref": "T.op_cash",
+              "period": "2025-12-31"
+            }
+          ],
+          "add_trigger": {
+            "metric": "T.op_cash",
+            "period": "2026-03-31",
+            "op": ">=",
+            "value": 200
+          }
+        },
+        "stance_calc": {
+          "action": "现在分批",
+          "add_trigger": {
+            "metric": "T.op_cash",
+            "period": "2026-03-31",
+            "op": ">=",
+            "value": 200
+          }
+        },
+        "open_questions": [
+          {
+            "id": "issue-1-8fcf0fea2742-1",
+            "where": "answer[3]",
+            "problem": "用户要求对利润下降20%及持续下降作分红压力测试，本稿仅完成19.5119%参数的测试。虽然已准确说明区别，但仍未回答指定的20%情景；gaps中的说明不能替代测试。"
+          },
+          {
+            "id": "issue-1-8fcf0fea2742-2",
+            "where": "valuation",
+            "problem": "风险回报回答仍不完整：已展示三情景假设及概率加权回报，但未给出各情景、尤其保守情景的独立风险回报；现有程序持有期约2.49年，也未覆盖用户要求的3至5年。报告主动承认这些缺口，避免了误称，但尚未完成相应问题。"
+          }
+        ],
+        "origin": "l5"
+      }
+    },
+    {
+      "captured_issue_report": "108",
+      "agenda_location_mutation": true,
+      "card": {
+        "version": "research-v1",
+        "code": "600519",
+        "name": "贵州茅台",
+        "report_id": 1,
+        "period": "2025-12-31",
+        "created_at": "2026-11-05T21:07:49+08:00",
+        "completed_at": "2026-11-05T21:07:49+08:00",
+        "pending_events": [],
+        "current": {
+          "last_close": null,
+          "last_close_date": null,
+          "valuation": null,
+          "current_zone": null
+        },
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：2025年营业总收入1720.54亿元，低于上年。",
+        "risks": [
+          "经营现金流从924.64亿元降至615.22亿元。"
+        ],
+        "checkpoints": [
+          {
+            "text": "下一期经营现金流若仍低于615.22亿元，说明现金转化尚未恢复。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-03-31",
+              "low": 100,
+              "high": 260,
+              "confidence": 60
+            }
+          }
+        ],
+        "relative": null,
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "error": "缺少有效的 M.close[2026-10-20]，请补齐报告财务或行情表",
+          "boundary": null
+        },
+        "stance": {
+          "action": "现在分批",
+          "text": "经营现金流明显下降，首批之后观察下一期现金转化是否恢复。",
+          "cites": [
+            {
+              "ref": "T.op_cash",
+              "period": "2025-12-31"
+            }
+          ],
+          "add_trigger": {
+            "metric": "T.op_cash",
+            "period": "2026-03-31",
+            "op": ">=",
+            "value": 200
+          }
+        },
+        "stance_calc": {
+          "action": "现在分批",
+          "add_trigger": {
+            "metric": "T.op_cash",
+            "period": "2026-03-31",
+            "op": ">=",
+            "value": 200
+          }
+        },
+        "open_questions": [
+          {
+            "id": "issue-1-8fcf0fea2742-1",
+            "where": "prior_status[0]",
+            "problem": "用户要求对利润下降20%及持续下降作分红压力测试，本稿仅完成19.5119%参数的测试。虽然已准确说明区别，但仍未回答指定的20%情景；gaps中的说明不能替代测试。"
+          },
+          {
+            "id": "issue-1-8fcf0fea2742-2",
+            "where": "valuation",
+            "problem": "风险回报回答仍不完整：已展示三情景假设及概率加权回报，但未给出各情景、尤其保守情景的独立风险回报；现有程序持有期约2.49年，也未覆盖用户要求的3至5年。报告主动承认这些缺口，避免了误称，但尚未完成相应问题。"
+          }
+        ],
+        "origin": "l5"
+      }
+    }
+  ]
+}

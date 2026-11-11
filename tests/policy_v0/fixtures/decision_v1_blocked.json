@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "stock_code": "601899",
+  "framework": "C资源",
+  "framework_score": null,
+  "framework_classification": "not_formed",
+  "rule_version": "framework-v1",
+  "rule_hash": "sha256:blocked-fixture",
+  "l3_status": "not_applicable",
+  "portfolio_risk": {
+    "status": "incomplete",
+    "reason_codes": ["portfolio_inputs_missing"]
+  },
+  "suggested_action": "等待",
+  "blocked": true,
+  "block_reason": ["valuation_conflict", "portfolio_risk_blocked"],
+  "source_provenance": {
+    "valuation_conflict": {
+      "pb_conclusion": "低估",
+      "cross_valuation_conclusion": "偏贵",
+      "evidence": ["正式披露与可复核假设"]
+    }
+  },
+  "freshness": {
+    "as_of": "2026-09-12T04:00:00+00:00",
+    "status": "fresh"
+  }
+}

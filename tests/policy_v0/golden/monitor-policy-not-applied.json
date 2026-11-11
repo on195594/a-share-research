@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-09-13T12:00:00+08:00",
+  "runtime_version": "0.1.13",
+  "data_status": "partial",
+  "valuation_status": "unavailable",
+  "review_status": "review_required",
+  "action_status": "review_candidate",
+  "account": {
+    "portfolio_value": 100000,
+    "denominator_status": "explicit",
+    "stock_market_value": null,
+    "stock_weight_pct": null,
+    "total_stop_risk": null,
+    "total_stop_risk_pct": null,
+    "known_stop_risk_lower_bound": null,
+    "risk_budget_status": null,
+    "risk_policy": {
+      "policy_id": "fixture-policy",
+      "status": "not_applied_account_scope_required",
+      "source": "not_applied_account_scope_required",
+      "max_position_risk_pct": null,
+      "max_portfolio_risk_pct": null,
+      "field_sources": {
+        "max_position_risk_pct": "not_applied_account_scope_required",
+        "max_portfolio_risk_pct": "not_applied_account_scope_required"
+      }
+    },
+    "account_scope": null,
+    "denominator_requires_review": true
+  },
+  "quote_coverage": {
+    "priced": 0,
+    "active": 0,
+    "complete": false
+  },
+  "industry_context": {
+    "status": "not_applicable",
+    "error_code": null,
+    "freshness_days": null,
+    "source": null,
+    "fetched_at": null
+  },
+  "holdings": [],
+  "escalations": [],
+  "data_gaps": [
+    {
+      "code": null,
+      "field": "account_scope",
+      "minimum_action": "confirm and provide --account-scope"
+    }
+  ],
+  "stop_reason": null,
+  "requires_user_confirmation": false,
+  "manifest": {
+    "writes": false,
+    "stop_reason": null
+  }
+}

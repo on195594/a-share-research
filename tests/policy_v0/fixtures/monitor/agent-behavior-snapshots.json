@@ -1,0 +1,169 @@
+{
+  "no_action": {
+    "schema_version": 1,
+    "as_of": "2026-10-22T15:00:00+08:00",
+    "runtime_version": "0.1.22",
+    "data_status": "complete",
+    "valuation_status": "exact",
+    "review_status": "cleared",
+    "action_status": "no_action",
+    "account": {
+      "portfolio_value": 100000,
+      "denominator_status": "explicit",
+      "stock_market_value": 12300,
+      "stock_weight_pct": 12.3,
+      "total_stop_risk": 300,
+      "total_stop_risk_pct": 0.3,
+      "known_stop_risk_lower_bound": 300,
+      "risk_budget_status": "within_budget",
+      "risk_policy": {
+        "policy_id": "compatibility_default",
+        "source": "compatibility_default",
+        "max_position_risk_pct": 2.0,
+        "max_portfolio_risk_pct": 8.0,
+        "field_sources": {
+          "max_position_risk_pct": "compatibility_default",
+          "max_portfolio_risk_pct": "compatibility_default"
+        }
+      },
+      "account_scope": "synthetic-evaluation-account",
+      "denominator_requires_review": false,
+      "portfolio_value_as_of": "2026-10-22T15:00:00+08:00",
+      "denominator_scope_status": "provided",
+      "denominator_freshness_status": "as_of_provided",
+      "denominator_components": {
+        "account_value": 100000.0,
+        "off_account_strategy_cash": 0.0
+      }
+    },
+    "quote_coverage": {
+      "priced": 1,
+      "active": 1,
+      "complete": true
+    },
+    "industry_context": {
+      "status": "complete",
+      "error_code": null,
+      "freshness_days": 0,
+      "source": "synthetic-fixture",
+      "fetched_at": "2026-10-22T15:00:00+08:00"
+    },
+    "holdings": [
+      {
+        "id": 1,
+        "code": "600000",
+        "name": "模拟银行持仓",
+        "framework": "B银行",
+        "framework_confident": true,
+        "shares": 1000,
+        "quote": {
+          "status": "fresh",
+          "price": 12.3,
+          "source": "synthetic-fixture",
+          "as_of": "2026-10-22T15:00:00+08:00"
+        },
+        "stop_loss_20": 12.0,
+        "market_value": 12300,
+        "portfolio_weight_pct": 12.3,
+        "stop_risk": 300,
+        "stop_risk_pct": 0.3
+      }
+    ],
+    "escalations": [],
+    "data_gaps": [],
+    "stop_reason": "clean_fast_gate",
+    "requires_user_confirmation": false,
+    "manifest": {
+      "writes": false,
+      "stop_reason": "clean_fast_gate"
+    },
+    "fixture_note": "合成账户与行情，只用于离线行为回放；不代表真实持仓、报价或投资决策。"
+  },
+  "trade_candidate": {
+    "schema_version": 1,
+    "as_of": "2026-10-22T15:00:00+08:00",
+    "runtime_version": "0.1.22",
+    "data_status": "complete",
+    "valuation_status": "exact",
+    "review_status": "review_required",
+    "action_status": "trade_candidate",
+    "account": {
+      "portfolio_value": 100000,
+      "denominator_status": "explicit",
+      "stock_market_value": 12300,
+      "stock_weight_pct": 12.3,
+      "total_stop_risk": 300,
+      "total_stop_risk_pct": 0.3,
+      "known_stop_risk_lower_bound": 300,
+      "risk_budget_status": "within_budget",
+      "risk_policy": {
+        "policy_id": "compatibility_default",
+        "source": "compatibility_default",
+        "max_position_risk_pct": 2.0,
+        "max_portfolio_risk_pct": 8.0,
+        "field_sources": {
+          "max_position_risk_pct": "compatibility_default",
+          "max_portfolio_risk_pct": "compatibility_default"
+        }
+      },
+      "account_scope": "synthetic-evaluation-account",
+      "denominator_requires_review": false,
+      "portfolio_value_as_of": "2026-10-22T15:00:00+08:00",
+      "denominator_scope_status": "provided",
+      "denominator_freshness_status": "as_of_provided",
+      "denominator_components": {
+        "account_value": 100000.0,
+        "off_account_strategy_cash": 0.0
+      }
+    },
+    "quote_coverage": {
+      "priced": 1,
+      "active": 1,
+      "complete": true
+    },
+    "industry_context": {
+      "status": "complete",
+      "error_code": null,
+      "freshness_days": 0,
+      "source": "synthetic-fixture",
+      "fetched_at": "2026-10-22T15:00:00+08:00"
+    },
+    "holdings": [
+      {
+        "id": 1,
+        "code": "600000",
+        "name": "模拟银行持仓",
+        "framework": "B银行",
+        "framework_confident": true,
+        "shares": 1000,
+        "quote": {
+          "status": "fresh",
+          "price": 12.3,
+          "source": "synthetic-fixture",
+          "as_of": "2026-10-22T15:00:00+08:00"
+        },
+        "stop_loss_20": 12.0,
+        "market_value": 12300,
+        "portfolio_weight_pct": 12.3,
+        "stop_risk": 300,
+        "stop_risk_pct": 0.3
+      }
+    ],
+    "escalations": [
+      {
+        "code": "600000",
+        "reason_code": "l3_candidate",
+        "candidate": "trade",
+        "detail": "模拟 L3 条件已确认触发，runtime 形成卖出100股的交易候选；尚未取得具体授权，也未申报或成交。"
+      }
+    ],
+    "data_gaps": [],
+    "stop_reason": null,
+    "requires_user_confirmation": true,
+    "manifest": {
+      "writes": false,
+      "stop_reason": null
+    },
+    "fixture_note": "合成账户与行情，只用于离线行为回放；不代表真实持仓、报价或投资决策。"
+  }
+}

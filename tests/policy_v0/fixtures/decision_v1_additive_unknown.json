@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "stock_code": "000001",
+  "framework": "B银行",
+  "framework_score": 54,
+  "framework_classification": "A级",
+  "rule_version": "framework-v1",
+  "rule_hash": "sha256:additive-fixture",
+  "l3_status": "not_applicable",
+  "portfolio_risk": {
+    "status": "clear",
+    "reason_codes": [],
+    "future_limit": {"value": 7}
+  },
+  "suggested_action": "观望",
+  "blocked": false,
+  "block_reason": [],
+  "source_provenance": {
+    "scorer": "score-fundamentals"
+  },
+  "freshness": {
+    "as_of": "2026-09-12T04:00:00Z",
+    "status": "fresh"
+  },
+  "future_contract_field": {
+    "kept": true
+  }
+}

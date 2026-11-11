@@ -1,0 +1,369 @@
+{
+  "provenance": {
+    "source": "/home/lin/.local/share/a-share-research-evaluations/eval-34f01e1-20261101/data/app.db",
+    "access": "SQLite mode=ro; reports.body joined to runs.finished_at; captured 2026-11-01",
+    "reports": [
+      {
+        "report_id": 1,
+        "code": "600519.SH",
+        "body_sha256": "83b92dc01abdeff8f3d2ea7542048eabe73070fa6756357e9199600bb5fd5dd2"
+      },
+      {
+        "report_id": 2,
+        "code": "000858.SZ",
+        "body_sha256": "1b1343b3d8d72b20626ed10493558536bfed1aa22b5e2b9de7bf6aeea900ba7a"
+      },
+      {
+        "report_id": 3,
+        "code": "600900.SH",
+        "body_sha256": "b27e0a49c3fc28fabc794accf343dfdfc0ae1d808c86b5330cca4703100861f5"
+      },
+      {
+        "report_id": 10,
+        "code": "600309.SH",
+        "body_sha256": "3818a5be3627c8f23bafcee371bca64790812e1d58913174b045c990194c6b93"
+      }
+    ],
+    "projection": "Offline card-shaped projection, not a captured production API response. Numeric valuation/current fields are copied from real stored valuation_calc at its original close/as_of; no formulas are recomputed. Summary follows company_card projection (consensus omitted). status=有效, pending_events=[], origin and missing=[] are test scope assignments, not claims about the live scan. Boundary, event and missing-card variants are explicitly synthetic in tests."
+  },
+  "response": {
+    "version": "research-v1",
+    "cards": [
+      {
+        "version": "research-v1",
+        "code": "600519",
+        "name": "贵州茅台",
+        "report_id": 1,
+        "period": "2026-09-30",
+        "created_at": "2026-11-01T15:05:36+08:00",
+        "completed_at": "2026-11-01T15:05:36+08:00",
+        "pending_events": [],
+        "status": "有效",
+        "verdict": "值得继续研究",
+        "summary": "值得继续研究：前三季度归母净利润644.67亿元、同比下降0.25%，第三季度已恢复增长，但现金流大增主要来自财务公司资金变动，尚不能确认需求全面回暖。",
+        "risks": [
+          "成本压力仍未解除：前三季度营业成本同比增长22.01%，明显快于营业收入的1.96%，归母净利润仍下降0.25%。半年报将成本增加归因于销量和生产成本增加，但尚缺单位成本、产品组合的量化拆解，不能把利润停滞简单归为短期扰动。",
+          "渠道调整既可能改善触达，也可能掩盖经销需求不足。前三季度批发代理收入下降21.58%，合同负债同比下降73.10%。公司已说明预收货款政策随销售模式改变而调整，因此合同负债下降不能直接等同需求崩塌，但也不能据此排除渠道压力。",
+          "海外业务明显恶化：前三季度国外收入同比下降57.84%。国内经销商同期减少288个，披露称数量变动主要涉及系列酒；这反驳了各业务板块均已企稳的乐观判断，但经销商减少是否属于主动优化仍待验证。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年归母净利润能否承接第三季度的改善，并由扣非利润同步验证；若再次转弱或主要依赖非经常性收益，将削弱温和复苏判断。",
+            "forecast": {
+              "metric": "T.net_profit",
+              "period": "2026-12-31",
+              "low": 810,
+              "high": 860,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年营业总收入能否保持增长，并结合批发代理和海外业务判断增长是否更均衡；若直销继续增长而整体收入走弱，将削弱渠道改革带来增量的假设。",
+            "forecast": {
+              "metric": "T.revenue",
+              "period": "2026-12-31",
+              "low": 1745,
+              "high": 1820,
+              "confidence": 75
+            }
+          }
+        ],
+        "relative": {
+          "call": "跑赢",
+          "confidence": 55
+        },
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 910.3300447005363,
+            "stretched_above": 1498.6691956949114,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 991.0421842247674,
+            "cagr": 0.06380528040597834
+          },
+          "as_of": "2026-10-30",
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.07188840101798909
+            },
+            "中性": {
+              "annual_return": 0.06086313609952209
+            },
+            "乐观": {
+              "annual_return": 0.16667281661439934
+            }
+          }
+        },
+        "current": {
+          "last_close": 1392.05,
+          "last_close_date": "2026-10-30",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.07188840101798909,
+              "中性": 0.06086313609952209,
+              "乐观": 0.16667281661439934
+            },
+            "support_below": 910.3300447005363,
+            "stretched_above": 1498.6691956949114,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.4996577686516086,
+            "as_of": "2026-10-30",
+            "close": 1392.05
+          }
+        },
+        "origin": "l5"
+      },
+      {
+        "version": "research-v1",
+        "code": "000858",
+        "name": "五粮液",
+        "report_id": 2,
+        "period": "2026-09-30",
+        "created_at": "2026-11-01T15:09:44+08:00",
+        "completed_at": "2026-11-01T15:09:44+08:00",
+        "pending_events": [],
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：前三季度归母净利润97.11亿元，但第三季度利润同比下降48.25%，现金回收尚未支持持续复苏判断。",
+        "risks": [
+          "需求转弱是最直接的反证。第三季度营业收入同比下降37.68%、归母净利润下降48.25%；公司明确归因于需求偏弱、销量减少，不能用累计利润增长代替当季经营改善。",
+          "库存和预收款尚未显示供需压力解除：存货较年初增加20.59%，合同负债减少33.68%。这构成库存消化和后续订单的预警，但公司账面存货不等于渠道库存，合同负债下降也不能单独证明终端需求下降。",
+          "收入确认风险仍需跟踪。前期更正涉及已披露季度的收入和利润，而非单纯现金流调整；半年末仍列有监管商品及监管商品款项。未取得其转为收入、退货及结算条件的完整解释，不能把这些款项直接视为未来收入。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年营业总收入能否恢复增长，以及第四季度是否摆脱第三季度的需求收缩；若全年仍低于上年，将进一步削弱持续复苏判断。",
+            "forecast": {
+              "metric": "T.revenue",
+              "period": "2026-12-31",
+              "low": 385,
+              "high": 425,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察扣非利润能否继续积累，并核对税负下降与销售投入的持续性；若利润改善仍主要依赖税负变化而非经营改善，将强化谨慎判断。",
+            "forecast": {
+              "metric": "T.core_profit",
+              "period": "2026-12-31",
+              "low": 103,
+              "high": 120,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察经营现金流回升能否延续，并与合同负债和监管商品款项一同核对；若现金回收仍显著落后于利润，将削弱高分红可持续性的依据。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 5,
+              "high": 45,
+              "confidence": 60
+            }
+          }
+        ],
+        "relative": {
+          "call": "跑输",
+          "confidence": 65
+        },
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "as_of": "2026-10-30",
+          "not_priced": true
+        },
+        "current": {
+          "last_close": 74.7,
+          "last_close_date": "2026-10-30",
+          "current_zone": null,
+          "valuation": null,
+          "reason": "报告未定价（not_priced）"
+        },
+        "origin": "l5"
+      },
+      {
+        "version": "research-v1",
+        "code": "600900",
+        "name": "长江电力",
+        "report_id": 3,
+        "period": "2026-09-30",
+        "created_at": "2026-11-01T15:13:37+08:00",
+        "completed_at": "2026-11-01T15:13:38+08:00",
+        "pending_events": [],
+        "status": "有效",
+        "verdict": "需要谨慎",
+        "summary": "需要谨慎：前三季度归母净利润下降6.56%，现金创造能力仍强，但发电量下滑与最新利润口径下22.28倍估值削弱了安全边际。",
+        "risks": [
+          "发电量下滑已推翻上半年盈利增长可以延续的判断。第三季度境内六站发电量下降14.89%，归母净利润下降23.44%。来水具有区域和季节差异，不能把全部减产简单归因为统一缺水；前三季度三峡来水仍偏丰，具体调度、水头及季度来水影响尚待核实。",
+          "电价和交易结构风险仍存在。年报已提示电力市场改革、供需和气候共同带来不确定性；当前缺少最新水电结算电价，不能仅凭集团收入和境内发电量的变化认定电价稳定，也不能把绿色价值兑现提前算成利润。",
+          "估值并未明显补偿盈利转弱。按最新披露利润重算的滚动市盈率为22.28倍，而行情表列示20.10倍，两者不能混用。控股股东增持计划已经实施完毕，旧计划不能继续当作未来买盘承诺。"
+        ],
+        "checkpoints": [
+          {
+            "text": "观察全年归母利润与扣非利润能否同步企稳，重点核对第四季度发电及结算情况。若扣非盈利继续恶化、恢复主要依靠非经常性收益，将削弱正常化盈利能够回升的假设。",
+            "forecast": {
+              "metric": "T.net_profit",
+              "period": "2026-12-31",
+              "low": 310,
+              "high": 340,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "观察全年经营现金流、年末电费回收与工程付款是否匹配。若现金流进一步走弱，而购建支出回升、债务不再下降，将削弱现金创造能够同时支持分红和去杠杆的判断。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 540,
+              "high": 600,
+              "confidence": 75
+            }
+          }
+        ],
+        "relative": {
+          "call": "跑输",
+          "confidence": 60
+        },
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "测算透支区",
+          "zones": {
+            "support_below": 20.249211435923904,
+            "stretched_above": 29.110370534295186,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 438.2723011170268,
+            "cagr": 0.08300348945990511
+          },
+          "as_of": "2026-10-30",
+          "scenarios": {
+            "保守": {
+              "annual_return": -0.056785641113885274
+            },
+            "中性": {
+              "annual_return": 0.02122026299795203
+            },
+            "乐观": {
+              "annual_return": 0.05895071166081762
+            }
+          }
+        },
+        "current": {
+          "last_close": 29.74,
+          "last_close_date": "2026-10-30",
+          "current_zone": "测算透支区",
+          "valuation": {
+            "annual_returns": {
+              "保守": -0.056785641113885274,
+              "中性": 0.02122026299795203,
+              "乐观": 0.05895071166081762
+            },
+            "support_below": 20.249211435923904,
+            "stretched_above": 29.110370534295186,
+            "inverted": false,
+            "zone": "测算透支区",
+            "horizon": 2.4996577686516086,
+            "as_of": "2026-10-30",
+            "close": 29.74
+          }
+        },
+        "origin": "external"
+      },
+      {
+        "version": "research-v1",
+        "code": "600309",
+        "name": "万华化学",
+        "report_id": 10,
+        "period": "2026-09-30",
+        "created_at": "2026-11-01T15:52:06+08:00",
+        "completed_at": "2026-11-01T15:52:06+08:00",
+        "pending_events": [],
+        "status": "有效",
+        "verdict": "值得继续研究",
+        "summary": "值得继续研究：前三季度归母净利润156.58亿元、资本开支回落，盈利与现金创造能力改善，但地缘冲突带来的涨价红利不能直接视为长期盈利。",
+        "risks": [
+          "最可能推翻判断的是价格红利消退，而非收入增长停滞。公司将利润增长主要归因于产品涨价；第三季度归母净利润环比已下降11.82%，累计毛利率也从半年报的17.08%降至16.48%。这些变化尚不能证明周期见顶，但反对将当前同比高增长直接外推。",
+          "原料涨价既帮助推高售价，也可能反过来压缩利润。三季度纯苯价格同比上涨41.54%，石脑油上涨41.37%；如果产品提价落后于原料采购成本，收入增长仍可能伴随盈利回落。上半年披露的地产、家居需求偏弱，也说明涨价并不等于终端需求全面繁荣。",
+          "财务负担仍然较重，并未随自由现金流改善而全面解除。期末四项债务合计1,241.54亿元，减去货币资金后的差额为777.16亿元，高于年初的702.72亿元；这一简化口径尚未单独纳入长期租赁负债，也未扣除受限资金，不能当作完整净债务。"
+        ],
+        "checkpoints": [
+          {
+            "text": "下一期重点观察检修后归母利润的持续性，并结合产品价差判断第三季度环比回落是否延续；若主要产品仍涨价而盈利继续明显转弱，将削弱降本和一体化优势能够保留利润的判断。",
+            "forecast": {
+              "metric": "T.net_profit",
+              "period": "2026-12-31",
+              "low": 195,
+              "high": 215,
+              "confidence": 75
+            }
+          },
+          {
+            "text": "下一期观察经营现金流能否随盈利继续增加，以及存货和应收是否释放资金；若利润增长却伴随现金流明显落后、库存继续堆积，将削弱本报告对现金创造能力改善的判断。",
+            "forecast": {
+              "metric": "T.op_cash",
+              "period": "2026-12-31",
+              "low": 300,
+              "high": 355,
+              "confidence": 75
+            }
+          }
+        ],
+        "relative": {
+          "call": "跑赢",
+          "confidence": 60
+        },
+        "valuation_calc": {
+          "rule": "valuation-v1",
+          "zone": "中性区",
+          "zones": {
+            "support_below": 55.58041099229068,
+            "stretched_above": 81.99299443020774,
+            "inverted": false
+          },
+          "implied": {
+            "profit": 222.09842544150374,
+            "cagr": 0.21031145457163009
+          },
+          "as_of": "2026-10-30",
+          "scenarios": {
+            "保守": {
+              "annual_return": 0.0018921823999176305
+            },
+            "中性": {
+              "annual_return": 0.09601569195239618
+            },
+            "乐观": {
+              "annual_return": 0.14078848977141248
+            }
+          }
+        },
+        "current": {
+          "last_close": 70.2,
+          "last_close_date": "2026-10-30",
+          "current_zone": "中性区",
+          "valuation": {
+            "annual_returns": {
+              "保守": 0.0018921823999176305,
+              "中性": 0.09601569195239618,
+              "乐观": 0.14078848977141248
+            },
+            "support_below": 55.58041099229068,
+            "stretched_above": 81.99299443020774,
+            "inverted": false,
+            "zone": "中性区",
+            "horizon": 2.4996577686516086,
+            "as_of": "2026-10-30",
+            "close": 70.2
+          }
+        },
+        "origin": "l5"
+      }
+    ],
+    "missing": []
+  }
+}

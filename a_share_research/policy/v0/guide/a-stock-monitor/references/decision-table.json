@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "D01",
+      "priority": 100,
+      "condition": "structured_l3_status == triggered",
+      "effect": "propose_trade",
+      "action_source": "structured_l3_temporary_or_committed_exit_rule",
+      "requires_user_confirmation": true,
+      "requires_executable_sizing": true,
+      "heuristic": false
+    },
+    {
+      "id": "D02",
+      "priority": 95,
+      "condition": "confirmed_regulatory_or_integrity_thesis_break",
+      "effect": "propose_trade",
+      "action_source": "committed_thesis_exit_rule",
+      "requires_user_confirmation": true,
+      "requires_executable_sizing": true,
+      "heuristic": false
+    },
+    {
+      "id": "D03P0",
+      "priority": 85,
+      "condition": "p0_p1_p2_status IN (blocked, incomplete, review_required)",
+      "effect": "freeze_accumulation_and_open_red_review",
+      "action_source": "none",
+      "requires_user_confirmation": false,
+      "requires_executable_sizing": false,
+      "heuristic": false
+    },
+    {
+      "id": "D03",
+      "priority": 80,
+      "condition": "roe_yoy_drop_gt_5pts_two_quarters OR adjusted_profit_yoy_negative_two_quarters",
+      "effect": "open_red_alert_and_framework_review",
+      "action_source": "none",
+      "requires_user_confirmation": false,
+      "requires_executable_sizing": false,
+      "heuristic": false
+    },
+    {
+      "id": "D03Y",
+      "priority": 75,
+      "condition": "roe_yoy_drop_gt_3pts_two_quarters",
+      "effect": "open_yellow_alert",
+      "action_source": "none",
+      "requires_user_confirmation": false,
+      "requires_executable_sizing": false,
+      "heuristic": false
+    },
+    {
+      "id": "D04",
+      "priority": 70,
+      "condition": "p3_status == clear AND price <= stored_second_stop",
+      "effect": "propose_trade",
+      "action_source": "target_reduce_50_percent",
+      "requires_user_confirmation": true,
+      "requires_executable_sizing": true,
+      "heuristic": true
+    },
+    {
+      "id": "D05",
+      "priority": 60,
+      "condition": "price <= stored_first_stop",
+      "effect": "rerun_research",
+      "action_source": "none",
+      "requires_user_confirmation": false,
+      "requires_executable_sizing": false,
+      "heuristic": true
+    },
+    {
+      "id": "D06",
+      "priority": 50,
+      "condition": "framework_valuation_exit_signal",
+      "effect": "propose_trade",
+      "action_source": "framework_valuation_rule",
+      "requires_user_confirmation": true,
+      "requires_executable_sizing": true,
+      "heuristic": true
+    },
+    {
+      "id": "D07",
+      "priority": 40,
+      "condition": "tier1_or_tier2_signal",
+      "effect": "propose_trade",
+      "action_source": "tier_target_fraction",
+      "requires_user_confirmation": true,
+      "requires_executable_sizing": true,
+      "heuristic": true
+    },
+    {
+      "id": "D08",
+      "priority": 30,
+      "condition": "two_quantified_technical_signals",
+      "effect": "review_only",
+      "action_source": "none",
+      "requires_user_confirmation": false,
+      "requires_executable_sizing": false,
+      "heuristic": true
+    },
+    {
+      "id": "D09",
+      "priority": 10,
+      "condition": "accumulation_eligibility_and_evidence_pass",
+      "effect": "allow_trade_proposal",
+      "action_source": "accumulation_sizing_rule",
+      "requires_user_confirmation": true,
+      "requires_executable_sizing": true,
+      "heuristic": true,
+      "preconditions": [
+        "portfolio_value_known",
+        "single_name_risk_within_budget",
+        "portfolio_risk_within_budget",
+        "not_in_drawdown_breach_state"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "stock_code": "600519",
+  "framework": "E消费",
+  "framework_score": 68,
+  "framework_classification": "A级",
+  "rule_version": "framework-v1",
+  "rule_hash": "sha256:complete-fixture",
+  "l3_status": "not_applicable",
+  "portfolio_risk": {
+    "status": "clear",
+    "reason_codes": []
+  },
+  "suggested_action": "买入候选",
+  "blocked": false,
+  "block_reason": [],
+  "source_provenance": {
+    "scorer": "score-fundamentals",
+    "quote_source": "sina"
+  },
+  "freshness": {
+    "as_of": "2026-09-12T04:00:00+00:00",
+    "status": "fresh"
+  },
+  "narrative": "品牌与渠道仍有优势。"
+}
