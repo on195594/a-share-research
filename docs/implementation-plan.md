@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-11-11。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。此次删去的已完成小节与列表最后完整版本见 `git show 409155f:docs/implementation-plan.md`，阅读体验旧记录见 `git show 55d6ce2:docs/implementation-plan.md`。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
+更新：2026-11-12。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。此次删去的已完成小节与列表最后完整版本见 `git show 409155f:docs/implementation-plan.md`，阅读体验旧记录见 `git show 55d6ce2:docs/implementation-plan.md`。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
 
 ## 工作包与状态
 
@@ -124,6 +124,10 @@
 第 2 段第四十批（未发布，账户净值量尺）：新增 `core.account_nav` 的 `unit_nav_v1` 精确单位净值计算及 `account.nav.capture/evaluate/replay` 工具。只计算显式人民币无负债账户区间：端点是明确收盘估值，每笔有效出入金都有同刻流前估值；完整资金声明须绑定账本、作废关系与观察的资料哈希和原件，不能把缺流水解释为零。结果单列 `H00906.CSI` 累计收益及超额百分点，保留旧双指数报告，缺端点、重复指数日期、同刻多流、清零资金流或流前流后混用均拒绝。输入与结果保存为私有内容哈希凭证；更正后的新包与旧包独立，正式备份/恢复后仍可重放，不新增表或数据库版本。口径见[合一方案](consolidation.md#4-现有代码与知识的去向)，调用见[README](../README.md#账户净值工具)。
 
 177 项唯一检查通过：175 项计算、账本、工具、HTTP/MCP、分层与冻结契约检查，加正式备份/恢复重放、指数 JSON 十进制精度保留各 1 项；精度边界补丁后直接相关的 23 项非 HTTP 账户净值检查通过。HTTP TestClient 在沙箱停滞，本次进程中断清理后，在宿主带 60 秒总超时运行同一组，7.80 秒通过；无外部服务调用。纯计算核对 GIPS 官方历史原金额的独立分段链接；指数复用第三十六批真实公开 H00906 响应 206 条，原响应 SHA256 为 `d96da57cb55b5770c6cd7e270f993fafff1540f3b944a7fad246e6f345769703`。账户与原件仍为明示结构测试，不能作真实账户收益验收。首版指数由已保存证据输入，不自动采集；完整性声明不等于程序认证券商历史，结果固定标明 `trade_history_acceptance=not_assessed`。未执行生产发布、账户切换、宿主任务启用或通知；完整原始资料、真实净值对照和五交易日影子仍待验收（证据 `consolidation/stage2/account-nav/`）。
+
+第 2 段第四十一批（未发布，演练证据归档与真实复核尝试）：第三十九批 `initial-release-entry/data/`、`initial-failed/` 的 2590 个任务副本文件共 5,356,289,971 字节，归档为 396 个去重内容对象、773,877,756 字节。归档逐对象读回验哈希，原文件再次逐一检查内容和文件身份；从归档实际还原完整 `initial-failed/rollback-probe/bundle`，正式 `backup.verify` 在 12.346 秒内通过，才删除上述重复树和新恢复探针，净释放约 4.27 GiB。生产原件与第三十七批 `original-v9` 保留；原路径通过 `initial-release-entry/ARCHIVE.json` 指向归档、清单和恢复脚本，详见 `consolidation/stage2/evidence-archives/initial-release-entry/handoff.md`。这项是恢复材料维护，不是投资进展。另构建 `a0a0d91` 的 web/worker 镜像，分别约 12.445/17.278 秒，正式 `deploy.verify_images` 的应用源码哈希和读取权限通过；生产容器 ID、镜像与启动时刻不变（`worker-live-preparation/`）。
+
+此前第三批真实外部复核的自动审批拒绝，本次以项目第 41 行付费研究常设授权和更小公开资料副本重新提交后放行。新 v21 副本仅复制中国海油真实 run 212、call 1509 所属的 7 次调用、report 157、2 个提示块与 5 份公开 PDF，原列哈希不变；无旧凭据、会话、持仓、账本、批次或订阅，使用新 research 身份冻结原草稿并排外部复核。Pi 1.5.2 预检通过，实际 `antigravity/gemini-3.8-flash/medium` 在约 1.617 秒后模型阶段失败，外部任务如实为 failed、没有报告。以完全相同提示词哈希再做一次诊断，约 1.662 秒返回 `Resource has been exhausted`，适配器提示当前模型暂不可用、未必是账户额度墙；总计 2 次应用级推理调用，不自动重排、换模型或改写终态。原公开资料、旧记分样本 `[157]` 和种子行保持，完整性通过，失败状态另存正式备份包（`external-review-public-live/`）。本次将授权不明转为供应商可用性问题，**没有通过真实语义复核、新取证或默认 worker 完整研究验收**；后续须分别核验真实扫描回执、其自然排出的研究任务与最终报告，不能把 scan.done 当作研究完成。
 
 ### 固定里程碑
 
