@@ -122,6 +122,30 @@ Skills 通过 `a-stock-cache research` 接入本 API，先复用旧报告，再�
 
 纠错报告的 `methods` 是已核查的方法线索；`evidence.methods_used` 记录检索召回，不证明实际采用或收益贡献。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
 
+### 外部 Agent 受控取证与提交
+
+工具服务显式启用 `ASHARE_TOOLS_EXTERNAL_ENABLED=1` 后，research 与 assistant Key 可通过 `POST /tools/{name}` 调用下表；成功结果位于 `result.data`。入口复用同一服务端材料和核验工具，客户端不上传材料快照、PDF 原文或任意 URL。research Key 无账户权限；assistant 创建的研究始终保留 `account_aware=true`。owner Key 用于所有者操作，不能调用这些外部研究工具；操作和材料只属于创建它的 Key。
+
+| 工具 | 参数与结果 |
+|---|---|
+| `external.open` | `{request_id,code}`，六位公司代码；首次公司无需历史报告即可排队取证，立即返回操作 `id` |
+| `external.operation` | `{operation_id}`，读取 `queued/running/done/failed`、期限、错误类别、可用的 `error_detail` 和结果；成功返回 `external_id`、`material_revision` |
+| `external.start` | `{request_id,source_run_id}`，复用已完成 worker 研究的服务端材料，直接创建材料版本 0 |
+| `external.tools` | `{}`，读取允许的取证工具及参数 Schema；工具参数严格校验，最多 64 KiB |
+| `external.acquire` | `{request_id,external_id,base_revision,tool,arguments}`，在指定材料版本上排队执行一次工具；成功追加材料版本 |
+| `external.status` | `{external_id}`，读取当前材料版本、提交版本、未完成操作及历史提交回执 |
+| `external.material` | `{external_id,material_revision}`，读取指定不可变材料；省略版本读取最新材料 |
+| `external.submit` | `{external_id,expected_version,material_revision,draft}`，机械检查并冻结草稿与指定材料；`expected_version` 是提交版本，不是材料版本 |
+| `external.review` | `{submission_id}`，实例另外启用 `ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED=1` 且不在月批保护期时，将通过机械检查的提交交独立复核 |
+
+`open` 由默认 worker 调用现有 `material.gather`，`acquire` 调用目录中的披露检索、原文阅读、财务及程序计算等工具，两者不调用模型、不伪造研究任务。每次操作在受监督的独立子进程中运行，整次上限 1200 秒；HTTP 只入队和轮询，不等待采集完成。已持有的财务数据和披露目录可复用，原采集时间保留；检索新临时公告用 `announcements`，列出目录不等于读过原文。
+
+同一 Key 的 `start/open/acquire` 共用 `request_id` 命名空间：相同操作与参数重试返回原回执，相同编号改动作或参数返回 409。超时、中断、撤销凭据等失败是终态，重试原编号不会重跑；明确决定再次采集时使用新编号。每个外部研究同时只能有一个未完成取证操作，期间新的取证或提交返回 409。取证前和材料入账前均复查 Key；撤销后不发布取证结果。
+
+材料版本只追加，原文页、来源编号和计算行不会被后续取证改写。提交按“草稿哈希＋材料哈希”去重：同草稿绑定新证据产生新提交，指定原材料重试仍返回原回执。为兼容旧调用，省略 `material_revision` 的提交绑定版本 0；新调用应始终显式填写。独立复核只读该提交绑定的材料，后续取证不改变旧复核；`accepted=true` 仅表示机械检查通过，不代表独立复核通过或报告发布。
+
+该链路要求数据库 v22；旧材料与提交迁移为材料版本 0。发布空闲检查包括取证操作，备份收录所有历史材料版本的 PDF。仅支持 v21 的回退镜像会被兼容检查拒绝，须准备支持 v22 的回退基线；这里说明代码接口，不代表生产已切换，部署与真实验收状态见[实施记录](docs/implementation-plan.md)。
+
 ## 账户净值工具
 
 在启用账户工具的实例，以 assistant 凭据通过现有 `ashare` / HTTP / MCP 调用，参数结构以 `GET /tools` 返回的 schema 为准。研究凭据和 owner 凭据不能调用这三个账户工具；默认只读实例不开放它们。计算口径和边界见[合一方案的量尺](docs/consolidation.md#4-现有代码与知识的去向)，上线状态见[实施计划](docs/implementation-plan.md)。
@@ -283,7 +307,7 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次与扫描）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)），并删除比当前镜像及最近两级 `rollback-*` 目标更早的 web/worker 镜像标签（较新但未发布的构建不动，删除失败只记入 `manifest.json` 的 `pruned_images`）；失败时仅在旧镜像通过读取兼容检查后恢复原应用，保留数据、证据、全部备份和镜像，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和旧镜像跑不了新结构的迁移需要单独安排回退，不使用此工具；旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。工具的表指纹比较都在迁移之前，不证明迁移后数据守恒，迁移发布须另外复查。
+工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次、扫描与外部取证）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)），并删除比当前镜像及最近两级 `rollback-*` 目标更早的 web/worker 镜像标签（较新但未发布的构建不动，删除失败只记入 `manifest.json` 的 `pruned_images`）；失败时仅在旧镜像通过读取兼容检查后恢复原应用，保留数据、证据、全部备份和镜像，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和旧镜像跑不了新结构的迁移需要单独安排回退，不使用此工具；旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。工具的表指纹比较都在迁移之前，不证明迁移后数据守恒，迁移发布须另外复查。
 
 业务表指纹只在本次纳入的全部服务停止后比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `MODEL_REASONING` 分别记录，模型与推理强度未变时不追加模型配置检查或研究调用。
 

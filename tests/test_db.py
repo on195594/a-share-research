@@ -189,11 +189,12 @@ def test_scan_request_migration_preserves_v20_data_and_is_reentrant(tmp_path, mo
         conn.execute("INSERT INTO scans(status,requested_at,summary) VALUES ('done',?,'{}')", (db.now(),))
         before = list(conn.iterdump())
         conn.close()
+    monkeypatch.setattr(db, 'MIGRATIONS', migrations[:21])
     conn = db.connect(path)
     after = list(conn.iterdump())
     # The additive table/index must not rewrite any captured research or scan row.
     assert all(line in after for line in before)
-    assert conn.execute('PRAGMA user_version').fetchone()[0] == 21
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
     assert conn.execute('SELECT count(*) FROM scan_requests').fetchone()[0] == 0
     with db.transaction(conn):
         db._migrate_v21(conn)

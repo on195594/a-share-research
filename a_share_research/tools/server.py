@@ -89,7 +89,8 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
                     return JSONResponse(result,status_code=503)
                 expected = {'api_keys','runs','reports','prices','batches','scan_requests',*db.ACCOUNT_TABLES}
                 if external_enabled:
-                    expected.update(('external_research','external_submissions','external_reviews'))
+                    expected.update(('external_research','external_submissions','external_reviews',
+                                     'external_operations','external_materials'))
                 if account_shadow_enabled:
                     expected.update(('account_books','account_batches','account_journal','account_voids','account_observations',
                                      'account_analysis_history','account_position_books','account_projection_ids',

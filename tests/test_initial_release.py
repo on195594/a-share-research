@@ -53,7 +53,7 @@ def local_migration(image, database, evidence):
     """Real migration code, explicitly not a container/image compatibility test."""
     assert image == TARGET['worker']
     with closing(db.connect(database)) as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 21
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
 
 
 def destination(tmp_path, name='migration'):
@@ -84,7 +84,7 @@ def test_migrate_preserves_captured_rows_generated_values_and_deleted_key_sequen
     evidence = destination(tmp_path)
     report = initial_release.migrate(v9, TARGET['worker'], evidence)
     after = initial_release.state(v9, before['columns'])
-    assert after['version'] == 21
+    assert after['version'] == len(db.MIGRATIONS)
     assert after['tables'] == before['tables']
     with closing(sqlite3.connect(v9)) as conn:
         assert conn.execute('SELECT role FROM api_keys').fetchall() == [('research',)]
@@ -128,7 +128,7 @@ def test_incomplete_or_changed_migration_cannot_pass(v9, tmp_path, monkeypatch, 
                 conn.execute('INSERT INTO scan_requests VALUES (?,?,?,?)',
                              ('key:' + 'f' * 64, 'structural-orphan', 999, db.now()))
             else:
-                conn.execute('PRAGMA user_version=22')
+                conn.execute(f'PRAGMA user_version={len(db.MIGRATIONS) + 1}')
     monkeypatch.setattr(initial_release, '_run_migration', damaged)
     with pytest.raises(initial_release.InitialReleaseError):
         initial_release.migrate(v9, TARGET['worker'], destination(tmp_path))
@@ -146,7 +146,7 @@ def test_prepare_probes_the_migrated_complete_copy_and_keeps_source_unchanged(
         assert images == RECOVERY
         assert database.resolve() != v9.resolve()
         migrated = initial_release.state(database, original['columns'])
-        assert migrated['version'] == 21 and migrated['tables'] == original['tables']
+        assert migrated['version'] == len(db.MIGRATIONS) and migrated['tables'] == original['tables']
         assert integrity.check(database, database.parent / 'pdf')[0] == []
         original_pdf = next((v9.parent / 'pdf').iterdir())
         assert (database.parent / 'pdf' / original_pdf.name).read_bytes() == original_pdf.read_bytes()
@@ -195,7 +195,7 @@ def test_image_migration_failure_removes_only_its_own_container(tmp_path, monkey
     evidence.mkdir(mode=0o700)
     launched, removed = [], []
     output = {'invalid_json': 'incomplete response', 'wrong_version': '{"schema_version":20}',
-              'nonzero': '{"schema_version":21}'}.get(failure)
+              'nonzero': json.dumps({'schema_version': len(db.MIGRATIONS)})}.get(failure)
     def run(command, **kwargs):
         if command[:2] == ['docker', 'run']:
             launched.append(command[command.index('--name') + 1])
@@ -216,7 +216,7 @@ def test_image_migration_failure_removes_only_its_own_container(tmp_path, monkey
 
 
 @pytest.mark.parametrize('cleanup_failure', ['nonzero', 'timeout'])
-def test_schema_21_receipt_does_not_override_unconfirmed_container_cleanup(
+def test_target_schema_receipt_does_not_override_unconfirmed_container_cleanup(
         tmp_path, monkeypatch, cleanup_failure):
     """A successful migration process cannot authorize service start while cleanup is uncertain."""
     evidence = destination(tmp_path)
@@ -225,7 +225,7 @@ def test_schema_21_receipt_does_not_override_unconfirmed_container_cleanup(
     def run(command, **kwargs):
         if command[:2] == ['docker', 'run']:
             launched.append(command[command.index('--name') + 1])
-            return subprocess.CompletedProcess(command, 0, '{"schema_version":21}', '')
+            return subprocess.CompletedProcess(command, 0, json.dumps({'schema_version': len(db.MIGRATIONS)}), '')
         assert command[:3] == ['docker', 'rm', '-f']
         removed.append(command[3])
         if cleanup_failure == 'timeout':
@@ -236,4 +236,4 @@ def test_schema_21_receipt_does_not_override_unconfirmed_container_cleanup(
         initial_release._run_migration(TARGET['worker'], tmp_path / 'app.db', evidence)
     assert len(launched) == 1 and removed == launched
     diagnostic = json.loads((evidence / 'migration-process.json').read_text())
-    assert diagnostic['exit_code'] == 0 and json.loads(diagnostic['stdout']) == {'schema_version': 21}
+    assert diagnostic['exit_code'] == 0 and json.loads(diagnostic['stdout']) == {'schema_version': len(db.MIGRATIONS)}

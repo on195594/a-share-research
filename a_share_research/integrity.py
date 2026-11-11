@@ -155,6 +155,11 @@ def _check_external(conn: sqlite3.Connection, problems: list[str]) -> dict:
         return {}
     sessions = {r['id']: r for r in conn.execute('SELECT * FROM external_research')}
     submissions = {r['id']: r for r in conn.execute('SELECT * FROM external_submissions')}
+    revisions = ({(r['external_id'], r['revision']): r for r in conn.execute('SELECT * FROM external_materials')}
+                 if 'external_materials' in tables else {(eid, 0): row for eid, row in sessions.items()})
+    if 'external_materials' in tables:
+        from a_share_research.external_operations import inspect
+        problems.extend(inspect(conn))
     for eid, row in sessions.items():
         snapshot = _object(row['material'])
         try:
@@ -174,7 +179,8 @@ def _check_external(conn: sqlite3.Connection, problems: list[str]) -> dict:
             valid = False
         if not valid:
             problems.append(f'外部提交 {sid}：草稿哈希不符')
-        if parent is None or parent['material_sha256'] != row['material_sha256']:
+        bound = revisions.get((row['external_id'], row['material_revision'] if 'material_revision' in row.keys() else 0))
+        if parent is None or bound is None or bound['material_sha256'] != row['material_sha256']:
             problems.append(f'外部提交 {sid}：材料与所属研究不一致')
     reviews = []
     if 'external_reviews' in tables:
@@ -190,7 +196,9 @@ def _check_external(conn: sqlite3.Connection, problems: list[str]) -> dict:
                     or run['status'] != expected_status.get(row['status'])):
                 problems.append(f'外部复核 {sid}：提交、任务类型、公司或状态关联不一致')
                 continue
-            if run['material'] != parent['material']:
+            bound = revisions.get((submission['external_id'],
+                                   submission['material_revision'] if 'material_revision' in submission.keys() else 0))
+            if bound is None or run['material'] != bound['material']:
                 problems.append(f'外部复核 {sid}：任务材料与冻结材料不一致')
             producer = dict(kind='external', key_id=parent['owner_key_id'],
                             account_aware=bool(parent['account_aware']), submission_id=sid)

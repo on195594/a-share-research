@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
 TABLES = ("runs", "calls", "reports", "prices", "batches", "sessions", "api_keys")
 OPTIONAL_TABLES = (*db.ACCOUNT_TABLES, 'account_source', 'policy_activations',
-                   'external_research', 'external_submissions', 'external_reviews',
+                   'external_research', 'external_submissions', 'external_reviews', 'external_operations', 'external_materials',
                    'account_books', 'account_batches', 'account_journal', 'account_voids', 'account_observations',
                    'account_analysis_history', 'account_position_books',
                    'account_projection_ids', 'policy_v0_profiles', 'policy_v0_account_openings',
@@ -45,8 +45,10 @@ def idle(database: Path) -> None:
         busy = conn.execute("SELECT id FROM batches WHERE status NOT IN ('failed','done','closed')"
                             " AND (status != 'tracking' OR step IS NOT NULL)").fetchall()
         scans = conn.execute("SELECT id FROM scans WHERE status IN ('queued','running')").fetchall()
-    if active or busy or scans:
-        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy} 或扫描 {scans} 尚未空闲")
+        operations = (conn.execute("SELECT id FROM external_operations WHERE status IN ('queued','running')").fetchall()
+                      if conn.execute("SELECT 1 FROM sqlite_master WHERE name='external_operations'").fetchone() else [])
+    if active or busy or scans or operations:
+        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy}、扫描 {scans} 或取证 {operations} 尚未空闲")
 
 
 KEEP_BACKUPS = 3
@@ -323,7 +325,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
         raise RuntimeError("web/worker 数据目录不一致")
     database = data / "app.db"
     if initial_recovery is None and _source_version(database) == 9:
-        raise RuntimeError('v9→v21 首次发布须指定 --initial-recovery；不能使用日常回退路径')
+        raise RuntimeError('v9→当前版本 首次发布须指定 --initial-recovery；不能使用日常回退路径')
     if has_tools and before['tools']['mounts'].get('/data') != before['web']['mounts']['/data']:
         raise RuntimeError('tools 数据目录与 web/worker 不一致')
     marker = data/'.tools-paused'
@@ -486,7 +488,7 @@ def main() -> None:
                         help="allow authorized Compose or environment configuration changes")
     parser.add_argument('--with-tools',action='store_true',help='include the tools service on its first authorized rollout')
     parser.add_argument('--initial-recovery', metavar='CODE',
-                        help='first v9→v21 release only: verify this compatible recovery build before stopping services')
+                        help='first v9→当前版本 release only: verify this compatible recovery build before stopping services')
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

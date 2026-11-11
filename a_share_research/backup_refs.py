@@ -89,7 +89,7 @@ def required(conn: sqlite3.Connection) -> dict[str, list[str]]:
         for (value,) in conn.execute("SELECT request FROM account_batches WHERE status='posted'"):
             request = _object(_json(value, label), label)
             account.update(_hashes(request.get('evidence_hashes'), label))
-    for table in ('runs', 'external_research'):
+    for table in ('runs', 'external_research', 'external_materials'):
         if table in tables:
             for (value,) in conn.execute(f'SELECT material FROM {table} WHERE material IS NOT NULL'):
                 pdf.update(_material(value, f'{table}.material'))

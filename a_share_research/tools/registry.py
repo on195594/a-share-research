@@ -13,13 +13,18 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from a_share_research import api_keys, service, external_research, external_review
+from a_share_research import api_keys, service, external_research, external_review, external_operations
 from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store, cycle_analysis
 from a_share_research.account import nav
 from a_share_research.policy import registry as policies
 from a_share_research.policy.stop_state import StopState
 from a_share_research.policy.position_request import Proposal
 from a_share_research.policy.scenario_request import Proposal as ScenarioProposal
+
+
+def _acquisition_catalog():
+    from a_share_research.research_tools import TOOLS as research_tools
+    return Payload(data={'tools': research_tools})
 
 
 class ToolError(Exception):
@@ -91,12 +96,32 @@ class ExternalId(Arguments):
     external_id: int = Field(gt=0)
 
 
+class ExternalOpen(Company):
+    request_id: str = Field(min_length=1, max_length=128)
+
+
+class ExternalOperation(Arguments):
+    operation_id: int = Field(gt=0)
+
+
+class ExternalAcquire(ExternalId):
+    request_id: str = Field(min_length=1, max_length=128)
+    base_revision: int = Field(ge=0)
+    tool: str
+    arguments: dict
+
+
+class ExternalMaterial(ExternalId):
+    material_revision: int | None = Field(default=None, ge=0)
+
+
 class ExternalReview(Arguments):
     submission_id: int = Field(gt=0)
 
 
 class ExternalSubmit(ExternalId):
     expected_version: int = Field(ge=0)
+    material_revision: int = Field(default=0, ge=0)
     draft: dict
 
 
@@ -384,13 +409,24 @@ TOOLS = {tool.name: tool for tool in (
     Tool('external.start', '复用服务端材料开启外部研究；不排队、不发布', _READERS, ExternalStart, Payload,
          lambda c, a: Payload(data=external_research.start(c.connection, c.principal, a.request_id, a.source_run_id)),
          access='write', external=True),
+    Tool('external.open', '首次公司取证：持久排队，无模型；用 operation 查询结果', _READERS, ExternalOpen, Payload,
+         lambda c, a: Payload(data=external_operations.open_research(c.connection, c.principal, a.request_id, a.code)),
+         access='write', external=True),
+    Tool('external.tools', '列出补充取证允许的工具及严格参数合同', _READERS, Arguments, Payload,
+         lambda c, a: _acquisition_catalog(), external=True),
+    Tool('external.acquire', '按指定材料版本执行受控研究工具并生成新版本', _READERS, ExternalAcquire, Payload,
+         lambda c, a: Payload(data=external_operations.acquire(c.connection, c.principal, a.request_id,
+                          a.external_id, a.base_revision, a.tool, a.arguments)), access='write', external=True),
+    Tool('external.operation', '查询本人取证操作；失败操作不自动重跑', _READERS, ExternalOperation, Payload,
+         lambda c, a: Payload(data=external_operations.operation(c.connection, c.principal, a.operation_id)), external=True),
     Tool('external.status', '查询本人研究及不可变提交回执', _READERS, ExternalId, Payload,
          lambda c, a: Payload(data=external_research.status(c.connection, c.principal, a.external_id)), external=True),
-    Tool('external.material', '读取本人研究绑定的服务端材料', _READERS, ExternalId, Payload,
-         lambda c, a: Payload(data=external_research.material_snapshot(c.connection, c.principal, a.external_id)), external=True),
+    Tool('external.material', '读取本人研究的指定材料版本；省略版本读取最新', _READERS, ExternalMaterial, Payload,
+         lambda c, a: Payload(data=external_research.material_snapshot(c.connection, c.principal, a.external_id,
+                                                                     a.material_revision)), external=True),
     Tool('external.submit', '机械检查并冻结草稿；通过不代表独立复核通过', _READERS, ExternalSubmit, Payload,
          lambda c, a: Payload(data=external_research.submit(c.connection, c.principal, a.external_id,
-                                                          a.expected_version, a.draft)), access='write', external=True),
+                                                          a.expected_version, a.draft, a.material_revision)), access='write', external=True),
     Tool('research.cards', '读取论点卡', _READERS, Arguments, Payload,
          lambda c, a: Payload(data=service.company_cards(c.connection))),
     Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,

@@ -58,6 +58,7 @@ def _receipt(row, conn) -> dict:
     review = view(conn, row['id'])
     return dict(submission_id=row['id'], version=row['version'], accepted=bool(row['accepted']),
                 draft_sha256=row['draft_sha256'], material_sha256=row['material_sha256'],
+                material_revision=row['material_revision'],
                 problems=json.loads(row['problems']), review_status=review['status'], review=review)
 
 
@@ -67,6 +68,9 @@ def start(conn: sqlite3.Connection, principal: api_keys.Principal, request_id: s
         raise SubmissionError('request_id 须为1–128字符', 422)
     with db.transaction(conn):
         _authorize(conn, principal)
+        if conn.execute('SELECT 1 FROM external_operations WHERE owner_key_id=? AND request_id=?',
+                        (principal.key_id, request_id)).fetchone():
+            raise SubmissionError('请求编号已绑定取证操作')
         previous = conn.execute('SELECT id, source_run_id FROM external_research WHERE owner_key_id=? AND request_id=?',
                                 (principal.key_id, request_id)).fetchone()
         if previous:
@@ -89,29 +93,42 @@ def start(conn: sqlite3.Connection, principal: api_keys.Principal, request_id: s
                 "status,created_at,material_sha256,material) VALUES (?,?,?,?,?,'collecting',?,?,?)",
                 (principal.key_id, request_id, source['company_key'], source_run_id, int(principal.role == 'assistant'),
                  db.now(), snapshot['sha256'], source['material'])).lastrowid
+            conn.execute('INSERT INTO external_materials(external_id,revision,created_at,material_sha256,material)'
+                         ' SELECT id,0,created_at,material_sha256,material FROM external_research WHERE id=?', (external_id,))
     return status(conn, principal, external_id)
 
 
 def status(conn: sqlite3.Connection, principal: api_keys.Principal, external_id: int) -> dict:
+    from a_share_research import external_operations as operations
     row = _owned(conn, principal, external_id)
     receipts = [_receipt(r, conn) for r in conn.execute(
         'SELECT * FROM external_submissions WHERE external_id=? ORDER BY version', (external_id,))]
     current = row['status']
-    if receipts and receipts[-1]['review_status'] in ('reviewing', 'done', 'failed'):
+    if (receipts and receipts[-1]['material_revision'] == row['material_revision']
+            and receipts[-1]['review_status'] in ('reviewing', 'done', 'failed')):
         current = receipts[-1]['review_status']
+    pending = operations.busy(conn, external_id)
+    material = operations.revision(conn, external_id, row['material_revision'])
     return dict(id=row['id'], company_key=row['company_key'], source_run_id=row['source_run_id'],
                 account_aware=bool(row['account_aware']), status=current, version=row['version'],
-                material_sha256=row['material_sha256'], receipts=receipts)
+                material_sha256=material['material_sha256'], material_revision=row['material_revision'],
+                operation_id=pending['id'] if pending else None, receipts=receipts)
 
 
-def material_snapshot(conn, principal, external_id) -> dict:
+def material_snapshot(conn, principal, external_id, material_revision=None) -> dict:
     """Only the creating credential can retrieve the evidence frozen for its draft."""
-    return json.loads(_owned(conn, principal, external_id)['material'])
+    from a_share_research import external_operations as operations
+    row = _owned(conn, principal, external_id)
+    number = row['material_revision'] if material_revision is None else material_revision
+    return json.loads(operations.revision(conn, external_id, number)['material'])
 
 
 def submit(conn: sqlite3.Connection, principal: api_keys.Principal, external_id: int,
-           expected_version: int, draft: dict) -> dict:
+           expected_version: int, draft: dict, material_revision: int = 0) -> dict:
     """Atomically freeze a checked revision; duplicate content returns its original receipt."""
+    from a_share_research import external_operations as operations
+    if type(material_revision) is not int or material_revision < 0:
+        raise SubmissionError('材料版本须为非负整数', 422)
     if not isinstance(draft, dict):
         raise SubmissionError('草稿须为JSON对象', 422)
     try:
@@ -120,20 +137,23 @@ def submit(conn: sqlite3.Connection, principal: api_keys.Principal, external_id:
         raise SubmissionError('草稿须为有效JSON', 422) from None
     with db.transaction(conn):
         row = _owned(conn, principal, external_id)
-        previous = conn.execute('SELECT * FROM external_submissions WHERE external_id=? AND draft_sha256=?',
-                                (external_id, sha)).fetchone()
+        material = operations.revision(conn, external_id, material_revision)
+        previous = conn.execute('SELECT * FROM external_submissions WHERE external_id=? AND draft_sha256=? AND material_sha256=?',
+                                (external_id, sha, material['material_sha256'])).fetchone()
         if previous:
             return _receipt(previous, conn)
+        if operations.busy(conn, external_id):
+            raise SubmissionError('存在未完成取证操作，请先查询操作结果')
         if row['version'] != expected_version:
             raise SubmissionError(f'版本冲突：当前版本为 {row["version"]}')
-        problems = gate.check_draft(draft, json.loads(row['material']))
+        problems = gate.check_draft(draft, json.loads(material['material']))
         version = row['version'] + 1
         submission_id = conn.execute(
             'INSERT INTO external_submissions(external_id,version,created_at,accepted,draft_sha256,'
-            'material_sha256,draft,problems) VALUES (?,?,?,?,?,?,?,?)',
-            (external_id, version, db.now(), int(not problems), sha, row['material_sha256'], text,
-             json.dumps(problems, ensure_ascii=False))).lastrowid
+            'material_sha256,draft,problems,material_revision) VALUES (?,?,?,?,?,?,?,?,?)',
+            (external_id, version, db.now(), int(not problems), sha, material['material_sha256'], text,
+             json.dumps(problems, ensure_ascii=False), material_revision)).lastrowid
         conn.execute('UPDATE external_research SET version=?,status=? WHERE id=?',
-                     (version, 'submitted' if not problems else 'collecting', external_id))
+                     (version, 'submitted' if not problems and material_revision == row['material_revision'] else 'collecting', external_id))
         receipt = conn.execute('SELECT * FROM external_submissions WHERE id=?', (submission_id,)).fetchone()
         return _receipt(receipt, conn)

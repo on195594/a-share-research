@@ -43,8 +43,9 @@ def view(conn, submission_id: int) -> dict:
 def enqueue(conn, principal, submission_id: int, *, allow: bool = False) -> dict:
     """Idempotently queue one accepted revision, with a new isolated run for that revision."""
     with db.transaction(conn):
-        source = conn.execute('SELECT s.*,e.owner_key_id,e.account_aware,e.company_key,e.material'
+        source = conn.execute('SELECT s.*,e.owner_key_id,e.account_aware,e.company_key,m.material'
                               ' FROM external_submissions s JOIN external_research e ON e.id=s.external_id'
+                              ' JOIN external_materials m ON m.external_id=s.external_id AND m.revision=s.material_revision'
                               ' WHERE s.id=?', (submission_id,)).fetchone()
         if source is None:
             raise external_research.SubmissionError('提交不存在', 404)
@@ -80,8 +81,9 @@ def execute(conn, run_id: int) -> None:
     from a_share_research.reviewing import ReviewLedger
 
     with db.transaction(conn):
-        row = conn.execute("SELECT q.*,s.draft,s.draft_sha256,s.material_sha256,e.material,e.owner_key_id,e.account_aware"
+        row = conn.execute("SELECT q.*,s.draft,s.draft_sha256,s.material_sha256,m.material,e.owner_key_id,e.account_aware"
                            " FROM external_reviews q JOIN external_submissions s ON s.id=q.submission_id"
+                           " JOIN external_materials m ON m.external_id=s.external_id AND m.revision=s.material_revision"
                            " JOIN external_research e ON e.id=s.external_id JOIN runs u ON u.id=q.run_id"
                            " WHERE q.run_id=? AND u.kind='external' AND q.status='submitted'", (run_id,)).fetchone()
         if row is None:

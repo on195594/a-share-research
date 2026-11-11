@@ -27,6 +27,15 @@ def probe(directory: Path) -> dict:
                 or conn.execute('PRAGMA foreign_key_check').fetchone()):
             return {'ok': False, 'reason': 'sqlite_integrity_failed'}
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'external_operations' in tables:
+            from a_share_research import db
+            if conn.execute('PRAGMA user_version').fetchone()[0] != len(db.MIGRATIONS):
+                return {'ok': False, 'reason': 'external_acquisition_unsupported'}
+            operations = importlib.import_module('a_share_research.external_operations')
+            if not all(callable(getattr(operations, name, None)) for name in ('open_research','acquire','operation','execute','inspect')):
+                return {'ok': False, 'reason': 'external_acquisition_unsupported'}
+            if operations.inspect(conn):
+                return {'ok': False, 'reason': 'external_acquisition_integrity_failed'}
         if 'scan_requests' in tables:
             from a_share_research import db, scans
             # Readable additive tables are insufficient: old tools reject the new

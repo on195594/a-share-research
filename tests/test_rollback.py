@@ -198,19 +198,21 @@ def test_readable_scan_request_table_requires_compatible_runtime(source, tmp_pat
         monkeypatch.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:20])
     else:
         monkeypatch.delattr(scans, 'submit_request')
-    assert rollback_probe.probe(target) == dict(ok=False, reason='scan_requests_unsupported')
+    reason = 'external_acquisition_unsupported' if older == 'schema' else 'scan_requests_unsupported'
+    assert rollback_probe.probe(target) == dict(ok=False, reason=reason)
     assert database_rows(target / 'bundle/app.db') == before
 
 
-def test_scan_protocol_incompatibility_is_a_valid_rejection(tmp_path, monkeypatch):
+@pytest.mark.parametrize('reason', ['scan_requests_unsupported', 'external_acquisition_unsupported', 'external_acquisition_integrity_failed'])
+def test_protocol_incompatibility_is_a_valid_rejection(tmp_path, monkeypatch, reason):
     def run(command, **kwargs):
         if command[1] == 'rm':
             return subprocess.CompletedProcess(command, 0, '', '')
         return subprocess.CompletedProcess(command, 1,
-            json.dumps(dict(ok=False, reason='scan_requests_unsupported')), '')
+            json.dumps(dict(ok=False, reason=reason)), '')
     monkeypatch.setattr(subprocess, 'run', run)
     assert rollback._assess_image('sha256:old', tmp_path) == dict(
-        ok=False, reason='scan_requests_unsupported', image='sha256:old')
+        ok=False, reason=reason, image='sha256:old')
 
 
 def test_cleanup_failure_also_refuses_rollback(tmp_path, monkeypatch):

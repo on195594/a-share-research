@@ -462,8 +462,13 @@ def _migrate_v21(conn: sqlite3.Connection) -> None:
     conn.execute('CREATE INDEX IF NOT EXISTS scan_requests_by_scan ON scan_requests(scan_id)')
 
 
+def _migrate_v22(conn: sqlite3.Connection) -> None:
+    from a_share_research.external_operations import migrate
+    migrate(conn)
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22)
 
 
 def now() -> str:

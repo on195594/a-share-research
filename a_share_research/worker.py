@@ -3,7 +3,7 @@
 import logging
 import time
 
-from a_share_research import consensus_backfill, db, model, price, research, screening, scans, service, external_review
+from a_share_research import consensus_backfill, db, model, price, research, screening, scans, service, external_review, external_operations
 
 log = logging.getLogger(__name__)
 
@@ -58,12 +58,17 @@ def main() -> None:
     conn = db.connect()
     recover(conn)
     external_review.recover(conn)
+    external_operations.recover(conn)
     screening.recover(conn)
     scans.recover(conn)
     log.info("worker ready")
     while True:
         row = next_run(conn, external_enabled=external_review.enabled())
         if row is None:
+            operation = conn.execute("SELECT id FROM external_operations WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+            if operation:
+                external_operations.execute(conn, operation['id'])
+                continue
             scan = conn.execute("SELECT id FROM scans WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if scan:
                 scans.execute(conn, scan['id'])

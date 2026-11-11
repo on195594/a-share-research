@@ -1,4 +1,4 @@
-"""First v9→v21 release checks; invoked only by deploy's explicit initial-recovery path.
+"""First v9→current-schema release checks; invoked only by deploy's explicit initial-recovery path.
 
 Migrate a complete private copy before stopping production, then check the stopped
 database again with the same image. Recovery never restores an earlier database.
@@ -13,7 +13,7 @@ import subprocess
 from typing import TypedDict
 import uuid
 
-from a_share_research import backup, integrity, rollback
+from a_share_research import backup, db, integrity, rollback
 
 
 class InitialReleaseError(RuntimeError):
@@ -78,8 +78,8 @@ def _run_migration(image: str, database: Path, evidence: Path) -> None:
         process = subprocess.run(command, capture_output=True, text=True, timeout=120)
         _save(evidence, 'migration-process.json', dict(image=image, exit_code=process.returncode,
                                                      stdout=process.stdout, stderr=process.stderr))
-        if process.returncode or json.loads(process.stdout) != {'schema_version': 21}:
-            raise InitialReleaseError('目标镜像未完成 v21 迁移；保留副本与诊断，不恢复旧库')
+        if process.returncode or json.loads(process.stdout) != {'schema_version': len(db.MIGRATIONS)}:
+            raise InitialReleaseError(f'目标镜像未完成 v{len(db.MIGRATIONS)} 迁移；保留副本与诊断，不恢复旧库')
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise InitialReleaseError('目标镜像迁移未获有效回执；保留现场核查') from exc
     finally:
@@ -107,7 +107,7 @@ the caller must keep admission closed rather than restart the old application.
     _run_migration(image, database, evidence)
     after = state(database, before['columns'])
     _save(evidence, 'after.json', after)
-    if after['version'] != 21 or before['tables'] != after['tables']:
+    if after['version'] != len(db.MIGRATIONS) or before['tables'] != after['tables']:
         raise InitialReleaseError('迁移版本或旧列守恒核对失败；保持停服，不自动恢复受理')
     with closing(sqlite3.connect(database.absolute().as_uri()+'?mode=ro', uri=True)) as conn:
         conn.execute('BEGIN')
@@ -117,7 +117,7 @@ the caller must keep admission closed rather than restart the old application.
     problems, _ = integrity.check(database, database.parent/'pdf')
     if problems:
         raise InitialReleaseError('迁移后的领域完整性检查失败；保持停服')
-    result = dict(source_version=9, target_version=21, image=image,
+    result = dict(source_version=9, target_version=len(db.MIGRATIONS), image=image,
                   old_columns_preserved=True, integrity_passed=True)
     _save(evidence, 'migration.json', result)
     return result
