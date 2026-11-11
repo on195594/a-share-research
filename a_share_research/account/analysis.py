@@ -129,16 +129,17 @@ def migrate(conn):
             BEGIN SELECT RAISE(ABORT,'analysis history is append-only'); END''')
 
 
-def _latest(conn, holding_id):
-    return conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? ORDER BY version DESC LIMIT 1',
-                        (holding_id,)).fetchone()
+def _latest(conn, holding_id, *, account_id=""):
+    return conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id=? ORDER BY version DESC LIMIT 1',
+                        (holding_id, account_id)).fetchone()
 
 
 def _result(row):
     return dict(revision_id=row['id'], holding_id=row['holding_id'], company_key=row['company_key'],
                 version=row['version'], parent_id=row['parent_id'], source=row['source'], mode='shadow',
                 actor_key_id=row['actor_key_id'], recorded_at=row['created_at'], request_hash=row['request_hash'],
-                evidence_hashes=json.loads(row['evidence_hashes']), snapshot=json.loads(row['snapshot']))
+                evidence_hashes=json.loads(row['evidence_hashes']), snapshot=json.loads(row['snapshot']),
+                **(dict(account_id=row['account_id'],cycle_id=row['cycle_id']) if row['account_id'] else {}))
 
 
 def _holding(conn, holding_id):
@@ -157,12 +158,12 @@ def _capture(conn, holding_id):
     return result
 
 
-def _insert(conn, holding, version, parent, source, principal, request, hashes, snapshot):
+def _insert(conn, holding, version, parent, source, principal, request, hashes, snapshot, *, account_id="", cycle_id=""):
     cursor = conn.execute('''INSERT INTO account_analysis_history
-        (holding_id,company_key,version,parent_id,request_hash,source,actor_key_id,created_at,snapshot_hash,evidence_hashes,request,snapshot)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (holding_id,company_key,version,parent_id,request_hash,source,actor_key_id,created_at,snapshot_hash,evidence_hashes,request,snapshot,account_id,cycle_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (holding['id'], holding['company_key'], version, parent, gate.digest(request), source, principal.key_id,
-         db.now(), gate.digest(snapshot), gate.canonical(hashes), gate.canonical(request), gate.canonical(snapshot)))
+         db.now(), gate.digest(snapshot), gate.canonical(hashes), gate.canonical(request), gate.canonical(snapshot), account_id, cycle_id))
     return _result(conn.execute('SELECT * FROM account_analysis_history WHERE id=?', (cursor.lastrowid,)).fetchone())
 
 
@@ -179,20 +180,20 @@ def initialize(conn, principal, holding_id: int) -> dict:
         return _insert(conn, holding, 0, None, 'legacy_baseline', principal, request, [], snapshot)
 
 
-def current(conn, principal, holding_id: int) -> dict:
+def current(conn, principal, holding_id: int, *, account_id="") -> dict:
     ledger.authorize(conn, principal)
-    row = _latest(conn, holding_id)
+    row = _latest(conn, holding_id, account_id=account_id)
     if row is None:
         raise ledger.LedgerError('尚未建立该持仓周期的分析基线', 404)
     return _result(row)
 
 
-def history(conn, principal, holding_id: int, *, after_id: int = 0, limit: int = 100) -> dict:
+def history(conn, principal, holding_id: int, *, after_id: int = 0, limit: int = 100, account_id="") -> dict:
     ledger.authorize(conn, principal)
     if type(after_id) is not int or after_id < 0 or type(limit) is not int or not 1 <= limit <= 1000:
         raise ledger.LedgerError('历史分页参数无效', 422)
-    rows = conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? AND id>? ORDER BY id LIMIT ?',
-                        (holding_id, after_id, limit)).fetchall()
+    rows = conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id=? AND id>? ORDER BY id LIMIT ?',
+                        (holding_id, account_id, after_id, limit)).fetchall()
     return {'revisions': [_result(r) for r in rows], 'next_after_id': rows[-1]['id'] if rows else after_id}
 
 
@@ -255,13 +256,47 @@ def _open_alert(conn, snapshot, holding, change, stamp):
             resolved_at=None, resolution_evidence=None, updated_at=stamp))
 
 
+def apply_changes(conn, holding, snapshot, changes):
+    """Apply validated changes to one caller-owned snapshot; caller commits the complete revision."""
+    holding_id = holding['id']
+    stamp = db.now()
+    for change in changes:
+        if isinstance(change, L3Update):
+            row = _one(snapshot, 'holding_l3_conditions', change.id)
+            if not row['is_active']:
+                raise ledger.LedgerError('已退役 L3 条件不可更新')
+            row.update(status=change.status, as_of=change.as_of.isoformat(), evidence=change.evidence,
+                       next_review_date=change.next_review_date.isoformat() if change.next_review_date else None,
+                       updated_at=stamp)
+            if change.evidence_cadence is not None:
+                row['evidence_cadence'] = change.evidence_cadence
+        elif isinstance(change, AlertUpdate):
+            row = _one(snapshot, 'holding_alerts', change.id)
+            if row['status'] == 'resolved' or change.status == 'pending' and row['status'] != 'active':
+                raise ledger.LedgerError('预警当前状态不允许该更新')
+            row.update(status=change.status, updated_at=stamp)
+            if change.status == 'resolved':
+                row.update(resolved_at=stamp, resolution_evidence=change.evidence)
+            else:
+                row['evidence'] = change.evidence
+        elif isinstance(change, ThesisRewrite):
+            _rewrite(conn, snapshot, holding_id, change, stamp)
+        elif isinstance(change, AlertOpen):
+            _open_alert(conn, snapshot, holding, change, stamp)
+        else:
+            row = _one(snapshot, 'holding_tier_state', holding_id)
+            if row[change.tier + '_status'] == 'exempted':
+                raise ledger.LedgerError('买入时豁免不能由普通状态更新更改')
+            row.update({change.tier + '_status': change.status, 'updated_at': stamp})
+
+
 def update(conn, principal, holding_id: int, request: Update, evidence_directory: Path) -> dict:
     """Append an atomic status revision. Does not edit entry configuration or alter legacy state."""
     request = Update.model_validate(request)
     data = request.model_dump(mode='json')
     with db.transaction(conn):
         ledger.authorize(conn, principal)
-        previous = conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? AND request_hash=?',
+        previous = conn.execute("SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id='' AND request_hash=?",
                                 (holding_id, gate.digest(data))).fetchone()
         if previous:
             return _result(previous)
@@ -282,35 +317,7 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
         for sha in request.evidence_hashes:
             evidence.verify(evidence_directory, sha)
         snapshot = json.loads(latest['snapshot'])
-        stamp = db.now()
-        for change in request.changes:
-            if isinstance(change, L3Update):
-                row = _one(snapshot, 'holding_l3_conditions', change.id)
-                if not row['is_active']:
-                    raise ledger.LedgerError('已退役 L3 条件不可更新')
-                row.update(status=change.status, as_of=change.as_of.isoformat(), evidence=change.evidence,
-                           next_review_date=change.next_review_date.isoformat() if change.next_review_date else None,
-                           updated_at=stamp)
-                if change.evidence_cadence is not None:
-                    row['evidence_cadence'] = change.evidence_cadence
-            elif isinstance(change, AlertUpdate):
-                row = _one(snapshot, 'holding_alerts', change.id)
-                if row['status'] == 'resolved' or change.status == 'pending' and row['status'] != 'active':
-                    raise ledger.LedgerError('预警当前状态不允许该更新')
-                row.update(status=change.status, updated_at=stamp)
-                if change.status == 'resolved':
-                    row.update(resolved_at=stamp, resolution_evidence=change.evidence)
-                else:
-                    row['evidence'] = change.evidence
-            elif isinstance(change, ThesisRewrite):
-                _rewrite(conn, snapshot, holding_id, change, stamp)
-            elif isinstance(change, AlertOpen):
-                _open_alert(conn, snapshot, holding, change, stamp)
-            else:
-                row = _one(snapshot, 'holding_tier_state', holding_id)
-                if row[change.tier + '_status'] == 'exempted':
-                    raise ledger.LedgerError('买入时豁免不能由普通状态更新更改')
-                row.update({change.tier + '_status': change.status, 'updated_at': stamp})
+        apply_changes(conn, holding, snapshot, request.changes)
         return _insert(conn, holding, latest['version'] + 1, latest['id'], 'assistant', principal,
                        data, request.evidence_hashes, snapshot)
 
@@ -319,16 +326,17 @@ def inspect(conn) -> list[str]:
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_analysis_history'").fetchone():
         return []
     problems, previous, rebases = [], {}, {}
-    cursor = conn.execute('SELECT * FROM account_analysis_history ORDER BY holding_id,version')
+    cursor = conn.execute('SELECT * FROM account_analysis_history ORDER BY account_id,holding_id,version')
     columns = [c[0] for c in cursor.description]
     for values in cursor:
         row = dict(zip(columns, values))
         label = f"分析历史 {row['id']}"
-        parent = previous.get(row['holding_id'])
+        subject = (row['account_id'], row['holding_id'])
+        parent = previous.get(subject)
         expected = (parent['version'] + 1, parent['id']) if parent else (0, None)
         if (row['version'], row['parent_id']) != expected:
             problems.append(label + '：版本或前序关系不一致')
-        if parent and row['company_key'] != parent['company_key']:
+        if parent and (row['company_key'],row['cycle_id']) != (parent['company_key'],parent['cycle_id']):
             problems.append(label + '：持仓周期公司身份变化')
         try:
             request, snapshot = json.loads(row['request']), json.loads(row['snapshot'])
@@ -341,8 +349,11 @@ def inspect(conn) -> list[str]:
                 states = snapshot[table]
                 if not isinstance(states, list) or any(not isinstance(r, dict) or r.get('holding_id') != row['holding_id'] for r in states):
                     raise ValueError
-            if row['source'] == 'legacy_baseline':
-                if row['version'] != 0 or hashes or request != {'source':'legacy_baseline', 'holding_id':row['holding_id'], 'snapshot':snapshot}:
+            if row['source'] == 'journal_baseline':
+                from a_share_research.account.cycle_analysis import inspect_baseline
+                problems.extend(label + '：' + issue for issue in inspect_baseline(conn,row,request,snapshot,hashes))
+            elif row['source'] == 'legacy_baseline':
+                if row['account_id'] or row['version'] != 0 or hashes or request != {'source':'legacy_baseline', 'holding_id':row['holding_id'], 'snapshot':snapshot}:
                     problems.append(label + '：旧基线来源不一致')
             elif row['source'] == 'assistant':
                 parsed = Update.model_validate(request)
@@ -355,7 +366,7 @@ def inspect(conn) -> list[str]:
                 group = rebases.setdefault(request['rebase_hash'], ({c.holding_id for c in parsed.choices}, set()))
                 group[1].add(row['holding_id'])
                 expected_snapshot = request['legacy_snapshot'] if choice and choice.select == 'legacy' else json.loads(parent['snapshot']) if parent else None
-                if (not choice or not parent or choice.expected_version != row['version']-1
+                if (row['account_id'] or not choice or not parent or choice.expected_version != row['version']-1
                         or choice.legacy_hash != gate.digest(request['legacy_snapshot'])
                         or request['rebase_hash'] != gate.digest(request['rebase'])
                         or hashes != parsed.evidence_hashes or snapshot != expected_snapshot):
@@ -364,7 +375,7 @@ def inspect(conn) -> list[str]:
                 problems.append(label + '：未知来源')
         except (ValueError, TypeError, KeyError):
             problems.append(label + '：请求或快照非法')
-        previous[row['holding_id']] = row
+        previous[subject] = row
     for expected, actual in rebases.values():
         if expected != actual:
             problems.append('分析协调批次缺少持仓周期回执')

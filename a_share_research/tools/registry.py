@@ -14,7 +14,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from a_share_research import api_keys, service, external_research, external_review
-from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store
+from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store, cycle_analysis
 
 
 class ToolError(Exception):
@@ -95,6 +95,23 @@ class AnalysisUpdate(Analysis):
 
 class AnalysisRebase(Arguments):
     rebase: analysis_rebase.Rebase
+
+
+class CycleAnalysis(Account):
+    cycle_id: analysis.Text
+
+
+class CycleAnalysisInitialize(CycleAnalysis):
+    initialize: cycle_analysis.Initialize
+
+
+class CycleAnalysisUpdate(CycleAnalysis):
+    update: analysis.Update
+
+
+class CycleAnalysisHistory(CycleAnalysis):
+    after_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=1000)
 
 
 class EvidenceUpload(Arguments):
@@ -184,6 +201,16 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('account.cycle_analysis.initialize', '以证据建立账户周期分析分支；旧周期须明确来源版本', frozenset({'assistant'}), CycleAnalysisInitialize, Payload,
+         lambda c,a: Payload(data=cycle_analysis.initialize(c.connection,c.principal,a.account_id,a.cycle_id,a.initialize,_evidence_directory(c))),
+         access='write', account=True),
+    Tool('account.cycle_analysis.current', '读取指定账户与周期的最新分析状态', frozenset({'assistant'}), CycleAnalysis, Payload,
+         lambda c,a: Payload(data=cycle_analysis.current(c.connection,c.principal,a.account_id,a.cycle_id)), account=True),
+    Tool('account.cycle_analysis.history', '读取指定账户周期的不可变分析历史，保留已作废周期', frozenset({'assistant'}), CycleAnalysisHistory, Payload,
+         lambda c,a: Payload(data=cycle_analysis.history(c.connection,c.principal,a.account_id,a.cycle_id,after_id=a.after_id,limit=a.limit)), account=True),
+    Tool('account.cycle_analysis.update', '追加指定账户周期的论点、L3、预警与Tier状态', frozenset({'assistant'}), CycleAnalysisUpdate, Payload,
+         lambda c,a: Payload(data=cycle_analysis.update(c.connection,c.principal,a.account_id,a.cycle_id,a.update,_evidence_directory(c))),
+         access='write', account=True),
     Tool('policy.v0.positions', '按明确政策期初和新账本事件生成旧表形状的只读投影', frozenset({'assistant'}), Account, Payload,
          _v0_positions, account=True),
     Tool('account.positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,

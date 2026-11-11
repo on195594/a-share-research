@@ -2,7 +2,7 @@
 
 HTTP 与进程内入口默认只读，单文件客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务尚未启用；发布编排、MCP、新材料取证与账户切换按 `docs/consolidation.md` 第 2 段继续实现。
 
-开发验证使用已迁移至 v17 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
+开发验证使用已迁移至 v18 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
 DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server
@@ -125,4 +125,16 @@ v17 新增不可变周期/事件整数编号、政策投影参数和期初快照
 
 `batch.position_distributions` 以事件下标提供每股现金除权金额，仅绑定分红或送转事件。到账现金与每股除权是独立事实，不能彼此反推；没有每股信息的分红只计收入。已有元数据不能通过重复事件补加或覆盖，须作废更正；同批同业务事件的元数据冲突会被拒绝。新增可选字段为空时保留旧请求哈希。
 
-显式设置 `POLICY_V0_ACCOUNT_SHADOW=账户编号` 后，v0 连接在同一只读事务内生成 TEMP holdings/holding_events，再启用 query_only；可与 `POLICY_V0_ANALYSIS_SHADOW=1` 联用。主库旧表不改，未设置时沿用旧来源。编号在金融入账事务内固定，读请求不分配编号，作废后也不复用。新 journal 周期的分析基线接入尚未完成，不能把现有周期联用通过视为全部 D7 已验收。
+显式设置 `POLICY_V0_ACCOUNT_SHADOW=账户编号` 后，v0 连接在同一只读事务内生成 TEMP holdings/holding_events，再启用 query_only；可与 `POLICY_V0_ANALYSIS_SHADOW=1` 联用。主库旧表不改，未设置时沿用旧来源。编号在金融入账事务内固定，读请求不分配编号，作废后也不复用。账户周期分析读取规则见下节；宿主流程和生产切换仍须整段验收。
+
+## 账户周期分析分支（影子入口）
+
+v18 在同一 `account_analysis_history` 表增加 account_id/cycle_id 作用域。旧记录保持原列值、编号、哈希和父链，旧工具只读取空作用域；不同账户即使使用相同持仓整数编号，也不会混用状态。新入口均要求 assistant 及账户影子开关：
+
+- `account.cycle_analysis.initialize`：提供 account_id、cycle_id，以及 initialize 对象中的 expected_account_version、evidence_hashes。新周期从空论点/L3/预警和 pending Tier 开始，不借用上一个周期的判断。已有期初周期还须提供 legacy_revision_id，明确选择其当前旧分析版本；导入快照与来源版本完整保留。
+- `account.cycle_analysis.current/history`：读取指定账户周期的最新值或分页历史。周期清仓或因交易作废失效后，历史仍可查询。
+- `account.cycle_analysis.update`：提供 account_id、cycle_id、update，沿用既有 expected_version/evidence_hashes/reason/changes 合同和论点、L3、预警、Tier 转移逻辑；该版本号属于分析分支，与初始化核对的账户版本分开。一次提交原子追加，重复请求返回原回执，关闭或失效周期拒绝新更新。
+
+已导入分支独立追加，旧镜像或旧分析后续更新不会自动覆盖它。基线不能重建覆盖，旧来源始终可追溯。没有显式导入分支的期初周期继续使用既有旧分析投影；新在仓周期缺少分析基线时，双投影读取明确拒绝，不拼接其他账户或旧周期的分析。双投影先生成持仓，再按账户/周期加载分析，最后封闭写入；已关闭周期保留其分支的最后快照供历史读取。
+
+未识别作用域的旧工具版本会混读新分支，因此不能把已写入账户分支的数据库直接交给旧工具回退。发布前须完成证据保全、兼容快照恢复与旧宿主切回演练；此路径尚未验收，生产仍沿用旧账户来源。

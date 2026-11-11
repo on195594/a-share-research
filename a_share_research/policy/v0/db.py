@@ -44,12 +44,13 @@ def _read_only_connection(timeout: float) -> sqlite3.Connection:
     connection.execute(f"PRAGMA busy_timeout={max(1, round(timeout * 1000))}")
     account = os.environ.get("POLICY_V0_ACCOUNT_SHADOW")
     try:
-        if os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1":
-            from a_share_research.account.analysis_projection import install
-            install(connection, seal=not bool(account))
+        shadow_analysis = os.environ.get("POLICY_V0_ANALYSIS_SHADOW") == "1"
         if account:
             from a_share_research.policy.v0.account_store import install
-            install(connection, account)
+            install(connection, account, seal=not shadow_analysis)
+        if shadow_analysis:
+            from a_share_research.account.analysis_projection import install
+            install(connection, account_id=account)
     except BaseException:
         connection.close()
         raise

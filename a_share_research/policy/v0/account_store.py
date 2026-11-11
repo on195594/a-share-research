@@ -127,7 +127,7 @@ def read(conn, principal, account_id):
         return project(conn,ledger._account(account_id))
 
 
-def install(conn, account_id):
+def install(conn, account_id, *, seal=True):
     """Expose legacy-shaped TEMP tables on a mode=ro connection, then seal all writes."""
     if not conn.in_transaction:
         conn.execute('BEGIN DEFERRED')
@@ -143,7 +143,8 @@ def install(conn, account_id):
                          [[row[c] for c in columns] for row in result[table]])
         for (ddl,) in conn.execute("SELECT sql FROM main.sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",(table,)).fetchall():
             conn.execute(re.sub(r'^(CREATE (?:UNIQUE )?INDEX )',r'\1temp.',ddl,count=1,flags=re.IGNORECASE))
-    conn.execute('PRAGMA query_only=ON')
+    if seal:
+        conn.execute('PRAGMA query_only=ON')
 
 
 def inspect(conn):

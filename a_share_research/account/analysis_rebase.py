@@ -32,7 +32,7 @@ class Rebase(Value):
 
 def baseline(conn, holding_id):
     """Read the most recently acknowledged mirror, preserving the original baseline forever."""
-    row = conn.execute("SELECT source,request,snapshot,request_hash,snapshot_hash FROM main.account_analysis_history WHERE holding_id=?"
+    row = conn.execute("SELECT source,request,snapshot,request_hash,snapshot_hash FROM main.account_analysis_history WHERE holding_id=? AND account_id=''"
                        " AND source IN ('legacy_baseline','legacy_rebase') ORDER BY version DESC LIMIT 1",
                        (holding_id,)).fetchone()
     if row is None:
@@ -90,7 +90,7 @@ def rebase(conn, principal, request: Rebase, evidence_directory: Path):
     client_hash = gate.digest(data)
     with db.transaction(conn):
         ledger.authorize(conn, principal)
-        previous = conn.execute("SELECT * FROM account_analysis_history WHERE source='legacy_rebase'"
+        previous = conn.execute("SELECT * FROM account_analysis_history WHERE source='legacy_rebase' AND account_id=''"
                                 " AND json_extract(request,'$.rebase_hash')=? ORDER BY holding_id", (client_hash,)).fetchall()
         if previous:
             if {r['holding_id'] for r in previous} != {c.holding_id for c in request.choices}:
