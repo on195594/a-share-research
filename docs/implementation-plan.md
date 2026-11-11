@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-11-10。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。此次删去的已完成小节与列表最后完整版本见 `git show 409155f:docs/implementation-plan.md`，阅读体验旧记录见 `git show 55d6ce2:docs/implementation-plan.md`。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
+更新：2026-11-11。职责见[项目契约](project-contract.md)，演进条件见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、最近部署与直接回退。已完成工作包的逐次验证、审查与旧部署详情不在此复述：10-31 瘦身前的完整记录见 `git show 52d1eec:docs/implementation-plan.md`，更早历史从该版本的链接继续追溯。此次删去的已完成小节与列表最后完整版本见 `git show 409155f:docs/implementation-plan.md`，阅读体验旧记录见 `git show 55d6ce2:docs/implementation-plan.md`。原始证据保留在仓库外 `~/.local/share/a-share-research-evaluations/`（下文证据路径均相对此目录）。
 
 ## 工作包与状态
 
@@ -21,6 +21,7 @@
 | 判断账本 K5/K6（11-05） | `9fb28b9` 已上线议程记分与搜索，见[积累方案 K5](research-accumulation.md#k5-议程状态账本针对-p6p7服务避开大亏与复盘改进)、[判断验证 V5](judgment-validation.md#v5-议程状态记分2026-11-05)；所有者 11-05 决定交易关联归 Skills，不合并数据库 | 非阻塞观察：首批新覆盖期样本预计 2026 年报后，抽查“无法判断”占比与“已发生”中旧问题延续比例（比亚迪 111 两条依据半年报）；搜索 P95 超 1 秒再评估索引 |
 | 复核放宽、边界立场与取材修复（11-05） | `37838e7`、`c2f78b4`、`db9f6f2` 已上线；所有者 11-05 批准仅剩未答完问题时列 `open_questions` 照常交付、距 v2 门槛价 ±5% 标边界立场并单列记分 | 非阻塞观察：抽查首批 5 份的 `open_questions` 频率及是否掩盖实质缺陷；首批等价格到期（约 2027-05）比较边界/非边界等待代价，再决定是否调整 5%；12-01 首个真实月批 |
 | 架构整理（11-10） | 维护与基础设施：K7 退役；判断契约版本与契约面哈希（`contract.py`）；报告正文类型与 `GET /api/schema`（`report.py`）；TuShare 网关 `market.py`；上限集中 `limits.py` 与分层测试；批次终态 `closed` 与轮询取列；Hermes 脚本入库 `ops/hermes/` | `907a1be` 已上线（11-10）；契约面修改走[季度窗口](judgment-validation.md#判断契约与修改窗口)，首个窗口 2027-01-01 月批之前 |
+| 跨项目架构与路线图重写（11-11） | 维护：[项目契约](project-contract.md)按价值链与分层重写并纳入 Hermes，[路线图](roadmap.md#3-阶段与日期)给出演进原则与 X1–X5；只改文档，未改代码、接口与投资规则 | X1–X5 日期待所有者确认后进固定里程碑；X3、X4 另需 Skills 侧授权 |
 
 已完成且无后续项：D0、I1–I6、R0–R3（[项目契约](project-contract.md)、[路线图](roadmap.md)，Skills 长期 API Key 见其 [operations](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/operations.md#current-deployment-record)）、数据层治理（[方案](data-foundation.md#6-已验证)，迁移 v9 获所有者 msg 4264 授权）、公司研究进展退役、统一来源与跨轮复核（[方案 5.1](proposal.md#51-统一来源与跨轮复核)）、数字阈值与遗漏关闭边界、技术债 T1–T3、取证与修正闭环、初筛解耦与图表防护及 Pi 预检、结构与存储整理、公司研究进展分类边界、性能整改与校验误伤、机会成本分红口径与验证边界、月批自动发起（详情见上述历史版本）。
 

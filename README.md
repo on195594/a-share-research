@@ -2,11 +2,11 @@
 
 收盘后的 A 股个股研究助手：输入一家公司和可选问题，AI 自主补读定期报告和临时公告、查询财务与程序计算，通常几分钟后读到带原文出处的研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
 
-本项目负责公司财报研究与阅读；`a-stock-agent-skills` 负责 Agent 投研、持仓与风险，两者独立运行并共用 `a-stock-lib`。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
+本项目生产有出处的公司判断并为判断记分；`a-stock-agent-skills` 把判断与账户事实、风险政策合成为配置与持仓决策，两者独立运行并共用 `a-stock-lib`，定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
 - 产品目标与使用流程：[PRODUCT.md](PRODUCT.md)；领域设计与研究方案：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
-- 三项目职责与协作：[项目契约](docs/project-contract.md)。
-- AI 能力演进与进入条件：[路线图](docs/roadmap.md)。
+- 架构分层、三项目职责与协作：[项目契约](docs/project-contract.md)。
+- AI 能力演进原则与阶段日期：[路线图](docs/roadmap.md)。
 - 候选发现与研究实验：[方案](docs/screening-experiment.md)，用法见下文[候选初筛](#候选初筛)。
 - 基本面深度、经营序列与投资论证：[升级方案](docs/investment-upgrade.md)。
 - 接续研究、检查点与归因复盘：[积累方案](docs/research-accumulation.md)。
