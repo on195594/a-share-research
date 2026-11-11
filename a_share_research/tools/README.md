@@ -198,6 +198,10 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 止损规则不从新监控结论近似推导：直接复用 v0 的 stop_level/new_stop_alerts，保留同日与绝对 15 分钟行情窗、3% 临近线、逐代码每日升档、部分行情有效时只检查有效部分的既有行为。全部行情无效返回已保存的 unavailable 评估（exit_code=1），与采集器异常、来源变动等未保存成功回执的服务错误区分。可用 `policy.evaluation` 查回原输入/结果/身份；纯函数 `policy.stop_evaluation.evaluate` 可离线复算。无数据库列变更，但旧版本不识别上下文 3，不可作为这些记录的直接回退版本；发布前仍须兼容合并镜像演练。
 
+`policy.daily_brief` 接受 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。采集沿用监控输入但不加入旧 daily-brief 未读取的研究卡片；另保留每个未关闭持仓的完整生命周期事件、Provider 规范化分红行、来源/获取时间/源日期与安全错误类别、分红检查日和格式化日。成功空行集与失败 null 行集区分；逐持仓身份、代码、名称、股数必须与监控输入一致，遗漏或重复核查项拒绝。新旧入口共用从旧函数原样抽出的 implemented_rows，再由 unrecorded_dividends 和 format_daily_brief 复算，不采用调用方提供的计算结论。
+
+日报回执 mode=`service_daily_brief_capture`、上下文版本 4，原始输入根部仍保存 risk_policy。结果包含 status（ready/silent）、exit_code、stdout、stderr、snapshot 及 dividends.checked/findings/failures；无当日报价时保留 v0 静默行为，失败项仍可查。可由 `policy.daily_evaluation.evaluate` 离线复算，避免旧监控对嵌套 L3 的注解改变原始留存输入。采集仍在固定 25 秒预算内；只有此固定子进程允许从 tools 的环境接收 TUSHARE_TOKEN，其余模型/owner/宿主配置不传入。分红 Provider 异常逐持仓记录安全类别，不回显异常正文；数据库/来源/政策漂移等仍使整体回执失败。未新增数据库列，兼容回退版本必须识别上下文 4。
+
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
 mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256。当前只有该绑定的读取和验证，没有生产切换写入器，私有测试中设置绑定不算完成切换。

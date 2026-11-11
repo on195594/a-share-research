@@ -997,31 +997,9 @@ def _implemented_dividends(code: str) -> list[dict]:
         raise RuntimeError(
             f"TuShare 分红数据不可用（{getattr(result, 'status', 'error')}）"
         )
-    rows = []
-    for row in frame.to_dict("records"):
-        cash = row.get("cash_div_tax")
-        if row.get("div_proc") != "实施" or not isinstance(row.get("record_date"), str):
-            continue
-        if not risk_budget.positive_number(cash) and not risk_budget.positive_number(
-            row.get("stk_div")
-        ):
-            continue
-        rows.append(
-            {
-                "record_date": row["record_date"],
-                "ex_date": row.get("ex_date")
-                if isinstance(row.get("ex_date"), str)
-                else None,
-                "pay_date": row.get("pay_date")
-                if isinstance(row.get("pay_date"), str)
-                else None,
-                "cash_div": float(cash) if risk_budget.positive_number(cash) else 0.0,
-                "split_ratio": float(row["stk_div"])
-                if risk_budget.positive_number(row.get("stk_div"))
-                else 0.0,
-            }
-        )
-    return rows
+    from a_share_research.policy.v0.dividend_input import implemented_rows
+
+    return implemented_rows(frame.to_dict("records"))
 
 
 def scan_unrecorded_dividends(

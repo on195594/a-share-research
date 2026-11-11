@@ -223,6 +223,11 @@ def _stop_alert(ctx: Context, args: PolicyStopAlert) -> Payload:
                            args.expected_activation_id, args.previous_state.model_dump(mode='json', exclude_unset=True)))
 
 
+def _daily_brief(ctx: Context, args: PolicyMonitor) -> Payload:
+    from a_share_research.policy.daily_brief import run
+    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id))
+
+
 def _v0_positions(ctx: Context, args: Account) -> Payload:
     from a_share_research.policy.v0.account_store import read
     return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
@@ -242,6 +247,8 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('policy.daily_brief', '采集持仓监控和分红核查，保存原始输入、失败项与盘后日报；不发送通知、不记分红账',
+         frozenset({'assistant'}), PolicyMonitor, Payload, _daily_brief, access='write', account=True),
     Tool('policy.stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态；不发送通知、不修改账户',
          frozenset({'assistant'}), PolicyStopAlert, Payload, _stop_alert, access='write', account=True),
     Tool('policy.monitor', '从已核对的账户镜像或明确绑定的账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',

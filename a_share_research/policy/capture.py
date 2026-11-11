@@ -85,7 +85,7 @@ def _ledger_projection(source: dict | None):
             else:os.environ[key]=value
 
 
-def collect(parameters: dict, *, source: dict | None = None) -> dict:
+def collect(parameters: dict, *, source: dict | None = None, include_research: bool = True) -> dict:
     """Capture verified account inputs, stored research and bounded quotes as a replayable JSON bundle."""
     with db.read_only_scope(), _ledger_projection(source):
         current = domain.cst_now()
@@ -100,7 +100,7 @@ def collect(parameters: dict, *, source: dict | None = None) -> dict:
             denominator_evidence.update(portfolio_value_source=source['asset']['source'],
                                         portfolio_value_recorded_at=source['asset']['recorded_at'])
         local = commands_monitor._load_monitor_local_snapshot()
-        research = monitor_research.fetch_cards()
+        research = monitor_research.fetch_cards() if include_research else {'status': 'not_configured'}
         codes = list(dict.fromkeys(item['code'] for item in local['holdings']))
         quotes, industry = commands_holdings.fetch_monitor_price_quotes(codes)
         bundle = evaluation.pack(dict(

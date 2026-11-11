@@ -62,13 +62,17 @@ def capture(database: Path, parameters: dict, *, source: dict | None = None) -> 
     return _capture(database, 'a_share_research.policy.capture', payload)
 
 
-def _capture(database: Path, module: str, payload: dict) -> dict:
+def _capture(database: Path, module: str, payload: dict, *, market_token: bool = False) -> dict:
     """Run the fixed collector with a private empty config and no inherited model credentials."""
+    if market_token and module != 'a_share_research.policy.daily_brief':
+        raise ValueError('market credentials are only allowed for the dividend collector')
     with tempfile.TemporaryDirectory(prefix='ashare-policy-capture-') as directory:
         config = Path(directory)/'runtime.env'
         config.touch(mode=0o600)
         env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','LANG','LC_ALL')}
         env.update(POLICY_V0_DB=str(database.resolve()),A_STOCK_CONFIG_FILE=str(config))
+        if market_token and os.environ.get('TUSHARE_TOKEN'):
+            env['TUSHARE_TOKEN'] = os.environ['TUSHARE_TOKEN']
         process = subprocess.Popen([sys.executable,'-m',module],
             cwd=Path(__file__).resolve().parents[2],env=env,stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
