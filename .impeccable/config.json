@@ -10,7 +10,7 @@
           "a_share_research/static/app.css"
         ],
         "createdAt": "2026-10-30T09:11:33.853Z",
-        "reason": "Agent triage: DESIGN.md (Components / 图表与候选展示) explicitly specifies the accent stripe for selected matrix rows; this is an intentional selection marker, unchanged by 8cb46c8."
+        "reason": "Agent triage: DESIGN.md:113 specifies 3px amber counterevidence markers used by .risks .items > li and .card-list.risk; DESIGN.md:166 specifies the selected matrix-row accent used by .matrix tr.picked th. All three predate this session (86af05c0, b3d37104, 251b9ff0); preserve these semantic markers."
       }
     ]
   }
