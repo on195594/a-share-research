@@ -1,10 +1,11 @@
 """External lifecycle tests use real material with deterministic reviewer protocol decisions."""
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 
-from a_share_research import api_keys, db, external_research as external, external_review, research, worker
+from a_share_research import api_keys, db, external_research as external, external_review, model, research, worker
 from a_share_research.reviewing import digest
 from support.reports import MATERIAL, report
 
@@ -90,6 +91,65 @@ def test_restart_resumes_frozen_draft_not_research(queued, monkeypatch):
     external_review.execute(conn, task['run_id'])
     assert external_review.view(conn, sid)['status'] == 'done'
     assert external_review.view(conn, sid)['attempt'] == 2
+
+
+@pytest.mark.parametrize('call_limit', [1, 2])
+def test_restart_preserves_logged_calls_and_remaining_budget(queued, monkeypatch, call_limit):
+    conn, principal, sid, _ = queued
+    task = external_review.enqueue(conn, principal, sid, allow=True)
+    run_id = task['run_id']
+    database = Path(conn.execute('PRAGMA database_list').fetchone()[2])
+    frozen = {table: [dict(row) for row in conn.execute(f'SELECT * FROM {table}')]
+              for table in ('external_submissions', 'external_materials')}
+    # Protocol fixture over captured disclosure excerpts, not a new semantic review.
+    response = dict(version=1, draft_sha256=digest(report()), material_sha256=MATERIAL.snapshot()['sha256'],
+                    issues=[], resolutions=[], risk_resolutions=[])
+    completions = []
+
+    def complete(*args, **kwargs):
+        completions.append(kwargs['role'])
+        return model.Completion(json.dumps(response), None, 0, {'mode': 'protocol-fixture'}, {})
+
+    review = research.review
+
+    def interrupted(*args):
+        review(*args)  # Runner.call persists the actual response before the interruption.
+        raise PowerLoss()
+
+    monkeypatch.setattr(model, 'complete', complete)
+    monkeypatch.setattr(research, 'research_call_limit', lambda *args: call_limit)
+    monkeypatch.setattr(research, 'review', interrupted)
+    with pytest.raises(PowerLoss):
+        external_review.execute(conn, run_id)
+    prior_call = dict(conn.execute('SELECT * FROM calls WHERE run_id=?', (run_id,)).fetchone())
+    assert prior_call['response'] == json.dumps(response) and prior_call['error'] is None
+    assert external_review.view(conn, sid)['status'] == 'reviewing'
+    assert conn.execute('SELECT count(*) FROM reports').fetchone()[0] == 0
+    conn.close()
+
+    conn = db.connect(database)
+    try:
+        worker.recover(conn)
+        external_review.recover(conn)
+        assert external_review.view(conn, sid)['status'] == 'submitted'
+        monkeypatch.setattr(research, 'review', review)
+        worker.execute_run(conn, worker.next_run(conn, external_enabled=True))
+        outcome = external_review.view(conn, sid)
+        assert outcome['status'] == ('failed' if call_limit == 1 else 'done')
+        assert outcome['attempt'] == 2
+        assert completions == ['review'] * call_limit
+        calls = [dict(row) for row in conn.execute('SELECT * FROM calls WHERE run_id=? ORDER BY id', (run_id,))]
+        assert len(calls) == call_limit and calls[0] == prior_call
+        assert conn.execute('SELECT count(*) FROM reports').fetchone()[0] == call_limit - 1
+        for table, rows in frozen.items():
+            assert [dict(row) for row in conn.execute(f'SELECT * FROM {table}')] == rows
+        external_review.recover(conn)
+        external_review.execute(conn, run_id)
+        assert external_review.view(conn, sid) == outcome
+        assert completions == ['review'] * call_limit
+        assert conn.execute('SELECT count(*) FROM reports').fetchone()[0] == call_limit - 1
+    finally:
+        conn.close()
 
 
 def test_error_is_terminal_and_failed_publication_rolls_back(queued, monkeypatch):
