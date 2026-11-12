@@ -67,6 +67,16 @@ Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装�
 
 使用 `chat --oneshot --format stream-json` 保存回执，并用明确 session ID 恢复。流式输出会截断长工具结果，完整核对应读取私有会话数据库；显式 Skill 正文保存在 gateway 会话政策的 `skills_prompt`，不能仅检查基础系统提示词列。保留成功调用和失败原因，不为修正验收脚本的计数口径重复已经成功的模型调用。正式启用仍以以下场景和合一退出条件为准。
 
+## Claude 隔离预验证
+
+原生 Claude Code 2.1.322 使用私有 `HOME`、`CLAUDE_CONFIG_DIR` 和只读工作目录，统一 Skill 放在 `.claude/skills/a-share/SKILL.md`。已有 OAuth 文件只读挂载到私有配置目录，不复制令牌；外层挂载空间屏蔽原宿主主目录与 `/run`，仅任务目录可写。保持原模型别名 `fable` 与 `--effort high`，实际初始化和模型用量均记录为 `claude-fable-5-2`。`--bare` 不适用于本次 OAuth 登录。
+
+以 `--tools Skill` 限定内置工具，`--strict-mcp-config --mcp-config <私有文件>` 只注册 ashare；research Key 与只读服务仅开放三项研究读取。使用 `--permission-mode dontAsk --permission-prompts none`，私有设置只允许 `Skill(a-share)` 与 `mcp__ashare__*`，关闭 hooks、自动记忆和 Claude.ai 连接器。实际暴露工具须核对为 Skill 与三项研究工具；本机自动将 MCP 点号名称规范化为下划线，无须 AGY 的名称适配参数。
+
+项目 Skill 需要 `--setting-sources project`；本机 `--restricted` 即使指定 project 也不加载它。禁网的原生 initialize 对照已验证：空来源和 restricted+project 均无 a-share，仅 project 且不加 restricted 才能发现。这里由工具白名单、私有配置及外层挂载隔离限制权限，不依赖 restricted。发现列表只证明可见；以 `/a-share` 加载后，还须核对实际会话记录含完整 Skill 正文。本次首轮读取虽成功，但 Skill 未加载，保留该失败记录；修正启动参数后在原会话补验，未重复报告读取。
+
+用 `-p --verbose --output-format stream-json --session-id <UUID>` 保存首次回执，进程退出后以 `--resume <UUID>` 发起新读取。核对相同 session、新工具调用 ID、实际 HTTP 请求和完整工具结果，不以最终回复或退出码代替。临时 research 客户端配置在退出后清理，核查业务库、原宿主配置/凭据哈希、令牌泄漏和残留进程。此处记录隔离预验证方式，正式安装及六场景验收仍按下文执行。
+
 ## Codex 隔离预验证
 
 原生 Codex CLI 0.167.1 使用私有 `CODEX_HOME`、私有 `HOME` 和空工作目录。`mcp_servers.ashare.enabled_tools` 只允许本次研究读取；`features.shell_tool=false` 关闭命令执行，另关闭 apps、plugins、hooks、浏览器、电脑操作及多 Agent，配置以 `--strict-config` 检查。参数依据见 [MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)与[配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。外层挂载空间仍须屏蔽原宿主主目录与 `/run`，只允许任务目录写入，工作目录及已有登录文件只读；不改全局配置或复制令牌。
