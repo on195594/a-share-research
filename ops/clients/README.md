@@ -65,7 +65,11 @@ Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装�
 
 原生 `model_aliases` 的 `key_env` 可从进程环境接收已有访问令牌，保持 `provider: openai-codex`，不另传 `--provider` 或设置别名 `base_url`。预验证不复制刷新令牌，不允许回落读取宿主凭据；访问令牌须覆盖测试时长。gateway 重启会失去这种临时会话凭据，恢复时需按原生 `--api-key` 协议重绑同一令牌，不能把凭据失效误报为 MCP 丢失。本次通过私有启动器在进程内构造参数后调用未改动的 `hermes_cli.main.main`，令牌不进入系统命令行或生成文件；未修改应用的 Pi 推理链路。
 
+上述重绑启动器只用于恢复会话。新会话应走原生 CLI 的别名解析与 `key_env` 路径；若同时传入临时别名和显式 `api_key`，本机 `gateway/session_local_route.py` 会跳过别名解析，将别名原样发送给 Provider。边界补验首次因此收到 HTTP 400、零模型输出，失败证据保留；修正私有启动方式后实际模型仍为 `gpt-6.1-sol/high`，没有更换模型或修改 Hermes 安装。
+
 使用 `chat --oneshot --format stream-json` 保存回执，并用明确 session ID 恢复。流式输出会截断长工具结果，完整核对应读取私有会话数据库；显式 Skill 正文保存在 gateway 会话政策的 `skills_prompt`，不能仅检查基础系统提示词列。保留成功调用和失败原因，不为修正验收脚本的计数口径重复已经成功的模型调用。正式启用仍以以下场景和合一退出条件为准。
+
+拒绝与暂停补验已区分元工具和研究调用：账户请求仅搜索可用工具，研究调用为零；恢复后工具发现成功，再暂停隔离服务，报告请求恰好一次收到 HTTP 503。检查原生 `tool_result.is_error` 与最终回复；持久消息可能带 `untrusted_tool_result` 包装，核对完整结果须保留该数据边界并解析内部 JSON，不能把包装文本直接当 JSON 失败后重跑模型。
 
 ## Claude 隔离预验证
 
@@ -86,6 +90,8 @@ Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装�
 本机 `gpt-6-astra/high` 通过自带 Code Mode 分发 MCP。不要把 `features.code_mode_host=false` 当作关闭 shell：它会使 MCP 发现成功但实际调用失败。隔离空间应保留默认 Code Mode 开关，并挂载同一安装包的 `codex-code-mode-host`；这不要求开放 shell 工具。实际回执要同时检查 CLI 退出码、回合完成事件、MCP 成功状态与服务收到的请求；首轮模型如实报告分发失败时 CLI 也退出 0。
 
 将统一 Skill 原文放入私有工作目录 `.agents/skills/a-share/SKILL.md`，在提示中显式使用 `$a-share`。发现列表仅证明可见，正文加载须另查实际会话记录；本次已核对原文完整进入会话。`codex exec --json` 首次读取后等待进程退出，再以 `codex exec resume <thread_id> --json` 读取另一项，检查同一 thread 与新的实际 HTTP 调用。两次完整 `content`/`structuredContent` 均应等于服务返回，不用最终回复代替结果对照。研究凭据始终单独发放，完成后清理临时客户端配置并核查宿主存储、业务库及进程。
+
+权限与暂停补验沿用同样隔离：账户请求只列出两项研究工具，没有 MCP 研究调用；恢复同一 thread 后在工具发现成功时暂停私有服务，报告请求恰好一次收到 HTTP 503。实际 CLI 的 `mcp_tool_call.status=failed`，原生 Code Mode 回执 `isError=true`，最终回复明确失败且未重试；正确解释错误的回合仍可 `turn.completed`，不能只看退出码。Code Mode 列举工具元数据不算读取研究或账户。
 
 ## AGY 隔离预验证
 
