@@ -2,8 +2,8 @@
 # Temporary owner reminder; delivers fixed instructions without running an agent.
 set -eu
 cat <<'ASHARE_REMINDER'
-A股合一重构提醒：切换后观察与重构收尾（12-12 到期）
-计划时间：2026-12-11T09:00:00+08:00
+A股合一重构提醒：切换后首个交易日观察与重构收尾
+计划时间：2026-11-13T17:00:00+08:00
 
 请把下面这段原样交给开发 Agent：
 

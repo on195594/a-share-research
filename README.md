@@ -2,7 +2,7 @@
 
 收盘后的 A 股个股研究助手：输入一家公司和可选问题，AI 自主补读定期报告和临时公告、查询财务与程序计算，通常几分钟后读到带原文出处的研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
 
-本项目生产有出处的公司判断并为判断记分，数据与确定性计算已并入 `core/`；账户切换前，旧 `a-stock-agent-skills` 仍使用锁定的 `a-stock-lib`，把判断与账户事实、风险政策合成为配置与持仓决策。定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
+本项目生产有出处的公司判断并为判断记分，数据与确定性计算归 `core/`，账户事实归 `account/`，配置与持仓规则归 `policy/`；宿主通过统一 `a-share` Skill 和受控工具访问同一服务，旧账户库只读保留。定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
 - 产品目标与使用流程：[PRODUCT.md](PRODUCT.md)；领域设计与研究方案：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
 - 三仓合一重构（阶段与日期见[固定里程碑](docs/implementation-plan.md#固定里程碑)）：[方案](docs/consolidation.md)；切换前的三项目职责与协作：[项目契约](docs/project-contract.md)。
@@ -16,7 +16,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `a_share_research/` | `web.py` 鉴权/参数/渲染，`worker.py` 后台入口，`reading.py` 只读查询，`service.py` 提交；`research.py` 编排研究，`screening.py` / `backtest.py` 候选批次/回测；`contract.py` 判断契约，`report.py` 正文类型与视图，`market.py` TuShare 唯一网关（网页不加载行情依赖），`limits.py` 运行上限与依据；`core/` 并入的 a-stock-lib（Provider 与确定性计算，合同见 `core/PROVIDERS.md`）；`policy/v0/` 并入的旧 Skills 运行时（政策 v0，规则资料在 `policy/v0/guide/`；切换前不接生产账户，见[合一重构方案](docs/consolidation.md)） |
+| `a_share_research/` | `web.py` 鉴权/参数/渲染，`worker.py` 后台入口，`reading.py` 只读查询，`service.py` 提交；`research.py` 编排研究，`screening.py` / `backtest.py` 候选批次/回测；`contract.py` 判断契约，`report.py` 正文类型与视图，`market.py` TuShare 唯一网关（网页不加载行情依赖），`limits.py` 运行上限与依据；`core/` 并入的 a-stock-lib（Provider 与确定性计算，合同见 `core/PROVIDERS.md`）；`policy/v0/` 并入的旧 Skills 运行时（政策 v0，规则资料在 `policy/v0/guide/`；生产账户经受控工具接入，见[合一重构方案](docs/consolidation.md)） |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
 | `docs/` | 领域方案、项目契约、路线图、实施与部署状态；产品目标见根目录 `PRODUCT.md`，视觉规范见 `DESIGN.md` |
@@ -262,7 +262,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --dat
 - **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
 - **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码（Research 不存持仓标签），扫描范围另含最近冻结批次的 L5；`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回事件、失败与 `notify`，`GET /api/scans/weekly` 返回周报数据。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
-- **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 新版源码已接入独立待查状态与整轮预算，尚未安装启用，详见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。
+- **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 新版源码已接入独立待查状态与整轮预算，已安装启用，详见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。
 - **区间条件收益诊断**（只读，不调模型）：
 
 ```bash
@@ -278,7 +278,7 @@ v21 增加 `scan_requests` 及扫描引用索引，不改已有扫描或研究�
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
-- tools（生产自 2026-11-12 起只读运行，功能开关默认关闭）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
+- tools（账户工具已启用，研究排队开关状态见实施计划）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
 - worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口；每次推理单独启动 Node（冷启动约 1.2 秒），不常驻进程。
 
 主模型使用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；独立复核可同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID`，仅 `review` 阶段使用该模型，其他阶段仍用主模型。`MODEL_REVIEW_REASONING` 未设置时继承主模型思考强度；未配置独立复核时沿用主模型。当前生产选择只在[实施记录](docs/implementation-plan.md#当前部署)维护。

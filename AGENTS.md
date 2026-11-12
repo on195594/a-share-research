@@ -25,7 +25,7 @@
 
 ## 架构与能力归属
 
-三个项目正在合并为本仓库内的一个系统，设计、分段与验收见[合一重构方案](docs/consolidation.md)；账户切换（最早 2026-12-05）前，跨项目的现行调用关系仍按[项目契约](docs/project-contract.md)。
+三个项目已合并为本仓库内的一个系统，账户已由所有者当次授权提前切换；设计与验收见[合一重构方案](docs/consolidation.md)，实际状态见[实施计划](docs/implementation-plan.md)。[旧项目契约](docs/project-contract.md)仅保留切换前历史边界，不再授权旧账户入口写入。
 
 - 只保留三条不变量：真钱只由所有者动；冻结的判断不改写；事实可溯源、计算经程序。研究 AI 看不到持仓与账户。
 - 新能力放进目标结构，依赖方向为 `policy → account → core`：数据与确定性计算归 `core/`，账户事件与对账归 `account/`，投资规则归 `policy/` 的版本模块（v0 是旧运行时整体），对 Agent 开放的能力经 `tools/` 注册表，判断写入经入账门。不再向 Lib、Skills 两仓添加功能。
