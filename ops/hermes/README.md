@@ -1,5 +1,5 @@
 # Hermes 定时脚本
-源文件只在本目录维护；宿主安装目录为 `~/.hermes/scripts/cron/`，使用复制，不使用符号链接。当前合一替代脚本仅准备，尚未安装；启用须满足[合一方案](../../docs/consolidation.md)的影子、回退与切换条件。
+源文件只在本目录维护；宿主安装目录为 `~/.hermes/scripts/cron/`，使用复制，不使用符号链接。当前合一替代脚本仅准备，尚未安装；启用须满足[合一方案](../../docs/consolidation.md)的影子、回退与切换条件。**切换前不要运行 `install.py --apply`**：它会把止损、日报、月度对比与顾问的替代版本一并装上；这期间需要新增的单个脚本从已提交版本单独复制（`a-share-shadow-diff.sh` 即如此安装）。
 任务与计划取自[上线后接入](../../docs/implementation-plan.md#当前部署)（上海时间；该节只记录任务 ID，未记录具名任务名称）。
 | 脚本（共用入口） | Hermes 任务 | 计划 |
 |---|---|---|
@@ -10,7 +10,7 @@
 | `a-share-monthly-submit.sh`、`a-share-monthly-status.sh`（`a-share-monthly.sh`、`a-share-monthly.py`） | 月批发起 `3d8b860808e4` / 状态 `112633a18054` | 每月 1 日 20:00 / 每月 1–3 日每小时 :30 |
 | `a-share-scoring.sh`、`a-share-scoring.py` | 记分 `2c0e2f798501` | 周日 19:07 |
 | `a-share-milestones.sh`、`a-share-milestones.py` | 里程碑进度 `6b6ecd1783ea` | 周一 09:03 |
-| `a-share-shadow-diff.sh`（调用仓库外 `consolidation/stage3/daily.sh`） | 合一第 3 段影子对照（临时，任务 ID 见实施计划） | 2026-11-23～11-27 每日 15:45；新旧监控输出一致时静默，第 4 段收尾时移除 |
+| `a-share-shadow-diff.sh`（调用仓库外 `consolidation/stage3/daily.sh`） | 合一第 3 段影子对照 `85806e8e4ea1`（临时，5 次） | 2026-11-23～11-27 每日 15:45；新旧监控输出一致时静默，第 4 段收尾时移除 |
 凭据：`~/.config/a-share-advisor/runtime.env`。
 去重回执：`~/.local/state/a-share-advisor/opportunities.json`、`~/.local/state/a-share-monthly/<月>.receipt`、`~/.local/state/a-share-scoring/state.json`。
 核对：`python3 ops/hermes/install.py --check`；安装：`python3 ops/hermes/install.py --apply`（须先提交本目录改动，自动复核）。
