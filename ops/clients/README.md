@@ -77,6 +77,8 @@ Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装�
 
 用 `-p --verbose --output-format stream-json --session-id <UUID>` 保存首次回执，进程退出后以 `--resume <UUID>` 发起新读取。核对相同 session、新工具调用 ID、实际 HTTP 请求和完整工具结果，不以最终回复或退出码代替。临时 research 客户端配置在退出后清理，核查业务库、原宿主配置/凭据哈希、令牌泄漏和残留进程。此处记录隔离预验证方式，正式安装及六场景验收仍按下文执行。
 
+边界场景须区分发现层权限和实际服务错误。research 会话请求账户持仓时，检查账户工具不可见、没有研究工具替代调用、回复明确无法读取；这不等于直接账户请求的 HTTP 403 验收。暂停场景在本次工具发现返回后暂停隔离服务，再检查新的报告调用实际收到 HTTP 503、MCP `is_error=true`、没有自动重试，回复不得把会话中已有报告当作本次成功。Claude 的最终回合事件在正确解释工具失败时仍是 success，不能据此将服务调用判为成功。
+
 ## Codex 隔离预验证
 
 原生 Codex CLI 0.167.1 使用私有 `CODEX_HOME`、私有 `HOME` 和空工作目录。`mcp_servers.ashare.enabled_tools` 只允许本次研究读取；`features.shell_tool=false` 关闭命令执行，另关闭 apps、plugins、hooks、浏览器、电脑操作及多 Agent，配置以 `--strict-config` 检查。参数依据见 [MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)与[配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。外层挂载空间仍须屏蔽原宿主主目录与 `/run`，只允许任务目录写入，工作目录及已有登录文件只读；不改全局配置或复制令牌。
@@ -91,7 +93,9 @@ AGY 1.5.6 的原生 `agy acp` 支持 ACP v1。使用私有 `HOME`，`--gemini-di
 
 隔离预验证屏蔽原宿主主目录与 `/run`，仅任务目录可写；已有原生 OAuth 文件只读挂载到私有登录路径，不复制令牌。访问令牌须覆盖本次期限；退出后检查原文件哈希、证据泄漏与进程残留。私有权限拒绝原生文件/命令工具，客户端不声明文件/终端能力并拒绝权限请求；这些设置不能替代挂载隔离。`--include-default-customizations=false` 下仍可收到内置命令列表，不能据此声称宿主没有内置工具。
 
-实际原生调用发现点号工具名被 AGY 判为非法，首次公司卡请求缺少必填参数而收到 HTTP 422。使用上述名称适配后，同模型 `gemini-3.8-flash/medium` 调用 `research_card`，参数含 `code=600938`，服务实际收到 `/tools/research.card` 并返回 200，模型成功回复中国海油。ACP 事件只给调用状态和最终回复，没有完整工具结果正文；本次不宣称逐字段结果对照、会话恢复或统一 Skill 加载通过。原生模型成功也不替代应用经 Pi 的独立语义复核，二者分别验收。
+实际原生调用发现点号工具名被 AGY 判为非法，首次公司卡请求缺少必填参数而收到 HTTP 422。使用上述名称适配后，同模型 `gemini-3.8-flash/medium` 调用 `research_card`，参数含 `code=600938`，服务实际收到 `/tools/research.card` 并返回 200，模型成功回复中国海油。此次 ACP 事件只给调用状态和最终回复，没有完整工具结果正文；完整结果实际保存在私有 `.gemini/antigravity-cli/brain/<session_id>/.system_generated/logs/transcript_full.jsonl` 的已完成 GENERIC 步骤。后续已从该原生记录解析并逐字段核对公司卡，结果与服务一致，无须重复模型读取。原生模型成功不替代应用经 Pi 的独立语义复核，二者分别验收。
+
+官方 [Skill 发现规则](https://antigravity.google/docs/customization-discovery?tab=cli)支持工作区 `.agents/skills/a-share/SKILL.md` 与私有 HOME 下 `.gemini/config/skills/a-share/SKILL.md`；显式调用为 `/a-share`。原生初始化已声明 load/resume，按 [ACP 会话协议](https://agentclientprotocol.com/protocol/v1/session-setup)以 `sessionId`、`cwd`、`mcpServers` 恢复。发现、正文加载与新工具调用仍须分别实测；`--include-default-customizations=false` 对项目 Skill 的影响未核验。本次补验前已有访问令牌过期，没有启动新模型请求或刷新、改写凭据；会话恢复和统一 Skill 加载仍待有效登录后的实际验证。
 
 ## 启用验收
 
