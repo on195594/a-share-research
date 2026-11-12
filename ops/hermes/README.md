@@ -16,6 +16,10 @@
 核对：`python3 ops/hermes/install.py --check`；安装：`python3 ops/hermes/install.py --apply`（须先提交本目录改动，自动复核）。
 可加 `--target <目录>`；安装移除旧 `a-share-k7-progress.py/.sh`，其他非清单文件不动；Hermes 任务入口需同步为新名字。
 
+## 临时接续提醒
+
+`a-share-remind-release.sh`、`a-share-remind-monthly.sh`、`a-share-remind-cutover.sh`、`a-share-remind-closeout.sh` 只输出交给开发 Agent 的固定提示词，不调用模型或执行运维操作。四个脚本已单独安装，一次性计划与任务 ID 由[实施计划](../../docs/implementation-plan.md#合一后续人工接续提醒11-12-所有者授权)维护；第 4 段收尾清理已完成的任务及脚本。
+
 ## 合一替代调用与切换核对
 
 任务配置以 2026-11-11 本机核对为基线，替代源码状态如下；不改变任务时间、`no_agent` 模式或通知目标。三个 `a-stock-*` 包装脚本已纳入版本管理，止损、日报与月度对比源码已改为服务调用；公开上游成功样例已有证据，真实账户完整运行耗时和正式送达仍须验收。宿主尚未安装这些替代版本。
