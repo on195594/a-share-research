@@ -55,6 +55,16 @@ Pi 1.5.2 可将 `PI_CODING_AGENT_DIR` 指向新建私有目录，在其中放独
 
 若用 `--mode rpc` 在同一进程验证服务暂停，先等 `agent_settled` 再暂停服务并发出下一条提示；命令应答或 `agent_end` 不代表整个回合已稳定结束。保留已发现的工具，让下一次真实调用取得错误回执，并核对调用次数、HTTP 状态、`isError` 与模型最终回复。研究身份的账户工具不可见与模型拒绝，只证明发现层隔离，不替代服务端越权请求的 403 验证。
 
+## Hermes 隔离预验证
+
+Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装仍须单独保护。本机源码 `3b421578` 的原生入口会准备该私有目录自己的依赖环境，聊天经私有 gateway 执行；仅运行帮助不能证明聊天链路可用。预验证使用宿主文件系统只读的独立挂载空间，仅证据目录可写，并在退出时回收该空间内的 gateway、CLI 和 MCP 子进程。不要为测试修复或更新共享安装。
+
+私有 `config.yaml` 只配置 ashare MCP，`tools.include` 限定本次工具；`--toolsets mcp-ashare --ignore-rules --skills a-share` 限定工具并显式加载复制到私有目录的统一 Skill。该版本先以 `tool_search` / `tool_describe` / `tool_call` 渐进发现工具，验收须区分这些宿主元工具与实际研究调用。`--safe-mode` 会关闭 MCP，不适用于此场景。实际 gateway 路径拒绝帮助中仍列出的 `--run-budget` 和 `--no-restore-cwd`；分别使用私有配置 `agent.run_budget_seconds` 与 `--in <原会话目录>`。
+
+原生 `model_aliases` 的 `key_env` 可从进程环境接收已有访问令牌，保持 `provider: openai-codex`，不另传 `--provider` 或设置别名 `base_url`。预验证不复制刷新令牌，不允许回落读取宿主凭据；访问令牌须覆盖测试时长。gateway 重启会失去这种临时会话凭据，恢复时需按原生 `--api-key` 协议重绑同一令牌，不能把凭据失效误报为 MCP 丢失。本次通过私有启动器在进程内构造参数后调用未改动的 `hermes_cli.main.main`，令牌不进入系统命令行或生成文件；未修改应用的 Pi 推理链路。
+
+使用 `chat --oneshot --format stream-json` 保存回执，并用明确 session ID 恢复。流式输出会截断长工具结果，完整核对应读取私有会话数据库；显式 Skill 正文保存在 gateway 会话政策的 `skills_prompt`，不能仅检查基础系统提示词列。保留成功调用和失败原因，不为修正验收脚本的计数口径重复已经成功的模型调用。正式启用仍以以下场景和合一退出条件为准。
+
 ## 启用验收
 
 当前只准备，不替换旧 Skills 或生产入口。后续按合一方案安装并开启时，逐宿主验证：同一真实截图入账、持仓复核、研究读取、禁止操作、服务不可用和会话重载；检查工具 Schema 与回执来源，保留证据。SDK 互通测试只能证明传输兼容，不能代替五个宿主的实际任务验收。
