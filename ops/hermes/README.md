@@ -10,6 +10,7 @@
 | `a-share-monthly-submit.sh`、`a-share-monthly-status.sh`（`a-share-monthly.sh`、`a-share-monthly.py`） | 月批发起 `3d8b860808e4` / 状态 `112633a18054` | 每月 1 日 20:00 / 每月 1–3 日每小时 :30 |
 | `a-share-scoring.sh`、`a-share-scoring.py` | 记分 `2c0e2f798501` | 周日 19:07 |
 | `a-share-milestones.sh`、`a-share-milestones.py` | 里程碑进度 `6b6ecd1783ea` | 周一 09:03 |
+| `a-share-shadow-diff.sh`（调用仓库外 `consolidation/stage3/daily.sh`） | 合一第 3 段影子对照（临时，任务 ID 见实施计划） | 2026-11-23～11-27 每日 15:45；新旧监控输出一致时静默，第 4 段收尾时移除 |
 凭据：`~/.config/a-share-advisor/runtime.env`。
 去重回执：`~/.local/state/a-share-advisor/opportunities.json`、`~/.local/state/a-share-monthly/<月>.receipt`、`~/.local/state/a-share-scoring/state.json`。
 核对：`python3 ops/hermes/install.py --check`；安装：`python3 ops/hermes/install.py --apply`（须先提交本目录改动，自动复核）。
