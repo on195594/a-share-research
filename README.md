@@ -2,10 +2,10 @@
 
 收盘后的 A 股个股研究助手：输入一家公司和可选问题，AI 自主补读定期报告和临时公告、查询财务与程序计算，通常几分钟后读到带原文出处的研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
 
-本项目生产有出处的公司判断并为判断记分；`a-stock-agent-skills` 把判断与账户事实、风险政策合成为配置与持仓决策，两者独立运行并共用 `a-stock-lib`，定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
+本项目生产有出处的公司判断并为判断记分，数据与确定性计算已并入 `core/`；账户切换前，旧 `a-stock-agent-skills` 仍使用锁定的 `a-stock-lib`，把判断与账户事实、风险政策合成为配置与持仓决策。定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
 - 产品目标与使用流程：[PRODUCT.md](PRODUCT.md)；领域设计与研究方案：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
-- 三仓合一重构（进行中，2026-12-07 前完成）：[方案](docs/consolidation.md)；切换前的三项目职责与协作：[项目契约](docs/project-contract.md)。
+- 三仓合一重构（阶段与日期见[固定里程碑](docs/implementation-plan.md#固定里程碑)）：[方案](docs/consolidation.md)；切换前的三项目职责与协作：[项目契约](docs/project-contract.md)。
 - AI 能力演进原则与阶段日期：[路线图](docs/roadmap.md)。
 - 候选发现与研究实验：[方案](docs/screening-experiment.md)，用法见下文[候选初筛](#候选初筛)。
 - 基本面深度、经营序列与投资论证：[升级方案](docs/investment-upgrade.md)。
@@ -273,7 +273,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 v21 增加 `scan_requests` 及扫描引用索引，不改已有扫描或研究记录。后续顾问客户端的回退基线必须同时支持 v21、新请求 API 和 tools 就绪；旧 v20 镜像不满足，应用回退检查会明确拒绝，保留停服/暂停现场。准备期新增接口不代表已满足首次生产迁移的发布准入；须先按下文验证兼容镜像，不能将旧代码能读取新增表当作完整回退证明。
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。v9 重建 `runs`、`reports`、`calls` 把大字段放到表尾，增加 `company_key` 等生成列，`runs`、`reports` 改为 `AUTOINCREMENT`，设计与门禁见[数据层治理方案](docs/data-foundation.md)。迁移须另获授权并备份，日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测；做不到的不能使用日常参数，须准备一次性迁移路径，v9→v21 入口见下文。回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。v9 重建 `runs`、`reports`、`calls` 把大字段放到表尾，增加 `company_key` 等生成列，`runs`、`reports` 改为 `AUTOINCREMENT`，设计与门禁见[数据层治理方案](docs/data-foundation.md)。迁移须另获授权并备份，日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测；做不到的不能使用日常参数，须准备一次性迁移路径，v9→v22 入口见下文。回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
@@ -315,7 +315,7 @@ uv run python -m a_share_research.deploy "$release_code" \
 
 已启用政策服务时，镜像就绪与政策实装一致是两项检查：应用代码参与政策身份，升级或回退后 `policy.current.installed` 可能为 false，新计算会拒绝，已有请求仍可查回原回执。所有者须按[政策本地入口](a_share_research/tools/README.md#完整政策身份生效指针与固定输入重放影子入口)，用核对后的参数在目标镜像下登记身份并追加生效指针；回退同样适用。发布工具不代替所有者切换政策，也不改写既存回执与旧周期参数。
 
-首次 v9→v21 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。v9 漏传此参数会在停服和更改镜像标签前拒绝。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
+首次 v9→v22 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。v9 漏传此参数会在停服和更改镜像标签前拒绝。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
 
 ```sh
 uv run --offline --no-sync python -m a_share_research.deploy <目标提交> <新的私有证据目录> \
@@ -330,4 +330,4 @@ uv run --offline --no-sync python -m a_share_research.deploy <目标提交> <新
 
 最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
 
-定时脚本的唯一来源是 `ops/hermes/`，改动提交后用 `python3 ops/hermes/install.py --check` 核对、`python3 ops/hermes/install.py --apply` 同步宿主。发布工具不负责这一步，任务与宿主路径见 [脚本说明](ops/hermes/README.md)。
+定时脚本的唯一来源是 `ops/hermes/`，用 `python3 ops/hermes/install.py --check` 只读核对。账户切换前，替代脚本尚未安装造成的差异是预期状态，不能运行 `--apply` 整包覆盖；期间新增单个脚本从已提交版本单独复制。满足切换条件后才用 `python3 ops/hermes/install.py --apply` 同步宿主。发布工具不负责这一步，任务、宿主路径与切换核对见[脚本说明](ops/hermes/README.md)。

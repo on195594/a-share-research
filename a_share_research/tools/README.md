@@ -2,7 +2,7 @@
 
 HTTP 与进程内入口默认只读，单文件 CLI/MCP 客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产服务自 2026-11-12 起以只读模式运行（外部研究、外部复核与账户影子三个开关均关闭）；开关启用与账户切换按 `docs/consolidation.md` 第 3、4 段推进，状态见实施计划。
 
-开发验证使用已迁移至 v20 的数据库副本。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
+开发验证使用已迁移至当前 schema 的数据库副本；版本由 `db.MIGRATIONS` 确定。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
 ```sh
 DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
