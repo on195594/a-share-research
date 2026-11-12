@@ -278,7 +278,7 @@ v21 增加 `scan_requests` 及扫描引用索引，不改已有扫描或研究�
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
-- tools（合一开发入口，生产未启用）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
+- tools（生产自 2026-11-12 起只读运行，功能开关默认关闭）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
 - worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口；每次推理单独启动 Node（冷启动约 1.2 秒），不常驻进程。
 
 主模型使用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；独立复核可同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID`，仅 `review` 阶段使用该模型，其他阶段仍用主模型。`MODEL_REVIEW_REASONING` 未设置时继承主模型思考强度；未配置独立复核时沿用主模型。当前生产选择只在[实施记录](docs/implementation-plan.md#当前部署)维护。
