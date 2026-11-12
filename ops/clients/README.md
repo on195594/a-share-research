@@ -67,6 +67,14 @@ Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装�
 
 使用 `chat --oneshot --format stream-json` 保存回执，并用明确 session ID 恢复。流式输出会截断长工具结果，完整核对应读取私有会话数据库；显式 Skill 正文保存在 gateway 会话政策的 `skills_prompt`，不能仅检查基础系统提示词列。保留成功调用和失败原因，不为修正验收脚本的计数口径重复已经成功的模型调用。正式启用仍以以下场景和合一退出条件为准。
 
+## Codex 隔离预验证
+
+原生 Codex CLI 0.167.1 使用私有 `CODEX_HOME`、私有 `HOME` 和空工作目录。`mcp_servers.ashare.enabled_tools` 只允许本次研究读取；`features.shell_tool=false` 关闭命令执行，另关闭 apps、plugins、hooks、浏览器、电脑操作及多 Agent，配置以 `--strict-config` 检查。参数依据见 [MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)与[配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。外层挂载空间仍须屏蔽原宿主主目录与 `/run`，只允许任务目录写入，工作目录及已有登录文件只读；不改全局配置或复制令牌。
+
+本机 `gpt-6-astra/high` 通过自带 Code Mode 分发 MCP。不要把 `features.code_mode_host=false` 当作关闭 shell：它会使 MCP 发现成功但实际调用失败。隔离空间应保留默认 Code Mode 开关，并挂载同一安装包的 `codex-code-mode-host`；这不要求开放 shell 工具。实际回执要同时检查 CLI 退出码、回合完成事件、MCP 成功状态与服务收到的请求；首轮模型如实报告分发失败时 CLI 也退出 0。
+
+将统一 Skill 原文放入私有工作目录 `.agents/skills/a-share/SKILL.md`，在提示中显式使用 `$a-share`。发现列表仅证明可见，正文加载须另查实际会话记录；本次已核对原文完整进入会话。`codex exec --json` 首次读取后等待进程退出，再以 `codex exec resume <thread_id> --json` 读取另一项，检查同一 thread 与新的实际 HTTP 调用。两次完整 `content`/`structuredContent` 均应等于服务返回，不用最终回复代替结果对照。研究凭据始终单独发放，完成后清理临时客户端配置并核查宿主存储、业务库及进程。
+
 ## AGY 隔离预验证
 
 AGY 1.5.6 的原生 `agy acp` 支持 ACP v1。使用私有 `HOME`，`--gemini-dir .gemini --app-data-dir antigravity-cli` 指定相对目录名；实际传绝对 `--app-data-dir` 会被语言服务拒绝。握手后从返回的 `configOptions` 选择模型与思考档位，不能把 print 模式参数直接用于 ACP。会话 `mcpServers` 只注册本次 ashare，应用服务使用 research Key 且保持只读模式。
