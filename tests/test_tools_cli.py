@@ -59,6 +59,43 @@ def test_error_never_echoes_server_body_or_token(monkeypatch, capsys):
     assert output.out == '' and '403' in output.err and 'asr_secret' not in output.err
 
 
+@pytest.mark.parametrize(('status', 'body', 'expected'), [
+    (503, b'{"ok":false,"error":{"code":"paused","message":"asr_secret"}}', '暂停'),
+    (503, b'{"ok":false,"error":{"code":"busy","message":"asr_secret"}}', '繁忙'),
+    (503, b'{"error":{"code":"asr_secret","message":"asr_secret"}}', '暂不可用'),
+    (503, b'{"error":{"code":["paused"]}}', '暂不可用'),
+    (503, b'{"error":{"code":"paused","code":"busy"}}', '暂不可用'),
+    (503, b'asr_secret', '暂不可用'),
+    (503, b' ' * 4097 + b'asr_secret', '暂不可用'),
+    (500, b'{"error":{"code":"paused","message":"asr_secret"}}', '暂不可用'),
+])
+def test_service_error_guidance_is_safe_and_does_not_retry(monkeypatch, status, body, expected):
+    monkeypatch.setenv('ASHARE_TOKEN', 'asr_secret')
+    calls = []
+
+    class BoundedBody(io.BytesIO):
+        def read(self, size=-1):
+            assert 0 <= size <= 4097
+            return super().read(size)
+
+    stream = BoundedBody(body)
+
+    class Opener:
+        def open(self, req, timeout):
+            calls.append(req.full_url)
+            raise urllib.error.HTTPError(req.full_url, status, 'asr_secret', {}, stream)
+
+    monkeypatch.setattr(cli.urllib.request, 'build_opener', lambda *args: Opener())
+    with pytest.raises(cli.ClientError) as caught:
+        cli.request('/tools/research.report', {'report_id': 157})
+    message = str(caught.value)
+    assert expected in message and str(status) in message
+    assert '未自动重试' in message and '凭据' not in message
+    assert 'asr_secret' not in message and 'http://' not in message
+    assert caught.value.status == status and len(calls) == 1
+    assert stream.closed
+
+
 @pytest.mark.parametrize('args', [['call', '../escape'], ['call', 'x', '--json', '[]'],
     ['call', 'x', '--json', '{"x":NaN}']])
 def test_invalid_call_fails_before_transport(args, monkeypatch):

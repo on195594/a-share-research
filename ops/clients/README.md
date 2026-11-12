@@ -25,6 +25,8 @@ ashare --config /home/lin/.config/ashare/hermes-assistant.json mcp
 
 文件仅按 JSON 解析，不作为 shell 执行；地址只允许回环 IP。选择文件后覆盖本次进程的 `ASHARE_URL` / `ASHARE_TOKEN`，不影响父进程；省略参数仍支持原有环境变量方式。不同宿主分别发 Key，便于单独撤销。账户知情会话不能换一枚 research Key 就被视为盲研究。
 
+客户端不自动重试。HTTP 503 的已知 `paused` / `busy` 错误分别提示暂停或繁忙；其他 5xx 提示检查服务状态。仅从最多 4096 字节的严格 JSON 错误体识别这两个代码，不回显原始错误正文、地址或凭据；状态码仍保留供 MCP 区分错误。服务恢复后，由调用者决定是否用原请求重试。
+
 ## 配置与 Skill 目标
 
 这些是后续安装时的目标，生成包不会写入它们。只合并 `ashare` 条目，保留已有其他服务与宿主设置；不要用片段覆盖完整配置文件。
@@ -50,6 +52,8 @@ Pi 1.5.2 可将 `PI_CODING_AGENT_DIR` 指向新建私有目录，在其中放独
 实际会话使用 `--no-extensions -e builtin:mcp --no-context-files --no-approve --no-builtin-tools`，再以 `--tools` 限定所需 `mcp__ashare__…` 工具。`--no-skills --skill <本仓库 skill/a-share/SKILL.md>` 只加载统一入口，通过 `/skill:a-share …` 显式展开；同时关闭其他提示模板与主题。固定模型、私有 `--session-dir` 和 `--session-id`，用 `--mode json` 保留真实调用与结果。恢复后必须产生新的成功工具调用，不能把复述历史结果当作重连成功；JSON 模式即使进程退出 0 也须检查 assistant 的 `stopReason` 和工具 `isError`。
 
 这类预验证不安装正式配置，不替换旧入口。结束后停止自建服务与子进程，清理临时凭据，核对宿主存储及业务数据未变；若宿主生成完整输出临时文件，应归档到本次私有证据目录。各场景实际完成程度归实施计划，不因一次公开报告读取通过就认定账户或五宿主验收完成。
+
+若用 `--mode rpc` 在同一进程验证服务暂停，先等 `agent_settled` 再暂停服务并发出下一条提示；命令应答或 `agent_end` 不代表整个回合已稳定结束。保留已发现的工具，让下一次真实调用取得错误回执，并核对调用次数、HTTP 状态、`isError` 与模型最终回复。研究身份的账户工具不可见与模型拒绝，只证明发现层隔离，不替代服务端越权请求的 403 验证。
 
 ## 启用验收
 

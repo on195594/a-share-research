@@ -82,6 +82,29 @@ def base_url(value):
     return value.rstrip('/')
 
 
+def http_error(error):
+    """Translate bounded, known service codes without exposing raw error contents."""
+    with error:
+        if not 500 <= error.code < 600:
+            return ClientError(f'服务拒绝请求（HTTP {error.code}），请检查凭据、权限与参数', status=error.code)
+        message = '工具服务暂不可用，请检查服务状态'
+        if error.code == 503:
+            try:
+                raw = error.read(4097)
+                if len(raw) > 4096:
+                    raise ValueError('oversized error response')
+                body = json.loads(raw, parse_constant=reject_constant, parse_float=finite_float,
+                                  object_pairs_hook=unique_object)
+                detail = body.get('error') if isinstance(body, dict) else None
+                code = detail.get('code') if isinstance(detail, dict) else None
+                if isinstance(code, str):
+                    message = {'paused': '工具服务已暂停受理，恢复后可用原请求重试',
+                               'busy': '工具服务繁忙，稍后可用原请求重试'}.get(code, message)
+            except (ValueError, UnicodeError, RecursionError, OSError):
+                pass  # An unreadable error body keeps the safe HTTP-status guidance.
+        return ClientError(f'{message}（HTTP {error.code}）；未自动重试', status=error.code)
+
+
 def request(path, payload=None):
     url = base_url(os.environ.get('ASHARE_URL', 'http://127.0.0.1:8621'))
     token = os.environ.get('ASHARE_TOKEN', '')
@@ -104,7 +127,7 @@ def request(path, payload=None):
         result = json.loads(raw, parse_constant=reject_constant, parse_float=finite_float, object_pairs_hook=unique_object)
     except urllib.error.HTTPError as exc:
         # Never echo server bodies, URLs or request headers containing credentials.
-        raise ClientError(f'服务拒绝请求（HTTP {exc.code}），请检查凭据、权限与参数', status=exc.code) from None
+        raise http_error(exc) from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise ClientError('无法连接工具服务或请求超时；未自动重试') from None
     except (ValueError, UnicodeError, RecursionError):
