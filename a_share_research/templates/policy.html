@@ -2,33 +2,39 @@
 {% block title %}投资政策 · 个股研究{% endblock %}
 {% block main %}
 <h1>投资政策</h1>
-<p class="muted">查看当前登记的政策、适用范围与账户数据来源。</p>
+<p class="muted">我的投资规则：看清适用范围、风险预算与使用边界。</p>
 
 <section aria-labelledby="policy-status" class="policy-section">
   <h2 id="policy-status">{{ policy.title }}</h2>
   <p{% if policy.status not in ['active', 'inactive'] %} class="notice caution"{% endif %}>{{ policy.message }}</p>
+  <p class="notice">账户风险：本页未评估。政策已启用不代表当前持仓风险达标；本页只读，不执行交易。</p>
   {% if policy.manifest %}
   <dl class="policy-facts">
-    <div><dt>政策名称</dt><dd>{{ parameters.get('policy_id') or '未记录' }}</dd></div>
-    <div><dt>规则版本</dt><dd>{{ policy.manifest.policy }}</dd></div>
-    <div><dt>启用时间</dt><dd><time datetime="{{ policy.activation.activated_at }}">{{ policy.activation.activated_at|replace('T', ' ') }}</time></dd></div>
     <div><dt>适用账户范围</dt><dd>{{ parameters.get('account_scope') or '未记录' }}</dd></div>
+    <div><dt>有效期</dt><dd>{{ (parameters.get('effective_from') or '起点未记录')|replace('T', ' ') }} 至 {{ (parameters.get('effective_to') or '未设截止时间')|replace('T', ' ') }}</dd></div>
   </dl>
   {% endif %}
 </section>
 
 {% if policy.manifest %}
 <section aria-labelledby="policy-parameters">
-  <h2 id="policy-parameters">风险参数</h2>
+  <h2 id="policy-parameters">我的规则摘要</h2>
+  <dl class="policy-facts policy-budgets">
+    <div><dt>单一持仓参考风险预算</dt><dd>{% if parameters.get('max_position_risk_pct') is not none %}{{ parameters.max_position_risk_pct }}%{% else %}未记录{% endif %}</dd></div>
+    <div><dt>组合参考风险预算</dt><dd>{% if parameters.get('max_portfolio_risk_pct') is not none %}{{ parameters.max_portfolio_risk_pct }}%{% else %}未记录{% endif %}</dd></div>
+  </dl>
+  <p class="small muted">按现价跌至第二档止损参考价估算，占可投资组合总资产的比例，包含浮盈回吐。不是仓位上限，也不保证实际亏损或最大回撤不超过此值。</p>
+  <details class="block policy-details">
+    <summary>风险怎么算，超限后会怎样？</summary>
+    <p>单项参考风险比例 = 股数 × max（现价 − 第二档止损参考价，0）÷ 可投资组合总资产；组合参考风险为纳入测算的各项持仓风险合计。</p>
+    <p>可投资组合总资产指股票市值与本策略可动用现金，不含房产和应急金。缺少可靠资产范围、行情或止损依据时，应保留缺口，不能当作零风险。</p>
+    <p>严格超过预算才算超限，不按显示舍入值判定。超限冻结新增风险建议，不自动卖出或调整止损；已跌破止损参考价也不能因剩余测算值为零视为正常。</p>
+    <p>跳空、成交价格及数据缺失等会使实际损失不同。这是参考测算，不是收益或回撤保证。</p>
+  </details>
   <dl class="policy-facts">
-    <div><dt>单一持仓风险上限</dt><dd>{% if parameters.get('max_position_risk_pct') is not none %}{{ parameters.max_position_risk_pct }}%{% else %}未记录{% endif %}</dd></div>
-    <div><dt>组合风险上限</dt><dd>{% if parameters.get('max_portfolio_risk_pct') is not none %}{{ parameters.max_portfolio_risk_pct }}%{% else %}未记录{% endif %}</dd></div>
-    <div><dt>生效起点</dt><dd>{{ (parameters.get('effective_from') or '未记录')|replace('T', ' ') }}</dd></div>
-    <div><dt>生效截止</dt><dd>{{ (parameters.get('effective_to') or '未设截止时间')|replace('T', ' ') }}</dd></div>
-    <div><dt>确认时间</dt><dd>{{ (parameters.get('confirmed_at') or '未记录')|replace('T', ' ') }}</dd></div>
-    <div><dt>确认依据</dt><dd>{{ parameters.get('confirmation_ref') or '未记录' }}</dd></div>
-    {% if 'off_account_strategy_cash' in parameters %}<div><dt>账户外策略现金</dt><dd>{{ parameters.off_account_strategy_cash }} {{ parameters.get('currency') or '' }}</dd></div>{% endif %}
+    <div><dt>回撤观察目标</dt><dd>{% if parameters.get('drawdown_observation_target_pct') is not none %}{{ parameters.drawdown_observation_target_pct }}%{% else %}未设置{% endif %}<p class="small muted">与上述止损参考风险预算分开，不是实际回撤上限承诺。</p></dd></div>
     {% if 'untradable_boards' in parameters %}<div><dt>不可交易板块</dt><dd>{% for board in parameters.untradable_boards %}{{ {'STAR':'科创板（STAR）','BSE':'北交所（BSE）'}.get(board, board) }}{{ '、' if not loop.last else '' }}{% else %}未设置{% endfor %}</dd></div>{% endif %}
+    {% if 'off_account_strategy_cash' in parameters %}<div><dt>账户外策略现金</dt><dd>{{ parameters.off_account_strategy_cash }} {{ parameters.get('currency') or '' }}<p class="small muted">存在有效账户资产依据时，按已确认参数加入组合资产分母；转回账户后需同步核对，避免重复计算。本页不确认该金额是否仍为最新。</p></dd></div>{% endif %}
   </dl>
 </section>
 {% endif %}
@@ -38,16 +44,30 @@
   <p><strong>{{ policy.source.title }}</strong></p>
   <p{% if policy.source.status in ['invalid', 'scope_mismatch'] %} class="notice caution"{% else %} class="muted"{% endif %}>{{ policy.source.message }}</p>
   <dl class="policy-facts">
-    {% if policy.source.updated_at %}<div><dt>来源登记时间</dt><dd>{{ policy.source.updated_at|replace('T', ' ') }}</dd></div>{% endif %}
-    {% if policy.source.account_id %}<div><dt>账本账户</dt><dd>{{ policy.source.account_id }}</dd></div>{% endif %}
+    {% if policy.source.account_id %}<div><dt>账本账户</dt><dd>{{ '主账户（primary）' if policy.source.account_id == 'primary' else policy.source.account_id }}</dd></div>{% endif %}
     {% if policy.source.account_scope %}<div><dt>账本账户范围</dt><dd>{{ policy.source.account_scope }}</dd></div>{% endif %}
+    {% if policy.source.updated_at %}<div><dt>来源登记时间</dt><dd>{{ policy.source.updated_at|replace('T', ' ') }}</dd></div>{% endif %}
   </dl>
+  <p class="small muted">来源登记时间不是持仓、行情或对账截至时间。本页未提供账户数据新鲜度与对账结论。</p>
 </section>
 
 {% if policy.manifest %}
+<section aria-labelledby="policy-use">
+  <h2 id="policy-use">如何影响研究建议</h2>
+  <ul>
+    <li>研究结论不等于已满足账户风险约束，实际建议还需核对账户与数据。</li>
+    <li>不可交易板块仍可研究，但不作为该账户的机会提示、换仓候选或定仓建议。</li>
+    <li>历史报告保留当时判断，不随当前政策自动改写。</li>
+  </ul>
+</section>
 <details class="block policy-details">
-  <summary>核对版本与完整参数</summary>
+  <summary>来源与版本 · 核对完整参数</summary>
   <dl class="policy-facts policy-identities">
+    <div><dt>政策名称</dt><dd>{{ parameters.get('policy_id') or '未记录' }}</dd></div>
+    <div><dt>规则版本</dt><dd>{{ policy.manifest.policy }}</dd></div>
+    <div><dt>启用时间</dt><dd><time datetime="{{ policy.activation.activated_at }}">{{ policy.activation.activated_at|replace('T', ' ') }}</time></dd></div>
+    <div><dt>确认时间</dt><dd>{{ (parameters.get('confirmed_at') or '未记录')|replace('T', ' ') }}</dd></div>
+    <div><dt>确认依据</dt><dd>{{ parameters.get('confirmation_ref') or '未记录' }}</dd></div>
     <div><dt>完整政策身份</dt><dd>{{ policy.manifest.identity }}</dd></div>
     <div><dt>代码版本</dt><dd>{{ policy.manifest.code_hash }}</dd></div>
     <div><dt>规则版本摘要</dt><dd>{{ policy.manifest.rules_hash }}</dd></div>

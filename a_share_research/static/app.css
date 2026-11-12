@@ -57,6 +57,10 @@ body {
 .policy-facts > div { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: 8px 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .policy-facts dt { color: var(--muted); }
 .policy-facts dd { margin: 0; overflow-wrap: anywhere; }
+.policy-budgets dd { font-size: 19px; font-weight: 650; color: var(--accent); }
+.policy-details summary { min-height: 44px; overflow-wrap: anywhere; }
+.policy-details p { margin-top: 12px; }
+.policy-facts + .small { margin-top: 12px; }
 .policy-identities dd { font-size: 14px; }
 .policy-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
 @media (max-width: 540px) {

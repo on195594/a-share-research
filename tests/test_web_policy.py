@@ -33,7 +33,7 @@ def test_owner_sees_registered_policy_and_reads_do_not_change_any_database_rows(
     before=list(conn.iterdump())
     page=client.get(url+'/policy')
     assert page.status_code==200 and '政策已启用' in page.text
-    assert '单一持仓风险上限' in page.text and '2.0%' in page.text
+    assert '单一持仓参考风险预算' in page.text and '2.0%' in page.text
     assert '旧账户镜像' in page.text and '切换前' in page.text
     assert 'aria-current="page"' in page.text
     assert manifest['identity'] in page.text and manifest['guide_version'] in page.text
@@ -63,3 +63,27 @@ def test_policy_storage_failure_has_owner_read_error_without_record_details(serv
     page=client.get(url+'/policy')
     assert page.status_code==503 and '暂时无法读取政策' in page.text
     assert 'temporarily_missing_source' not in page.text
+
+
+def test_policy_explains_risk_without_claiming_account_assessment(server):
+    conn,client,url,*_=server
+    activate(conn)
+    client.post(url+'/auth/dev',headers={'Origin':url})
+    before=list(conn.iterdump())
+    text=client.get(url+'/policy').text
+    for phrase in ('账户风险：本页未评估', '不是仓位上限', '不自动卖出或调整止损',
+                   '来源登记时间不是持仓', '回撤观察目标', '未设置', '来源与版本'):
+        assert phrase in text
+    assert text.index('我的规则摘要') < text.index('完整政策身份')
+    assert list(conn.iterdump())==before
+
+
+def test_optional_observation_target_and_cash_keep_their_distinct_meaning(server):
+    conn,client,url,*_=server
+    # Explicit policy-parameter variants; not market or account evidence.
+    activate(conn,drawdown_observation_target_pct=4.,off_account_strategy_cash=0.,untradable_boards=['STAR'])
+    client.post(url+'/auth/dev',headers={'Origin':url})
+    text=client.get(url+'/policy').text
+    assert '回撤观察目标</dt><dd>4.0%' in text
+    assert '账户外策略现金</dt><dd>0.0 CNY' in text
+    assert '科创板（STAR）' in text and '避免重复计算' in text
