@@ -103,6 +103,12 @@ AGY 1.5.6 的原生 `agy acp` 支持 ACP v1。使用私有 `HOME`，`--gemini-di
 
 官方 [Skill 发现规则](https://antigravity.google/docs/customization-discovery?tab=cli)支持工作区 `.agents/skills/a-share/SKILL.md` 与私有 HOME 下 `.gemini/config/skills/a-share/SKILL.md`；显式调用为 `/a-share`。原生初始化已声明 load/resume，按 [ACP 会话协议](https://agentclientprotocol.com/protocol/v1/session-setup)以 `sessionId`、`cwd`、`mcpServers` 恢复。发现、正文加载与新工具调用仍须分别实测；`--include-default-customizations=false` 对项目 Skill 的影响未核验。本次补验前已有访问令牌过期，没有启动新模型请求或刷新、改写凭据；会话恢复和统一 Skill 加载仍待有效登录后的实际验证。
 
+## 账户场景预验证
+
+账户读取使用独立的 assistant 凭据、私有宿主配置与新会话；不能把已有 research 会话改成账户会话后继续宣称盲研究。可先在禁网空间准备真实镜像，并通过 `account.current`、`policy.current`、`policy.v0.read` 核对来源、政策状态及已保存持仓。`holdings` 回执包含已退出周期，读取在仓清单须按状态或退出日期区分，不能因旧关闭周期仍有股数字段就当作当前持仓。镜像时间不等于资产估值时点，未激活政策应明确报告，不能猜默认版本。
+
+完整账户回执只放私有证据目录；向外部宿主模型发送前按实际目的地、字段范围及授权处理。此次自动审批拒绝 Codex 账户发送后，仅完成了断网预检；待发送的原生脚本绑定已准备的源哈希与持仓回执，未运行模型，也未将数据改送其他宿主。仅列工具、公开读取或本地预检通过，都不能代替真实账户场景验收。
+
 ## 启用验收
 
 当前只准备，不替换旧 Skills 或生产入口。后续按合一方案安装并开启时，逐宿主验证：同一真实截图入账、持仓复核、研究读取、禁止操作、服务不可用和会话重载；检查工具 Schema 与回执来源，保留证据。SDK 互通测试只能证明传输兼容，不能代替五个宿主的实际任务验收。
