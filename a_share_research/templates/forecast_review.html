@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>预测复盘快照</title>
+<style>
+:root {color-scheme:light} * {box-sizing:border-box} body {margin:0;background:#f5f4f0;color:#1d232b;font:16px/1.6 system-ui,sans-serif}
+main {max-width:960px;margin:auto;padding:24px 16px} h1 {font-size:26px} h2 {font-size:19px} h3 {font-size:17px}
+section,article {background:#fff;border:1px solid #dcd9d1;padding:16px;margin:16px 0;border-radius:6px;overflow-wrap:anywhere}
+.muted {color:#5a616b;font-size:14px}.notice {border-left:4px solid #8a5300;background:#fbf1de;padding:12px}
+.grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px} p {margin:8px 0}
+summary {cursor:pointer;color:#2b48b0} dt {color:#5a616b} dd {margin:0 0 8px} .number {font-variant-numeric:tabular-nums}
+</style></head>
+<body><main>
+<h1>预测复盘快照</h1>
+<p class="muted">生成于 {{ review.generated_at }}。静态快照，不自动刷新或调用研究。</p>
+<p class="notice">{{ review.scope }} 样本数不等于独立判断数，少量或未兑现样本不能证明投资优势；预测把握是主观声明，不是已验证成功率。</p>
+<section><h2>先分清三个问题</h2><div class="grid">
+<div><h3>研究预测是否有信息量</h3><p>本页检查冻结区间、实际兑现与朴素基线。</p></div>
+<div><h3>选股模拟是否有增量</h3><p>在批次复盘中比较冻结组合、机械对照和扣费后全收益基准。本页未计算模拟收益。</p></div>
+<div><h3>真实账户是否受益</h3><p>另需完整资金流、估值、费用与决策依据。本页未读取或评估真实账户。</p></div>
+</div></section>
+<section><h2>样本覆盖</h2>{% set s = review.summary %}
+<p>首份预测 {{ s.total }} 条 · {{ s.companies }} 家公司 · {{ s.periods }} 个目标期；更新 {{ s.updates }} 条不重复记分。</p>
+<p>已兑现 {{ s.scored }} · 待披露 {{ s.pending }} · 缺失/不可比 {{ s.unavailable }} · 未查询兑现 {{ s.unchecked }} · 基期更正 {{ s.restated }}</p>
+<p>区间中点胜过朴素基线：{{ s.beat_baseline|review_pct }}（可比 {{ s.compared }} 条；持平不算胜出）。</p>
+{% for level,g in s.by_confidence.items() %}<p>主观把握 {{ level }}%：兑现 {{ g.n }} 条，命中 {{ g.hit|review_pct }}。</p>{% endfor %}
+{% if not s.scored %}<p class="notice">尚无已记分结果，不能把未查询或未到期当成命中、失败或零收益。</p>{% endif %}
+</section>
+<section><h2>按冻结模型组合观察</h2>
+<p class="muted">模型身份来自报告保存的配置，不代表逐次调用已审计。先沿原规则选首份，再按契约、作者及复核者分组；不让重复研究增加样本。身份缺失单列，不用当前配置回填。组间公司、日期、任务可能不同，不是随机对照；按身份排序，不提供优劣排名。</p>
+{% for g in review.model_groups %}<article>
+<h3>契约 {{ g.contract if g.contract is not none else '未记录' }}</h3>
+<p>作者：{{ g.author }}<br>复核：{{ g.reviewer }}</p>
+<p>{{ g.reports }} 份报告 / {{ g.companies }} 家公司 / {{ g.periods }} 个目标期 / {{ g.total }} 条首份预测</p>
+<p>已兑现 {{ g.scored }}，待披露 {{ g.pending }}，缺失/不可比 {{ g.unavailable }}，未查询 {{ g.unchecked }}；胜朴素 {{ g.beat_baseline|review_pct }}（{{ g.compared }} 条可比）。</p>
+<p class="muted">区间宽度按把握度、指标及单位分层，不混合汇总；宽度含未兑现样本，不代表准确性。</p>
+{% for w in g.width_groups %}<p>{{ w.metric }}（{{ w.unit }}）· 把握 {{ w.confidence }}%：首份 {{ w.total }}，已兑现 {{ w.scored }}，朴素可比 {{ w.compared }}；相对区间宽度中位 {{ w.median_width_to_baseline|review_pct }}（{{ w.width_compared }} 条有非零基线）。</p>{% endfor %}
+</article>{% else %}<p>没有入样的首份预测。</p>{% endfor %}
+</section>
+<section><h2>区间与误差明细</h2>
+<p class="muted">绝对宽度 = 上界 − 下界，误差为绝对误差，均保留原指标单位，不跨单位取平均。相对宽度 = 宽度 ÷ 冻结朴素值的绝对值；基线为零或缺失时为“—”，接近零会放大比例。该指标只帮助发现过宽区间，不是新评分。实际值口径的宽度只在兑现后展示。</p>
+{% for i in review["items"] %}{% set d=i.diagnostics %}{% set r=i.result %}
+<article><h3>#{{ i.report }} {{ i.name }} · {{ i.written.label or i.forecast.metric }}</h3>
+<p>{{ i.forecast.period }} · {{ '首份' if i.first else '更新，不重复记分' }} · {{ {'scored':'已兑现','pending':'待披露','unavailable':'缺失/不可比','unchecked':'未查询兑现'}.get(r.status,r.status) }}</p>
+<p class="number">区间 {{ i.forecast.low }}–{{ i.forecast.high }} {{ d.unit }}，主观把握 {{ i.forecast.confidence }}%</p>
+<p>绝对宽度 {{ d.width }} {{ d.difference_unit }}；相对冻结基线 {{ d.width_to_baseline|review_pct }}。</p>
+<details><summary>查看依据与误差</summary>
+<p>基期 {{ i.base }}，冻结朴素值 {{ d.baseline if d.baseline is not none else '缺失' }} {{ d.unit }}。</p>
+{% if r.status == 'scored' %}
+<p>实际 {{ r.actual }} {{ d.unit }}，{{ '命中' if r.hit else '未命中' }}；相对实际值宽度 {{ d.width_to_actual|review_pct }}。</p>
+<p>区间中点误差 {{ d.midpoint_absolute_error }} {{ d.difference_unit }}；朴素误差 {{ d.baseline_absolute_error if d.baseline_absolute_error is not none else '缺失' }} {{ d.difference_unit }}。</p>
+{% if r.restated %}<p>基期已更正：朴素基线仍使用报告冻结时数据。</p>{% endif %}
+{% else %}<p>{{ r.reason or '等待实际披露，不生成模拟兑现结果。' }}</p>{% endif %}
+</details></article>
+{% else %}<p>当前筛选没有预测。</p>{% endfor %}
+</section></main></body></html>

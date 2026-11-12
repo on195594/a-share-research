@@ -249,10 +249,13 @@ uv run --env-file .env python -m a_share_research.backtest --out DIR --start 201
 ```bash
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db [--json OUT]              # V0 事后超额记分
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --forecasts [--json OUT]  # V1 预测记分
+uv run python -m a_share_research.validation --database /path/to/app.db --forecasts --frozen --html review.html --json review.json  # 不联网的冻结预测复盘
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --hypotheses [--json OUT] # V3 H1 避坑 / H3 读得快
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --agenda [--json OUT]     # V5 议程状态与各状态组后续表现（没有入样报告时不访问行情）
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --stances [--json OUT]    # V4 研究立场兑现与等待代价
 ```
+
+V1 可加 `--html review.html` 导出可直接打开的手机友好静态快照，`--json` 保留原字段并追加描述性宽度、误差和模型分组。`--frozen` 不访问行情/模型接口：未结束目标期待披露，已结束但未查询的明确列“未查询兑现”，不冒充已记分。正常 `--forecasts` 仍沿用原兑现查询和评分，基线冻结、不重复记分。快照不是线上实时复盘页，也不计算模拟组合或真实账户收益。
 
 ### 顾问闭环（批次 A）
 

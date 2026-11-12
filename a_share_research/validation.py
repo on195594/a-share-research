@@ -12,6 +12,8 @@ import sqlite3
 import statistics
 from contextlib import closing
 from datetime import date, datetime, time
+from decimal import Decimal
+from pathlib import Path
 
 from a_share_research import market, agenda, forecasts, report as report_body, screening, stance as stances
 from a_share_research.db import SHANGHAI
@@ -133,11 +135,91 @@ def summarize_forecasts(scored: list[dict]) -> dict:
     compared = [s for s in done if s["result"]["beat_baseline"] is not None]
     return {"total": len(first), "updates": len(scored) - len(first), "scored": len(done), "pending": sum(s["result"]["status"] == "pending" for s in first),
             "unavailable": sum(s["result"]["status"] == "unavailable" for s in first),
+            "unchecked": sum(s["result"]["status"] == "unchecked" for s in first),
             "companies": len({s["code"] for s in first}), "periods": len({s["forecast"]["period"] for s in first}),
             "restated": sum(bool(s["result"].get("restated")) for s in done),
             "by_confidence": by_confidence,
             "beat_baseline": sum(s["result"]["beat_baseline"] for s in compared) / len(compared) if compared else None,
             "compared": len(compared)}
+
+
+def model_roles(body: dict) -> dict:
+    """Frozen configuration only, never infer historical roles from today's environment."""
+    judgment = body.get("judgment") or {}
+    return {role: {key: (judgment.get(role) or {}).get(key) for key in ("provider", "model", "reasoning")}
+            for role in ("author", "reviewer")}
+
+
+def model_label(role: dict) -> str:
+    return " / ".join(str(role.get(k) or "未记录") for k in ("provider", "model", "reasoning"))
+
+
+def forecast_diagnostics(item: dict) -> dict:
+    """Descriptive measures, not a new score. Percentage differences are percentage points; original value units are retained."""
+    forecast, written, result = item["forecast"], item["written"], item["result"]
+    low, high = Decimal(str(forecast["low"])), Decimal(str(forecast["high"]))
+    width, midpoint = high - low, (high + low) / 2
+    frozen = {p: Decimal(str(v)) for p, v in (written.get("exact_values") or written.get("values") or {}).items()}
+    naive = forecasts.baseline(forecast["metric"], written.get("unit", ""), forecast["period"], item["base"], frozen)
+    # A zero denominator has no relative interpretation, not zero error or width.
+    ratio = lambda n, d: float(n / abs(d)) if d is not None and d != 0 else None
+    out = {"width": float(width), "unit": written.get("unit", ""),
+           "difference_unit": "百分点" if written.get("unit") == "%" else written.get("unit", ""),
+           "baseline": float(naive) if naive is not None else None,
+           "width_to_baseline": ratio(width, naive), "width_to_actual": None,
+           "midpoint_absolute_error": None, "baseline_absolute_error": None}
+    if result["status"] == "scored":
+        actual = Decimal(str(result["actual"]))
+        out.update(width_to_actual=ratio(width, actual), midpoint_absolute_error=float(abs(midpoint - actual)),
+                   baseline_absolute_error=float(abs(naive - actual)) if naive is not None else None)
+    return out
+
+
+def forecast_review(scored: list[dict]) -> dict:
+    """Use the existing first-sample flags before grouping; never give a rerun a new scoring slot."""
+    items = [dict(item, diagnostics=forecast_diagnostics(item)) for item in scored]
+    groups = {}
+    for item in items:
+        if not item["first"]:
+            continue
+        roles = item.get("models") or model_roles({})
+        key = (item.get("contract"), model_label(roles["author"]), model_label(roles["reviewer"]))
+        groups.setdefault(key, []).append(item)
+    cohorts = []
+    # Stable identity order, not a model performance ranking.
+    for (contract, author, reviewer), group in sorted(groups.items(), key=lambda pair: str(pair[0])):
+        strata = {}
+        for item in group:
+            key = (item["forecast"]["confidence"], item["forecast"]["metric"], item["diagnostics"]["unit"])
+            strata.setdefault(key, []).append(item)
+        width_groups = []
+        for (confidence, metric, unit), rows in sorted(strata.items(), key=lambda pair: str(pair[0])):
+            widths = [i["diagnostics"]["width_to_baseline"] for i in rows
+                      if i["diagnostics"]["width_to_baseline"] is not None]
+            width_groups.append({"confidence": confidence, "metric": metric, "unit": unit,
+                                 **summarize_forecasts(rows), "width_compared": len(widths),
+                                 "median_width_to_baseline": statistics.median(widths) if widths else None})
+        summary = summarize_forecasts(group)
+        cohorts.append({"contract": contract, "author": author, "reviewer": reviewer,
+                        "reports": len({i["report"] for i in group}), **summary,
+                        "width_groups": width_groups})
+    return {"items": items, "summary": summarize_forecasts(items), "model_groups": cohorts,
+            "generated_at": datetime.now(SHANGHAI).isoformat(),
+            "scope": "研究预测；非模拟组合收益，非真实账户表现。模型分组仅描述冻结配置，不排名、不作因果归因。"}
+
+
+def frozen_forecasts(items: list[dict], today: date | None = None) -> list[dict]:
+    """No market/model calls: ended periods are unchecked, not scored or presumed unavailable."""
+    today = today or datetime.now(SHANGHAI).date()
+    return [dict(item, result={"status": "unchecked" if period_ended(item["forecast"]["period"], today) else "pending",
+                               "reason": "只读冻结记录，未查询兑现数据"}) for item in items]
+
+
+def write_forecast_html(review: dict, path: str) -> None:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    env = Environment(loader=FileSystemLoader(Path(__file__).with_name("templates")), autoescape=select_autoescape())
+    env.filters["review_pct"] = lambda v: f"{v:.1%}" if v is not None else "—"
+    Path(path).write_text(env.get_template("forecast_review.html").render(review=review), encoding="utf-8")
 
 
 def mark_first(items: list[dict]) -> list[dict]:
@@ -224,7 +306,7 @@ def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
             forecast = item.get("forecast") if isinstance(item, dict) else None
             if base and forecast and not forecasts.problems(forecast, table):
                 out.append({"report": report_id, "code": code, "name": name, "created": created, "index": i,
-                            "contract": judgment_contract(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
+                            "contract": judgment_contract(body), "models": model_roles(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
     return mark_first(filter_contract(out, contract))
 
 
@@ -400,6 +482,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="V0：已有报告的事后超额（只读，不调用模型）")
     parser.add_argument("--database", required=True, help="生产或隔离库 app.db，只读打开")
     parser.add_argument("--json", help="另存逐份结果与汇总的 JSON 路径")
+    parser.add_argument("--html", help="V1：另存可直接打开的只读复盘快照 HTML")
+    parser.add_argument("--frozen", action="store_true", help="仅与 --forecasts 同用：只看冻结预测，不访问行情/财务接口")
     parser.add_argument("--contract", type=int, help="只看指定判断契约；0 表示未记录")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--forecasts", action="store_true", help="V1：为检查点预测记分，而不是计算事后超额")
@@ -407,33 +491,56 @@ def main() -> None:
     modes.add_argument("--stances", action="store_true", help="V4：研究立场、加仓检查点与历史等证据兑现与等待代价")
     modes.add_argument("--agenda", action="store_true", help="V5：接续报告对旧风险与检查点的逐项状态及各状态组后续表现")
     args = parser.parse_args()
+    if (args.html or args.frozen) and not args.forecasts:
+        parser.error("--html / --frozen 仅适用于 --forecasts")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.hypotheses:
         from a_share_research import hypotheses
         hypotheses.run(args.database, args.json, args.contract)
         return
     if args.forecasts:
-        scored = score_forecasts(load_forecasts(args.database, args.contract))
+        items = load_forecasts(args.database, args.contract)
+        scored = frozen_forecasts(items) if args.frozen else score_forecasts(items)
+        review = forecast_review(scored)
         summary = summarize_forecasts(scored)
         lines = [f"V1 预测记分：首份 {summary['total']} 条（{summary['companies']} 家公司、{summary['periods']} 个目标期，"
                  f"另有更新 {summary['updates']} 条不重复记分），已兑现 {summary['scored']}，待披露 {summary['pending']}，"
-                 f"缺失/不可比 {summary['unavailable']}，基期数据已更正 {summary['restated']}"]
+                 f"缺失/不可比 {summary['unavailable']}，未查询兑现 {summary['unchecked']}，基期数据已更正 {summary['restated']}"]
+        lines.append(review["scope"])
         lines.append(contract_line([s for s in scored if s["first"]]))
-        for s in scored:
+        for s in review["items"]:
             r = s["result"]
             lines.append(f"#{s['report']}[{s['index']}]{'' if s['first'] else '（更新）'} {s['code']} {s['name']} "
                          f"{forecasts.describe(s['forecast'], [])} → "
                          + (f"实际 {r['actual']:g} {'命中' if r['hit'] else '未中'}，朴素 {r['baseline']}"
                             f"{'，胜过朴素' if r['beat_baseline'] else '，未胜过朴素（含持平）' if r['beat_baseline'] is False else ''}"
                             if r["status"] == "scored" else r.get("reason", "待披露")))
+            d = s["diagnostics"]
+            lines.append(f"  区间宽度 {d['width']:g}{d['difference_unit']}，宽度/冻结朴素值绝对值 "
+                         f"{_pct(d['width_to_baseline']) if d['width_to_baseline'] is not None else '—'}"
+                         + (f"；中点绝对误差 {d['midpoint_absolute_error']:g}{d['difference_unit']}，"
+                            f"朴素绝对误差 {d['baseline_absolute_error']}{d['difference_unit']}" if r["status"] == "scored" else ""))
         for level, g in summary["by_confidence"].items():
             lines.append(f"把握 {level}%：n={g['n']} 命中 {g['hit']:.0%}")
         if summary["beat_baseline"] is not None:
             lines.append(f"区间中点胜过朴素预测：{summary['beat_baseline']:.0%}（n={summary['compared']}）")
+        for group in review["model_groups"]:
+            lines.append(f"契约 {group['contract']} 作者 {group['author']} × 复核 {group['reviewer']}："
+                         f"{group['reports']} 份报告，{group['companies']} 家公司，{group['periods']} 个目标期，"
+                         f"首份 {group['total']} 条，已兑现 {group['scored']}，朴素可比 {group['compared']}（仅描述，不作排名）")
+            for width in group["width_groups"]:
+                lines.append(f"  {width['metric']}（{width['unit']}）把握 {width['confidence']}%："
+                             f"首份 {width['total']}，已兑现 {width['scored']}，朴素可比 {width['compared']}；"
+                             f"相对宽度中位 {_pct(width['median_width_to_baseline']) if width['median_width_to_baseline'] is not None else '—'}"
+                             f"（非零基线 n={width['width_compared']}，含未兑现样本）")
         log.info("\n%s", "\n".join(lines))
+        if args.html:
+            write_forecast_html(review, args.html)
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump({"forecasts": scored, "summary": summary, "contracts": contract_counts([s for s in scored if s["first"]])}, fh, ensure_ascii=False, indent=1, default=str)
+                json.dump({"forecasts": review["items"], "summary": summary, "model_groups": review["model_groups"],
+                           "generated_at": review["generated_at"], "scope": review["scope"],
+                           "contracts": contract_counts([s for s in scored if s["first"]])}, fh, ensure_ascii=False, indent=1, default=str)
         return
     if args.agenda:
         result = score_agenda(load_agenda(args.database, args.contract))
