@@ -16,7 +16,7 @@ def _reports(database: str, key_id: int, account_aware: bool, contract: int | No
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.created_at, r.coverage, r.body FROM reports r "
             "JOIN runs u ON u.id=r.run_id WHERE u.kind='external' AND u.status='done' "
-            "AND u.replay_of IS NULL AND r.passed=1 "
+            "AND r.passed=1 "
             "AND json_extract(r.body,'$.producer.kind')='external' "
             "AND json_type(r.body,'$.producer.key_id')='integer' "
             "AND json_extract(r.body,'$.producer.key_id')=? "

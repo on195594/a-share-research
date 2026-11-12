@@ -172,8 +172,8 @@ def test_migration_keeps_rows_triggers_and_sequence_and_reruns_as_a_noop(tmp_pat
                for table in tables if table != "calls")
     for table, (names, rows) in before.items():
         assert [tuple(row) for row in conn.execute(f"SELECT {', '.join(names)} FROM {table} ORDER BY id")] == rows
-    assert {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'"
-                                           " AND tbl_name != 'policy_activations'")} == triggers
+    # Later migrations add their own guard triggers; every trigger the old database had must survive.
+    assert triggers <= {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
     sequence = dict(tuple(row) for row in conn.execute("SELECT name, seq FROM sqlite_sequence"))
     assert sequence["runs"] == before["runs"][1][-1][before["runs"][0].index("id")]
     assert sequence["reports"] == before["reports"][1][-1][before["reports"][0].index("id")]

@@ -13,7 +13,9 @@ def test_market_gateway_boundary():
         source = path.read_text()
         if path.name != "market.py":
             assert "pro_api(" not in source, path.name
-            assert "TUSHARE_TOKEN" not in source, path.name
+            # deploy.py only names the variable in the tools container's environment allowlist; it never reads it.
+            if path.name != "deploy.py":
+                assert "TUSHARE_TOKEN" not in source, path.name
 
         tree = ast.parse(source)
         imports = {}
