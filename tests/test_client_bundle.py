@@ -34,7 +34,8 @@ def test_bundle_is_parseable_disabled_and_keeps_host_state_untouched(tmp_path,ro
         records[host]=json.loads((output/'configs'/file).read_text())[root]['ashare']
     for host,value in records.items():
         assert value['command']==str(home/'.local/bin/ashare')
-        assert value['args']==['--config',str(home/f'.config/ashare/{host}-{role}.json'),'mcp']
+        assert value['args']==['--config',str(home/f'.config/ashare/{host}-{role}.json'),'mcp']+(
+            ['--portable-names'] if host=='agy' else [])
         assert 'env' not in value
     assert all(records[host]['enabled'] is False for host in ('codex','hermes','pi'))
     assert records['agy']['disabled'] is True and 'timeout' not in records['agy']

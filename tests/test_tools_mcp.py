@@ -24,11 +24,59 @@ def initialize(version='2025-11-25'):
                              'clientInfo': {'name': 'boundary-test', 'version': '1'}})
 
 
-def ready_bridge():
-    bridge = cli.MCPBridge()
+def ready_bridge(**kwargs):
+    bridge = cli.MCPBridge(**kwargs)
     assert 'result' in bridge.handle(initialize())
     assert bridge.handle({'jsonrpc': '2.0', 'method': 'notifications/initialized'}) is None
     return bridge
+
+
+def test_portable_names_keep_schema_and_route_to_canonical_http_tool(monkeypatch):
+    tool = {'name': 'research.card', 'description': 'Company card',
+            'input_schema': {'type': 'object', 'properties': {'code': {'type': 'string'}}, 'required': ['code']},
+            'output_schema': {'type': 'object'}, 'access': 'read', 'idempotent': True}
+    calls = []
+
+    def transport(path, payload=None):
+        calls.append((path, payload))
+        return {'tools': [tool]} if path == '/tools' else {'result': {'company': 'transport fixture'}}
+
+    monkeypatch.setattr(cli, 'request', transport)
+    bridge = ready_bridge(portable_names=True)
+    listed = bridge.handle(rpc('tools/list'))['result']['tools']
+    assert listed[0]['name'] == 'research_card'
+    assert listed[0]['inputSchema'] == tool['input_schema']
+    assert listed[0]['outputSchema'] == tool['output_schema']
+    response = bridge.handle(rpc('tools/call', {'name': 'research_card', 'arguments': {'code': '600938'}}))
+    assert response['result']['isError'] is False
+    assert calls == [('/tools', None), ('/tools/research.card', {'code': '600938'})]
+    assert bridge.handle(rpc('tools/call', {'name': 'research.card'}))['error']['code'] == -32602
+
+
+def test_portable_call_without_list_discovers_exact_name_mapping(monkeypatch):
+    tool = {'name': 'fixture.read_item', 'description': 'Transport fixture', 'input_schema': {},
+            'output_schema': {}, 'access': 'read', 'idempotent': True}
+    calls = []
+
+    def transport(path, payload=None):
+        calls.append(path)
+        return {'tools': [tool]} if path == '/tools' else {'result': {}}
+
+    monkeypatch.setattr(cli, 'request', transport)
+    bridge = ready_bridge(portable_names=True)
+    assert 'result' in bridge.handle(rpc('tools/call', {'name': 'fixture_read_item'}))
+    assert calls == ['/tools', '/tools/fixture.read_item']
+
+
+@pytest.mark.parametrize('names', [['fixture.read', 'fixture_read'], ['fixture/read'], ['x' * 65]])
+def test_portable_invalid_or_colliding_names_fail_without_call(monkeypatch, names):
+    tools = [{'name': name, 'description': 'Transport fixture', 'input_schema': {},
+              'output_schema': {}, 'access': 'read', 'idempotent': True} for name in names]
+    calls = []
+    monkeypatch.setattr(cli, 'request', lambda path, *args: calls.append(path) or {'tools': tools})
+    bridge = ready_bridge(portable_names=True)
+    assert bridge.handle(rpc('tools/list'))['error']['code'] == -32603
+    assert calls == ['/tools']
 
 
 def no_transport(monkeypatch):
@@ -235,6 +283,11 @@ def test_oversized_line_stops_stream_without_dispatch(monkeypatch):
     assert data.tell() == 32 * 1024 * 1024 + 1
 
 
-def test_mcp_subcommand_uses_stdio_exit_status(monkeypatch):
-    monkeypatch.setattr(cli, 'serve_mcp', lambda: 7)
-    assert cli.main(['mcp']) == 7
+@pytest.mark.parametrize('portable', [False, True])
+def test_mcp_subcommand_uses_stdio_exit_status(monkeypatch, portable):
+    def serve(*, portable_names):
+        assert portable_names is portable
+        return 7
+
+    monkeypatch.setattr(cli, 'serve_mcp', serve)
+    assert cli.main(['mcp'] + (['--portable-names'] if portable else [])) == 7

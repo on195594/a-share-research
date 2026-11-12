@@ -41,6 +41,8 @@ ashare --config /home/lin/.config/ashare/hermes-assistant.json mcp
 
 Claude 的禁用状态保存在用户配置的项目条目中，不能在 stdio 服务片段里臆造 `enabled` 字段。Codex 使用 `startup_timeout_sec` / `tool_timeout_sec`，Hermes 使用 `connect_timeout` / `timeout`，Pi 使用 `timeout`。AGY 片段只含其支持的 command、args、disabled。客户端 HTTP 超时为 30 秒，宿主支持时设 40 秒，给错误回执留出时间。
 
+AGY 的客户端参数使用 `mcp --portable-names`：MCP 发现返回 `research_card` 等下划线名称，客户端按发现时的精确映射调用原 HTTP `research.card`。输入/输出 Schema、权限及回执保持原合同；名称冲突或不合法时拒绝发现，不通过反向替换猜测工具。其他宿主保留默认点号名称。此参数只改变 MCP 传输名称，不改变 CLI `call`、服务注册表或账户权限。
+
 本机 Pi 1.5.2 已有原生 MCP，无需扩展；`pi mcp list` 会连接所有已启用服务，不能当作离线格式检查。AGY 的 skills 目录当前链接到 `~/.agents/skills`，因此共享目录安装一次会同时影响 Codex、Pi、AGY；启用前应确认实际链接，避免重复发现或提前加载。
 
 字段核对依据：[Claude MCP](https://code.claude.com/docs/en/mcp)、[Claude Skills](https://code.claude.com/docs/en/skills)、[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Codex Skills](https://learn.chatgpt.com/docs/build-skills)。本机 Hermes v0.23.1 的 `tools/mcp_tool_common.py`、`tools/mcp_tool_discovery.py` 与 `tools/skills_tool.py`，Pi 1.5.2 的 `docs/mcp.md` 与 `docs/skills.md`，AGY 1.5.5 的内嵌 MCP/Skill 帮助用于核对其余格式。升级宿主后以实际支持字段为准。
@@ -64,6 +66,14 @@ Hermes 的私有 `HERMES_HOME` 隔离配置、会话和缓存，但共享安装�
 原生 `model_aliases` 的 `key_env` 可从进程环境接收已有访问令牌，保持 `provider: openai-codex`，不另传 `--provider` 或设置别名 `base_url`。预验证不复制刷新令牌，不允许回落读取宿主凭据；访问令牌须覆盖测试时长。gateway 重启会失去这种临时会话凭据，恢复时需按原生 `--api-key` 协议重绑同一令牌，不能把凭据失效误报为 MCP 丢失。本次通过私有启动器在进程内构造参数后调用未改动的 `hermes_cli.main.main`，令牌不进入系统命令行或生成文件；未修改应用的 Pi 推理链路。
 
 使用 `chat --oneshot --format stream-json` 保存回执，并用明确 session ID 恢复。流式输出会截断长工具结果，完整核对应读取私有会话数据库；显式 Skill 正文保存在 gateway 会话政策的 `skills_prompt`，不能仅检查基础系统提示词列。保留成功调用和失败原因，不为修正验收脚本的计数口径重复已经成功的模型调用。正式启用仍以以下场景和合一退出条件为准。
+
+## AGY 隔离预验证
+
+AGY 1.5.6 的原生 `agy acp` 支持 ACP v1。使用私有 `HOME`，`--gemini-dir .gemini --app-data-dir antigravity-cli` 指定相对目录名；实际传绝对 `--app-data-dir` 会被语言服务拒绝。握手后从返回的 `configOptions` 选择模型与思考档位，不能把 print 模式参数直接用于 ACP。会话 `mcpServers` 只注册本次 ashare，应用服务使用 research Key 且保持只读模式。
+
+隔离预验证屏蔽原宿主主目录与 `/run`，仅任务目录可写；已有原生 OAuth 文件只读挂载到私有登录路径，不复制令牌。访问令牌须覆盖本次期限；退出后检查原文件哈希、证据泄漏与进程残留。私有权限拒绝原生文件/命令工具，客户端不声明文件/终端能力并拒绝权限请求；这些设置不能替代挂载隔离。`--include-default-customizations=false` 下仍可收到内置命令列表，不能据此声称宿主没有内置工具。
+
+实际原生调用发现点号工具名被 AGY 判为非法，首次公司卡请求缺少必填参数而收到 HTTP 422。使用上述名称适配后，同模型 `gemini-3.8-flash/medium` 调用 `research_card`，参数含 `code=600938`，服务实际收到 `/tools/research.card` 并返回 200，模型成功回复中国海油。ACP 事件只给调用状态和最终回复，没有完整工具结果正文；本次不宣称逐字段结果对照、会话恢复或统一 Skill 加载通过。原生模型成功也不替代应用经 Pi 的独立语义复核，二者分别验收。
 
 ## 启用验收
 

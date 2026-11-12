@@ -129,7 +129,8 @@ def test_private_config_mcp_startup_and_error_restore_environment(tmp_path,monke
     path=private_config(tmp_path)
     monkeypatch.delenv('ASHARE_TOKEN',raising=False)
     monkeypatch.delenv('ASHARE_URL',raising=False)
-    def fail():
+    def fail(*, portable_names):
+        assert portable_names is False
         assert cli.os.environ['ASHARE_TOKEN']=='asr_private-fixture'
         raise cli.ClientError('fixture failure')
     monkeypatch.setattr(cli,'serve_mcp',fail)
