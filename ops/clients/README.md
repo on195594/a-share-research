@@ -43,6 +43,14 @@ Claude 的禁用状态保存在用户配置的项目条目中，不能在 stdio 
 
 字段核对依据：[Claude MCP](https://code.claude.com/docs/en/mcp)、[Claude Skills](https://code.claude.com/docs/en/skills)、[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Codex Skills](https://learn.chatgpt.com/docs/build-skills)。本机 Hermes v0.23.1 的 `tools/mcp_tool_common.py`、`tools/mcp_tool_discovery.py` 与 `tools/skills_tool.py`，Pi 1.5.2 的 `docs/mcp.md` 与 `docs/skills.md`，AGY 1.5.5 的内嵌 MCP/Skill 帮助用于核对其余格式。升级宿主后以实际支持字段为准。
 
+## Pi 隔离预验证
+
+Pi 1.5.2 可将 `PI_CODING_AGENT_DIR` 指向新建私有目录，在其中放独立 `mcp.json`、设置及所需模型凭据副本；客户端仍使用独立 `--config` 文件。启用的服务只设 `ashare`，暴露方式为 `direct`。`pi mcp list --json` 输出的 `scope=global` 此时指该私有目录，不是宿主原配置。设置关闭 agent/provider 自动重试、自动压缩及安装遥测；`--offline` 关闭启动目录刷新和更新，但仍允许模型与本机 MCP 调用。
+
+实际会话使用 `--no-extensions -e builtin:mcp --no-context-files --no-approve --no-builtin-tools`，再以 `--tools` 限定所需 `mcp__ashare__…` 工具。`--no-skills --skill <本仓库 skill/a-share/SKILL.md>` 只加载统一入口，通过 `/skill:a-share …` 显式展开；同时关闭其他提示模板与主题。固定模型、私有 `--session-dir` 和 `--session-id`，用 `--mode json` 保留真实调用与结果。恢复后必须产生新的成功工具调用，不能把复述历史结果当作重连成功；JSON 模式即使进程退出 0 也须检查 assistant 的 `stopReason` 和工具 `isError`。
+
+这类预验证不安装正式配置，不替换旧入口。结束后停止自建服务与子进程，清理临时凭据，核对宿主存储及业务数据未变；若宿主生成完整输出临时文件，应归档到本次私有证据目录。各场景实际完成程度归实施计划，不因一次公开报告读取通过就认定账户或五宿主验收完成。
+
 ## 启用验收
 
 当前只准备，不替换旧 Skills 或生产入口。后续按合一方案安装并开启时，逐宿主验证：同一真实截图入账、持仓复核、研究读取、禁止操作、服务不可用和会话重载；检查工具 Schema 与回执来源，保留证据。SDK 互通测试只能证明传输兼容，不能代替五个宿主的实际任务验收。
