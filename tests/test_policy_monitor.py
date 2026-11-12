@@ -214,8 +214,11 @@ def test_fixed_child_transport_drops_inherited_credentials_and_config(tmp_path,m
     assert seen['payload']==(parameters if source is None else dict(parameters=parameters,source=source))
     assert seen['timeout']==25
     env=seen['kwargs']['env']
-    assert set(env)<= {'PATH','HOME','LANG','LC_ALL','POLICY_V0_DB','A_STOCK_CONFIG_FILE'}
+    assert set(env)<= {'PATH','HOME','LANG','LC_ALL','POLICY_V0_DB','A_STOCK_CONFIG_FILE','TUSHARE_TOKEN'}
     assert env['POLICY_V0_DB']==str(database.resolve())
+    assert env['HOME']==str(database.resolve().parent)
+    assert env['TUSHARE_TOKEN']=='must-not-propagate'
+    assert 'ASHARE_OWNER_TOKEN' not in env and 'OPENAI_API_KEY' not in env
     assert seen['kwargs']['start_new_session'] is True
     assert not Path(env['A_STOCK_CONFIG_FILE']).exists()
 

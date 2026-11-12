@@ -59,18 +59,18 @@ def _existing(conn, principal, request_id, request):
 
 def capture(database: Path, parameters: dict, *, source: dict | None = None) -> dict:
     payload = parameters if source is None else dict(parameters=parameters, source=source)
-    return _capture(database, 'a_share_research.policy.capture', payload)
+    return _capture(database, 'a_share_research.policy.capture', payload, market_token=True)
 
 
 def _capture(database: Path, module: str, payload: dict, *, market_token: bool = False) -> dict:
     """Run the fixed collector with a private empty config and no inherited model credentials."""
-    if market_token and module not in ('a_share_research.policy.daily_brief', 'a_share_research.policy.benchmark'):
+    if market_token and module not in ('a_share_research.policy.capture', 'a_share_research.policy.daily_brief', 'a_share_research.policy.benchmark'):
         raise ValueError('market credentials are only allowed for the configured market collectors')
     with tempfile.TemporaryDirectory(prefix='ashare-policy-capture-') as directory:
         config = Path(directory)/'runtime.env'
         config.touch(mode=0o600)
         env = {k:v for k,v in os.environ.items() if k in ('PATH','HOME','LANG','LC_ALL')}
-        env.update(POLICY_V0_DB=str(database.resolve()),A_STOCK_CONFIG_FILE=str(config))
+        env.update(HOME=str(database.resolve().parent),POLICY_V0_DB=str(database.resolve()),A_STOCK_CONFIG_FILE=str(config))
         if market_token and os.environ.get('TUSHARE_TOKEN'):
             env['TUSHARE_TOKEN'] = os.environ['TUSHARE_TOKEN']
         process = subprocess.Popen([sys.executable,'-m',module],

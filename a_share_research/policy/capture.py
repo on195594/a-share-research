@@ -102,6 +102,11 @@ def collect(parameters: dict, *, source: dict | None = None, include_research: b
         local = commands_monitor._load_monitor_local_snapshot()
         research = monitor_research.fetch_cards() if include_research else {'status': 'not_configured'}
         codes = list(dict.fromkeys(item['code'] for item in local['holdings']))
+        # The service owns its persistent market cache; an expired/missing cache
+        # can be refreshed using only its market credential, never host config.
+        if codes and os.environ.get('TUSHARE_TOKEN'):
+            from a_share_research.core.providers import TushareFundamentalsProvider
+            TushareFundamentalsProvider().fetch_industry_map()
         quotes, industry = commands_holdings.fetch_monitor_price_quotes(codes)
         bundle = evaluation.pack(dict(
             local=local, quotes=quotes, portfolio_value=denominator.portfolio_value,

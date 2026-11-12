@@ -117,7 +117,7 @@ def test_provider_evidence_preserves_null_cells_without_rounding_and_sanitizes_e
     assert 'secret' not in json.dumps(failed)
 
 
-def test_only_explicit_dividend_transport_receives_market_credential(tmp_path, monkeypatch):
+def test_only_explicit_market_transports_receive_market_credential(tmp_path, monkeypatch):
     monkeypatch.setenv('TUSHARE_TOKEN', 'structural-market-token')
     monkeypatch.setenv('ASHARE_OWNER_TOKEN', 'must-not-inherit')
     monkeypatch.setenv('MODEL_API_KEY', 'must-not-inherit')
@@ -132,7 +132,7 @@ def test_only_explicit_dividend_transport_receives_market_credential(tmp_path, m
     monitor._capture(tmp_path / 'app.db', 'a_share_research.policy.daily_brief', {}, market_token=True)
     monitor.capture(tmp_path / 'app.db', {})
     assert envs[0]['TUSHARE_TOKEN'] == 'structural-market-token'
-    assert 'TUSHARE_TOKEN' not in envs[1]
+    assert envs[1]['TUSHARE_TOKEN'] == 'structural-market-token'
     for env in envs:
         assert 'ASHARE_OWNER_TOKEN' not in env and 'MODEL_API_KEY' not in env
     with pytest.raises(ValueError):
