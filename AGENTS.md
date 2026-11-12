@@ -15,7 +15,7 @@
 | `README.md` | 架构概览、本地启动、API/CLI 手册、固定生产部署入口 | 阶段验收流水账 |
 | `docs/proposal.md` | 实现产品目标的领域取舍、研究流程与架构设计、评估集基线；专题细则链接各自方案 | 第二套产品目标或授权规则、逐次实验记录、当前生产版本号 |
 | `docs/consolidation.md` | 三仓合一重构的不变量、所有者决定、目标结构、代码去向、分段验收与回退 | 工作包状态与部署记录（归实施计划） |
-| `docs/project-contract.md` | 切换前 `a-share-research`、`a-stock-agent-skills`、`a-stock-lib` 与 Hermes 的现行职责边界、接口与状态所有权 | 单项目内部实现细节、发版流水、重构设计 |
+| `ARCHITECTURE.md` | 现行能力、进程、状态所有权与接口边界 | 部署流水、逐批验收、实验细则 |
 | `docs/roadmap.md` | 演进原则、阶段日期与到期默认动作、方法论借鉴 | 具体工作包状态与部署记录 |
 | `docs/implementation-plan.md` | 当前工作包状态、剩余验收项、当前生产部署与回退命令 | 产品长文与设计规范 |
 | `docs/data-foundation.md` | 数据层结构、迁移与治理规则的设计和验收口径 | 当前部署与工作包状态（归实施计划） |
@@ -25,7 +25,7 @@
 
 ## 架构与能力归属
 
-三个项目已合并为本仓库内的一个系统，账户已由所有者当次授权提前切换；设计与验收见[合一重构方案](docs/consolidation.md)，实际状态见[实施计划](docs/implementation-plan.md)。[旧项目契约](docs/project-contract.md)仅保留切换前历史边界，不再授权旧账户入口写入。
+三个项目已合并为本仓库内的一个系统，账户已由所有者当次授权提前切换；设计与验收见[合一重构方案](docs/consolidation.md)，实际状态见[实施计划](docs/implementation-plan.md)。能力与状态归属见[系统架构](ARCHITECTURE.md)，旧账户入口不再写入。
 
 - 只保留三条不变量：真钱只由所有者动；冻结的判断不改写；事实可溯源、计算经程序。研究 AI 看不到持仓与账户。
 - 新能力放进目标结构，依赖方向为 `policy → account → core`：数据与确定性计算归 `core/`，账户事件与对账归 `account/`，投资规则归 `policy/` 的版本模块（v0 是旧运行时整体），对 Agent 开放的能力经 `tools/` 注册表，判断写入经入账门。不再向 Lib、Skills 两仓添加功能。

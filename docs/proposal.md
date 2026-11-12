@@ -1,6 +1,6 @@
 # 研究产品方案
 
-a-stock-tracker 已归档，需参考时只读查 GitHub，不导入其源码。本方案维护产品范围、现有流程和设计取舍；跨项目职责见[项目契约](project-contract.md)，后续能力见[路线图](roadmap.md)，生产版本与回退只维护在[当前部署](implementation-plan.md#当前部署)。
+a-stock-tracker 已归档，需参考时只读查 GitHub，不导入其源码。本方案维护产品范围、现有流程和设计取舍；跨项目职责见[系统架构](../ARCHITECTURE.md)，后续能力见[路线图](roadmap.md)，生产版本与回退只维护在[当前部署](implementation-plan.md#当前部署)。
 
 ## 1 用户要做的事
 
@@ -127,7 +127,7 @@ a-stock-tracker 已归档，需参考时只读查 GitHub，不导入其源码。
 
 ## 10 首发历史
 
-M0 打通真实数据 → M1 命令行研究（评估集非金融 10/10）→ M2 网页主流程 → M3 价格参考（移植 `price-reference-v2`，前复权改用 TuShare 复权因子）→ M4 上线切换：2026-10-21 v1.0.1 上线，stock.keyi.win → `a-share-research-web:8620`，当天改为本仓库 docker compose 编排。旧系统后续归档状态见[项目契约](project-contract.md#1-共同目标与当前关系)，之后的能力批次见[路线图](roadmap.md)。
+M0 打通真实数据 → M1 命令行研究（评估集非金融 10/10）→ M2 网页主流程 → M3 价格参考（移植 `price-reference-v2`，前复权改用 TuShare 复权因子）→ M4 上线切换：2026-10-21 v1.0.1 上线，stock.keyi.win → `a-share-research-web:8620`，当天改为本仓库 docker compose 编排。旧系统后续归档状态见[系统架构](../ARCHITECTURE.md)，之后的能力批次见[路线图](roadmap.md)。
 
 ## 11 后续候选
 

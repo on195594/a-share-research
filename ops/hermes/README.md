@@ -10,7 +10,7 @@
 | `a-share-monthly-submit.sh`、`a-share-monthly-status.sh`（`a-share-monthly.sh`、`a-share-monthly.py`） | 月批发起 `3d8b860808e4` / 状态 `112633a18054` | 每月 1 日 20:00 / 每月 1–3 日每小时 :30 |
 | `a-share-scoring.sh`、`a-share-scoring.py` | 记分 `2c0e2f798501` | 周日 19:07 |
 | `a-share-milestones.sh`、`a-share-milestones.py` | 里程碑进度 `6b6ecd1783ea` | 周一 09:03 |
-| `a-share-shadow-diff.sh`（调用仓库外 `consolidation/stage3/daily.sh`） | 合一第 3 段影子对照 `85806e8e4ea1`（临时，5 次） | 原计划 2026-11-23～11-27 每日 15:45；提前切换后的任务处置见实施计划 |
+| `a-share-shadow-diff.sh`（调用仓库外 `consolidation/stage3/daily.sh`） | 合一第 3 段影子对照 `85806e8e4ea1`（临时，5 次） | 已暂停；原计划 2026-11-23～11-27 每日 15:45 |
 凭据：研究 API 使用 `~/.config/a-share-advisor/runtime.env`；统一账户/政策客户端使用 `~/.config/ashare/hermes-assistant.json`。
 去重回执：`~/.local/state/a-share-advisor/opportunities.json`、`~/.local/state/a-share-monthly/<月>.receipt`、`~/.local/state/a-share-scoring/state.json`。
 核对：`python3 ops/hermes/install.py --check`；安装：`python3 ops/hermes/install.py --apply`（须先提交本目录改动，自动复核）。
@@ -27,7 +27,7 @@
 | 任务 | 调用与替代状态 | 去重状态 | 命令预算与回退边界 |
 |---|---|---|---|
 | 止损提醒 | 新脚本 `policy.current` → `policy.stop_alert`；服务保存原始行情、止损线、旧通知状态及评估 | 新 `~/.local/state/ashare-stop-alert/state.json`，切换时从已确认的旧 stop-alert-state.json 导入 | ashare 子进程 40 秒，HTTP 30 秒，服务采集 25 秒；切换后只回兼容新账本及此回执/状态的合并版 |
-| 持仓日报 | 新脚本 `policy.current` → `policy.daily_brief`；监控、逐持仓完整事件与 Provider 分红响应/失败共同留存 | `~/.local/state/ashare-daily-brief/state.json` 仅记录待查请求，无新增每日通知去重 | ashare 子进程 40 秒、HTTP 30 秒、服务整体采集 25 秒；公开样例的真实分红响应已验证，账户完整采集预算与正式送达仍待验收 |
+| 持仓日报 | 新脚本 `policy.current` → `policy.daily_brief`；监控、逐持仓完整事件与 Provider 分红响应/失败共同留存 | `~/.local/state/ashare-daily-brief/state.json` 仅记录待查请求，无新增每日通知去重 | ashare 子进程 40 秒、HTTP 30 秒、服务整体采集 25 秒；真实账户日报脚本已成功运行；正式定时送达待观察 |
 | 账本月度对比 | 新脚本 `policy.current` → `policy.benchmark`；完整历史、双全收益指数及估值报价或失败留存 | `~/.local/state/ashare-benchmark/state.json` 仅记录待查请求，无新增月度通知去重 | ashare 子进程 40 秒、HTTP 30 秒、采集 25 秒；公开双基准完整响应已验证，真实账户完整采集、预算与正式送达仍待验收 |
 | 顾问扫描 | `account.current` 同步及通知前刷新持仓；新持久扫描 API；`policy.current` + `policy.monitor` 取已留存评估 | 独立 `scan.json` 保存待查扫描；原 `opportunities.json` 保留机会键及待查政策请求 | 整轮 540 秒，共享持仓、HTTP、轮询、机会检查预算；超时保留待查请求，回退服务须支持 v21 协议 |
 | 顾问周报 | 原研究 weekly API，无账户命令 | 无独立通知去重，独立运行锁 | 同一 advisor 进程监督与 540 秒总预算 |
@@ -46,7 +46,7 @@
 
 新请求先核对持仓并同步订阅，再持久保存 UUID、绑定和创建时刻，之后才 PUT 新接口。有待查请求时直接重试原键并查询原扫描，不重新同步订阅或另建扫描。有效回执会补存扫描编号；超时、断连、404、坏回执、损坏状态或服务/凭据变化均保留待查信息，不回落旧 POST，不清空后重新开始。取得终态后刷新当前持仓、构造扫描和机会输出，再结束待查；跨日补回的扫描注明原时间，不作为今日观察。机会检查仍使用原 `opportunities.json` 格式和恢复规则。
 
-服务可使用已验证的 `565ced8` v21 镜像基线，但回退服务时仍须保留支持 `scan.json` 的客户端和监督模块；忽略该文件、继续调用旧 POST 的历史 advisor 脚本不是兼容客户端，不能用它处理已有待查请求。
+当前回退镜像只以[实施计划](../../docs/implementation-plan.md#当前部署)为准，并须保留支持 `scan.json` 的客户端和监督模块；忽略该文件、继续调用旧 POST 的历史 advisor 脚本不是兼容客户端，不能用它处理已有待查请求。
 
 `advisor_budget.py` 用 Linux 子进程和单调时钟限制整轮执行，涵盖阻塞 HTTP、ashare 调用、轮询睡眠和机会检查；HTTP 自身超时不替代总时限。超时或 TERM/INT 后终止进程组，约 4 秒内升级 KILL 并回收后代；正常结束也清理后代，子进程 stdout/stderr 不直接投递，成功返回的文本才交 Hermes。监督进程本身被 SIGKILL 时无法收尾，工具子进程不得另开会话脱离组；正式宿主时限须允许 540 秒预算后的清理。状态写入与 stdout 之间仍无送达 ACK，不能保证恰好一次通知。
 
@@ -64,7 +64,7 @@
 
 机会去重键仍为 `code|report_id|stance_action|v2_zone`，只保留当次仍存在的键；机会失效后重现可再次提醒。旧 JSON 数组首次使用时升级为 `{schema_version:1,seen:[…],pending:null}`。调用监控前原子保存 `pending` 中的 request_id / expected_activation_id；超时、损坏响应或不匹配回执保留请求，下次复用，不另造编号。锁防止并行改写；损坏状态不覆盖。前日已成功回执只用于清理待查请求，保留 seen，不作为今日机会发送，下次再采集。持久化通知键仍在 stdout 交给 Hermes 之前，未增加送达确认机制，不能宣称通知恰好一次。
 
-若待查请求被服务拒绝，应先以同一凭据重试原请求并核对政策/权限；不要删状态反复制造评估。无法经重试查回时，由维护者按 created_by/request_id 检查 policy_evaluations，确认不存在成功回执后再解除该 pending。状态升级后旧 advisor 不理解此对象，不能直接覆盖回旧脚本；正式切换前须把此客户端兼容性纳入合并版回退演练。当前安装与状态交接结果见实施计划。
+若待查请求被服务拒绝，应先以同一凭据重试原请求并核对政策/权限；不要删状态反复制造评估。无法经重试查回时，由维护者按 created_by/request_id 检查 policy_evaluations，确认不存在成功回执后再解除该 pending。状态升级后旧 advisor 不理解此对象，不能直接覆盖回旧脚本；后续应用回退须保持此客户端兼容性。当前安装与状态交接结果见实施计划。
 
 ## 止损提醒替代入口
 
@@ -92,7 +92,7 @@ uv run python -m a_share_research.cutover --database /absolute/new-data/app.db \
 
 日报读取新 `policy.daily_brief` 完整结果，保留漏记分红及分红获取失败提示。Provider 成功空表表示未发现实施记录，失败的 null 表表示尚未核对，两者不会混用。服务正文沿用 v0，客户端仅把“运行 dividend-check”提示改为通过统一 a-share 核对券商流水，不自动入账。无当日报价时原格式静默，分红失败仍在评估回执的 dividends.failures 中可查。
 
-成功分红采集需要 tools 专用 `.env.tools` 中已有的 TUSHARE_TOKEN；日报子进程仅额外传递这一行情令牌，不读取旧 runtime.env，也不传模型或 owner 凭据。服务未配置令牌时保留 AUTH_MISSING 失败项。离线历史行情、无令牌失败支路和既有分红历史样本已验证；真实 Provider 成功响应、整体 25 秒采集预算及定时送达仍须正式验收。上下文版本 4 和待查文件格式须由回退合并版本支持。安装及真实运行结果见实施计划。
+成功分红采集需要 tools 专用 `.env.tools` 中已有的 TUSHARE_TOKEN；日报子进程仅额外传递这一行情令牌，不读取旧 runtime.env，也不传模型或 owner 凭据。服务未配置令牌时保留 AUTH_MISSING 失败项。离线历史行情、无令牌失败支路和既有分红历史样本已验证；生产日报脚本已成功运行，定时送达继续观察。上下文版本 4 和待查文件格式须由回退合并版本支持。安装及真实运行结果见实施计划。
 
 ## 账本月度对比替代入口
 
