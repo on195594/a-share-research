@@ -19,7 +19,7 @@ def git(*args: str) -> subprocess.CompletedProcess:
 
 def parse_milestones(text: str) -> list[dict]:
     """Rows of the fixed milestone table; a malformed row fails loudly rather than vanishing from the push."""
-    section = text.split("### 固定里程碑", 1)[1].split("\n\n已完成", 1)[0]
+    section = re.split(r"\n#{1,6}\s", text.split("### 固定里程碑", 1)[1], maxsplit=1)[0]
     rows = []
     for line in section.splitlines():
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]

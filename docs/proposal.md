@@ -30,7 +30,7 @@ a-stock-tracker 已归档，需参考时只读查 GitHub，不导入其源码。
 
 ## 3 架构
 
-一个 Python 包、一个 SQLite 文件，PDF 与账户证据分别保存；web、worker 与只听本机的 `tools` 三个服务共用受控数据层。`core/`、`account/`、`policy/` 与工具注册表的职责见[合一重构](consolidation.md)，生产启用与账户切换状态见[实施计划](implementation-plan.md#合一重构当前退出条件)。
+一个 Python 包、一个 SQLite 文件，PDF 与账户证据分别保存；web、worker 与只听本机的 `tools` 三个服务共用受控数据层。`core/`、`account/`、`policy/` 与工具注册表的职责见[合一重构](consolidation.md)，生产启用与账户切换状态见[实施计划](implementation-plan.md#合一重构与实盘割接2026-11-12-已上线第-4-段收尾中)。
 
 | 进程 | 做什么 | 持有 |
 |---|---|---|
@@ -135,7 +135,7 @@ M0 打通真实数据 → M1 命令行研究（评估集非金融 10/10）→ M2
 
 - **金融股**：旧系统招商银行被拒两次，上线后招商银行、中国平安仍有范围拒绝（网页按名称前置拒绝不落任务记录，需求会被低估）。银行、保险、券商的财务表和风险小节都不同，需要单独的财务表和评估子集（每类 2 家）；初筛期间金融类按范围排除。
 
-MCP 与客户端接入已纳入[合一重构](consolidation.md)，适配与安装入口见[工具文档](../a_share_research/tools/README.md)；实际启用按[实施计划](implementation-plan.md#合一重构当前退出条件)执行。
+MCP 与客户端接入已纳入[合一重构](consolidation.md)，适配与安装入口见[工具文档](../a_share_research/tools/README.md)；实际启用按[实施计划](implementation-plan.md#合一重构与实盘割接2026-11-12-已上线第-4-段收尾中)执行。
 
 ## 报告语言治理（2026-11-13，契约 2）
 

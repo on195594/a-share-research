@@ -165,6 +165,17 @@ def test_percentage_differences_render_as_points_in_html_and_cli(tmp_path, monke
     assert '区间宽度 10百分点' in caplog.text
     assert '中点绝对误差 1百分点，朴素绝对误差 4.0百分点' in caplog.text
 
+    # Scored item whose prior-year base period was missing has None baseline; CLI must not render "None".
+    no_baseline = dict(item, written=dict(item['written'], unit='亿元', exact_values={item['base']: '20'}),
+                       result={'status': 'scored', 'actual': 24, 'baseline': None, 'hit': True,
+                               'beat_baseline': None, 'base_restated': False})
+    monkeypatch.setattr(validation, 'load_forecasts', lambda *args: [no_baseline])
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        validation.main()
+    assert '朴素 缺失' in caplog.text and '朴素绝对误差 缺失' in caplog.text
+    assert '朴素 None' not in caplog.text and 'None亿元' not in caplog.text
+
 
 def test_width_groups_never_mix_confidence_metric_or_unit(tmp_path):
     item = frozen(tmp_path / 'capture.db')[0]

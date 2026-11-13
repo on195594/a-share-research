@@ -512,14 +512,15 @@ def main() -> None:
             r = s["result"]
             lines.append(f"#{s['report']}[{s['index']}]{'' if s['first'] else '（更新）'} {s['code']} {s['name']} "
                          f"{forecasts.describe(s['forecast'], [])} → "
-                         + (f"实际 {r['actual']:g} {'命中' if r['hit'] else '未中'}，朴素 {r['baseline']}"
+                         + (f"实际 {r['actual']:g} {'命中' if r['hit'] else '未中'}，朴素 {r['baseline'] if r['baseline'] is not None else '缺失'}"
                             f"{'，胜过朴素' if r['beat_baseline'] else '，未胜过朴素（含持平）' if r['beat_baseline'] is False else ''}"
                             if r["status"] == "scored" else r.get("reason", "待披露")))
             d = s["diagnostics"]
+            baseline_err = f"{d['baseline_absolute_error']}{d['difference_unit']}" if d['baseline_absolute_error'] is not None else "缺失"
             lines.append(f"  区间宽度 {d['width']:g}{d['difference_unit']}，宽度/冻结朴素值绝对值 "
                          f"{_pct(d['width_to_baseline']) if d['width_to_baseline'] is not None else '—'}"
                          + (f"；中点绝对误差 {d['midpoint_absolute_error']:g}{d['difference_unit']}，"
-                            f"朴素绝对误差 {d['baseline_absolute_error']}{d['difference_unit']}" if r["status"] == "scored" else ""))
+                            f"朴素绝对误差 {baseline_err}" if r["status"] == "scored" else ""))
         for level, g in summary["by_confidence"].items():
             lines.append(f"把握 {level}%：n={g['n']} 命中 {g['hit']:.0%}")
         if summary["beat_baseline"] is not None:

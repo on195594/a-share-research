@@ -187,7 +187,7 @@ uv run python -m a_share_research.backup verify /absolute/private/new-backup
 uv run python -m a_share_research.backup restore /absolute/private/new-backup /absolute/private/new-recovery
 ```
 
-默认从数据库同目录的 `pdf/`、`account-evidence/` 读取原件；副本验收可用 `--pdf-directory`、`--evidence-directory` 明确来源。目标目录必须不存在，目录/文件分别为 0700/0600；操作不会覆盖现库。恢复只是生成经校验的独立副本，不启动服务、不自动迁移、不抬升序列，也不代表允许丢弃备份之后的写入。实际数据恢复仍按[数据层回退步骤](docs/data-foundation.md#7-验收与治理规则)处理高水位与引用；合一切换后应用回退保持新账本为唯一事实来源，见[合一回退规则](docs/consolidation.md#7-回退与文档收敛)。
+默认从数据库同目录的 `pdf/`、`account-evidence/` 读取原件；副本验收可用 `--pdf-directory`、`--evidence-directory` 明确来源。目标目录必须不存在，目录/文件分别为 0700/0600；操作不会覆盖现库。恢复只是生成经校验的独立副本，不启动服务、不自动迁移、不抬升序列，也不代表允许丢弃备份之后的写入。实际数据恢复仍按[数据层回退步骤](docs/data-foundation.md#7-验收与治理规则)处理高水位与引用；合一切换后应用回退保持新账本为唯一事实来源，见[合一回退规则](docs/consolidation.md#5-验收与割接实施)。
 
 账户切换使用本地 owner 入口，要求 `ASHARE_OWNER_TOKEN` 已通过私有环境提供。按[合一退出条件](docs/consolidation.md)完成验收、停用并排空旧宿主与定时任务后，先运行末次镜像，核对资金/成本零版本期初、全部旧持仓及事件历史、账户周期分析与原始证据，再登记并启用匹配当前代码及账户范围的政策。正式切换日期和阶段状态见[实施计划](docs/implementation-plan.md)；命令只检查技术状态，不证明券商资金完整、五交易日对照通过或允许提前启用宿主。
 
