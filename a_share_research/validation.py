@@ -133,6 +133,7 @@ def summarize_forecasts(scored: list[dict]) -> dict:
         if group:
             by_confidence[level] = {"n": len(group), "hit": sum(s["result"]["hit"] for s in group) / len(group)}
     compared = [s for s in done if s["result"]["beat_baseline"] is not None]
+    clean_compared = [s for s in compared if _item_baseline_note(s) is None]
     return {"total": len(first), "updates": len(scored) - len(first), "scored": len(done), "pending": sum(s["result"]["status"] == "pending" for s in first),
             "unavailable": sum(s["result"]["status"] == "unavailable" for s in first),
             "unchecked": sum(s["result"]["status"] == "unchecked" for s in first),
@@ -140,7 +141,10 @@ def summarize_forecasts(scored: list[dict]) -> dict:
             "restated": sum(bool(s["result"].get("restated")) for s in done),
             "by_confidence": by_confidence,
             "beat_baseline": sum(s["result"]["beat_baseline"] for s in compared) / len(compared) if compared else None,
-            "compared": len(compared)}
+            "compared": len(compared),
+            "distorted_compared": len(compared) - len(clean_compared),
+            "clean_beat_baseline": sum(s["result"]["beat_baseline"] for s in clean_compared) / len(clean_compared) if clean_compared else None,
+            "clean_compared": len(clean_compared)}
 
 
 def model_roles(body: dict) -> dict:
@@ -152,6 +156,36 @@ def model_roles(body: dict) -> dict:
 
 def model_label(role: dict) -> str:
     return " / ".join(str(role.get(k) or "未记录") for k in ("provider", "model", "reasoning"))
+
+
+def _item_baseline_note(item: dict) -> str | None:
+    if "diagnostics" in item:
+        return item["diagnostics"].get("baseline_note")
+    written = item.get("written")
+    base = item.get("base")
+    if not written or not base:
+        return None
+    frozen = {p: Decimal(str(v)) for p, v in (written.get("exact_values") or written.get("values") or {}).items()}
+    return baseline_distortion(item["forecast"], base, written, frozen)
+
+
+def baseline_distortion(forecast: dict, base: str, written: dict, frozen: dict[str, Decimal]) -> str | None:
+    """Flag cumulative-flow naive baselines distorted by sign flips, negative bases, or tiny denominators."""
+    metric, unit = forecast.get("metric"), written.get("unit", "")
+    if unit != "亿元" or metric in forecasts.BALANCES:
+        return None
+    period = forecast.get("period", "")
+    prior_base, prior_period = f"{int(base[:4]) - 1}{base[4:]}", f"{int(period[:4]) - 1}{period[4:]}"
+    if base not in frozen or prior_base not in frozen or prior_period not in frozen or frozen[prior_base] == 0:
+        return None
+    vb, vpb = frozen[base], frozen[prior_base]
+    if vb * vpb < 0:
+        return "基期与上年同期异号，比例外推失真"
+    if vpb < 0:
+        return "上年同期基期为负，比例外推失真"
+    if abs(vb / vpb) >= 5:
+        return "基期同比变动≥5倍，比例外推可能失真"
+    return None
 
 
 def forecast_diagnostics(item: dict) -> dict:
@@ -166,6 +200,7 @@ def forecast_diagnostics(item: dict) -> dict:
     out = {"width": float(width), "unit": written.get("unit", ""),
            "difference_unit": "百分点" if written.get("unit") == "%" else written.get("unit", ""),
            "baseline": float(naive) if naive is not None else None,
+           "baseline_note": baseline_distortion(forecast, item["base"], written, frozen),
            "width_to_baseline": ratio(width, naive), "width_to_actual": None,
            "midpoint_absolute_error": None, "baseline_absolute_error": None}
     if result["status"] == "scored":
@@ -175,16 +210,19 @@ def forecast_diagnostics(item: dict) -> dict:
     return out
 
 
+def _group_identity(item: dict) -> tuple[int | None, str, str]:
+    roles = item.get("models") or model_roles({})
+    return (item.get("contract"), model_label(roles["author"]), model_label(roles["reviewer"]))
+
+
 def forecast_review(scored: list[dict]) -> dict:
     """Use the existing first-sample flags before grouping; never give a rerun a new scoring slot."""
     items = [dict(item, diagnostics=forecast_diagnostics(item)) for item in scored]
     groups = {}
+    shadowed = {}
     for item in items:
-        if not item["first"]:
-            continue
-        roles = item.get("models") or model_roles({})
-        key = (item.get("contract"), model_label(roles["author"]), model_label(roles["reviewer"]))
-        groups.setdefault(key, []).append(item)
+        key = _group_identity(item)
+        (groups if item["first"] else shadowed).setdefault(key, []).append(item)
     cohorts = []
     # Stable identity order, not a model performance ranking.
     for (contract, author, reviewer), group in sorted(groups.items(), key=lambda pair: str(pair[0])):
@@ -196,14 +234,51 @@ def forecast_review(scored: list[dict]) -> dict:
         for (confidence, metric, unit), rows in sorted(strata.items(), key=lambda pair: str(pair[0])):
             widths = [i["diagnostics"]["width_to_baseline"] for i in rows
                       if i["diagnostics"]["width_to_baseline"] is not None]
+            clean_widths = [i["diagnostics"]["width_to_baseline"] for i in rows
+                            if i["diagnostics"]["width_to_baseline"] is not None
+                            and i["diagnostics"]["baseline_note"] is None]
+            distorted = sum(1 for i in rows if i["diagnostics"]["baseline_note"] is not None)
             width_groups.append({"confidence": confidence, "metric": metric, "unit": unit,
                                  **summarize_forecasts(rows), "width_compared": len(widths),
-                                 "median_width_to_baseline": statistics.median(widths) if widths else None})
+                                 "median_width_to_baseline": statistics.median(widths) if widths else None,
+                                 "distorted_baselines": distorted,
+                                 "clean_width_compared": len(clean_widths),
+                                 "clean_median_width_to_baseline": statistics.median(clean_widths) if clean_widths else None})
         summary = summarize_forecasts(group)
         cohorts.append({"contract": contract, "author": author, "reviewer": reviewer,
                         "reports": len({i["report"] for i in group}), **summary,
                         "width_groups": width_groups})
+    shadowed_cohorts = []
+    for (contract, author, reviewer), rows in sorted(shadowed.items(), key=lambda pair: str(pair[0])):
+        if (contract, author, reviewer) in groups:
+            continue
+        shadowed_cohorts.append({"contract": contract, "author": author, "reviewer": reviewer,
+                                 "reports": len({i["report"] for i in rows}),
+                                 "companies": len({i["code"] for i in rows}),
+                                 "updates": len(rows)})
+    first_by_contract = {}
+    for i in items:
+        if i["first"] and i.get("contract") is not None:
+            first_by_contract[i["contract"]] = first_by_contract.get(i["contract"], 0) + 1
+    contract_independent_first = []
+    for c in sorted({i.get("contract") for i in items if i.get("contract") is not None}):
+        indep_rows = mark_first([dict(i) for i in items if i.get("contract") == c])
+        indep_summary = summarize_forecasts(indep_rows)
+        if indep_summary["total"] > first_by_contract.get(c, 0):
+            contract_independent_first.append({"contract": c, **indep_summary})
+    first_items = [i for i in items if i["first"]]
+    confidence_coverage = [
+        {"confidence": level,
+         "total": sum(1 for i in first_items if i["forecast"]["confidence"] == level),
+         "scored": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "scored"),
+         "pending": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "pending"),
+         "unchecked": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "unchecked"),
+         "unavailable": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "unavailable")}
+        for level in forecasts.CONFIDENCE
+    ]
     return {"items": items, "summary": summarize_forecasts(items), "model_groups": cohorts,
+            "shadowed_model_groups": shadowed_cohorts, "contract_independent_first": contract_independent_first,
+            "confidence_coverage": confidence_coverage,
             "generated_at": datetime.now(SHANGHAI).isoformat(),
             "scope": "研究预测；非模拟组合收益，非真实账户表现。模型分组仅描述冻结配置，不排名、不作因果归因。"}
 
@@ -519,27 +594,53 @@ def main() -> None:
             baseline_err = f"{d['baseline_absolute_error']}{d['difference_unit']}" if d['baseline_absolute_error'] is not None else "缺失"
             lines.append(f"  区间宽度 {d['width']:g}{d['difference_unit']}，宽度/冻结朴素值绝对值 "
                          f"{_pct(d['width_to_baseline']) if d['width_to_baseline'] is not None else '—'}"
+                         + (f"（{d['baseline_note']}）" if d.get("baseline_note") else "")
                          + (f"；中点绝对误差 {d['midpoint_absolute_error']:g}{d['difference_unit']}，"
                             f"朴素绝对误差 {baseline_err}" if r["status"] == "scored" else ""))
+        cov_parts = [f"{c['confidence']}% {c['total']} 条" for c in review["confidence_coverage"]]
+        missing_levels = [f"{c['confidence']}%" for c in review["confidence_coverage"] if c["total"] == 0]
+        if summary["total"]:
+            lines.append("主观把握入样分布（首份）：" + " · ".join(cov_parts)
+                         + (f"（缺 {'/'.join(missing_levels)} 样本，校准度暂不完整）" if missing_levels else ""))
         for level, g in summary["by_confidence"].items():
             lines.append(f"把握 {level}%：n={g['n']} 命中 {g['hit']:.0%}")
         if summary["beat_baseline"] is not None:
             lines.append(f"区间中点胜过朴素预测：{summary['beat_baseline']:.0%}（n={summary['compared']}）")
+            if summary["distorted_compared"]:
+                lines.append(f"  剔除 {summary['distorted_compared']} 条外推失真基线后胜过朴素预测："
+                             f"{_pct(summary['clean_beat_baseline'])}（n={summary['clean_compared']}）")
         for group in review["model_groups"]:
             lines.append(f"契约 {group['contract']} 作者 {group['author']} × 复核 {group['reviewer']}："
                          f"{group['reports']} 份报告，{group['companies']} 家公司，{group['periods']} 个目标期，"
                          f"首份 {group['total']} 条，已兑现 {group['scored']}，朴素可比 {group['compared']}（仅描述，不作排名）")
             for width in group["width_groups"]:
+                distorted_note = (f"；剔除 {width['distorted_baselines']} 条外推失真基线后中位 "
+                                  f"{_pct(width['clean_median_width_to_baseline'])}（n={width['clean_width_compared']}）"
+                                  if width["distorted_baselines"] else "")
                 lines.append(f"  {width['metric']}（{width['unit']}）把握 {width['confidence']}%："
                              f"首份 {width['total']}，已兑现 {width['scored']}，朴素可比 {width['compared']}；"
                              f"相对宽度中位 {_pct(width['median_width_to_baseline']) if width['median_width_to_baseline'] is not None else '—'}"
-                             f"（非零基线 n={width['width_compared']}，含未兑现样本）")
+                             f"（非零基线 n={width['width_compared']}，含未兑现样本{distorted_note}）")
+        if review["shadowed_model_groups"]:
+            lines.append("以下契约/模型配置因早期报告已占首份名额，在当前未筛选口径下仅作更新、未计入上方首份分组：")
+            for sg in review["shadowed_model_groups"]:
+                hint = f"（单独观测请加 --contract {sg['contract']}）" if sg["contract"] is not None else ""
+                lines.append(f"  契约 {sg['contract']} 作者 {sg['author']} × 复核 {sg['reviewer']}："
+                             f"{sg['reports']} 份报告，{sg['companies']} 家公司，更新 {sg['updates']} 条{hint}")
+        if review["contract_independent_first"]:
+            lines.append("按契约独立去重（不受早期契约占槽影响）：")
+            for cs in review["contract_independent_first"]:
+                lines.append(f"  契约 {cs['contract']}：首份 {cs['total']} 条（{cs['companies']} 家公司、"
+                             f"{cs['periods']} 个目标期、已兑现 {cs['scored']}）；完整详情加 --contract {cs['contract']}")
         log.info("\n%s", "\n".join(lines))
         if args.html:
             write_forecast_html(review, args.html)
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump({"forecasts": review["items"], "summary": summary, "model_groups": review["model_groups"],
+                           "shadowed_model_groups": review["shadowed_model_groups"],
+                           "contract_independent_first": review["contract_independent_first"],
+                           "confidence_coverage": review["confidence_coverage"],
                            "generated_at": review["generated_at"], "scope": review["scope"],
                            "contracts": contract_counts([s for s in scored if s["first"]])}, fh, ensure_ascii=False, indent=1, default=str)
         return

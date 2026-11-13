@@ -22,7 +22,8 @@ summary {cursor:pointer;color:#2b48b0} dt {color:#5a616b} dd {margin:0 0 8px} .n
 <section><h2>样本覆盖</h2>{% set s = review.summary %}
 <p>首份预测 {{ s.total }} 条 · {{ s.companies }} 家公司 · {{ s.periods }} 个目标期；更新 {{ s.updates }} 条不重复记分。</p>
 <p>已兑现 {{ s.scored }} · 待披露 {{ s.pending }} · 缺失/不可比 {{ s.unavailable }} · 未查询兑现 {{ s.unchecked }} · 基期更正 {{ s.restated }}</p>
-<p>区间中点胜过朴素基线：{{ s.beat_baseline|review_pct }}（可比 {{ s.compared }} 条；持平不算胜出）。</p>
+<p>区间中点胜过朴素基线：{{ s.beat_baseline|review_pct }}（可比 {{ s.compared }} 条；持平不算胜出{% if s.distorted_compared %}；剔除 {{ s.distorted_compared }} 条外推失真基线后 {{ s.clean_beat_baseline|review_pct }}，{{ s.clean_compared }} 条{% endif %}）。</p>
+{% if s.total %}<p>主观把握入样分布（首份）：{% for c in review.confidence_coverage %}{{ c.confidence }}% {{ c.total }} 条{% if not loop.last %} · {% endif %}{% endfor %}。</p>{% endif %}
 {% for level,g in s.by_confidence.items() %}<p>主观把握 {{ level }}%：兑现 {{ g.n }} 条，命中 {{ g.hit|review_pct }}。</p>{% endfor %}
 {% if not s.scored %}<p class="notice">尚无已记分结果，不能把未查询或未到期当成命中、失败或零收益。</p>{% endif %}
 </section>
@@ -34,8 +35,13 @@ summary {cursor:pointer;color:#2b48b0} dt {color:#5a616b} dd {margin:0 0 8px} .n
 <p>{{ g.reports }} 份报告 / {{ g.companies }} 家公司 / {{ g.periods }} 个目标期 / {{ g.total }} 条首份预测</p>
 <p>已兑现 {{ g.scored }}，待披露 {{ g.pending }}，缺失/不可比 {{ g.unavailable }}，未查询 {{ g.unchecked }}；胜朴素 {{ g.beat_baseline|review_pct }}（{{ g.compared }} 条可比）。</p>
 <p class="muted">区间宽度按把握度、指标及单位分层，不混合汇总；宽度含未兑现样本，不代表准确性。</p>
-{% for w in g.width_groups %}<p>{{ w.metric }}（{{ w.unit }}）· 把握 {{ w.confidence }}%：首份 {{ w.total }}，已兑现 {{ w.scored }}，朴素可比 {{ w.compared }}；相对区间宽度中位 {{ w.median_width_to_baseline|review_pct }}（{{ w.width_compared }} 条有非零基线）。</p>{% endfor %}
+{% for w in g.width_groups %}<p>{{ w.metric }}（{{ w.unit }}）· 把握 {{ w.confidence }}%：首份 {{ w.total }}，已兑现 {{ w.scored }}，朴素可比 {{ w.compared }}；相对区间宽度中位 {{ w.median_width_to_baseline|review_pct }}（{{ w.width_compared }} 条有非零基线{% if w.distorted_baselines %}；剔除 {{ w.distorted_baselines }} 条外推失真基线后中位 {{ w.clean_median_width_to_baseline|review_pct }}，{{ w.clean_width_compared }} 条{% endif %}）。</p>{% endfor %}
 </article>{% else %}<p>没有入样的首份预测。</p>{% endfor %}
+{% if review.shadowed_model_groups or review.contract_independent_first %}<div class="notice">
+{% if review.shadowed_model_groups %}<p>以下契约/模型配置因早期报告已占首份名额，当前未筛选口径下仅作更新、未计入上方首份分组：</p>
+{% for sg in review.shadowed_model_groups %}<p>契约 {{ sg.contract if sg.contract is not none else '未记录' }}（作者 {{ sg.author }} × 复核 {{ sg.reviewer }}）：{{ sg.reports }} 份报告 / {{ sg.companies }} 家公司 / {{ sg.updates }} 条更新{% if sg.contract is not none %}；独立观测请运行 <code>--contract {{ sg.contract }}</code>{% endif %}。</p>{% endfor %}{% endif %}
+{% if review.contract_independent_first %}<p>按契约独立去重（不受早期契约占槽影响）：{% for cs in review.contract_independent_first %}契约 {{ cs.contract }} 首份 {{ cs.total }} 条（{{ cs.companies }} 家公司、已兑现 {{ cs.scored }}）{% if not loop.last %}；{% endif %}{% endfor %}。</p>{% endif %}
+</div>{% endif %}
 </section>
 <section><h2>区间与误差明细</h2>
 <p class="muted">绝对宽度 = 上界 − 下界，误差为绝对误差，均保留原指标单位，不跨单位取平均。相对宽度 = 宽度 ÷ 冻结朴素值的绝对值；基线为零或缺失时为“—”，接近零会放大比例。该指标只帮助发现过宽区间，不是新评分。实际值口径的宽度只在兑现后展示。</p>
@@ -43,7 +49,7 @@ summary {cursor:pointer;color:#2b48b0} dt {color:#5a616b} dd {margin:0 0 8px} .n
 <article><h3>#{{ i.report }} {{ i.name }} · {{ i.written.label or i.forecast.metric }}</h3>
 <p>{{ i.forecast.period }} · {{ '首份' if i.first else '更新，不重复记分' }} · {{ {'scored':'已兑现','pending':'待披露','unavailable':'缺失/不可比','unchecked':'未查询兑现'}.get(r.status,r.status) }}</p>
 <p class="number">区间 {{ i.forecast.low }}–{{ i.forecast.high }} {{ d.unit }}，主观把握 {{ i.forecast.confidence }}%</p>
-<p>绝对宽度 {{ d.width }} {{ d.difference_unit }}；相对冻结基线 {{ d.width_to_baseline|review_pct }}。</p>
+<p>绝对宽度 {{ d.width }} {{ d.difference_unit }}；相对冻结基线 {{ d.width_to_baseline|review_pct }}{% if d.baseline_note %}（{{ d.baseline_note }}）{% endif %}。</p>
 <details><summary>查看依据与误差</summary>
 <p>基期 {{ i.base }}，冻结朴素值 {{ d.baseline if d.baseline is not none else '缺失' }} {{ d.unit }}。</p>
 {% if r.status == 'scored' %}

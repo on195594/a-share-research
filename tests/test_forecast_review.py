@@ -192,3 +192,86 @@ def test_width_groups_never_mix_confidence_metric_or_unit(tmp_path):
         assert stratum['total'] == stratum['width_compared'] == 1
         assert stratum['scored'] == stratum['compared'] == 0
         assert stratum['pending'] == 1
+
+
+def test_distorted_baseline_shadowed_models_and_confidence_coverage(tmp_path, monkeypatch, caplog):
+    import logging
+    import sys
+
+    item = frozen(tmp_path / 'capture.db')[0]
+    base = item['base']
+    prior_base, prior_period = f"{int(base[:4]) - 1}{base[4:]}", f"{int(item['forecast']['period'][:4]) - 1}{item['forecast']['period'][4:]}"
+    sign_flip = dict(item, report=201, code='300475.SZ',
+                     written=dict(item['written'], unit='亿元',
+                                  exact_values={prior_base: '-0.5', prior_period: '14', base: '50'}),
+                     forecast=dict(item['forecast'], metric='T.op_cash', low=40, high=70, confidence=60))
+    neg_prior = dict(item, report=202, code='000657.SZ',
+                     written=dict(item['written'], unit='亿元',
+                                  exact_values={prior_base: '-0.2', prior_period: '4', base: '-5'}),
+                     forecast=dict(item['forecast'], metric='T.op_cash', low=0, high=7, confidence=60))
+    clean = dict(item, report=203, code='600938.SH',
+                 written=dict(item['written'], unit='亿元',
+                              exact_values={prior_base: '100', prior_period: '120', base: '110'}),
+                 forecast=dict(item['forecast'], metric='T.op_cash', low=125, high=145, confidence=60))
+    shadowed = dict(clean, report=204, first=False, contract=2,
+                    models=validation.model_roles({'judgment': {'author': {'provider': 'openai-codex', 'model': 'gpt-6.1-sol', 'reasoning': 'high'},
+                                                                'reviewer': {'provider': 'openai-codex', 'model': 'gpt-6.1-sol', 'reasoning': 'high'}}}))
+    review = validation.forecast_review([sign_flip, neg_prior, clean, shadowed])
+    assert review['items'][0]['diagnostics']['baseline_note'] == '基期与上年同期异号，比例外推失真'
+    assert review['items'][1]['diagnostics']['baseline_note'] == '上年同期基期为负，比例外推失真'
+    assert review['items'][2]['diagnostics']['baseline_note'] is None
+    stratum, = review['model_groups'][0]['width_groups']
+    assert stratum['width_compared'] == 3 and stratum['distorted_baselines'] == 2
+    assert stratum['clean_width_compared'] == 1
+    assert stratum['clean_median_width_to_baseline'] == pytest.approx(20 / 132)
+    sg, = review['shadowed_model_groups']
+    assert (sg['contract'], sg['reports'], sg['companies'], sg['updates']) == (2, 1, 1, 1)
+    cs, = review['contract_independent_first']
+    assert (cs['contract'], cs['total'], cs['companies']) == (2, 1, 1)
+    assert {c['confidence']: c['total'] for c in review['confidence_coverage']} == {60: 3, 75: 0, 90: 0}
+
+    # Scored comparison keeps original beat_baseline while exposing distortion-excluded comparison.
+    scored_distorted = dict(sign_flip, result={'status': 'scored', 'actual': 55.0, 'hit': True,
+                                                'baseline': -1400.0, 'beat_baseline': True, 'restated': False})
+    scored_clean = dict(clean, result={'status': 'scored', 'actual': 140.0, 'hit': True,
+                                       'baseline': 132.0, 'beat_baseline': False, 'restated': False})
+    scored_review = validation.forecast_review([scored_distorted, scored_clean])
+    assert scored_review['summary']['compared'] == 2
+    assert scored_review['summary']['beat_baseline'] == pytest.approx(0.5)
+    assert scored_review['summary']['distorted_compared'] == 1
+    assert scored_review['summary']['clean_compared'] == 1
+    assert scored_review['summary']['clean_beat_baseline'] == pytest.approx(0.0)
+
+    html_path = tmp_path / 'diag.html'
+    validation.write_forecast_html(review, str(html_path))
+    html = html_path.read_text()
+    assert '外推失真基线' in html and '--contract 2' in html and '90% 0 条' in html
+    assert '按契约独立去重' in html
+
+    monkeypatch.setattr(validation, 'load_forecasts', lambda *args: [sign_flip, neg_prior, clean, shadowed])
+    monkeypatch.setattr(validation, 'frozen_forecasts', lambda rows: rows)
+    json_path = tmp_path / 'diag.json'
+    monkeypatch.setattr(sys, 'argv', ['validation', '--database', str(tmp_path / 'capture.db'),
+                                      '--forecasts', '--frozen', '--json', str(json_path)])
+    with caplog.at_level(logging.INFO):
+        validation.main()
+    assert '基期与上年同期异号' in caplog.text
+    assert '单独观测请加 --contract 2' in caplog.text
+    assert '按契约独立去重' in caplog.text
+    assert '缺 75%/90% 样本' in caplog.text
+    payload = json.loads(json_path.read_text())
+    assert len(payload['shadowed_model_groups']) == 1
+    assert len(payload['contract_independent_first']) == 1
+    assert len(payload['confidence_coverage']) == 3
+
+    # When a newer contract has both a new-company first forecast and a shadowed update under the same
+    # model identity, shadowed_model_groups is empty while contract_independent_first must still render in HTML.
+    c1_first = dict(clean, contract=1)
+    c2_update = dict(c1_first, report=205, contract=2, created='2026-11-13T12:00:00+08:00')
+    c2_new = dict(c2_update, report=206, code='000001.SZ')
+    mixed = validation.forecast_review(validation.mark_first([c1_first, c2_update, c2_new]))
+    assert mixed['shadowed_model_groups'] == []
+    assert [(x['contract'], x['total']) for x in mixed['contract_independent_first']] == [(2, 2)]
+    mixed_html = tmp_path / 'mixed.html'
+    validation.write_forecast_html(mixed, str(mixed_html))
+    assert '按契约独立去重' in mixed_html.read_text()
