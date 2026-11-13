@@ -34,4 +34,4 @@
 
 Lib 已并入 `core/`，Skills 运行时保留于 `policy/v0/`；旧账户库只读封锁，新账本是唯一账户写入来源。应用回退也必须保留新账本，不恢复旧写入、不用切换前数据库覆盖新记录。操作见 [README](README.md#部署)，当前回退版本见[实施计划](docs/implementation-plan.md#当前部署)。
 
-合一设计、所有者决定和未结归档条件暂保留在[合一方案](docs/consolidation.md)，本机源码已移至 `/home/lin/archives/`，远程归档收尾后再收束。切换前项目契约与第 2 段流水已退出现行文档，历史分别见 `git show eeec702:docs/project-contract.md`、`git show eeec702:docs/consolidation-stage2-history.md`。`a-stock-tracker` 已归档，不作为依赖或回退来源。
+合一设计、所有者决定与验收基准保留在[合一方案](docs/consolidation.md)；旧 `a-stock-lib`、`a-stock-agent-skills` 仓库本机副本已归档至 `/home/lin/archives/` 且 GitHub 远程仓库已归档只读（`a-stock-tracker` 亦已归档，不作为依赖或回退来源）。当前观察与未完成项只在[实施计划](docs/implementation-plan.md)维护；切换前项目契约与第 2 段流水历史分别见 `git show eeec702:docs/project-contract.md`、`git show eeec702:docs/consolidation-stage2-history.md`。

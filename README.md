@@ -136,7 +136,7 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 
-Skills 通过 `a-stock-cache research` 接入本 API，先复用旧报告，再按缺口发起追问；配置与使用见 [Skills 接入说明](https://github.com/on195594/a-stock-agent-skills/blob/master/skills/a-stock-research/references/research-service.md)，发布状态见实施计划。
+统一 `a-share` Skill 与受控客户端通过 `ashare` / MCP 接入本 API 与工具服务，先复用旧报告，再按缺口发起追问或受控取证；配置与使用见[客户端安装说明](ops/clients/README.md)与[工具目录](a_share_research/tools/README.md)，发布状态见实施计划。原 `a-stock-agent-skills` 仓库已只读归档。
 
 纠错报告的 `methods` 是已核查的方法线索；`evidence.methods_used` 记录检索召回，不证明实际采用或收益贡献。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
 

@@ -10,15 +10,14 @@
 | `a-share-monthly-submit.sh`、`a-share-monthly-status.sh`（`a-share-monthly.sh`、`a-share-monthly.py`） | 月批发起 `3d8b860808e4` / 状态 `112633a18054` | 每月 1 日 20:00 / 每月 1–3 日每小时 :30 |
 | `a-share-scoring.sh`、`a-share-scoring.py` | 记分 `2c0e2f798501` | 周日 19:07 |
 | `a-share-milestones.sh`、`a-share-milestones.py` | 里程碑进度 `6b6ecd1783ea` | 周一 09:03 |
-| `a-share-shadow-diff.sh`（调用仓库外 `consolidation/stage3/daily.sh`） | 合一第 3 段影子对照 `85806e8e4ea1`（临时，5 次） | 已暂停；原计划 2026-11-23～11-27 每日 15:45 |
 凭据：研究 API 使用 `~/.config/a-share-advisor/runtime.env`；统一账户/政策客户端使用 `~/.config/ashare/hermes-assistant.json`。
 去重回执：`~/.local/state/a-share-advisor/opportunities.json`、`~/.local/state/a-share-monthly/<月>.receipt`、`~/.local/state/a-share-scoring/state.json`。
 核对：`python3 ops/hermes/install.py --check`；安装：`python3 ops/hermes/install.py --apply`（须先提交本目录改动，自动复核）。
-可加 `--target <目录>`；安装移除旧 `a-share-k7-progress.py/.sh`，其他非清单文件不动；Hermes 任务入口需同步为新名字。
+可加 `--target <目录>`；安装移除已退役的 `a-share-k7-progress.*`、第 3 段临时对照 `a-share-shadow-diff.sh` 及已完成提醒脚本，其他非清单文件不动；Hermes 任务入口需同步为新名字。
 
 ## 临时接续提醒
 
-`a-share-remind-release.sh`、`a-share-remind-monthly.sh`、`a-share-remind-cutover.sh`、`a-share-remind-closeout.sh` 只输出交给开发 Agent 的固定提示词，不调用模型或执行运维操作。四个脚本已单独安装，一次性计划与任务 ID 由[实施计划](../../docs/implementation-plan.md#合一后续人工接续提醒11-12-所有者授权)维护；第 4 段收尾清理已完成的任务及脚本。
+`a-share-remind-monthly.sh`（任务 `1f1ead8a8a62`，计划 2026-12-04 10:00）只输出交给开发 Agent 的固定提示词，不调用模型或执行运维操作。第 3 段临时对照任务 `85806e8e4ea1` 及已完成的发布、切换、收尾三条提醒（`ba792c50aef5`、`4c5639ca558e`、`ba87fe98944e`）与对应脚本已于 2026-11-13 清理退役，仅保留待执行月批核验提醒；计划与维护记录见[实施计划](../../docs/implementation-plan.md#合一后续人工接续提醒11-12-所有者授权)。
 
 ## 合一替代调用与切换核对
 

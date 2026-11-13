@@ -10,7 +10,14 @@ import subprocess
 import tempfile
 
 SOURCE = Path(__file__).resolve().parent
-OBSOLETE = ("a-share-k7-progress.py", "a-share-k7-progress.sh")
+OBSOLETE = (
+    "a-share-k7-progress.py",
+    "a-share-k7-progress.sh",
+    "a-share-shadow-diff.sh",
+    "a-share-remind-release.sh",
+    "a-share-remind-cutover.sh",
+    "a-share-remind-closeout.sh",
+)
 
 
 def scripts() -> list[Path]:
