@@ -46,5 +46,5 @@
     </details>
   </details>
   {% endfor %}
-  <p class="hint">来源：{{ body.series.source.provider }}，取得于 {{ body.series.source.retrieved_at[:16].replace('T', ' ') }}。采用采集时的最新公开版本；“含更正”表示实际公告日晚于公告日，或同一期记录值存在差异。经营现金流减购建长期资产现金不等于可分配现金。</p>
+  <p class="hint">来源：{{ body.series.source.provider }}，取得于 {{ body.series.source.retrieved_at[:16].replace('T', ' ') }}。采用采集时的最新公开版本；“含更正”表示实际公告日晚于公告日，或同一期记录值存在差异。该差额未扣除筹资性租金、票据购建及分红支出。</p>
   {% else %}<p class="muted">本报告未记录经营序列。</p>{% endif %}

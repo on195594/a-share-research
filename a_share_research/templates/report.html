@@ -10,7 +10,7 @@
     <h1>{{ report.name }}</h1>
     {% if purpose == 'diagnostic' %}<p class="notice" role="status">研究诊断 · 用于核查研究方法，正式投资报告与记分保持原记录。</p>{% endif %}
     <p class="meta"><span class="code">{{ report.code }}</span> · <span class="date">报告生成于 {{ report.created_at[:16].replace("T", " ") }}</span></p>
-    <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，不是公告日期）</p>
+    <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，非公告日期）</p>
     {% if newer_report %}<p class="notice caution" role="status">正在阅读历史报告，以下判断与价格属于本报告时点。<a href="/reports/{{ newer_report.id }}">查看 {{ newer_report.created_at[:10] }} 的最新正式研究（{{ '复核通过' if newer_report.passed else '复核未通过' }}）</a>。</p>{% endif %}
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {% if report.passed %}
@@ -28,7 +28,12 @@
           <div><dt>测算位置</dt><dd>{{ sd.zone or '区间倒置' }}{% if sd.annual_return is number %}<small class="num">· 年化 {{ sd.annual_return }}%</small>{% endif %}</dd></div>
         </dl>
         {% if sd.boundary %}<p class="small stance-boundary"><strong>边界立场</strong>：现价与期望回报门槛价相差不足 5%，同样材料重跑可能得出相反立场；记分单列，不作判断力证据。</p>{% endif %}
-        {{ flip_sensitivity(sd) }}
+        {% if sd.flip_distance is number %}
+        <details class="block stance-sensitivity"{% if sd.flip_distance | abs <= 0.02 %} open{% endif %}>
+          <summary>假设敏感度（距立场切换约 <span class="num">{{ '%.1f' | format(sd.flip_distance | abs * 100) }}%</span>）</summary>
+          {{ flip_sensitivity(sd) }}
+        </details>
+        {% else %}{{ flip_sensitivity(sd) }}{% endif %}
         {% endif %}
         {% if body.stance.action == '现在分批' and body.stance.add_trigger %}{% set t = body.stance.add_trigger %}
         <p class="small stance-trigger">加仓检查点（参考，不阻止首批）：{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}。达到才加后续批次；未达到则复核是否减仓。</p>
@@ -69,7 +74,7 @@
     <details id="evidence" tabindex="-1" {% if request and (request.query_params.get('evidence') == '1' or request.query_params.get('claim', '').startswith('gaps:')) %}open{% endif %}>
       <summary>证据日期与本报告记录的缺口{% if evidence and evidence.gaps %} · {{ evidence.gaps|length }} 项{% else %} · 缺口未记录{% endif %}{% if evidence and evidence.missing_dates %} · 公告日不完整{% endif %}</summary>
       <p>基础披露：{{ body.document.title if body.document else '未记录' }}。</p>
-      {% if evidence and evidence.announced %}<p>已存披露记录的公告日：{{ evidence.announced | join('、') }}。</p>{% else %}<p>公告可得日期未记录，不能用报告生成时间补足。</p>{% endif %}
+      {% if evidence and evidence.announced %}<p>已存披露记录的公告日：{{ evidence.announced | join('、') }}。</p>{% else %}<p>公告可得日期未记录（此处仅展示已记录的披露日期）。</p>{% endif %}
       {% if evidence and evidence.missing_dates and evidence.announced %}<p>另有 {{ evidence.missing_dates }} 处披露日期记录不完整，以上日期并不完整。</p>{% endif %}
       <p>基础披露抓取于：{{ body.document.retrieved_at if body.document and body.document.retrieved_at else '未记录' }}。</p>
       {% if evidence and evidence.gaps %}<ul>{% for gap in evidence.gaps %}<li id="claim-gaps-{{ loop.index0 }}" tabindex="-1">{{ gap }}</li>{% endfor %}</ul>{% else %}<p>未记录明确的证据缺口。</p>{% endif %}
@@ -84,12 +89,12 @@
     <ul class="toc">
       <li><a href="#risks">风险与反证{% if content.risks %}<small class="num">{{ content.risks | length }}</small>{% endif %}</a></li>
       {% if body.question or content.answer %}<li><a href="#answer">{{ answer_title }}{% if content.answer %}<small class="num">{{ content.answer | length }}</small>{% endif %}</a></li>{% endif %}
-      {% if content.prior_status %}<li><a href="#prior-status">旧议程状态<small class="num">{{ content.prior_status | length }}</small></a></li>{% endif %}
-      {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点<small class="num">{{ content.checkpoints | length }}</small></a></li>{% endif %}
       <li><a href="#business">业务{% if content.business %}<small class="num">{{ content.business | length }}</small>{% endif %}</a></li>
       <li><a href="#financial">财务与走势</a></li>
       {% if comparison and comparison.old %}<li><a href="#comparison">前后对照</a></li>{% endif %}
       {% if report.passed and body.valuation %}<li><a href="#valuation">情景测算</a></li>{% endif %}
+      {% if content.checkpoints %}<li><a href="#checkpoints">下期检查点<small class="num">{{ content.checkpoints | length }}</small></a></li>{% endif %}
+      {% if content.prior_status %}<li><a href="#prior-status">旧议程状态<small class="num">{{ content.prior_status | length }}</small></a></li>{% endif %}
       {% if purpose != 'diagnostic' %}
       {% if report.passed %}<li><a href="#price">价格参考</a></li>{% endif %}
       <li><a href="#more">继续研究</a></li>
@@ -114,32 +119,10 @@
     {% if body.open_questions %}
     <div class="open-questions">
       <h3>复核认为尚未答完</h3>
-      <p class="small muted">以下部分未完成，其余结论已通过复核；未完成部分不能当作已回答。</p>
+      <p class="small muted">以下部分尚待补充取证，其余结论已通过复核。</p>
       <ul>{% for q in body.open_questions %}<li>{{ q.problem }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
-  </section>
-  {% endif %}
-  {% if prior_agenda %}
-  <section id="prior-status" tabindex="-1">
-    <h2>旧议程状态</h2>
-    <p class="small muted">逐项对照<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，状态按本次证据判定。</p>
-    <ul class="items">
-    {% for entry in prior_agenda %}
-      <li id="claim-prior_status-{{ loop.index0 }}" tabindex="-1">
-        <p class="prior-old"><a href="{{ entry.previous_url }}">{{ entry.previous_label }}</a>{% if entry.previous %}：{{ entry.previous }}{% endif %}</p>
-        <p><span class="badge quiet">{{ entry.status }}</span> {{ entry.text }}</p>
-        {{ cites(entry, rows, documents, focus == 'prior_status:' ~ loop.index0) }}
-      </li>
-    {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
-  {% if content.checkpoints %}
-  <section id="checkpoints" tabindex="-1">
-    <h2>下期检查点</h2>
-    <p class="muted">下一期披露时应观察的事项；出处只证明基期事实。标“预测”的是对下一期财务表数值的区间判断，披露后由程序记分。</p>
-    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus, followup=purpose != 'diagnostic' and not replay_of) }}
   </section>
   {% endif %}
   <section id="business">
@@ -199,6 +182,31 @@
 
   {% if report.passed and body.valuation %}{% include "_valuation.html" %}{% endif %}
 
+  {% if content.checkpoints %}
+  <section id="checkpoints" tabindex="-1">
+    <h2>下期检查点</h2>
+    <p class="muted">下一期披露时应观察的事项；出处只证明基期事实。标“预测”的是对下一期财务表数值的区间判断，披露后由程序记分。</p>
+    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus, followup=purpose != 'diagnostic' and not replay_of) }}
+  </section>
+  {% endif %}
+  {% if prior_agenda %}
+  <section id="prior-status" tabindex="-1">
+    <details class="block"{% if focus.startswith('prior_status:') %} open{% endif %}>
+      <summary>旧议程状态 · 对照上次报告 {{ prior_agenda | length }} 项</summary>
+      <p class="small muted">逐项对照<a href="/reports/{{ body.prior.report_id }}">上次报告</a>（资料至 {{ body.prior.period }}）列出的风险与检查点，状态按本次证据判定。</p>
+      <ul class="items">
+      {% for entry in prior_agenda %}
+        <li id="claim-prior_status-{{ loop.index0 }}" tabindex="-1">
+          <p class="prior-old"><a href="{{ entry.previous_url }}">{{ entry.previous_label }}</a>{% if entry.previous %}：{{ entry.previous }}{% endif %}</p>
+          <p><span class="badge quiet">{{ entry.status }}</span> {{ entry.text }}</p>
+          {{ cites(entry, rows, documents, focus == 'prior_status:' ~ loop.index0) }}
+        </li>
+      {% endfor %}
+      </ul>
+    </details>
+  </section>
+  {% endif %}
+
   {% if report.passed and body.methods %}
   <section>
     <h2>本次可复用的方法</h2>
@@ -221,7 +229,7 @@
     <ul>{% for p in body.problems %}<li>{{ p.problem }}{% if p.id %}<small> · {{ p.id }} · {{ '仍未解决' if p.status == 'unresolved' else '状态未记录' }}</small>{% endif %}{% if p.importance %}<p>与本次判断的关系：{{ p.importance }}</p>{% endif %}{% if p.evidence %}{{ cites(dict(cites=p.evidence), rows, documents) }}{% endif %}</li>{% endfor %}</ul>
     {% endif %}
     {% if source_view.error %}<p class="notice caution">{{ source_view.error }}</p>{% endif %}
-    {% for key, source in documents.items() %}<p>{{ '基础原文' if key == 'D0' else '补充原文' }}：{% if source.href %}<a href="{{ source.href }}" rel="noreferrer noopener">{{ source.document.title or key }}</a>{% else %}{{ source.document.title or key }}（未记录原文链接）{% endif %}（公告日 {{ source.document.announced or '未记录' }}），{% if source.state == 'listed' %}仅目录记录，不是已读证据{% elif source.read_pages %}已读取页码：{{ source.read_pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
+    {% for key, source in documents.items() %}<p>{{ '基础原文' if key == 'D0' else '补充原文' }}：{% if source.href %}<a href="{{ source.href }}" rel="noreferrer noopener">{{ source.document.title or key }}</a>{% else %}{{ source.document.title or key }}（未记录原文链接）{% endif %}（公告日 {{ source.document.announced or '未记录' }}），{% if source.state == 'listed' %}仅目录记录（尚未读取原文）{% elif source.read_pages %}已读取页码：{{ source.read_pages | join('、') }}{% else %}未记录已读页码{% endif %}。</p>{% endfor %}
     {% if body.document %}<p class="muted small">抓取于 {{ body.document.retrieved_at or '未记录' }} · SHA-256 {{ body.document.sha256[:16] if body.document.sha256 else '未记录' }} · 模型调用 {{ body.calls }} 次</p>{% endif %}
 
     {% if body.stop_reasons %}<p>取证停止记录：{% for stop in body.stop_reasons %}{{ {'time_limit': '探索时限', 'fetch_limit': '取证次数上限', 'tool_limit': '工具次数上限', 'round_limit': '探索轮数上限', 'repeated_requests': '重复请求未增加资料'}.get(stop.reason, '已记录停止条件') }}{{ '；' if not loop.last else '。' }}{% endfor %}</p>{% endif %}

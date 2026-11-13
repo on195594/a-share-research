@@ -6,7 +6,7 @@
   <p class="small">仅列本报告原研究范围中已查询的同行快照，请结合<a href="{{ '#answer' if body.question else '#financial' }}">{{ '原研究问题与回答' if body.question else '原报告正文' }}</a>阅读。</p>
   {% for peer in peer_snapshots %}
   <h3>{{ peer.subject_name }}与{{ peer.name }}</h3>
-  {% if peer.period and peer.rows %}<p class="small">对照期：{{ financial_period(peer.period) }} · 累计口径沿用生成时契约，并非逐行重新证明。仅取所选指标中已存的最近共同期间，各对公司可能不同期，不代表当前最新资料。</p>
+  {% if peer.period and peer.rows %}<p class="small">对照期：{{ financial_period(peer.period) }} · 累计口径沿用生成时契约，并非逐行重新证明。仅取所选指标中已存的最近共同期间，各对公司可能不同期（非当前最新资料汇总）。</p>
   {% elif peer.period %}<p class="small">记录中的共同日期：<time datetime="{{ peer.period }}">{{ peer.period }}</time>，该日期不等于期间口径已确认。</p>{% endif %}
   {% if peer.rows %}
   {% if peer.chart %}

@@ -219,3 +219,68 @@ def test_contextual_followup_preserves_risk_identity_and_escapes_source():
     hostile = dict(risk, text='"<script>alert(1)</script>')
     safe = macro.items([hostile], {}, '风险', section='risks', followup=True)
     assert '<script>' not in safe and '&lt;script&gt;' in safe
+
+
+def test_report_layout_orders_business_financial_valuation_before_prior_agenda(tmp_path):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from a_share_research import db, reading, valuation
+    from support.continuation import BODY, load
+    from support.templates import render
+    from support.valuation import RECORD, ROWS, assumptions
+
+    conn = db.connect(tmp_path / 'layout.db')
+    load(conn)
+    row = dict(conn.execute('SELECT * FROM reports WHERE id = 39').fetchone())
+    body = deepcopy(BODY[39])
+    body['valuation'] = assumptions()
+    body['valuation_calc'] = valuation.compute(
+        body['valuation'], body['table'], body['market_date'],
+        consensus=valuation.consensus(ROWS, [2026, 2027, 2028], body['market_date']))
+    body['prior_status'] = [{'ref': 'risks[0]', 'status': '仍存在',
+                             'text': '风险条件仍在。', 'cites': body['risks'][0]['cites']}]
+    prior = reading.prior_agenda(conn, body)
+    page = lambda req=None: render(
+        'report.html', report=RECORD | {'id': row['id'], 'period': row['period']}, body=body,
+        feedback=None, feedback_label='', replay_of=None,
+        rows={r['id']: r for r in body['table']}, price=None, followups=[],
+        prior_agenda=prior, comparison={'old': None}, market=[], fin=[], request=req)
+    html = page()
+    conn.close()
+    order = [html.index(tag) for tag in (
+        '<section id="risks"', '<section id="answer"', '<section id="business"',
+        '<section id="financial"', '<section id="valuation"', '<section id="checkpoints"',
+        '<section id="prior-status"')]
+    assert order == sorted(order)
+    prior_block = html[html.index('<section id="prior-status"'):]
+    prior_block = prior_block[:prior_block.index('</section>')]
+    assert '<details class="block">' in prior_block
+    focused_html = page(SimpleNamespace(query_params={'claim': 'prior_status:0'}))
+    focused_prior = focused_html[focused_html.index('<section id="prior-status"'):]
+    assert '<details class="block" open>' in focused_prior[:focused_prior.index('</section>')]
+
+
+def test_noncritical_flip_sensitivity_folds_while_critical_stays_open():
+    from copy import deepcopy
+    from support.templates import render
+    from test_stance import FLIP_SAMPLES
+
+    def rendered(sample):
+        calc = sample['valuation_calc']
+        rep = {'id': sample['report_id'], 'code': sample['code'], 'name': sample['code'],
+               'created_at': '2026-11-05T10:00:00+08:00', 'period': '2026-09-30',
+               'passed': True, 'run_id': sample['report_id']}
+        body = {'verdict': '需要谨慎', 'summary': '需要谨慎：测试。', 'risks': [], 'business': [],
+                'financial': [], 'table': [], 'market_date': calc['as_of'],
+                'stance': {'action': sample['action'], 'text': '立场说明。', 'cites': []},
+                'stance_calc': {'price': calc['v2']['support_below'], 'valid_until': '2027-04-30'},
+                'valuation_calc': deepcopy(calc)}
+        html = render('report.html', report=rep, body=body, rows={}, comparison=None)
+        start = html.index('<details class="block stance-sensitivity"')
+        return html[start:html.index('>', start) + 1]
+
+    critical = next(s for s in FLIP_SAMPLES if s['report_id'] == 116)
+    noncritical = next(s for s in FLIP_SAMPLES if s['report_id'] == 132)
+    assert ' open>' in rendered(critical)
+    assert ' open>' not in rendered(noncritical)
+
