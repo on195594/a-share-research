@@ -5,6 +5,6 @@
 契约面清单由 tests/test_judgment_contract.py 机械钉住；修改遵守判断验证文档的季度窗口。
 """
 
-JUDGMENT_CONTRACT = 1
-SURFACE_SHA256 = "c810df729b32b40ae8dfd0a3ce6f58eb692d777c2dcc3f5ee84a7dede692fd96"
-CHANGES = [(1, "2026-11-10", "当前提示词、工具定义与冻结规则的基线，未改变研究语义。")]
+JUDGMENT_CONTRACT = 2
+SURFACE_SHA256 = "c61cb2ccd1b1903d54baee7b6574d1135c6456fd84c6c7a39acf142274bca8ed"
+CHANGES = [(2, "2026-11-13", "所有者当次批准提前合入：成文与修复提示增加投资者写作约定；后续部署启用契约2，历史判断保持原版本。"), (1, "2026-11-10", "当前提示词、工具定义与冻结规则的基线，未改变研究语义。")]
