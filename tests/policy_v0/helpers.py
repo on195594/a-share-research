@@ -2,20 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from io import StringIO
 from typing import Any
 
-from a_share_research.policy.v0 import commands_analysis, domain, store
-
-FRAMEWORK_NAMES = {
-    "A": "A通用",
-    "B": "B银行",
-    "C": "C资源",
-    "D": "D公用",
-    "E": "E消费",
-    "F": "F科技",
-}
+from a_share_research.policy.v0 import domain, store
 
 
 def valid_fundamentals_payload(
@@ -60,7 +49,7 @@ def set_valid_fundamentals(
 
 
 def record_valid_quote(code: str, price: float = 10.0) -> None:
-    """Write a recent validated quote snapshot for set-analysis tests."""
+    """Write a recent validated quote snapshot for cache and watchlist tests."""
     store.record_quote_snapshot(
         code,
         price,
@@ -70,60 +59,6 @@ def record_valid_quote(code: str, price: float = 10.0) -> None:
         {"sina": {"price": price}},
         False,
     )
-
-
-def valid_decision_payload(
-    code: str,
-    framework: str = "A",
-    score: int | None = 60,
-    *,
-    action: str | None = None,
-    cycle: bool | dict[str, str] | None = None,
-    conflict: bool = False,
-    narrative: str = "fixture analysis",
-) -> dict[str, Any]:
-    """Build the smallest valid decision-v1 fixture."""
-    normalized = FRAMEWORK_NAMES.get(framework, framework)
-    blocked = conflict or score is None
-    reasons = (
-        ["valuation_conflict" if conflict else "score_incomplete"] if blocked else []
-    )
-    payload: dict[str, Any] = {
-        "schema_version": 1,
-        "stock_code": code,
-        "framework": normalized,
-        "framework_score": None if conflict else score,
-        "framework_classification": "not_formed" if blocked else "A级",
-        "rule_version": "test-v1",
-        "rule_hash": "test-rule-hash",
-        "l3_status": "not_triggered",
-        "portfolio_risk": {"status": "clear", "reason_codes": []},
-        "suggested_action": action or ("等待" if blocked else "买入候选"),
-        "blocked": blocked,
-        "block_reason": reasons,
-        "source_provenance": {"fixture": "tests.helpers"},
-        "freshness": {"as_of": f"{domain.cst_today()}T10:00:00+08:00"},
-        "narrative": narrative,
-    }
-    if conflict:
-        payload["source_provenance"]["valuation_conflict"] = {
-            "pb_conclusion": "低估",
-            "cross_valuation_conclusion": "偏贵",
-            "evidence": ["fixture valuation evidence"],
-        }
-    if cycle is True:
-        payload["cycle_stage"] = {"stage": "上行期", "rationale": "fixture cycle"}
-    elif isinstance(cycle, dict):
-        payload["cycle_stage"] = cycle
-    return payload
-
-
-def set_valid_analysis(monkeypatch, **kwargs: Any) -> dict[str, Any]:
-    """Write a decision-v1 fixture through the production stdin command."""
-    payload = valid_decision_payload(**kwargs)
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload, ensure_ascii=False)))
-    commands_analysis.cmd_set_analysis([])
-    return payload
 
 
 def mock_price_quotes(monkeypatch, fetch):

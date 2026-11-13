@@ -3,7 +3,6 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from a_share_research.policy.v0 import risk_gates, store
-from a_share_research.policy.v0.check_regulatory_freshness import check as check_regulatory_freshness
 
 CST = timezone(timedelta(hours=8))
 
@@ -224,11 +223,10 @@ def test_expired_regulatory_rule_cannot_clear_gate():
     assert gate["source_hash"]
 
 
-def test_regulatory_freshness_ci_guard_fails_expired_rules():
-    errors = check_regulatory_freshness(date(2026, 12, 14))
-
-    assert len(errors) == len(risk_gates.REGULATORY_RULES)
-    assert all("review_due" in error for error in errors)
+def test_all_regulatory_rules_have_valid_freshness_metadata():
+    for rule in risk_gates.REGULATORY_RULES.values():
+        assert risk_gates.evaluate_rule_freshness(rule, date(2026, 9, 13)) == "current"
+        assert risk_gates.evaluate_rule_freshness(rule, date(2026, 12, 14)) == "review_due"
 
 
 def test_roe_negative_wins_even_when_two_negative_values_would_make_ratio_positive():

@@ -151,7 +151,7 @@ def open_research(conn, principal, request_id, code):
 
 
 def acquire(conn, principal, request_id, external_id, base_revision, tool, arguments):
-    from a_share_research.core.external_acquisition import validate_call
+    from a_share_research.external_acquisition import validate_call
     row = _owned(conn, principal, external_id)
     if type(base_revision) is not int or base_revision < 0:
         raise SubmissionError('材料版本须为非负整数', 422)
@@ -176,7 +176,7 @@ def recover(conn):
 
 
 def execute(conn, operation_id):
-    from a_share_research.core import acquisition_process
+    from a_share_research import acquisition_process
     from a_share_research.material import Material
 
     with db.transaction(conn):
@@ -246,7 +246,7 @@ def execute(conn, operation_id):
 
 def inspect(conn):
     """Read all revision/operation links without requiring historical keys to remain active."""
-    from a_share_research.core.external_acquisition import validate_extension
+    from a_share_research.external_acquisition import validate_extension
     from a_share_research.material import Material, ResearchError
 
     problems = []

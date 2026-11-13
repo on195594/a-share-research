@@ -1,13 +1,129 @@
 """Release guards on captured runs in an isolated database; never stops services."""
 
 import json
+import logging
 import os
 from pathlib import Path
+import sqlite3
+from contextlib import closing
 
 import pytest
 
-from a_share_research import db, deploy
+from a_share_research import db, deploy, gate
+from a_share_research.policy import identity
 from support.continuation import load
+
+
+@pytest.mark.parametrize('tables', [(), ('policy_versions',), ('policy_activations',),
+                                  ('policy_versions', 'policy_activations')])
+def test_policy_installed_status_without_active_policy_is_read_only(tmp_path, tables):
+    database = tmp_path / 'policy.db'
+    with closing(sqlite3.connect(database)) as conn:
+        for table in tables:
+            conn.execute(f'CREATE TABLE {table} (id INTEGER PRIMARY KEY, identity TEXT, manifest TEXT)')
+    before = database.read_bytes()
+    assert deploy.policy_installed_status(database) is None
+    assert database.read_bytes() == before
+
+
+@pytest.fixture
+def policy_database(tmp_path):
+    database = tmp_path / 'app.db'
+    with closing(db.connect(database)):
+        pass
+    return database
+
+
+def _activate_manifest(database, manifest):
+    with closing(sqlite3.connect(database)) as conn:
+        conn.execute('INSERT OR IGNORE INTO policy_versions VALUES (?,?,?,?,?)',
+                     (manifest['identity'], 'v0', db.now(), 1, json.dumps(manifest)))
+        conn.execute('INSERT INTO policy_activations(policy,activated_at,activated_by,identity) VALUES (?,?,?,?)',
+                     ('v0', db.now(), 'structural-test', manifest['identity']))
+        conn.commit()
+
+
+def _stale_manifest(manifest):
+    # Explicit stale-source variant of the real installation, with consistent archived digests.
+    stale = json.loads(json.dumps(manifest))
+    stale['files']['code']['a_share_research/deploy.py'] = '0' * 64
+    stale['code_hash'] = gate.digest(stale['files']['code'])
+    del stale['identity']
+    stale['identity'] = 'policy:' + gate.digest(stale)
+    identity.verify(stale)
+    return stale
+
+
+def test_policy_installed_status_checks_latest_activation_without_writes(policy_database):
+    manifest = identity.build({'source': 'explicit-identity-test'})
+    stale = _stale_manifest(manifest)
+    with pytest.raises(identity.IdentityError, match='当前安装'):
+        identity.check_installed(stale)
+    for selected, expected in ((stale, False), (manifest, True), (stale, False)):
+        _activate_manifest(policy_database, selected)
+        before = deploy.fingerprints(policy_database)
+        assert deploy.policy_installed_status(policy_database) is expected
+        assert deploy.fingerprints(policy_database) == before
+
+
+@pytest.mark.parametrize('installed', [None, True, False])
+def test_deploy_records_policy_status_and_warns_only_when_invalid(
+        policy_database, tmp_path, monkeypatch, caplog, installed):
+    if installed is not None:
+        manifest = identity.build({'source': 'explicit-identity-test'})
+        _activate_manifest(policy_database, manifest if installed else _stale_manifest(manifest))
+    original = deploy.fingerprints(policy_database)
+    events = []
+
+    def run(*args):
+        if args[:2] == ('git', 'rev-parse'):
+            return 'release'
+        if args[:2] == ('docker', 'ps'):
+            return 'tools-container'
+        if 'config' in args:
+            return f'{args[-1]} config-hash'
+        return ''
+
+    def tools_control(action):
+        events.append(action)
+        return {'paused': action == 'pause', 'in_flight': 0}
+
+    def verify(*args, **kwargs):
+        events.append('verified')
+        return {}
+
+    def ready():
+        events.append('ready')
+        return {}
+
+    check = deploy.policy_installed_status
+
+    def check_after_ready(database):
+        assert events[-3:] == ['verified', 'resume', 'ready']
+        return check(database)
+
+    # Isolate Docker/backup side effects; exercise real policy reads and release manifest writes.
+    monkeypatch.setattr(deploy, 'run', run)
+    monkeypatch.setattr(deploy, '_tools_config', lambda: None)
+    monkeypatch.setattr(deploy, 'verify_images', lambda code: {'web': 'new-web', 'worker': 'new-worker'})
+    monkeypatch.setattr(deploy, 'describe', lambda service: {
+        'running': True, 'image': 'old', 'config_hash': 'config-hash',
+        'mounts': {'/data': [str(tmp_path), True]}})
+    monkeypatch.setattr(deploy, 'tools_control', tools_control)
+    monkeypatch.setattr(deploy, '_verify_release', verify)
+    monkeypatch.setattr(deploy, 'wait_tools_ready', ready)
+    monkeypatch.setattr(deploy, 'create_release_backup', lambda *args: {})
+    monkeypatch.setattr(deploy, 'prune_backups', lambda *args: [])
+    monkeypatch.setattr(deploy, 'prune_images', lambda *args: {})
+    monkeypatch.setattr(deploy, 'policy_installed_status', check_after_ready)
+    evidence = tmp_path / 'release'
+    with caplog.at_level(logging.WARNING, logger=deploy.__name__):
+        deploy.deploy('release', evidence)
+    assert json.loads((evidence / 'manifest.json').read_text())['policy_installed'] is installed
+    assert deploy.fingerprints(policy_database) == original
+    assert ('installed=false' in caplog.text) is (installed is False)
+    if installed is False:
+        assert 'README' in caplog.text and '保持参数不变' in caplog.text and '重新登记并激活' in caplog.text
 
 
 def test_idle_guard_and_fingerprints_on_captured_records(tmp_path):

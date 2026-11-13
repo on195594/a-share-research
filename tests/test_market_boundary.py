@@ -7,6 +7,14 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[1] / "a_share_research"
 
 
+def test_package_uses_absolute_imports():
+    for path in sorted(PACKAGE.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert node.level == 0, (str(path.relative_to(PACKAGE)), node.lineno)
+
+
 def test_market_gateway_boundary():
     forbidden = {"a_share_research.screening._pro", "a_share_research.screening._trade_days"}
     for path in sorted(PACKAGE.glob("*.py")):
@@ -27,9 +35,6 @@ def test_market_gateway_boundary():
                     )
                     _check_dependency(path, alias.name)
             elif isinstance(node, ast.ImportFrom):
-                # The repository requires absolute package imports.
-                if path.name in {"market.py", "sources.py"}:
-                    assert node.level == 0, (path.name, node.lineno)
                 module = node.module or ""
                 for alias in node.names:
                     target = f"{module}.{alias.name}"

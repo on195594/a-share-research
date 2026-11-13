@@ -11,12 +11,10 @@ import sys
 
 from a_share_research.policy.v0 import (
     commands_admin,
-    commands_analysis,
     commands_holdings,
     commands_monitor,
     db,
     paths,
-    performance,
     research_client,
     portfolio_scenario,
     position_size,
@@ -26,16 +24,6 @@ COMMANDS = {
     "research": research_client.cmd_research,
     "portfolio-scenario": portfolio_scenario.cmd_portfolio_scenario,
     "position-size": position_size.cmd_position_size,
-    "check": commands_analysis.cmd_check,
-    "get": commands_analysis.cmd_get,
-    "set": commands_analysis.cmd_set,
-    "get-analysis": commands_analysis.cmd_get_analysis,
-    "set-analysis": commands_analysis.cmd_set_analysis,
-    "set-score": commands_analysis.cmd_set_score,
-    "set-score-breakdown": commands_analysis.cmd_set_score_breakdown,
-    "score-fundamentals": commands_analysis.cmd_score_fundamentals,
-    "regulatory-evidence": commands_analysis.cmd_regulatory_evidence,
-    "performance-report": performance.cmd_performance_report,
     "set-flag": commands_monitor.cmd_set_flag,
     "clear-flag": commands_monitor.cmd_clear_flag,
     "alert-open": commands_monitor.cmd_alert_open,
@@ -75,7 +63,6 @@ COMMANDS = {
     "list": commands_admin.cmd_list,
     "cleanup": commands_admin.cmd_cleanup,
     "clear": commands_admin.cmd_clear,
-    "checklist": commands_admin.cmd_checklist,
 }
 
 # One source of truth for the side-effect boundary.  R0 is local read-only,
@@ -84,8 +71,6 @@ COMMANDS = {
 COMMAND_CLASSIFICATION = {
     **dict.fromkeys(
         (
-            "get",
-            "get-analysis",
             "holdings",
             "position-return",
             "retro-pending",
@@ -95,9 +80,6 @@ COMMAND_CLASSIFICATION = {
             "l3-list",
             "watchlist",
             "list",
-            "checklist",
-            "score-fundamentals",
-            "performance-report",
             "portfolio-scenario",
             "position-size",
         ),
@@ -105,7 +87,6 @@ COMMAND_CLASSIFICATION = {
     ),
     **dict.fromkeys(
         (
-            "check",
             "research",
             "check-holdings",
             "portfolio-risk",
@@ -120,11 +101,6 @@ COMMAND_CLASSIFICATION = {
     ),
     **dict.fromkeys(
         (
-            "set",
-            "set-analysis",
-            "regulatory-evidence",
-            "set-score",
-            "set-score-breakdown",
             "set-flag",
             "clear-flag",
             "alert-open",
@@ -163,19 +139,6 @@ _CLI_POSITIONALS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "research": (),
     "portfolio-scenario": (),
     "position-size": (),
-    "check": (("代码", "?"),),
-    "get": (("代码", "?"),),
-    "set": (
-        ("代码", None),
-        ("名称", None),
-        ("行业", None),
-        ("JSON", None),
-        ("TTL", "?"),
-    ),
-    "get-analysis": (("代码", "?"),),
-    "set-analysis": (),
-    "set-score": (("代码", None), ("分数", None)),
-    "set-score-breakdown": (("代码", None), ("JSON", None)),
     "set-flag": (("代码", None), ("级别", None), ("原因", None)),
     "clear-flag": (("代码", None),),
     "alert-open": (
@@ -239,10 +202,6 @@ _CLI_POSITIONALS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "list": (),
     "cleanup": (),
     "clear": (("代码", "?"),),
-    "checklist": (("代码", None), ("框架", None)),
-    "score-fundamentals": (("代码", None), ("框架", None), ("评分输入JSONv1", None)),
-    "performance-report": (),
-    "regulatory-evidence": (("代码", None),),
 }
 
 _CLI_VALUE_OPTIONS = {
@@ -269,7 +228,6 @@ _CLI_VALUE_OPTIONS = {
         "--account-scope",
         "--portfolio-value-as-of",
     ),
-    "performance-report": ("--input", "--benchmark"),
     "benchmark-report": ("--end",),
     "report-trades": ("--end",),
 }
@@ -329,12 +287,6 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             command_parser.add_argument("--all", action="store_true")
             command_parser.add_argument("--active", action="store_true")
             command_parser.add_argument("--json", action="store_true")
-        if command == "performance-report":
-            command_parser.add_argument("--check-ledger", action="store_true")
-            command_parser.add_argument(
-                "--allow-eod-flow-assumption", action="store_true"
-            )
-            command_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -382,12 +334,6 @@ def main(argv: list[str] | None = None) -> int:
         return int(exc.code or 0)
     if command in {"research", "portfolio-scenario", "position-size"}:
         return int(COMMANDS[command](remaining) or 0)
-    if command == "performance-report":
-        try:
-            return int(COMMANDS[command](remaining) or 0)
-        except sqlite3.Error as exc:
-            print(f"数据库查询失败：{exc}", file=sys.stderr)
-            return 1
     try:
         database_path = paths.cache_db_path()
     except (OSError, RuntimeError, UnicodeError) as exc:

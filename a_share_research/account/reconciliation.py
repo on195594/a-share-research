@@ -44,11 +44,6 @@ class Value(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-class Position(Value):
-    code: Code
-    shares: Quantity
-
-
 class Opening(Value):
     positions: dict[Code, Quantity]
     cash: Annotated[Money, Field(ge=0)]

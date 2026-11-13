@@ -1,36 +1,18 @@
 """
-补充测试覆盖：
-  - cache.py: cmd_set/cmd_get、cmd_get_analysis、cmd_set_score_breakdown、
-              cmd_set_flag/cmd_clear_flag、cmd_remove_holding、cmd_cleanup/cmd_clear、
-              fetch_current_price 前缀路由、cmd_check_holdings 精确边界、
-              get_watchlist_rows 排序与 needs_refresh=False、并发迁移安全性
-  - fetcher.py: _market_prefix、timed_call（超时/异常）、timed_call_with_retry、
-                parse_float 边界值、avg_of 边界值、_extract_fin_fields 缺列
+补充测试覆盖：标记、持仓移除、缓存清理、行情前缀与持仓检查边界、观察名单排序。
 """
 
 import json
 from datetime import datetime, timedelta
-from io import StringIO
 from unittest.mock import MagicMock
 
 import pytest
 
-from a_share_research.policy.v0 import (
-    commands_admin,
-    commands_analysis,
-    commands_holdings,
-    commands_monitor,
-    db,
-    domain,
-    fetcher,
-    market_quotes,
-    store,
-)
+from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes, store
 from policy_v0.helpers import (
     mock_price_quotes,
     record_valid_quote,
     set_valid_fundamentals,
-    valid_fundamentals_payload,
 )
 
 
@@ -55,202 +37,6 @@ def _insert_analysis(code: str, result: str = "结论", score: int | None = None
     conn.close()
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_set / cmd_get
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestCmdSetAndGet:
-    def test_cmd_set_writes_and_get_reads_back(self, capsys):
-        payload = json.dumps(
-            valid_fundamentals_payload({"pe": 5.2, "pb": 0.6}), ensure_ascii=False
-        )
-        commands_analysis.cmd_set(["600000", "浦发银行", "国有大行", payload])
-        capsys.readouterr()  # discard set output
-
-        commands_analysis.cmd_get(["600000"])
-        out = capsys.readouterr().out
-        data = json.loads(out)
-        assert data["pe"] == 5.2
-        assert data["pb"] == 0.6
-        assert data["_cache_meta"]["code"] == "600000"
-
-    def test_cmd_set_confirms_industry_ttl(self, capsys):
-        payload = json.dumps(valid_fundamentals_payload({}), ensure_ascii=False)
-        commands_analysis.cmd_set(["601318", "中国平安", "保险", payload])
-        out = capsys.readouterr().out
-        assert "TTL:72h" in out
-
-    def test_cmd_set_explicit_ttl_overrides_industry(self, capsys):
-        payload = json.dumps(valid_fundamentals_payload({}), ensure_ascii=False)
-        commands_analysis.cmd_set(["000858", "五粮液", "白酒", payload, "48"])
-        out = capsys.readouterr().out
-        assert "TTL:48h" in out
-
-    def test_cmd_set_invalid_json_exits(self):
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set(["600000", "名称", "行业", "{invalid json}"])
-        assert exc.value.code == 1
-
-    def test_cmd_set_missing_args_exits(self):
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set(["600000", "名称"])
-        assert exc.value.code == 1
-
-    def test_cmd_get_miss(self, capsys):
-        commands_analysis.cmd_get(["999999"])
-        out = capsys.readouterr().out
-        assert out.strip() == "CACHE_MISS"
-
-    def test_cmd_get_expired_returns_cache_miss(self, capsys, monkeypatch):
-        payload = json.dumps(
-            valid_fundamentals_payload({"roe": 15}), ensure_ascii=False
-        )
-        commands_analysis.cmd_set(["600036", "招商银行", "银行", payload])
-        capsys.readouterr()
-        monkeypatch.setattr(domain, "is_expired", lambda *_: True)
-        commands_analysis.cmd_get(["600036"])
-        out = capsys.readouterr().out
-        assert out.strip() == "CACHE_MISS"
-
-    def test_cmd_get_no_args_returns_cache_miss(self, capsys):
-        commands_analysis.cmd_get([])
-        out = capsys.readouterr().out
-        assert out.strip() == "CACHE_MISS"
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_get_analysis
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestCmdGetAnalysis:
-    def test_legacy_row_is_human_only(self, capsys):
-        _insert_analysis("600036", "招行分析：买入")
-        commands_analysis.cmd_get_analysis(["600036"])
-        out = capsys.readouterr().out
-        assert "招行分析：买入" in out
-        assert "LEGACY_ANALYSIS_HUMAN_ONLY" in out
-        assert "缓存命中" not in out
-
-    def test_miss_returns_cache_miss(self, capsys):
-        commands_analysis.cmd_get_analysis(["999999"])
-        assert capsys.readouterr().out.strip() == "CACHE_MISS"
-
-    def test_no_args_returns_cache_miss(self, capsys):
-        commands_analysis.cmd_get_analysis([])
-        assert capsys.readouterr().out.strip() == "CACHE_MISS"
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_set_score_breakdown
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestCmdSetScoreBreakdown:
-    def test_valid_breakdown_stored(self, capsys):
-        _insert_analysis("600036")
-        breakdown = {
-            "fundamentals": {"roe_3y": 10, "subtotal": 44},
-            "timing": {"valuation_axis": 13, "subtotal": 17},
-            "total": 61,
-        }
-        commands_analysis.cmd_set_score_breakdown(["600036", json.dumps(breakdown)])
-        out = capsys.readouterr().out
-        assert "分项得分已记录" in out
-
-        # Verify it's actually in the database
-        today = domain.cst_today()
-        conn = db.get_db()
-        row = conn.execute(
-            "SELECT score_breakdown FROM analysis_results WHERE code=? AND date=?",
-            ("600036", today),
-        ).fetchone()
-        conn.close()
-        stored = json.loads(row[0])
-        assert stored["fundamentals"]["subtotal"] == 44
-
-    def test_no_analysis_record_exits(self):
-        breakdown = {"fundamentals": {"subtotal": 1}, "timing": {"subtotal": 1}}
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score_breakdown(["888888", json.dumps(breakdown)])
-        assert exc.value.code == 1
-
-    def test_invalid_json_exits(self):
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score_breakdown(["600036", "{bad json}"])
-        assert exc.value.code == 1
-
-    def test_legacy_flat_schema_rejected(self, capsys):
-        """旧平铺 schema（无 fundamentals/timing）写入应被拒绝（TL-3 写入校验）"""
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score_breakdown(
-                ["600036", '{"roe": 8, "volume": 7}']
-            )
-        assert exc.value.code == 1
-        assert "fundamentals" in capsys.readouterr().err
-
-    @pytest.mark.parametrize(
-        "json_string", ["null", "123", '["fundamentals","timing"]']
-    )
-    def test_non_dict_top_level_json_rejected(self, json_string, capsys):
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score_breakdown(["600036", json_string])
-        assert exc.value.code == 1
-        assert "dict" in capsys.readouterr().err
-
-    def test_missing_subtotal_rejected(self):
-        _insert_analysis("600036")
-        breakdown = {"fundamentals": {"roe_3y": 10}, "timing": {"subtotal": 17}}
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score_breakdown(["600036", json.dumps(breakdown)])
-        assert exc.value.code == 1
-
-    @pytest.mark.parametrize("bad_subtotal", [True, [1, 2]])
-    def test_non_numeric_subtotal_rejected(self, bad_subtotal, capsys):
-        _insert_analysis("600036")
-        breakdown = {
-            "fundamentals": {"subtotal": bad_subtotal},
-            "timing": {"subtotal": 1},
-        }
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score_breakdown(["600036", json.dumps(breakdown)])
-        assert exc.value.code == 1
-        assert "subtotal" in capsys.readouterr().err
-
-    @pytest.mark.parametrize(
-        "breakdown",
-        [
-            {"fundamentals": {"subtotal": 61}, "timing": {"subtotal": 0}, "total": 61},
-            {"fundamentals": {"subtotal": 40}, "timing": {"subtotal": 15}, "total": 99},
-            {
-                "fundamentals": {"subtotal": float("nan")},
-                "timing": {"subtotal": 15},
-                "total": float("nan"),
-            },
-        ],
-    )
-    def test_breakdown_rejects_invalid_bounds_total_and_nan(self, breakdown):
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit):
-            commands_analysis.cmd_set_score_breakdown(["600036", json.dumps(breakdown)])
-
-    def test_breakdown_must_match_persisted_score(self):
-        _insert_analysis("600036", score=60)
-        breakdown = {
-            "fundamentals": {"subtotal": 44},
-            "timing": {"subtotal": 17},
-            "total": 61,
-        }
-        with pytest.raises(SystemExit):
-            commands_analysis.cmd_set_score_breakdown(["600036", json.dumps(breakdown)])
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_set_flag / cmd_clear_flag
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -315,8 +101,6 @@ class TestSetAndClearFlag:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_remove_holding
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestRemoveHolding:
@@ -340,8 +124,6 @@ class TestRemoveHolding:
         assert exc.value.code == 1
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_cleanup / cmd_clear
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -462,8 +244,6 @@ class TestCleanupAndClear:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_check_holdings 精确边界
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestCheckHoldingsBoundary:
@@ -521,8 +301,6 @@ class TestCheckHoldingsBoundary:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  cache.py — get_watchlist_rows / cmd_watchlist 排序与 needs_refresh
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestWatchlistRows:
@@ -563,8 +341,6 @@ class TestWatchlistRows:
         assert rows[0]["flags"][0]["level"] == "red"
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — fetch_current_price 市场前缀路由
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -751,27 +527,6 @@ class TestFetchCurrentPrice:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_set_analysis 边界
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestSetAnalysisBoundary:
-    def test_empty_stdin_exits(self, monkeypatch):
-        monkeypatch.setattr("sys.stdin", StringIO(""))
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_analysis(["600036"])
-        assert exc.value.code == 1
-
-    def test_whitespace_only_stdin_exits(self, monkeypatch):
-        monkeypatch.setattr("sys.stdin", StringIO("   \n  "))
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_analysis(["600036"])
-        assert exc.value.code == 1
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_close_holding 自定义日期
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestCloseHoldingCustomDate:
@@ -789,217 +544,3 @@ class TestCloseHoldingCustomDate:
         ).fetchone()
         conn.close()
         assert row[0] == "2025-12-31"
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — 并发 get_db() 迁移安全性
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestMarketPrefix:
-    def test_sh_for_6xx(self):
-        assert fetcher._market_prefix("600036") == "sh"
-        assert fetcher._market_prefix("601318") == "sh"
-
-    def test_sz_for_0xx(self):
-        assert fetcher._market_prefix("000001") == "sz"
-
-    def test_sz_for_3xx(self):
-        assert fetcher._market_prefix("300750") == "sz"
-
-    def test_bj_for_4xx(self):
-        assert fetcher._market_prefix("430570") == "bj"
-
-    def test_bj_for_8xx(self):
-        assert fetcher._market_prefix("872925") == "bj"
-
-    def test_bj_for_920xx(self):
-        assert fetcher._market_prefix("920189") == "bj"
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — timed_call
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestTimedCall:
-    def test_success_returns_value(self):
-        assert fetcher.timed_call(lambda: 42) == 42
-
-    def test_exception_returns_error_tuple(self):
-        result = fetcher.timed_call(lambda: 1 / 0)
-        assert isinstance(result, tuple)
-        assert result[0] == "ERROR"
-        assert "division by zero" in result[1]
-
-    def test_timeout_returns_timeout_sentinel(self):
-        import time
-
-        # Function sleeps 2s; timeout is 0.2s → TIMEOUT
-        result = fetcher.timed_call(time.sleep, 2, timeout=0.2)
-        assert result == "TIMEOUT"
-
-    def test_args_forwarded_correctly(self):
-        def add(a, b):
-            return a + b
-
-        assert fetcher.timed_call(add, 3, 4) == 7
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — timed_call_with_retry
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestTimedCallWithRetry:
-    def test_zero_retries_returns_no_attempts(self):
-        result = fetcher.timed_call_with_retry(lambda: 42, max_retries=0)
-        assert result == ("ERROR", "no attempts made")
-
-    def test_success_on_first_attempt_no_retry(self):
-        import multiprocessing as mp
-
-        calls = mp.Value("i", 0)
-
-        def fn():
-            with calls.get_lock():
-                calls.value += 1
-            return "ok"
-
-        result = fetcher.timed_call_with_retry(fn, max_retries=3)
-        assert result == "ok"
-        assert calls.value == 1
-
-    def test_succeeds_on_second_attempt(self, monkeypatch):
-        monkeypatch.setattr("time.sleep", lambda _: None)
-        import multiprocessing as mp
-
-        calls = mp.Value("i", 0)
-
-        def flaky():
-            with calls.get_lock():
-                calls.value += 1
-                call_number = calls.value
-            if call_number == 1:
-                raise ValueError("first failure")
-            return "recovered"
-
-        result = fetcher.timed_call_with_retry(flaky, max_retries=3)
-        assert result == "recovered"
-        assert calls.value == 2
-
-    def test_all_retries_exhausted_returns_last_error(self, monkeypatch):
-        monkeypatch.setattr("time.sleep", lambda _: None)
-
-        def always_fail():
-            raise RuntimeError("always fails")
-
-        result = fetcher.timed_call_with_retry(always_fail, max_retries=2)
-        assert isinstance(result, tuple)
-        assert result[0] == "ERROR"
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — parse_float
-# ═══════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.parametrize(
-    "val,expected",
-    [
-        (None, None),
-        ("--", None),
-        ("-", None),
-        ("None", None),
-        ("nan", None),
-        ("False", None),
-        ("True", None),
-        ("", None),
-        ("3.14", 3.14),
-        ("15%", 15.0),  # percentage stripped
-        (" 2.5 ", 2.5),  # whitespace stripped
-        (10, 10.0),  # int passthrough
-        (0.0, 0.0),  # zero is valid
-        (-5.5, -5.5),  # negative
-    ],
-)
-def test_parse_float(val, expected):
-    result = fetcher.parse_float(val)
-    assert result == expected
-
-
-def test_parse_float_custom_default():
-    assert fetcher.parse_float(None, default=-1.0) == -1.0
-    assert fetcher.parse_float("--", default=0.0) == 0.0
-
-
-def test_parse_float_nonnumeric_string_returns_default():
-    assert fetcher.parse_float("abc") is None
-    assert fetcher.parse_float("abc", default=99.0) == 99.0
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — avg_of
-# ═══════════════════════════════════════════════════════════════════
-
-
-def _pd_series(values):
-    import pandas as pd
-
-    return pd.Series(values)
-
-
-class TestAvgOf:
-    def test_none_series_returns_none(self):
-        assert fetcher.avg_of(None, 3) is None
-
-    def test_all_none_values_returns_none(self):
-        assert fetcher.avg_of(_pd_series([None, None, None]), 3) is None
-
-    def test_fewer_than_n_uses_all_available(self):
-        # series has 2 values, n=5 → average of those 2
-        result = fetcher.avg_of(_pd_series([10.0, 20.0]), 5)
-        assert result == 15.0
-
-    def test_normal_last_n(self):
-        # last 3 of [10, 20, 30, 40, 50] = [30, 40, 50] → avg=40
-        result = fetcher.avg_of(_pd_series([10.0, 20.0, 30.0, 40.0, 50.0]), 3)
-        assert result == 40.0
-
-    def test_mixed_none_ignored(self):
-        # last 3 of series: [None, 20, 30] → avg of [20, 30] = 25.0
-        result = fetcher.avg_of(_pd_series(["--", "20.00", "30.00"]), 3)
-        assert result == 25.0
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — _extract_fin_fields with missing columns
-# ═══════════════════════════════════════════════════════════════════
-
-
-def test_extract_fin_fields_handles_missing_columns():
-    """Missing columns must return None for that field, not raise KeyError."""
-    import pandas as pd
-
-    # DataFrame with only some columns
-    partial_df = pd.DataFrame(
-        {
-            "净资产收益率": ["12.00", "13.00", "14.00"],
-            # intentionally omit most other columns
-        }
-    )
-    result = fetcher._extract_fin_fields(partial_df)
-    assert result["roe_3y_avg"] == 13.0
-    # Missing columns should be None, not raise
-    assert result["debt_ratio"] is None
-    assert result["gross_margin"] is None
-    assert result["current_ratio"] is None
-
-
-def test_extract_fin_fields_empty_dataframe():
-    """Empty DataFrame must return all None without crashing."""
-    import pandas as pd
-
-    result = fetcher._extract_fin_fields(pd.DataFrame())
-    for v in result.values():
-        assert v is None

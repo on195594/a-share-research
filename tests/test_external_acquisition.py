@@ -14,7 +14,7 @@ import sys
 import pytest
 
 from a_share_research import db, evidence, sources
-from a_share_research.core import external_acquisition as adapter
+from a_share_research import external_acquisition as adapter
 from a_share_research.material import Material
 from a_share_research.research_tools import TOOLS
 from support.reports import MATERIAL
@@ -189,7 +189,7 @@ def test_research_methods_uses_readonly_database(monkeypatch, tmp_path):
 
 
 def test_cli_real_calculation_protocol_does_not_create_database(tmp_path):
-    result = subprocess.run([sys.executable, '-m', 'a_share_research.core.external_acquisition'],
+    result = subprocess.run([sys.executable, '-m', 'a_share_research.external_acquisition'],
         input=json.dumps(request()), text=True, capture_output=True, timeout=30,
         env=os.environ | {'DATA_DIR': str(tmp_path)}, cwd=Path(__file__).parents[1])
     assert result.returncode == 0, result.stderr
@@ -200,7 +200,7 @@ def test_cli_real_calculation_protocol_does_not_create_database(tmp_path):
 
 
 def test_cli_failure_has_no_success_envelope_or_traceback():
-    result = subprocess.run([sys.executable, '-m', 'a_share_research.core.external_acquisition'],
+    result = subprocess.run([sys.executable, '-m', 'a_share_research.external_acquisition'],
         input=json.dumps({'action': 'open', 'code': 'file:///secret'}), text=True,
         capture_output=True, timeout=30, cwd=Path(__file__).parents[1])
     assert result.returncode == 1

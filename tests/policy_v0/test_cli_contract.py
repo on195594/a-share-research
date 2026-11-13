@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 
-from a_share_research.policy.v0 import cache, fetcher
+from a_share_research.policy.v0 import cache
 
 CLI_ARGUMENT_CASES = {
     "research": (
         ["reports", "600519"],
         ["report", "9", "--compact"],
     ),
-    "check": ([], ["600000"]),
-    "get": ([], ["600000"]),
-    "set": (["600000", "名称", "行业", "{}"], ["600000", "名称", "行业", "{}", "24"]),
-    "get-analysis": ([], ["600000"]),
-    "set-analysis": ([], []),
-    "set-score": (["600000", "60"], ["600000", "60"]),
-    "set-score-breakdown": (["600000", "{}"], ["600000", "{}"]),
     "set-flag": (["600000", "yellow", "原因"], ["600000", "yellow", "原因"]),
     "clear-flag": (["600000"], ["600000"]),
     "alert-open": (
@@ -104,7 +97,6 @@ CLI_ARGUMENT_CASES = {
     "report-trades": ([], ["--end", "2026-10-21"]),
     "daily-brief": ([], []),
     "stop-alert": ([], []),
-    "regulatory-evidence": (["600000"], ["600000"]),
     "portfolio-scenario": (
         ["--snapshot", "/tmp/snapshot.json", "--sell", "600000:100", "--fees", "0"],
         ["--snapshot", "/tmp/snapshot.json", "--sell", "600000:100", "--sell", "600001:200", "--fees", "5", "--cash", "100"],
@@ -141,29 +133,11 @@ CLI_ARGUMENT_CASES = {
     "list": ([], []),
     "cleanup": ([], []),
     "clear": ([], ["600000"]),
-    "checklist": (["600000", "A"], ["600000", "A"]),
-    "score-fundamentals": (
-        ["600000", "A", "{}"],
-        ["600000", "A", '{"gross_margin_stable":true}'],
-    ),
-    "performance-report": (
-        ["--input", "account.json"],
-        [
-            "--input",
-            "account.json",
-            "--benchmark",
-            "benchmark.json",
-            "--check-ledger",
-            "--allow-eod-flow-assumption",
-            "--json",
-        ],
-    ),
 }
 
 
 def test_public_mains_return_int() -> None:
     assert isinstance(cache.main(["--help"]), int)
-    assert isinstance(fetcher.main(["--help"]), int)
 
 
 def test_w1_requires_prefix_confirmation_without_opening_database(
@@ -296,29 +270,6 @@ def test_every_subcommand_has_help(capsys) -> None:
     for command in cache.COMMANDS:
         assert cache.main([command, "--help"]) == 0, command
         assert command in capsys.readouterr().out
-
-
-def test_phase4_structured_command_help_and_schema(capsys) -> None:
-    assert cache._CLI_POSITIONALS["set-analysis"] == ()
-    assert cache.main(["set-analysis", "--help"]) == 0
-    set_analysis_help = capsys.readouterr().out
-    assert "usage: a-stock-cache set-analysis [-h]" in set_analysis_help
-    assert "代码" not in set_analysis_help
-    assert "框架" not in set_analysis_help
-
-    assert cache._CLI_POSITIONALS["score-fundamentals"] == (
-        ("代码", None),
-        ("框架", None),
-        ("评分输入JSONv1", None),
-    )
-    assert cache.main(["score-fundamentals", "--help"]) == 0
-    scoring_help = capsys.readouterr().out
-    assert "代码 框架 评分输入JSONv1" in scoring_help
-
-    assert "decision-v1 JSON" in set_analysis_help
-    assert "stdin" in set_analysis_help
-    assert "set-analysis <代码> <框架> [得分]" not in set_analysis_help
-    assert "报告正文从stdin读取" not in set_analysis_help
 
 
 def test_sina_parser_preserves_price_when_previous_close_is_malformed() -> None:

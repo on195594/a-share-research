@@ -197,7 +197,7 @@ def _guard(liveness_fd: int) -> int:
             os.killpg(os.getpgrp(), signal.SIGKILL)
 
     threading.Thread(target=watch_parent, daemon=True).start()
-    child = subprocess.Popen([sys.executable, '-m', 'a_share_research.core.external_acquisition'],
+    child = subprocess.Popen([sys.executable, '-m', 'a_share_research.external_acquisition'],
                              stdin=sys.stdin, stdout=sys.stdout, stderr=subprocess.DEVNULL)
     return child.wait()
 

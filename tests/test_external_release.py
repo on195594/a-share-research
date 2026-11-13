@@ -12,7 +12,7 @@ import pytest
 
 from a_share_research import (api_keys, backup_refs, db, deploy, external_operations,
                              external_research, initial_release, integrity, rollback, rollback_probe)
-from a_share_research.core import acquisition_process, external_acquisition
+from a_share_research import acquisition_process, external_acquisition
 from a_share_research.tools.server import create_app
 from support.reports import MATERIAL, report
 

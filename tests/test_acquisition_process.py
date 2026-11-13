@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from a_share_research.core import acquisition_process as process
+from a_share_research import acquisition_process as process
 
 
 RESULT = {'material': {'sha256': 'protocol-fixture'}, 'result': {'ok': True}}
@@ -112,14 +112,14 @@ time.sleep(60)
     # Keep the real guardian and liveness pipe; only its fixed collector is replaced.
     guardian = f"""
 import sys
-from a_share_research.core import acquisition_process as m
+from a_share_research import acquisition_process as m
 popen=m.subprocess.Popen
 m.subprocess.Popen=lambda command,**kwargs: popen([sys.executable,'-c',{collector!r}],**kwargs)
 sys.exit(m._guard(int(sys.argv[1])))
 """
     return f"""
 import sys
-from a_share_research.core import acquisition_process as m
+from a_share_research import acquisition_process as m
 m._command=lambda fd: [sys.executable,'-c',{guardian!r},str(fd)]
 m.run({{}},timeout=30)
 """

@@ -10,9 +10,6 @@ import pytest
 
 MODULES = (
     "cache",
-    "fetcher",
-    "checklist",
-    "framework_metadata",
     "framework_catalog",
     "market_quotes",
     "position_ledger",
@@ -20,7 +17,6 @@ MODULES = (
     "domain",
     "db",
     "store",
-    "commands_analysis",
     "commands_holdings",
     "commands_monitor",
     "commands_admin",
@@ -38,11 +34,6 @@ def test_no_legacy_top_level_runtime_imports() -> None:
     assert "from project_paths" not in text
     assert "import project_paths" not in text
     assert "from cache import" not in text
-
-
-def test_checklist_does_not_import_cache() -> None:
-    root = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0"
-    assert "import cache" not in (root / "checklist.py").read_text(encoding="utf-8")
 
 
 def test_command_modules_do_not_import_cache() -> None:

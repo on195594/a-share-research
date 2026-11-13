@@ -160,6 +160,32 @@ def _source_version(database: Path) -> int:
         return conn.execute('PRAGMA user_version').fetchone()[0]
 
 
+def policy_installed_status(database: Path) -> bool | None:
+    """Check the latest policy against installed sources without migrating or writing.
+
+    Missing policy tables or activations return None; an invalid identity returns False.
+    Database and JSON decoding errors propagate.
+    """
+    from a_share_research.policy import identity
+
+    with closing(sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True)) as conn:
+        conn.execute('BEGIN')
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {'policy_activations', 'policy_versions'} <= tables:
+            return None
+        activation = conn.execute('SELECT identity FROM policy_activations ORDER BY id DESC LIMIT 1').fetchone()
+        if activation is None:
+            return None
+        row = conn.execute('SELECT manifest FROM policy_versions WHERE identity=?', activation).fetchone()
+    if row is None:
+        return False
+    try:
+        identity.check_installed(json.loads(row[0]))
+    except identity.IdentityError:
+        return False
+    return True
+
+
 def describe(service: str) -> dict:
     container = json.loads(run("docker", "inspect", f"a-share-research-{service}"))[0]
     mounts = {m['Destination']: ['tmpfs' if m.get('Type') == 'tmpfs' else m['Source'], m['RW']]
@@ -397,13 +423,18 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             if tools_control('resume')['paused']:
                 raise RuntimeError('tools 未恢复受理')
             save('tools-ready.json',wait_tools_ready())
+        policy_installed = policy_installed_status(database)
+        if policy_installed is False:
+            log.warning('本次部署的代码变更使生效政策的源码安装身份失效（installed=false）；'
+                        '运行政策前须按 README 保持参数不变，重新登记并激活政策身份')
         # The first migration retains all preparation/recovery evidence and images.
         pruned = prune_backups(data) if recovery_images is None else []
         pruned_images = prune_images(images) if recovery_images is None else {}
         save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
                                "backup": str(backup), "backup_bundle": str(backup.with_suffix('.bundle')),
                                "backup_counts": counts, "pruned_backups": pruned,
-                               "pruned_images": pruned_images, "initial_recovery": recovery_images, "at": db.now()})
+                               "pruned_images": pruned_images, "initial_recovery": recovery_images,
+                               "policy_installed": policy_installed, "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
         log.exception("发布失败，核对兼容性后回退应用；保留数据、备份与证据")

@@ -27,10 +27,14 @@
 | 价格参考与技术纪律 | `test_price.py` |
 | 图表与可视化几何、投资卡片 | `test_charts.py`、`test_cards.py`、`test_company_card.py` |
 | 引文、复核账本、接续报告与公司法定事项 | `test_check.py`、`test_review_evidence.py`、`test_open_questions.py`、`test_continuation.py`、`test_attention.py`、`test_feedback_retry.py`、`test_research_methods.py`、`test_companies.py`、`test_company_identity.py`、`test_stock_codes.py` |
-| 精确计算、报告载荷与研究工具 | `test_research_tools.py`、`test_calculation_assumptions.py`、`test_conditions.py`、`test_report.py`、`test_valuation.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证假设链传播、长期补充回报、分情景引用、共享补证、修订调用储备、来源冲突及跨材料账本；不代表真实模型语义验收或研究通过率） |
+| 精确计算、报告载荷与研究工具 | `test_research_tools.py`、`test_calculation_assumptions.py`、`test_conditions.py`、`test_report.py`、`test_report_language.py`、`test_valuation.py`、`test_research_repair.py`、`test_repair.py`（真实披露与离线协议输入验证假设链传播、长期补充回报、分情景引用、共享补证、修订调用储备、来源冲突、写作契约接线及跨材料账本；不代表真实模型语义验收或研究通过率） |
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py`、`test_batch_c.py`、`test_monthly_batch.py` |
 | 历史回测 | `test_backtest.py` |
-| 判断记分、投资立场与估值诊断（V0–V3、V5、A1、A3、A4、契约面锁定） | `test_validation.py`、`test_judgment_contract.py`、`test_agenda.py`、`test_stance.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py`、`test_r2_queries.py` |
+| 判断记分、投资立场与估值诊断（V0–V5、A1、A3、A4、契约面锁定） | `test_validation.py`、`test_forecast_review.py`、`test_judgment_contract.py`、`test_agenda.py`、`test_stance.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py`、`test_r2_queries.py` |
+| 账户账本、净值与对账（`account/`） | `test_account.py`、`test_account_ledger.py`、`test_account_reconciliation.py`、`test_account_nav.py`、`test_account_nav_core.py`、`test_account_evidence.py`、`test_account_analysis.py`、`test_account_audit.py`、`test_account_current.py`、`test_account_retirement.py`、`test_account_valuation_time.py`、`test_cutover.py` |
+| 投资政策与监控（`policy/`、`policy/v0/`） | `test_policy_identity.py`、`test_policy_registry.py`、`test_policy_replay.py`、`test_policy_monitor.py`、`test_policy_derived.py`、`test_policy_stop_evaluation.py`、`test_policy_daily_evaluation.py`、`test_benchmark_evaluation.py`、`test_web_policy.py`、`policy_v0/` |
+| 受控工具、CLI/MCP 与外部入账（`tools/`） | `test_tools_service.py`、`test_tools_auth.py`、`test_tools_control.py`、`test_tools_external.py`、`test_tools_lifecycle.py`、`test_tools_cli.py`、`test_tools_mcp.py`、`test_tools_account.py`、`test_external_research.py`、`test_external_review.py`、`test_external_scoring.py` |
+| 公共数据与计算合同（`core/`） | `core/` |
 | 页面证据与只读检索 | `test_web_reading.py`、`test_reading_discovery.py`、`test_content_search.py` |
 | 数据库迁移、治理基底与历史隔离 | `test_db.py`、`test_data_foundation.py`、`test_diagnostic_isolation.py`、`test_call_log.py`（真实探索轮次的增量与资料块还原、巡检互变） |
 | TuShare 缓存与任务恢复 | `test_tushare_cache.py`、`test_market_boundary.py`、`test_worker_recovery.py`、`test_material_cache.py`（真实财报响应、SQLite 恢复事务和材料快照；`test_integrity.py` 核对 PDF 文本缓存复用与重建） |

@@ -2,35 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
-from io import StringIO
 from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import (
-    commands_admin,
-    commands_analysis,
-    db,
-    domain,
-    fetcher,
-    store,
-)
-from policy_v0.helpers import (
-    set_valid_analysis,
-    valid_decision_payload,
-    valid_fundamentals_payload,
-)
+from a_share_research.policy.v0 import commands_admin, db, domain, store
+from policy_v0.helpers import valid_fundamentals_payload
 
-SUBJECTIVE_CATEGORIES = {
-    "A": ("护城河", "行业地位"),
-    "B": ("护城河", "行业地位"),
-    "C": ("护城河", "行业地位"),
-    "D": ("特许经营稀缺性", "行业地位"),
-    "E": ("品牌渠道", "行业地位"),
-    "F": ("护城河", "行业地位"),
-}
 NOW = datetime(2026, 7, 14, 2, 0, tzinfo=timezone.utc)
 PROJECT_ROOT = Path(__file__).resolve().parents[3] / "a_share_research/policy/v0/guide"
 
@@ -55,41 +34,6 @@ def record_quote(
         {"sina": {"price": price, "quote_date": "2026-07-14"}},
         False,
         fetched_at=fetched_at or NOW.isoformat(),
-    )
-
-
-def scoring_input(framework: str, *, cycle: bool | None = None) -> dict:
-    letter = framework[0]
-    return {
-        "schema_version": 1,
-        "metrics": {},
-        "subjective_assessments": [
-            {
-                "category": category,
-                "rating": "优档",
-                "evidence": [f"{category} fixture evidence"],
-                "confidence": "高",
-            }
-            for category in SUBJECTIVE_CATEGORIES[letter]
-        ],
-        "cycle_stage": (
-            {"stage": "上行期", "rationale": "fixture cycle evidence"}
-            if cycle is True or cycle is None and letter in {"B", "C", "D"}
-            else None
-        ),
-    }
-
-
-def run_set_analysis(
-    monkeypatch, code: str, framework: str, score: int | None = 60
-) -> None:
-    record_quote(code)
-    set_valid_analysis(
-        monkeypatch,
-        code=code,
-        framework=framework,
-        score=score,
-        cycle=framework[0] in {"B", "C", "D"},
     )
 
 
@@ -145,26 +89,6 @@ def test_research_routes_product_cycle_analysis_to_grounded_reference() -> None:
         assert contract in reference
 
 
-def test_set_analysis_uses_latest_snapshot_without_requesting_another_quote(
-    monkeypatch,
-) -> None:
-    run_set_analysis(monkeypatch, "600000", "A", score=60)
-
-    with db.db_session() as conn:
-        analysis = conn.execute(
-            "SELECT quote_price, quote_as_of, quote_source FROM analysis_results WHERE code=?",
-            ("600000",),
-        ).fetchone()
-        snapshot = conn.execute(
-            "SELECT source, verification_sources, degraded FROM quote_snapshots WHERE code=?",
-            ("600000",),
-        ).fetchone()
-    assert analysis == (100.0, "2026-07-14T10:00:00", "sina")
-    assert snapshot[0] == "sina"
-    assert json.loads(snapshot[1])["sina"]["price"] == 100.0
-    assert snapshot[2] == 0
-
-
 @pytest.mark.parametrize(
     "period", ["2025年报", "2026半年报", "2026Q1", "2026Q2", "2026Q3"]
 )
@@ -195,113 +119,6 @@ def test_fundamentals_requires_provenance_and_null_reason_for_every_field() -> N
         store.set_fundamentals("1", "测试", "制造", missing_provenance)
     with pytest.raises(ValueError, match="null_reasons"):
         store.set_fundamentals("2", "测试", "制造", missing_reason)
-
-
-def test_fetcher_payload_writes_complete_provenance_and_excludes_global_bond() -> None:
-    results = {
-        "roe_3y_avg": 12.0,
-        "pe_static": 18.0,
-        "pe_ttm": 18.0,
-        "pe_percentile_5y": 25.0,
-        "ps_ttm": 3.2,
-        "ps_percentile_5y": 40.0,
-        "_pe_percentile_windows": {
-            "5": {"sample_start": "2021-07-14", "sample_end": "2026-07-14"},
-        },
-        "_ps_percentile_window": {
-            "sample_start": "2021-07-30",
-            "sample_end": "2026-07-14",
-            "valid_months": 60,
-            "basis": "ps_ttm",
-            "source": "tushare.daily_basic",
-        },
-        "latest_report_snapshot": {
-            "report_period": "2026Q1",
-            "announcement_date": "2026-04-25",
-            "source": "tushare.fina_indicator+income+balancesheet",
-            "is_newer_than_annual": True,
-            "fields": {},
-        },
-        "_quote_as_of": "2026-07-14T10:00:00",
-        "price_change_5d": 3.25,
-        "_price_change_5d_as_of": "2026-07-11",
-    }
-    fetcher._build_cache_payload("600000", "测试", "制造", results, {}, "2025年报")
-
-    with db.db_session() as conn:
-        stored = json.loads(
-            conn.execute(
-                "SELECT data FROM stock_fundamentals WHERE code=?", ("600000",)
-            ).fetchone()[0]
-        )
-    business_fields = set(stored) - {"data_period", "null_reasons", "field_provenance"}
-    assert "bond_yield_10y" not in stored
-    assert set(stored["field_provenance"]) == business_fields
-    assert stored["field_provenance"]["roe_3y_avg"]["status"] == "ok"
-    assert stored["field_provenance"]["pb"]["status"] == "missing"
-    assert stored["null_reasons"]["pb"]
-    assert stored["pe_static"] == stored["pe_ttm"] == 18.0
-    assert stored["field_provenance"]["pe_static"]["as_of"] == "2026-07-14T10:00:00"
-    assert stored["price_change_5d"] == 3.25
-    assert stored["field_provenance"]["price_change_5d"] == {
-        "source": "computed",
-        "as_of": "2026-07-11",
-        "status": "ok",
-    }
-    assert stored["field_provenance"]["pe_percentile_5y"]["window_years"] == "5"
-    assert (
-        stored["field_provenance"]["pe_percentile_5y"]["basis"]
-        == "annual_eps_disclosure_lag_adjusted"
-    )
-    assert stored["field_provenance"]["pe_percentile_5y"]["price_basis"] == "raw_close"
-    assert (
-        stored["field_provenance"]["pe_percentile_5y"]["split_policy"]
-        == "detected_event_eps_adjustment"
-    )
-    assert (
-        stored["field_provenance"]["pe_percentile_5y"]["sample_start"] == "2021-07-14"
-    )
-    assert stored["field_provenance"]["pe_percentile_5y"]["sample_end"] == "2026-07-14"
-    assert stored["ps_ttm"] == 3.2
-    assert stored["ps_percentile_5y"] == 40.0
-    assert stored["field_provenance"]["ps_percentile_5y"]["basis"] == "ps_ttm"
-    assert stored["field_provenance"]["ps_percentile_5y"]["valid_months"] == 60
-    assert (
-        stored["field_provenance"]["ps_percentile_5y"]["source"]
-        == "tushare.daily_basic"
-    )
-    assert stored["field_provenance"]["latest_report_snapshot"]["status"] == "ok"
-    assert (
-        stored["field_provenance"]["latest_report_snapshot"]["source"]
-        == "tushare.fina_indicator+income+balancesheet"
-    )
-    assert stored["field_provenance"]["latest_report_snapshot"]["as_of"] == "2026-04-25"
-    assert stored["latest_report_snapshot"]["report_period"] == "2026Q1"
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("2025", "2025年报"),
-        ("2026Q1", "2026Q1"),
-        ("2026-06-30", "2026半年报"),
-        ("2026-09-30", "2026Q3"),
-    ],
-)
-def test_fetcher_derives_data_period_from_actual_report_column(raw, expected) -> None:
-    import pandas as pd
-
-    assert fetcher._extract_data_period(pd.DataFrame({"报告期": [raw]})) == expected
-
-
-def test_fetcher_refuses_fundamentals_write_when_report_period_unknown() -> None:
-    with pytest.raises(SystemExit):
-        fetcher._build_cache_payload("600000", "测试", "制造", {}, {}, None)
-
-    with db.db_session() as conn:
-        assert (
-            conn.execute("SELECT COUNT(*) FROM stock_fundamentals").fetchone()[0] == 0
-        )
 
 
 def test_legacy_naive_timestamp_is_interpreted_as_asia_shanghai(monkeypatch) -> None:
@@ -402,233 +219,6 @@ def test_quote_snapshot_retention_is_bounded_per_code() -> None:
     assert count == store.QUOTE_SNAPSHOT_RETENTION_PER_CODE
 
 
-@pytest.mark.parametrize(
-    "token,expected",
-    [
-        ("A", "A通用"),
-        ("B", "B银行"),
-        ("C", "C资源"),
-        ("D", "D公用"),
-        ("E", "E消费"),
-        ("F", "F科技"),
-    ],
-)
-def test_set_analysis_accepts_all_framework_aliases(
-    monkeypatch, token: str, expected: str
-) -> None:
-    run_set_analysis(monkeypatch, str(ord(token)).zfill(6), token)
-
-    with db.db_session() as conn:
-        stored = conn.execute("SELECT framework FROM analysis_results").fetchone()[0]
-    assert stored == expected
-
-
-@pytest.mark.parametrize(
-    "invalid_fields",
-    [
-        {"schema_version": 2},
-        {"stock_code": "60000"},
-        {"framework": "unknown"},
-        {"framework_score": True},
-        {"framework_score": 81},
-    ],
-)
-def test_set_analysis_rejects_invalid_decision_without_analysis_write(
-    monkeypatch, invalid_fields
-) -> None:
-    record_quote("600000")
-    decision = valid_decision_payload("600000")
-    decision.update(invalid_fields)
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(decision)))
-
-    with pytest.raises(SystemExit):
-        commands_analysis.cmd_set_analysis([])
-    with db.db_session() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM analysis_results").fetchone()[0] == 0
-
-
-@pytest.mark.parametrize("framework", ["A", "B", "C", "D", "E", "F"])
-def test_each_framework_requires_its_normalized_subjective_categories(
-    capsys, framework: str
-) -> None:
-    code = str(ord(framework)).zfill(6)
-    store.set_fundamentals(code, "fixture", "fixture", valid_fundamentals_payload({}))
-    scoring = scoring_input(framework)
-
-    commands_analysis.cmd_score_fundamentals([code, framework, json.dumps(scoring)])
-    complete = json.loads(capsys.readouterr().out)
-    assert not any(
-        item.startswith("subjective:") for item in complete["missing_inputs"]
-    )
-
-    missing_category = SUBJECTIVE_CATEGORIES[framework][0]
-    scoring["subjective_assessments"] = scoring["subjective_assessments"][1:]
-    commands_analysis.cmd_score_fundamentals([code, framework, json.dumps(scoring)])
-    incomplete = json.loads(capsys.readouterr().out)
-    assert f"subjective:{missing_category}" in incomplete["missing_inputs"]
-
-
-@pytest.mark.parametrize("framework", ["B", "C", "D"])
-def test_cycle_frameworks_fail_closed_without_structured_cycle_stage(
-    capsys, framework: str
-) -> None:
-    code = str(ord(framework)).zfill(6)
-    store.set_fundamentals(code, "fixture", "fixture", valid_fundamentals_payload({}))
-
-    commands_analysis.cmd_score_fundamentals(
-        [code, framework, json.dumps(scoring_input(framework, cycle=False))]
-    )
-    result = json.loads(capsys.readouterr().out)
-
-    assert result["complete"] is False
-    assert "cycle_stage" in result["missing_inputs"]
-
-
-def test_c_valuation_conflict_is_incomplete_and_rejects_a_total_score(
-    monkeypatch,
-) -> None:
-    record_quote("601899")
-    conflict = valid_decision_payload(
-        "601899", "C", score=None, cycle=True, conflict=True
-    )
-    invalid = conflict | {"framework_score": 48}
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(invalid)))
-
-    with pytest.raises(SystemExit):
-        commands_analysis.cmd_set_analysis([])
-    with db.db_session() as conn:
-        assert (
-            conn.execute(
-                "SELECT COUNT(*) FROM analysis_results WHERE code=?", ("601899",)
-            ).fetchone()[0]
-            == 0
-        )
-
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(conflict)))
-    commands_analysis.cmd_set_analysis([])
-    with pytest.raises(SystemExit):
-        commands_analysis.cmd_set_score_breakdown(
-            [
-                "601899",
-                json.dumps(
-                    {
-                        "fundamentals": {"subtotal": 44},
-                        "timing": {"subtotal": 4},
-                        "total": 48,
-                    }
-                ),
-            ]
-        )
-    incomplete_breakdown = {
-        "fundamentals": {"subtotal": 44},
-        "timing": {"subtotal": None},
-        "total": None,
-    }
-    commands_analysis.cmd_set_score_breakdown(
-        ["601899", json.dumps(incomplete_breakdown)]
-    )
-    with db.db_session() as conn:
-        stored = conn.execute(
-            "SELECT score, scoring_status, score_breakdown FROM analysis_results WHERE code=?",
-            ("601899",),
-        ).fetchone()
-    assert stored[:2] == (None, "incomplete")
-    assert json.loads(stored[2]) == incomplete_breakdown
-
-
-def test_d_without_bond_snapshot_is_incomplete_and_accepts_null_timing(
-    monkeypatch,
-) -> None:
-    record_quote("600900")
-    decision = valid_decision_payload("600900", "D", score=None, cycle=True)
-    decision["block_reason"] = ["bond_yield_missing"]
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(decision)))
-    commands_analysis.cmd_set_analysis([])
-    breakdown = {
-        "fundamentals": {"subtotal": 45},
-        "timing": {"subtotal": None},
-        "total": None,
-    }
-    commands_analysis.cmd_set_score_breakdown(["600900", json.dumps(breakdown)])
-
-    with db.db_session() as conn:
-        row = conn.execute(
-            "SELECT score, scoring_status, score_breakdown FROM analysis_results WHERE code=?",
-            ("600900",),
-        ).fetchone()
-    assert row[0] is None
-    assert row[1] == "incomplete"
-    assert json.loads(row[2])["timing"]["subtotal"] is None
-
-
-def test_d_without_bond_snapshot_rejects_complete_score(monkeypatch) -> None:
-    record_quote("600901")
-    decision = valid_decision_payload("600901", "D", score=None, cycle=True)
-    decision["block_reason"] = ["bond_yield_missing"]
-    decision["framework_score"] = 60
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(decision)))
-
-    with pytest.raises(SystemExit):
-        commands_analysis.cmd_set_analysis([])
-    with db.db_session() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM analysis_results").fetchone()[0] == 0
-
-
-def test_non_d_or_complete_analysis_rejects_null_timing(monkeypatch) -> None:
-    run_set_analysis(monkeypatch, "600000", "A", score=60)
-    breakdown = {
-        "fundamentals": {"subtotal": 45},
-        "timing": {"subtotal": None},
-        "total": None,
-    }
-
-    with pytest.raises(SystemExit):
-        commands_analysis.cmd_set_score_breakdown(["600000", json.dumps(breakdown)])
-
-
-@pytest.mark.parametrize(
-    ("new_price", "hit"),
-    [(102.999, True), (103.0, False), (97.001, True), (97.0, False)],
-)
-def test_analysis_price_invalidation_three_percent_boundary(
-    monkeypatch, capsys, new_price: float, hit: bool
-) -> None:
-    run_set_analysis(monkeypatch, "600000", "A", score=60)
-    record_quote(
-        "600000", new_price, fetched_at=(NOW + timedelta(seconds=1)).isoformat()
-    )
-
-    commands_analysis.cmd_check(["600000"])
-    output = capsys.readouterr().out
-    assert ("ANALYSIS_HIT" in output) is hit
-    assert ("ANALYSIS_PRICE_STALE" in output) is (not hit)
-
-
-def test_analysis_hit_reports_signed_price_decline(monkeypatch, capsys) -> None:
-    run_set_analysis(monkeypatch, "600000", "A", score=60)
-    record_quote("600000", 98.0, fetched_at=(NOW + timedelta(seconds=1)).isoformat())
-
-    commands_analysis.cmd_check(["600000"])
-    output = capsys.readouterr().out
-
-    assert "ANALYSIS_HIT" in output
-    assert "较分析快照:-2.00%" in output
-
-
-def test_analysis_without_fresh_quote_cannot_hit(monkeypatch, capsys) -> None:
-    run_set_analysis(monkeypatch, "600000", "A", score=60)
-    with db.db_session() as conn:
-        conn.execute("DELETE FROM quote_snapshots WHERE code='600000'")
-        conn.commit()
-
-    commands_analysis.cmd_check(["600000"])
-    output = capsys.readouterr().out
-
-    assert "ANALYSIS_HIT" not in output
-    assert "ANALYSIS_PRICE_STALE" in output
-    assert "FULL_MISS" in output
-
-
 def test_unsupported_financial_watchlist_rows_are_terminal_qualitative_only() -> None:
     for code, industry in [("HOLDINS", "保险"), ("PENDBRK", "证券公司")]:
         store.update_qualitative_only_security(code, "金融公司", industry)
@@ -668,10 +258,6 @@ def test_human_facing_fundamentals_timestamp_is_converted_to_cst(capsys) -> None
         store.get_fundamentals("600000")["_cache_meta"]["updated_at"]
         == "2026-07-13 12:09"
     )
-    commands_analysis.cmd_check(["600000"])
-    output = capsys.readouterr().out
-    assert "更新:2026-07-13 12:09" in output
-    assert '"updated_at": "2026-07-13 12:09"' in output
 
 
 def insert_analysis(

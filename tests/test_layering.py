@@ -1,6 +1,7 @@
-"""Only the explicit web dependency and pure-module import boundaries."""
+"""Web, pure-module, and policy → account → core import boundaries."""
 
 import ast
+from importlib.util import resolve_name
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,46 @@ PURE_MODULES = (
     "batches", "stock_codes", "limits",
 ) + tuple(name for name in ("report", "contract") if (PACKAGE / f"{name}.py").exists())
 FORBIDDEN = {"db", "sources", "market", "model", "service", "research", "screening", "web", "worker"}
+LAYER_FORBIDDEN = {
+    "core": {
+        "account", "policy", "tools", "research", "research_tools", "material",
+        "evidence", "db", "web", "worker", "screening", "external_operations",
+        "external_acquisition", "acquisition_process", "external_research", "external_review",
+    },
+    "account": {
+        "policy", "tools", "research", "research_tools", "screening", "web", "worker",
+        "external_operations", "external_acquisition", "acquisition_process",
+    },
+    "policy": {
+        "tools", "web", "worker", "screening", "external_operations",
+        "external_acquisition", "acquisition_process", "external_research", "external_review",
+    },
+}
+
+
+@pytest.mark.parametrize("path", [
+    path for layer in LAYER_FORBIDDEN for path in sorted((PACKAGE / layer).rglob("*.py"))
+], ids=lambda path: str(path.relative_to(PACKAGE)))
+def test_layer_import_direction(path):
+    relative = path.relative_to(PACKAGE)
+    forbidden = LAYER_FORBIDDEN[relative.parts[0]]
+    package = ".".join((PACKAGE.name, *relative.parts[:-1]))
+    violations = []
+    # Walk every node, including lazy imports inside functions and classes.
+    for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                module = resolve_name("." * node.level + module, package)
+            names = [module, *(f"{module}.{alias.name}" for alias in node.names)]
+        else:
+            continue
+        for name in names:
+            if name.startswith("a_share_research.") and name.split(".")[1] in forbidden:
+                violations.append(f"{node.lineno}: {name}")
+    assert not violations, f"{relative}: forbidden imports {violations}"
 
 
 def test_web_does_not_load_market_dependencies(tmp_path):

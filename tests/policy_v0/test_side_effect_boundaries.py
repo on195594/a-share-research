@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import cache, commands_holdings, db, fetcher, paths
+from a_share_research.policy.v0 import cache, commands_holdings, db, paths
 
 
 def test_isolation_path_propagates_to_child_process(tmp_path) -> None:
@@ -27,14 +27,6 @@ def test_isolation_path_propagates_to_child_process(tmp_path) -> None:
         check=True,
     )
     assert result.stdout.strip() == str(database)
-
-
-def test_read_only_lookup_does_not_create_database(tmp_path, monkeypatch) -> None:
-    database = tmp_path / "missing" / "cache.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(database))
-    assert fetcher._lookup_cached_industry("600000") is None
-    assert fetcher._lookup_cached_name("600000") is None
-    assert not database.parent.exists()
 
 
 def test_read_only_scope_resets_after_exception() -> None:
@@ -88,7 +80,7 @@ def test_missing_w1_confirmation_keeps_fixture_hash(tmp_path, monkeypatch) -> No
     before = (
         hashlib.sha256(database.read_bytes()).hexdigest() if database.exists() else None
     )
-    assert cache.main(["set", "000001", "名称", "行业", "{}"]) == 3
+    assert cache.main(["add-holding", "000001", "10", "100"]) == 3
     after = (
         hashlib.sha256(database.read_bytes()).hexdigest() if database.exists() else None
     )

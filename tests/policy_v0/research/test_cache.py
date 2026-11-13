@@ -1,6 +1,6 @@
 """
 cache.py 单元测试
-覆盖本次修复的核心场景：持仓生命周期、FIFO平仓、WAL模式、TTL推断、缓存命中检测、分数显示。
+覆盖本次修复的核心场景：持仓生命周期、FIFO平仓、WAL模式、TTL推断。
 """
 
 import json
@@ -8,32 +8,15 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timedelta
-from io import StringIO
 from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import (
-    commands_admin,
-    commands_analysis,
-    commands_holdings,
-    commands_monitor,
-    db,
-    domain,
-    market_quotes,
-    store,
-)
-from policy_v0.helpers import (
-    mock_price_quotes,
-    record_valid_quote,
-    set_valid_analysis,
-    set_valid_fundamentals,
-    valid_decision_payload,
-)
+from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes, store
+from policy_v0.helpers import mock_price_quotes, record_valid_quote, set_valid_fundamentals
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CACHE_PY = PROJECT_ROOT / "a_share_research" / "policy" / "v0" / "cache.py"
-LEGACY_CYCLE_STAGE_TAG = '周期位置[阶段=上行期；依据="煤价中枢回升且供给侧收缩"]'
 
 
 @pytest.fixture(autouse=True)
@@ -142,207 +125,21 @@ def test_get_fundamentals_expired(monkeypatch):
     assert store.get_fundamentals("000002") is None
 
 
-# ── cmd_check：三种命中状态 ──────────────────────────────────────────────────
-
-
-def test_cmd_check_full_miss(capsys):
-    commands_analysis.cmd_check(["999999"])
-    out = capsys.readouterr().out
-    assert out.strip() == "FULL_MISS"
-
-
-def test_cmd_check_analysis_hit(capsys, monkeypatch):
-    code = "600036"
-    set_valid_analysis(monkeypatch, code=code, narrative="结论：买入")
-    capsys.readouterr()
-
-    commands_analysis.cmd_check([code])
-    out = capsys.readouterr().out
-    assert out.startswith("ANALYSIS_HIT")
-    assert "结论：买入" in out
-
-
-def test_cmd_check_analysis_requires_fresh_quote(capsys, monkeypatch):
-    code = "600036"
-    set_valid_analysis(monkeypatch, code=code)
-    monkeypatch.setattr(
-        store, "get_latest_quote_snapshot", lambda *args, **kwargs: None
-    )
-    capsys.readouterr()
-
-    commands_analysis.cmd_check([code])
-
-    out = capsys.readouterr().out
-    assert "ANALYSIS_HIT" not in out
-    assert "ANALYSIS_PRICE_STALE" in out
-
-
-def test_cmd_check_fundamentals_hit(capsys):
-    set_valid_fundamentals("601318", "中国平安", "保险", {"roe": 15})
-    commands_analysis.cmd_check(["601318"])
-    out = capsys.readouterr().out
-    assert out.startswith("FUNDAMENTALS_HIT")
-    assert "601318" in out
-
-
-def test_cmd_check_exposes_decision_and_leaf_completeness(capsys):
-    set_valid_fundamentals("002475", "立讯精密", "元器件", {"roe_3y_avg": 20})
-
-    commands_analysis.cmd_check(["002475"])
-
-    lines = capsys.readouterr().out.splitlines()
-    payload = json.loads("\n".join(lines[1:]))
-    meta = payload["_decision_meta"]
-    assert meta["framework_candidate"] == "A通用"
-    assert meta["scoring_status"] == "incomplete"
-    assert meta["timing_status"] == "incomplete"
-    assert meta["action_eligible"] is False
-    assert meta["data_completeness"] == {
-        "top_level_present": 1,
-        "top_level_total": 1,
-        "risk_gates_complete": 0,
-        "risk_gates_total": 3,
-    }
-
-
-def test_newer_bps_only_blocks_pb_percentile_frameworks() -> None:
-    clear = {"status": "clear", "action_eligible": True, "reason_code": "clear"}
-    data = {
-        "regulatory_gate": clear,
-        "roe_structural_gate": clear,
-        "cash_flow_gate": clear,
-        "valuation_compatibility": {
-            "status": "latest_report_update",
-            "timing_eligible": True,
-            "pb_percentile_eligible": False,
-        },
-    }
-
-    general = commands_analysis._decision_meta(data, "元器件")
-    bank = commands_analysis._decision_meta(data, "银行")
-
-    assert general["timing_status"] == "not_evaluated"
-    assert bank["timing_status"] == "incomplete"
-    assert "valuation_compatibility:pb_percentile_ineligible" in bank["reason_codes"]
-
-    data["valuation_compatibility"] = {
-        "status": "incomplete",
-        "timing_eligible": False,
-        "pb_percentile_eligible": False,
-        "reason_code": "same_period_value_mismatch",
-    }
-    conflict = commands_analysis._decision_meta(data, "元器件")
-    assert conflict["timing_status"] == "incomplete"
-    assert (
-        "valuation_compatibility:same_period_value_mismatch" in conflict["reason_codes"]
-    )
-
-
-@pytest.mark.parametrize(
-    ("dps", "eps", "expects_pb_requirement"),
-    [
-        (0.39, 1.0, True),
-        (0.40, 1.0, True),
-        (0.41, 1.0, False),
-        (-0.1, 1.0, False),
-        (None, 1.0, False),
-        (float("nan"), 1.0, False),
-        (float("inf"), 1.0, False),
-    ],
-)
-def test_resource_pb_requirement_uses_owner_strict_payout_contract(
-    monkeypatch, dps, eps, expects_pb_requirement
-) -> None:
-    clear = {"status": "clear", "action_eligible": True, "reason_code": "clear"}
-    data = {
-        "dps": dps,
-        "eps": eps,
-        "regulatory_gate": clear,
-        "roe_structural_gate": clear,
-        "cash_flow_gate": clear,
-        "valuation_compatibility": {
-            "timing_eligible": True,
-            "pb_percentile_eligible": False,
-        },
-    }
-    calls = []
-    real_ratio = commands_analysis.framework_scoring.calculate_payout_ratio
-    real_classify = commands_analysis.framework_scoring.classify_framework_rule
-
-    def ratio(raw_dps, raw_eps):
-        calls.append(("ratio", raw_dps, raw_eps))
-        return real_ratio(raw_dps, raw_eps)
-
-    def classify(framework, rule_id, value):
-        calls.append(("classify", framework, rule_id, value))
-        return real_classify(framework, rule_id, value)
-
-    monkeypatch.setattr(
-        commands_analysis.framework_scoring, "calculate_payout_ratio", ratio
-    )
-    monkeypatch.setattr(
-        commands_analysis.framework_scoring, "classify_framework_rule", classify
-    )
-
-    meta = commands_analysis._decision_meta(data, "煤炭")
-
-    assert calls[0] == ("ratio", dps, eps)
-    owner_ratio = real_ratio(dps, eps)
-    if owner_ratio is not None:
-        assert calls[1] == ("classify", "C", "payout_ratio", owner_ratio)
-    else:
-        assert len(calls) == 1
-    assert (
-        "valuation_compatibility:pb_percentile_ineligible" in meta["reason_codes"]
-    ) is expects_pb_requirement
-
-
-def test_bank_decision_meta_normalizes_cash_flow_gate_to_not_applicable() -> None:
-    clear = {"status": "clear", "action_eligible": True, "reason_code": "clear"}
-    data = {
-        "regulatory_gate": clear,
-        "roe_structural_gate": clear,
-        "cash_flow_gate": {
-            "status": "blocked",
-            "action_eligible": False,
-            "reason_code": "cfo_non_positive",
-            "ttm_cfo": -1,
-            "ttm_capex": 0,
-            "sources": ["official annual report"],
-            "as_of": "2026-09-09",
-        },
-        "valuation_compatibility": {
-            "timing_eligible": True,
-            "pb_percentile_eligible": True,
-        },
-    }
-
-    meta = commands_analysis._decision_meta(data, "银行")
-
-    assert meta["scoring_status"] == "not_evaluated"
-    assert "cash_flow_gate:cfo_non_positive" not in meta["reason_codes"]
-    assert meta["data_completeness"]["risk_gates_complete"] == 3
-
-
-def test_cmd_check_fundamentals_expired_is_full_miss(capsys, monkeypatch):
-    set_valid_fundamentals("601919", "中远海控", "航运", {"pe": 3})
-    monkeypatch.setattr(domain, "is_expired", lambda *_: True)
-    commands_analysis.cmd_check(["601919"])
-    out = capsys.readouterr().out
-    assert out.strip() == "FULL_MISS"
+# ── CLI 分派 ───────────────────────────────────────────────────────────────
 
 
 def test_cli_valid_command_smoke(isolated_db):
     """Subprocess smoke test for the real CLI dispatch path."""
+    db.get_db().close()
     result = subprocess.run(
-        [sys.executable, str(CACHE_PY), "check", "999999"],
+        [sys.executable, str(CACHE_PY), "list"],
         env={**os.environ, "POLICY_V0_DB": isolated_db},
         text=True,
         capture_output=True,
         check=False,
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == "FULL_MISS"
+    assert "=== 基本面缓存 (0有效 / 0条) ===" in result.stdout
     assert "[a-stock-cache] 操作数据库:" in result.stderr
     assert isolated_db in result.stderr
 
@@ -560,230 +357,6 @@ def test_holdings_display_two_stocks(capsys):
     assert "笔" not in out
 
 
-# ── cmd_set_score：确认显示 /80 ──────────────────────────────────────────────
-
-
-def test_set_score_displays_80_scale(capsys):
-    """分数应显示 /80，不是 /100（修复过的逻辑）"""
-    code = "600036"
-    today = domain.cst_today()
-    conn = db.get_db()
-    conn.execute(
-        "INSERT INTO analysis_results (code, date, result, created_at) VALUES (?,?,?,?)",
-        (code, today, "测试结论", datetime.now().isoformat()),
-    )
-    conn.commit()
-    conn.close()
-
-    commands_analysis.cmd_set_score([code, "55"])
-    out = capsys.readouterr().out
-    assert "55/80" in out
-    assert "/100" not in out
-
-
-def test_set_score_clears_breakdown_that_no_longer_matches_total(capsys, monkeypatch):
-    set_valid_analysis(monkeypatch, code="600036", score=62)
-    commands_analysis.cmd_set_score_breakdown(
-        [
-            "600036",
-            '{"fundamentals": {"subtotal": 44}, "timing": {"subtotal": 18}, "total": 62}',
-        ]
-    )
-
-    commands_analysis.cmd_set_score(["600036", "55"])
-
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT score, score_breakdown FROM analysis_results WHERE code='600036'"
-    ).fetchone()
-    conn.close()
-    assert row == (55, None)
-    assert "已清除" in capsys.readouterr().out
-
-
-def test_set_score_no_analysis_record(capsys):
-    """无今日分析记录时 set-score 应报错退出"""
-    with pytest.raises(SystemExit) as exc:
-        commands_analysis.cmd_set_score(["888888", "60"])
-    assert exc.value.code == 1
-
-
-# ── set-analysis structured decision contract ───────────────────────────────
-
-
-def test_set_analysis_with_score(capsys, monkeypatch):
-    """set-analysis derives human output and score from decision-v1."""
-    payload = set_valid_analysis(
-        monkeypatch, code="600036", framework="A", score=62, narrative="买入信号明确"
-    )
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        """SELECT result, decision_json, score
-           FROM analysis_results WHERE code='600036' AND date=?""",
-        (today,),
-    ).fetchone()
-    conn.close()
-
-    assert row is not None
-    assert "买入信号明确" in row[0]
-    assert json.loads(row[1]) == payload
-    assert row[2] == 62
-
-
-def test_set_analysis_without_score(capsys, monkeypatch):
-    """A valid not-formed decision stores a NULL score."""
-    set_valid_analysis(monkeypatch, code="000001", framework="A", score=None)
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        "SELECT score FROM analysis_results WHERE code='000001' AND date=?", (today,)
-    ).fetchone()
-    conn.close()
-
-    assert row[0] is None
-
-
-def test_set_analysis_with_framework_persists_column(monkeypatch):
-    """set-analysis persists the framework from decision-v1."""
-    set_valid_analysis(
-        monkeypatch, code="601088", framework="C资源", score=62, cycle=True
-    )
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        "SELECT framework, score FROM analysis_results WHERE code='601088' AND date=?",
-        (today,),
-    ).fetchone()
-    conn.close()
-
-    assert row == ("C资源", 62)
-
-
-def test_set_analysis_without_framework_is_rejected(monkeypatch):
-    """Missing safety-critical decision fields fail closed before write."""
-    payload = valid_decision_payload("000001", score=55)
-    payload.pop("framework")
-    monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
-    with pytest.raises(SystemExit):
-        commands_analysis.cmd_set_analysis([])
-
-    conn = db.get_db()
-    assert conn.execute("SELECT COUNT(*) FROM analysis_results").fetchone() == (0,)
-    conn.close()
-
-
-def test_set_analysis_rerun_same_day_preserves_flags_and_score_breakdown(monkeypatch):
-    """同一只股票同一天重复执行 set-analysis，不应清空已写入的 flags/score_breakdown"""
-    set_valid_analysis(
-        monkeypatch, code="600036", framework="A", score=62, narrative="首次分析结论"
-    )
-    commands_analysis.cmd_set_score_breakdown(
-        [
-            "600036",
-            '{"fundamentals": {"subtotal": 44}, "timing": {"subtotal": 18}, "total": 62}',
-        ]
-    )
-    commands_monitor.cmd_set_flag(["600036", "yellow", "估值偏高"])
-
-    set_valid_analysis(
-        monkeypatch,
-        code="600036",
-        framework="A",
-        score=62,
-        narrative="重写后的分析结论",
-    )
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        "SELECT result, score, score_breakdown, flags FROM analysis_results "
-        "WHERE code='600036' AND date=?",
-        (today,),
-    ).fetchone()
-    conn.close()
-
-    assert "重写后的分析结论" in row[0]
-    assert "首次分析结论" not in row[0]
-    assert row[1] == 62
-    assert (
-        row[2]
-        == '{"fundamentals": {"subtotal": 44}, "timing": {"subtotal": 18}, "total": 62}'
-    )
-    assert row[3] is not None and "估值偏高" in row[3]
-
-
-def test_set_analysis_rerun_with_new_score_overwrites_score(monkeypatch):
-    """重新执行 set-analysis 时显式传入新得分，应覆盖旧得分"""
-    set_valid_analysis(
-        monkeypatch, code="600519", framework="A", score=50, narrative="首次分析结论"
-    )
-    set_valid_analysis(
-        monkeypatch,
-        code="600519",
-        framework="A",
-        score=70,
-        narrative="重写后的分析结论",
-    )
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        "SELECT score FROM analysis_results WHERE code='600519' AND date=?", (today,)
-    ).fetchone()
-    conn.close()
-
-    assert row[0] == 70
-
-
-def test_set_analysis_rescore_clears_stale_score_breakdown(monkeypatch, capsys):
-    set_valid_analysis(monkeypatch, code="600519", framework="A", score=50)
-    commands_analysis.cmd_set_score_breakdown(
-        [
-            "600519",
-            '{"fundamentals": {"subtotal": 35}, "timing": {"subtotal": 15}, "total": 50}',
-        ]
-    )
-
-    set_valid_analysis(monkeypatch, code="600519", framework="A", score=70)
-
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT score, score_breakdown FROM analysis_results WHERE code='600519'"
-    ).fetchone()
-    conn.close()
-    assert row == (70, None)
-    assert "分析结论已缓存" in capsys.readouterr().out
-
-
-def test_set_analysis_rerun_with_same_score_preserves_previous_score(monkeypatch):
-    """A same-score structured rerun preserves the authoritative score."""
-    set_valid_analysis(
-        monkeypatch, code="601318", framework="A", score=65, narrative="首次分析结论"
-    )
-    set_valid_analysis(
-        monkeypatch,
-        code="601318",
-        framework="A",
-        score=65,
-        narrative="重写后的分析结论",
-    )
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        "SELECT result, score FROM analysis_results WHERE code='601318' AND date=?",
-        (today,),
-    ).fetchone()
-    conn.close()
-
-    assert "重写后的分析结论" in row[0]
-    assert row[1] == 65
-
-
 # ── 框架推断：confident 标志区分真实判断与数据缺失兜底 ─────────────────────────
 
 
@@ -816,109 +389,17 @@ def test_product_and_platform_technology_still_route_to_f(industry):
     assert confident is True
 
 
-# ── decision-v1 validation and machine-state independence ─────────────────────
-
-
-def test_set_analysis_accepts_valid_decision_json(monkeypatch):
-    payload = set_valid_analysis(
-        monkeypatch,
-        code="600036",
-        framework="A通用",
-        score=62,
-        narrative="普通分析结论，不依赖 Markdown 标签。",
-    )
-
-    conn = db.get_db()
-    today = domain.cst_today()
-    row = conn.execute(
-        """SELECT result, decision_json, framework, score
-           FROM analysis_results WHERE code='600036' AND date=?""",
-        (today,),
-    ).fetchone()
-    conn.close()
-
-    assert "普通分析结论，不依赖 Markdown 标签。" in row[0]
-    assert json.loads(row[1]) == payload
-    assert row[2:] == ("A通用", 62)
-
-
-def test_set_analysis_rejects_malformed_decision_json_before_write(monkeypatch):
-    monkeypatch.setattr("sys.stdin", StringIO("not-json"))
-
-    with pytest.raises(SystemExit) as exc_info:
-        commands_analysis.cmd_set_analysis([])
-
-    assert exc_info.value.code == 1
-    conn = db.get_db()
-    assert conn.execute("SELECT COUNT(*) FROM analysis_results").fetchone() == (0,)
-    conn.close()
-
-
-@pytest.mark.parametrize(
-    ("framework", "code"),
-    [("B银行", "600036"), ("C资源", "601088"), ("D公用", "600900")],
-)
-def test_cycle_stage_is_not_inferred_from_human_narrative(framework, code, monkeypatch):
-    payload = set_valid_analysis(
-        monkeypatch,
-        code=code,
-        framework=framework,
-        score=62,
-        cycle=False,
-        narrative=LEGACY_CYCLE_STAGE_TAG,
-    )
-
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT result, decision_json FROM analysis_results WHERE code=?", (code,)
-    ).fetchone()
-    conn.close()
-
-    assert LEGACY_CYCLE_STAGE_TAG in row[0]
-    assert json.loads(row[1]) == payload
-    assert json.loads(row[1]).get("cycle_stage") is None
-
-
-@pytest.mark.parametrize(
-    ("framework", "code"),
-    [("B银行", "600037"), ("C资源", "601088"), ("D公用", "600901")],
-)
-def test_structured_cycle_stage_is_persisted(framework, code, monkeypatch):
-    payload = set_valid_analysis(
-        monkeypatch, code=code, framework=framework, score=62, cycle=True
-    )
-
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT decision_json FROM analysis_results WHERE code=?", (code,)
-    ).fetchone()
-    conn.close()
-
-    assert json.loads(row[0]) == payload
-    assert json.loads(row[0])["cycle_stage"]["stage"] == "上行期"
-
-
-def test_a_framework_without_cycle_stage_stays_valid(monkeypatch, capsys):
-    set_valid_analysis(
-        monkeypatch, code="000001", framework="A通用", score=55, cycle=False
-    )
-
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT decision_json FROM analysis_results WHERE code='000001'"
-    ).fetchone()
-    conn.close()
-
-    assert json.loads(row[0]).get("cycle_stage") is None
-    assert "周期位置" not in capsys.readouterr().err
-
-
 # ── 旧表迁移：无 id 列时触发 AUTOINCREMENT 迁移 ──────────────────────────────
 
 
 def test_update_return_writes_pct_and_days(capsys, monkeypatch):
     """update-return 写入 return_pct 和 holding_days"""
-    set_valid_analysis(monkeypatch, code="600519", narrative="买入")
+    with db.db_session() as conn:
+        conn.execute(
+            "INSERT INTO analysis_results (code, date, result, created_at) VALUES (?,?,?,?)",
+            ("600519", domain.cst_today(), "买入", domain.utc_now().isoformat()),
+        )
+        conn.commit()
 
     import datetime as dt
 
@@ -1373,7 +854,12 @@ def test_bse_920_uses_incremental_share_rule_and_quote_prefix():
 
 
 def test_update_return_uses_holding_buy_date_not_latest_analysis_date(monkeypatch):
-    set_valid_analysis(monkeypatch, code="600519", narrative="买入")
+    with db.db_session() as conn:
+        conn.execute(
+            "INSERT INTO analysis_results (code, date, result, created_at) VALUES (?,?,?,?)",
+            ("600519", domain.cst_today(), "买入", domain.utc_now().isoformat()),
+        )
+        conn.commit()
     conn = db.get_db()
     conn.execute(
         """INSERT INTO holdings
@@ -1939,136 +1425,6 @@ def test_watchlist_no_breakdown_unchanged(capsys):
 
     assert "招商银行(600036)" in out
     assert "  分项:" not in out
-
-
-def test_cmd_checklist_b_framework_output_uses_owner_strict_thresholds(capsys):
-    """B框架输出准确展示 owner contract 的严格阈值。"""
-    set_valid_fundamentals("601988", "中国银行", "银行", {"roe_3y_avg": 14.0}, ttl=24)
-
-    commands_admin.cmd_checklist(["601988", "B"])
-
-    out = capsys.readouterr().out
-    assert out == (
-        "框架客观指标核对清单：银行框架 601988\n"
-        "────────────────────────────────\n"
-        "ROE加权年化: 14.0% | 优线>13% 格线>9% | 结果:达优 | 数据:完整\n"
-        "\n"
-        "需人工主观判断（不参与代码核对）：护城河、行业地位\n"
-        "\n"
-        "checklist工具无法核验（仍需按框架文档人工评分，权重不变）：\n"
-        "- 净息差趋势：数据缺口：该字段无AKShare API，需人工检索公开来源后手动写入缓存"
-        "（fetcher.py FIELDS注册表标注来源为web），核验对象与核验来源同源，不构成独立校验；"
-        "权重不变，仍需结合公开来源人工评分\n"
-        "- 不良贷款率：数据缺口：该字段无AKShare API，需人工检索公开来源后手动写入缓存"
-        "（fetcher.py FIELDS注册表标注来源为web），核验对象与核验来源同源，不构成独立校验；"
-        "权重不变，仍需结合公开来源人工评分\n"
-        "- 拨备覆盖率：数据缺口：该字段无AKShare API，需人工检索公开来源后手动写入缓存"
-        "（fetcher.py FIELDS注册表标注来源为web），核验对象与核验来源同源，不构成独立校验；"
-        "权重不变，仍需结合公开来源人工评分\n"
-    )
-
-
-def test_cmd_checklist_a_framework_has_no_skipped_section(capsys):
-    """A框架没有跳过项，输出里不应该出现"无法核验"小节（验证空list跟原来的
-    None在format_checklist()的falsy判断下行为一致）。"""
-    set_valid_fundamentals(
-        "600036",
-        "招商银行",
-        "银行",
-        {
-            "roe_3y_avg": 18.2,
-            "net_profit_growth": 16.0,
-            "debt_ratio": 30.0,
-            "gross_margin": 35.0,
-        },
-        ttl=24,
-    )
-
-    commands_admin.cmd_checklist(["600036", "A"])
-
-    out = capsys.readouterr().out
-    assert "checklist工具无法核验" not in out
-    assert "框架客观指标核对清单：A通用框架 600036" in out
-
-
-def test_cmd_checklist_ignores_cycle_stage_wording_in_narrative(capsys, monkeypatch):
-    set_valid_fundamentals(
-        "600900",
-        "长江电力",
-        "水电",
-        {
-            "eps": 1.5,
-            "debt_ratio": 50.0,
-        },
-        ttl=24,
-    )
-    set_valid_analysis(
-        monkeypatch,
-        code="600900",
-        framework="C资源",
-        score=55,
-        cycle=False,
-        narrative=LEGACY_CYCLE_STAGE_TAG,
-    )
-
-    commands_admin.cmd_checklist(["600900", "C"])
-
-    out = capsys.readouterr().out
-    assert "框架客观指标核对清单：能源/资源框架 600900" in out
-    assert "提前提示：C资源框架写入分析时必须包含有效的周期位置标签" not in out
-
-
-def test_cmd_checklist_c_framework_skips_warning_when_cycle_stage_present(
-    capsys, monkeypatch
-):
-    set_valid_fundamentals(
-        "600900",
-        "长江电力",
-        "水电",
-        {
-            "eps": 1.5,
-            "debt_ratio": 50.0,
-        },
-        ttl=24,
-    )
-    set_valid_analysis(
-        monkeypatch, code="600900", framework="C资源", score=55, cycle=True
-    )
-
-    commands_admin.cmd_checklist(["600900", "c"])
-
-    out = capsys.readouterr().out
-    assert "框架客观指标核对清单：能源/资源框架 600900" in out
-    assert "提前提示：C资源框架写入分析时必须包含有效的周期位置标签" not in out
-
-
-@pytest.mark.parametrize(
-    "framework,code,data",
-    [
-        ("B", "601988", {"roe_3y_avg": 14.0}),
-        ("D", "600025", {"debt_ratio": 50.0}),
-    ],
-)
-def test_cmd_checklist_bd_do_not_show_c_cycle_stage_warning(
-    framework, code, data, capsys
-):
-    set_valid_fundamentals(code, code, "测试行业", data, ttl=24)
-
-    commands_admin.cmd_checklist([code, framework])
-
-    out = capsys.readouterr().out
-    assert "提前提示：C资源框架写入分析时必须包含有效的周期位置标签" not in out
-
-
-def test_cmd_checklist_unsupported_framework_exits_nonzero(capsys):
-    set_valid_fundamentals("600036", "招商银行", "银行", {"roe_3y_avg": 18.2}, ttl=24)
-
-    with pytest.raises(SystemExit) as exc_info:
-        commands_admin.cmd_checklist(["600036", "Z"])
-
-    assert exc_info.value.code == 1
-    err = capsys.readouterr().err
-    assert "暂不支持框架 'Z' 的 checklist" in err
 
 
 @pytest.mark.parametrize(

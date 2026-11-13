@@ -1,6 +1,5 @@
 """2026-10-22 spec: supplied P0 evidence survives refreshes within one annual period."""
 
-import io
 import json
 import sqlite3
 from pathlib import Path
@@ -9,7 +8,7 @@ from datetime import date
 import pytest
 
 from a_share_research import db as app_db
-from a_share_research.policy.v0 import cache, risk_gates, store
+from a_share_research.policy.v0 import risk_gates, store
 
 TODAY = date(2026, 10, 22)
 FACTS = {
@@ -94,9 +93,17 @@ def _seed_fundamentals(database, data_period="2025年报"):
         )
 
 
-def _run_evidence(monkeypatch, facts):
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(facts)))
-    return cache.main(["--confirm-write", "regulatory-evidence", "600900"])
+def _store_evidence(database, facts):
+    """Seed supplied evidence independently of the retired CLI command."""
+    data, _ = _stored(database)
+    store.apply_regulatory_gate(
+        data, risk_gates.regulatory_evidence_gate(facts, "600900")
+    )
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE stock_fundamentals SET data=? WHERE code='600900'",
+            (json.dumps(data),),
+        )
 
 
 def _stored(database):
@@ -118,11 +125,9 @@ def _refresh(period):
     store.set_fundamentals("600900", "长江电力", "水电", data, ttl=168)
 
 
-def test_command_merges_gate_and_refresh_rejudges_latest_stored_evidence(
-    isolated_cache_database, monkeypatch
-):
+def test_refresh_rejudges_latest_stored_evidence(isolated_cache_database):
     _seed_fundamentals(isolated_cache_database)
-    assert _run_evidence(monkeypatch, FACTS) == 0
+    _store_evidence(isolated_cache_database, FACTS)
     data, updated_at = _stored(isolated_cache_database)
     gate = data["regulatory_gate"]
     assert gate["evidence_facts"] == FACTS
@@ -131,32 +136,8 @@ def test_command_merges_gate_and_refresh_rejudges_latest_stored_evidence(
 
     # Evidence written after a fetch started is read inside the refresh's write.
     blocked = {**FACTS, "investigation_status": "正式立案"}
-    assert _run_evidence(monkeypatch, blocked) == 0
+    _store_evidence(isolated_cache_database, blocked)
     _refresh("2025年报")
     assert _stored(isolated_cache_database)[0]["regulatory_gate"]["status"] == "blocked"
     _refresh("2026年报")
     assert _stored(isolated_cache_database)[0]["regulatory_gate"]["status"] == "incomplete"
-
-
-@pytest.mark.parametrize(
-    "facts",
-    [
-        {**FACTS, "report_period": "2024年报"},
-        {**FACTS, "report_period": None},
-        {**FACTS, "listing_risk": {"status": "clear", "sources": ["上交所公司公告"],
-                                   "as_of": "2026-10-22T10:00:00+08:00"}},
-    ],
-)
-def test_command_rejects_wrong_period_or_preset_checks(
-    facts, isolated_cache_database, monkeypatch
-):
-    _seed_fundamentals(isolated_cache_database)
-    assert _run_evidence(monkeypatch, facts) == 1
-    assert "regulatory_gate" not in _stored(isolated_cache_database)[0]
-
-
-def test_command_without_confirmation_writes_nothing(isolated_cache_database, monkeypatch):
-    _seed_fundamentals(isolated_cache_database)
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(FACTS)))
-    assert cache.main(["regulatory-evidence", "600900"]) == 3
-    assert "regulatory_gate" not in _stored(isolated_cache_database)[0]

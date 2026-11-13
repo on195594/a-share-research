@@ -11,7 +11,7 @@ import pytest
 
 from a_share_research import api_keys, db, external_operations as operations
 from a_share_research import external_research as external, external_review, gate, research
-from a_share_research.core import acquisition_process
+from a_share_research import acquisition_process
 from a_share_research.material import Material
 from a_share_research.research_tools import ResearchTools
 from a_share_research.reviewing import digest

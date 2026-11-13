@@ -2,36 +2,19 @@
 Edge cases and race conditions not covered by existing tests.
 
 Coverage gaps addressed:
-  cache.py  — add_holding arg-parsing branches, set_score validation,
-              holdings display, fetch_current_price market prefix,
-              set_analysis negative score, clear_flag edge cases,
-              re-closing an already-closed lot
-  fetcher.py — _is_timed_call_error all branches, compute_pe_percentile,
-               compute_pb_percentile,
-               avg_of with 0.0 values
-  race conds — concurrent cmd_close_holding, concurrent cmd_set_flag,
-               concurrent cmd_add_holding
+  holdings — argument validation, display, closing lots and quote prefixes
+  monitor — flag edge cases and concurrent writes
 """
 
-import datetime as dt
 import hashlib
 import json
 import threading
 from datetime import datetime
-from io import StringIO
 from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import (
-    commands_analysis,
-    commands_holdings,
-    commands_monitor,
-    db,
-    domain,
-    fetcher,
-    market_quotes,
-)
+from a_share_research.policy.v0 import commands_holdings, commands_monitor, db, domain, market_quotes
 
 
 @pytest.fixture(autouse=True)
@@ -52,8 +35,6 @@ def _insert_analysis(code: str, result: str = "test_result", score: int | None =
     conn.close()
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_add_holding arg-parsing edge cases
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -128,8 +109,6 @@ class TestAddHoldingArgParsing:
         assert row[1] == pytest.approx(round(47.33 * 0.80, 3), abs=0.0001)
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_holdings display edge cases
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -252,8 +231,6 @@ class TestHoldingsDisplay:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_close_holding defensive logic
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestCloseHoldingDefense:
@@ -281,53 +258,6 @@ class TestCloseHoldingDefense:
         assert exc.value.code == 1
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_set_score input validation
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestSetScoreValidation:
-    def test_nonnumeric_score_exits(self):
-        """String 'abc' → ValueError → sys.exit(1)."""
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score(["600036", "abc"])
-        assert exc.value.code == 1
-
-    def test_float_string_score_exits(self):
-        """'12.5' cannot be converted by int() → sys.exit(1). Prevents silent float acceptance."""
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit) as exc:
-            commands_analysis.cmd_set_score(["600036", "12.5"])
-        assert exc.value.code == 1
-
-    def test_negative_integer_score_rejected(self, capsys):
-        """Scores outside the 0—80 contract are rejected."""
-        _insert_analysis("600036")
-        with pytest.raises(SystemExit):
-            commands_analysis.cmd_set_score(["600036", "-3"])
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_set_analysis negative score argument
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestSetAnalysisNegativeScore:
-    def test_negative_score_arg_rejected(self, capsys, monkeypatch):
-        """set-analysis rejects a negative score before any write."""
-        monkeypatch.setattr(
-            "sys.stdin",
-            StringIO(
-                'analysis conclusion text\n行业地位[评级=优；证据="市占率连续5年第一";置信度=高]'
-            ),
-        )
-        with pytest.raises(SystemExit):
-            commands_analysis.cmd_set_analysis(["600036", "A", "-5"])
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  cache.py — fetch_current_price market prefix: 3xx ChiNext
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -392,8 +322,6 @@ class TestFetchCurrentPriceMarketPrefix:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  cache.py — cmd_clear_flag edge cases
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestClearFlagEdgeCases:
@@ -410,252 +338,6 @@ class TestClearFlagEdgeCases:
         assert "999999" in out
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — _is_timed_call_error all branches
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestIsTimedCallError:
-    def test_timeout_string_is_error(self):
-        assert fetcher._is_timed_call_error("TIMEOUT") is True
-
-    def test_error_two_tuple_is_error(self):
-        assert fetcher._is_timed_call_error(("ERROR", "message")) is True
-
-    def test_real_value_is_not_error(self):
-        assert fetcher._is_timed_call_error(42) is False
-
-    def test_none_is_not_error(self):
-        """None means 'no result', not an error sentinel."""
-        assert fetcher._is_timed_call_error(None) is False
-
-    def test_empty_string_is_not_error(self):
-        assert fetcher._is_timed_call_error("") is False
-
-    def test_wrong_prefix_tuple_is_not_error(self):
-        """('TIMEOUT', 'msg') is a 2-tuple but prefix is not 'ERROR'."""
-        assert fetcher._is_timed_call_error(("TIMEOUT", "msg")) is False
-
-    def test_single_element_error_tuple_is_not_error(self):
-        """('ERROR',) has length 1 — not the expected 2-element form."""
-        assert fetcher._is_timed_call_error(("ERROR",)) is False
-
-    def test_zero_is_not_error(self):
-        """0 is a valid result value — must not be confused with None or TIMEOUT."""
-        assert fetcher._is_timed_call_error(0) is False
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — avg_of with 0.0 values
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestAvgOfZeroValues:
-    def _s(self, values):
-        import pandas as pd
-
-        return pd.Series(values)
-
-    def test_zero_float_included_in_average(self):
-        """0.0 is a valid data point — must not be filtered out like None."""
-        result = fetcher.avg_of(self._s([0.0, 10.0, 20.0]), 3)
-        assert result == pytest.approx(10.0)
-
-    def test_single_zero_series_returns_zero(self):
-        """Series([0.0]) → avg = 0.0 (not None)."""
-        result = fetcher.avg_of(self._s([0.0]), 1)
-        assert result == 0.0
-
-    def test_zero_mixed_with_nones_only_zero_counted(self):
-        """[None, 0.0]: None excluded, 0.0 included → avg=0.0."""
-        result = fetcher.avg_of(self._s([None, 0.0]), 2)
-        assert result == 0.0
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — compute_pe_percentile
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestComputePePercentile:
-    """Inject price_df directly to avoid AKShare network calls."""
-
-    def _fin_df(self, eps_by_year: dict):
-        import pandas as pd
-
-        return pd.DataFrame(
-            [
-                {"报告期": yr, "基本每股收益": str(eps)}
-                for yr, eps in eps_by_year.items()
-            ]
-        )
-
-    def _price_df(self, n_days: int, price: float, start: dt.date) -> object:
-        import pandas as pd
-
-        rows = [
-            {"日期": str(start + dt.timedelta(days=i)), "收盘": price}
-            for i in range(n_days)
-        ]
-        df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["日期"]).astype("datetime64[us]")
-        return df
-
-    def test_none_pe_returns_none(self):
-        assert fetcher.compute_pe_percentile("600036", None, None) is None
-
-    def test_zero_pe_returns_none(self):
-        assert (
-            fetcher.compute_pe_percentile("600036", 0, self._fin_df({2023: 1.0}))
-            is None
-        )
-
-    def test_negative_pe_returns_none(self):
-        assert (
-            fetcher.compute_pe_percentile("600036", -5.0, self._fin_df({2023: 1.0}))
-            is None
-        )
-
-    def test_api_error_price_df_propagates(self):
-        """price_df='API_ERROR' → same string returned unchanged."""
-        result = fetcher.compute_pe_percentile(
-            "600036", 20.0, self._fin_df({2023: 2.0}), price_df="API_ERROR"
-        )
-        assert result == "API_ERROR"
-
-    def test_all_negative_eps_no_records_returns_none(self):
-        """Only negative EPS → eps_records empty → None, even with 200 price rows."""
-        import pandas as pd
-
-        fin_df = pd.DataFrame([{"报告期": 2023, "基本每股收益": "-2.0"}])
-        price_df = self._price_df(200, 20.0, dt.date(2015, 5, 1))
-        result = fetcher.compute_pe_percentile(
-            "600036", 20.0, fin_df, price_df=price_df
-        )
-        assert result is None
-
-    def test_fewer_than_100_data_points_returns_none(self):
-        """< 100 valid PE data points → None (insufficient statistical basis)."""
-        fin_df = self._fin_df({2014: 1.0})
-        price_df = self._price_df(10, 20.0, dt.date(2015, 5, 1))
-        result = fetcher.compute_pe_percentile(
-            "600036", 20.0, fin_df, price_df=price_df
-        )
-        assert result is None
-
-    def test_current_pe_above_all_history_returns_100(self):
-        """Current PE higher than all historical PE → 100.0%."""
-        fin_df = self._fin_df({2014: 1.0})  # historical PE = 10 (price 10 / EPS 1)
-        price_df = self._price_df(200, 10.0, dt.date(2015, 5, 1))
-        result = fetcher.compute_pe_percentile(
-            "600036", 1000.0, fin_df, price_df=price_df
-        )
-        assert result == 100.0
-
-    def test_current_pe_below_all_history_returns_zero(self):
-        """Current PE lower than all historical PE → 0.0%."""
-        fin_df = self._fin_df({2014: 1.0})  # historical PE = 30 (price 30 / EPS 1)
-        price_df = self._price_df(200, 30.0, dt.date(2015, 5, 1))
-        result = fetcher.compute_pe_percentile("600036", 1.0, fin_df, price_df=price_df)
-        assert result == 0.0
-
-    def test_median_pe_returns_approximately_50_pct(self):
-        """Current PE at historical median → ~50% (±10% tolerance)."""
-        import pandas as pd
-
-        # 200 days: 100 days at PE=5 (price=5), 100 days at PE=15 (price=15)
-        fin_df = self._fin_df({2014: 1.0})
-        rows = [
-            {"日期": str(dt.date(2015, 5, 1) + dt.timedelta(days=i)), "收盘": 5.0}
-            for i in range(100)
-        ] + [
-            {"日期": str(dt.date(2015, 9, 8) + dt.timedelta(days=i)), "收盘": 15.0}
-            for i in range(100)
-        ]
-        price_df = pd.DataFrame(rows)
-        price_df["date"] = pd.to_datetime(price_df["日期"]).astype("datetime64[us]")
-        result = fetcher.compute_pe_percentile(
-            "600036", 10.0, fin_df, price_df=price_df
-        )
-        assert result is not None
-        assert 40.0 <= result <= 60.0, (
-            f"median PE percentile should be ~50%, got {result}"
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  fetcher.py — compute_pb_percentile
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestComputePbPercentile:
-    def _fin_df(self, bps_by_year: dict):
-        import pandas as pd
-
-        return pd.DataFrame(
-            [{"报告期": yr, "每股净资产": str(bps)} for yr, bps in bps_by_year.items()]
-        )
-
-    def _price_df(self, n_days: int, price: float) -> object:
-        import pandas as pd
-
-        start = dt.date(2015, 5, 1)
-        rows = [
-            {"日期": str(start + dt.timedelta(days=i)), "收盘": price}
-            for i in range(n_days)
-        ]
-        df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["日期"]).astype("datetime64[us]")
-        return df
-
-    def test_none_pb_returns_none(self):
-        assert fetcher.compute_pb_percentile("600036", None, None) is None
-
-    def test_zero_pb_returns_none(self):
-        assert (
-            fetcher.compute_pb_percentile("600036", 0, self._fin_df({2023: 5.0}))
-            is None
-        )
-
-    def test_negative_pb_returns_none(self):
-        assert (
-            fetcher.compute_pb_percentile("600036", -1.0, self._fin_df({2023: 5.0}))
-            is None
-        )
-
-    def test_api_error_price_df_propagates(self):
-        result = fetcher.compute_pb_percentile(
-            "600036", 1.5, self._fin_df({2023: 5.0}), price_df="API_ERROR"
-        )
-        assert result == "API_ERROR"
-
-    def test_insufficient_data_points_returns_none(self):
-        fin_df = self._fin_df({2014: 5.0})
-        price_df = self._price_df(50, 25.0)  # 50 < 100 threshold
-        result = fetcher.compute_pb_percentile("600036", 1.5, fin_df, price_df=price_df)
-        assert result is None
-
-    def test_high_pb_above_all_history_returns_100(self):
-        """Current PB higher than all historical PB → 100.0%."""
-        fin_df = self._fin_df({2014: 10.0})  # historical PB = 2.5 (price 25 / BPS 10)
-        price_df = self._price_df(200, 25.0)
-        result = fetcher.compute_pb_percentile(
-            "600036", 999.0, fin_df, price_df=price_df
-        )
-        assert result == 100.0
-
-    def test_all_negative_bps_returns_none(self):
-        """Only negative BPS → bps_records empty → None."""
-        import pandas as pd
-
-        fin_df = pd.DataFrame([{"报告期": 2023, "每股净资产": "-5.0"}])
-        price_df = self._price_df(200, 10.0)
-        result = fetcher.compute_pb_percentile("600036", 1.0, fin_df, price_df=price_df)
-        assert result is None
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  Race conditions
 # ═══════════════════════════════════════════════════════════════════
 
 

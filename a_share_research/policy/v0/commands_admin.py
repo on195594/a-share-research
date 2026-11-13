@@ -1,16 +1,14 @@
-"""Watchlist, cleanup, and checklist commands."""
+"""Watchlist and cache maintenance commands."""
 
 from __future__ import annotations
 
 import json
 import math
-import sys
 from datetime import datetime, timedelta, timezone
 
 from a_share_research.policy.v0 import (
     db,
     domain,
-    framework_metadata,
     store,
 )
 
@@ -426,33 +424,3 @@ def cmd_clear(args: list[str]) -> None:
             conn.execute("DELETE FROM qualitative_only_securities")
             conn.commit()
             print("已清除全部缓存")
-
-
-def cmd_checklist(args: list[str]) -> None:
-    """打印框架客观指标核对清单：基于缓存的基本面数据逐项核对，不计分、不加总"""
-    if len(args) < 2:
-        print("用法：cache.py checklist <代码> <框架A|B|C|D|E|F>", file=sys.stderr)
-        sys.exit(1)
-
-    code, framework = args[0], args[1]
-    from a_share_research.policy.v0 import checklist
-
-    try:
-        items = checklist.build_checklist(code, framework)
-    except (
-        checklist.UnsupportedFrameworkError,
-        checklist.FundamentalsCacheMissingError,
-    ) as e:
-        print(f"错误：{e}", file=sys.stderr)
-        sys.exit(1)
-
-    # build_checklist 已经验证过 framework 合法（否则上面已经 sys.exit 退出），
-    # 这里直接下标访问是安全的
-    normalized = framework.upper()
-    metadata = framework_metadata.FRAMEWORK_REGISTRY[normalized]
-    skipped = [{"label": i.label, "reason": i.reason} for i in metadata.skipped_items]
-    print(
-        checklist.format_checklist(
-            items, normalized, code, metadata.subjective_items, skipped
-        )
-    )
