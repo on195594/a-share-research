@@ -657,3 +657,7 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .compare-shortcut { display: inline-block; margin-left: 8px; color: var(--accent); text-underline-offset: 3px; }
 .compare-shortcut:hover { color: var(--accent-strong); }
 .step-desc { font-size: 13px; font-weight: 400; color: var(--muted); margin: 4px 0 2px; line-height: 1.5; }
+
+.device-preferences { max-width: var(--column); margin: 0 auto; padding: 0 20px; font-size: 13px; color: var(--muted); }
+.device-preferences form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.device-preferences button { min-height: 44px; }

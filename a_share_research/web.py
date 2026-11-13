@@ -37,6 +37,8 @@ HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
 STATE_COOKIE = "oauth_state"
 SESSION_SECONDS = 8 * 3600
+DEVICE_COOKIE = "remember_device"
+DEVICE_SECONDS = 30 * 24 * 3600
 STEPS = {"gather": "取资料", "explore": "补读披露与计算", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改",
          "price": "计算价格参考"}
 CSP = ("default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; "
@@ -124,7 +126,15 @@ async def guard(request: Request, call_next):
         return Response("Invalid Host header", status_code=403, media_type="text/plain")
     if request.method not in ("GET", "HEAD") and not request.url.path.startswith("/api/") and not same_origin(request):
         return Response("Cross-origin request refused", status_code=403, media_type="text/plain")
+    # Restore only safe page reads, never use a device cookie as API/write authorization.
+    restored = None
+    if (request.method in ("GET", "HEAD") and not request.url.path.startswith(("/api/", "/static/", "/auth/"))
+            and request.url.path != "/oauth_callback" and not current_session(request)):
+        restored = restore_device(request)
     response = await call_next(request)
+    if restored:
+        token, age = restored
+        set_cookie(response, SESSION_COOKIE, token, age)
     response.headers.update(SECURITY_HEADERS)
     if not request.url.path.startswith("/static/"):
         response.headers["cache-control"] = "no-store, no-transform"
@@ -146,11 +156,51 @@ def _hash(token: str) -> str:
 
 
 def current_session(request: Request) -> str | None:
-    token = request.cookies.get(SESSION_COOKIE)
+    token = getattr(request.state, "restored_session", None) or request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
     row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (_hash(token),)).fetchone()
-    return _hash(token) if row and row["expires_at"] > time.time() else None
+    if not row or row["expires_at"] <= time.time():
+        return None
+    linked = conn.execute("SELECT d.owner_id, d.expires_at FROM device_sessions s "
+                          "LEFT JOIN remembered_devices d ON d.token_hash=s.device_hash "
+                          "WHERE s.session_hash=?", (_hash(token),)).fetchone()
+    if linked and (linked["owner_id"] != settings.github_user_id or not linked["expires_at"]
+                   or linked["expires_at"] <= time.time()):
+        return None
+    return _hash(token)
+
+
+def active_device(request: Request):
+    token = request.cookies.get(DEVICE_COOKIE, "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+        return None
+    return conn.execute("SELECT token_hash, expires_at FROM remembered_devices "
+                        "WHERE token_hash=? AND owner_id=? AND expires_at>?",
+                        (_hash(token), settings.github_user_id, time.time())).fetchone()
+
+
+def restore_device(request: Request):
+    with db.transaction(conn):
+        device = active_device(request)
+        if not device:
+            return None
+        token = secrets.token_urlsafe(32)
+        expires = min(time.time() + SESSION_SECONDS, device["expires_at"])
+        conn.execute("DELETE FROM device_sessions WHERE session_hash IN "
+                     "(SELECT token_hash FROM sessions WHERE expires_at<=?)", (time.time(),))
+        conn.execute("DELETE FROM sessions WHERE expires_at<=?", (time.time(),))
+        conn.execute("INSERT INTO sessions VALUES (?, ?)", (_hash(token), expires))
+        conn.execute("INSERT INTO device_sessions VALUES (?, ?)", (_hash(token), device["token_hash"]))
+    request.state.restored_session = token
+    return token, max(1, int(expires - time.time()))
+
+
+def revoke_device(device_hash: str):
+    conn.execute("DELETE FROM sessions WHERE token_hash IN "
+                 "(SELECT session_hash FROM device_sessions WHERE device_hash=?)", (device_hash,))
+    conn.execute("DELETE FROM device_sessions WHERE device_hash=?", (device_hash,))
+    conn.execute("DELETE FROM remembered_devices WHERE token_hash=?", (device_hash,))
 
 
 def csrf_token(session: str) -> str:
@@ -158,7 +208,7 @@ def csrf_token(session: str) -> str:
 
 
 def csrf_ok(session: str, supplied: str) -> bool:
-    return hmac.compare_digest(supplied, csrf_token(session))
+    return bool(re.fullmatch(r"[a-f0-9]{64}", supplied)) and hmac.compare_digest(supplied, csrf_token(session))
 
 
 def set_cookie(response: Response, name: str, value: str, age: int) -> None:
@@ -175,7 +225,9 @@ def start_session() -> RedirectResponse:
 
 
 def render(request: Request, name: str, session: str | None, status: int = 200, **context) -> HTMLResponse:
-    context |= {"csrf": csrf_token(session) if session else "", "steps": STEPS}
+    device = active_device(request) if session else None
+    context |= {"csrf": csrf_token(session) if session else "", "steps": STEPS,
+                "device_until": datetime.fromtimestamp(device["expires_at"], db.SHANGHAI).strftime("%Y-%m-%d %H:%M") if device else ""}
     return templates.TemplateResponse(request, name, context, status_code=status)
 
 
@@ -195,6 +247,8 @@ def login_required() -> RedirectResponse:
 
 @app.get("/login")
 def login(request: Request):
+    if current_session(request):
+        return RedirectResponse("/", status_code=303)
     return render(request, "login.html", None, dev_login=settings.dev_login)
 
 
@@ -254,13 +308,55 @@ def dev_login():
     return start_session()
 
 
+@app.post("/auth/remember-device")
+def remember_device(request: Request, csrf: str = Form(""), return_path: str = Form("/")):
+    session = current_session(request)
+    if not session:
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, "页面已过期", "请刷新页面后重试。", 403)
+    # Only a local ASCII path, never a URL, query or backslash-based network path.
+    destination = return_path if re.fullmatch(r"/[A-Za-z0-9/_.*-]*", return_path) and not return_path.startswith("//") else "/"
+    # Production persistent credentials require HTTPS; local development remains testable.
+    if not settings.secure and not settings.dev_login:
+        return message(request, session, "需要安全连接", "请通过 HTTPS 登记此设备。", 403)
+    with db.transaction(conn):
+        if not current_session(request):
+            return login_required()
+        if active_device(request):
+            return RedirectResponse(destination, status_code=303)
+        # A retried registration without its response cookie replaces, rather than orphans,
+        # the previous credential belonging to this session.
+        linked = conn.execute("SELECT device_hash FROM device_sessions WHERE session_hash=?", (session,)).fetchone()
+        if linked:
+            expiry = conn.execute("SELECT expires_at FROM sessions WHERE token_hash=?", (session,)).fetchone()[0]
+            revoke_device(linked["device_hash"])
+            conn.execute("INSERT INTO sessions VALUES (?, ?)", (session, expiry))
+        token = secrets.token_urlsafe(32)
+        conn.execute("INSERT INTO remembered_devices VALUES (?, ?, ?)",
+                     (_hash(token), settings.github_user_id, time.time() + DEVICE_SECONDS))
+        conn.execute("INSERT OR REPLACE INTO device_sessions VALUES (?, ?)", (session, _hash(token)))
+    response = RedirectResponse(destination, status_code=303)
+    set_cookie(response, DEVICE_COOKIE, token, DEVICE_SECONDS)
+    return response
+
+
 @app.post("/logout")
 def logout(request: Request, csrf: str = Form("")):
     session = current_session(request)
-    if session and csrf_ok(session, csrf):
+    if not session or not csrf_ok(session, csrf):
+        return message(request, session, "页面已过期", "请刷新页面后再退出。", 403)
+    with db.transaction(conn):
+        linked = conn.execute("SELECT device_hash FROM device_sessions WHERE session_hash=?", (session,)).fetchone()
+        if linked:
+            revoke_device(linked["device_hash"])
+        device = active_device(request)
+        if device:
+            revoke_device(device["token_hash"])
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (session,))
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(DEVICE_COOKIE, path="/")
     return response
 
 

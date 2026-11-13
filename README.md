@@ -25,6 +25,24 @@
 
 `.pytest_cache/`、`.ruff_cache/` 和应用、测试目录下的 `__pycache__/` 是可重建缓存；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
 
+### 记住当前浏览器 30 天
+
+所有者用 GitHub 登录后，可在页面导航下点击“记住此设备 30 天”，无需再次认证。8 小时会话过期后，打开原页面会自动恢复；页面显示固定截止日期，浏览不会延长 30 天期限。旧页面提交过期表单时需刷新一次，设备凭据不直接授权写请求或 API。点击“退出”会撤销当前设备及其派生会话，其他设备保持登录。
+
+生产仅通过 HTTPS 登记，Cookie 为 host-only、Secure、HttpOnly、SameSite=Lax；服务器只保存随机凭据的 SHA-256 哈希与截止时间，并核对当前 GitHub owner。凭据是浏览器持有的 bearer cookie，不是硬件绑定；被复制后在撤销或到期前可重放。清除 Cookie 或云浏览器环境重置后需重新登录。多实例必须共享同一应用数据库；会话密钥和 owner 配置保持一致。
+
+新增 `remembered_devices`、`device_sessions` 为可重入的附加认证表，保留 v22 与 `sessions` 两列结构，旧镜像可读写业务数据库。**回退旧镜像前须暂停 web，事务撤销所有设备及其派生会话**（只清理新增认证记录，不回滚业务数据库）：
+
+```sql
+BEGIN IMMEDIATE;
+DELETE FROM sessions WHERE token_hash IN (SELECT session_hash FROM device_sessions);
+DELETE FROM device_sessions;
+DELETE FROM remembered_devices;
+COMMIT;
+```
+
+旧镜像的退出操作不认识设备表；未撤销就回退，之后升级可能使旧 Cookie 再次生效。应用发布失败而自动回退时，同样执行上述认证清理后再恢复访问。初次部署需按认证配置/附加表变更处理，不把此节视为上线授权。
+
 ## 运行
 
 需要 Python ≥3.13、uv、Node.js、`pdftotext`（poppler-utils）、中文映射包 `poppler-data` 和本机 pi 运行时。按 `.env.example` 建 `.env`（0600，不进 Git），然后 `uv sync`。

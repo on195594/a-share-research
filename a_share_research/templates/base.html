@@ -21,6 +21,10 @@
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">退出</button></form>
   {% endif %}
 </header>
+{% if csrf %}<aside class="device-preferences" aria-label="登录设备">
+  {% if device_until %}<span>已记住此设备，至 {{ device_until }}（北京时间）；退出即取消。</span>
+  {% else %}<form method="post" action="/auth/remember-device"><input type="hidden" name="return_path" value="{{ request.url.path }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">记住此设备 30 天</button><span>仅在自己的设备启用</span></form>{% endif %}
+</aside>{% endif %}
 <main{% if refresh %} data-refresh="{{ refresh }}" data-key="{{ refresh_key }}"{% endif %}>
 {% block main %}{% endblock %}
 </main>

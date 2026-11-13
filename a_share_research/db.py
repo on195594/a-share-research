@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_by_expires ON sessions(expires_at);
+-- Additive authentication tables: old images keep reading/writing the unchanged sessions table.
+CREATE TABLE IF NOT EXISTS remembered_devices (
+    token_hash TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS device_sessions (
+    session_hash TEXT PRIMARY KEY,
+    device_hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS device_sessions_by_device ON device_sessions(device_hash);
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
