@@ -62,13 +62,13 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**当前应用 `da00d9c`，数据库 v22**。11-13 13:26 固定发布入口完成该版发布（含 30 天记住设备认证与附加表 `797d22c`、冻结预测复盘诊断改进与所有者当次批准提前启用的契约 3 检查点引导 `da00d9c`）；三个运行容器与发布清单一致，`worker` Pi 预检（`ready=true`）及完整性巡检（`ok=true`）通过，自动清理旧备份 `backup-pre-dae85dd-20261112-220137.db` 及旧镜像标签 `dae85dd`、`rollback-46003cc`。应用源码变更后曾因政策身份未续接导致 13:30、13:35、13:40 止损检查拒绝执行；所有者当次授权最小修复后，13:44:38 经本地 owner 入口以完全相同的参数登记当前实现并追加激活记录 5（`policy:91d1e013...c744`），读回 `installed=true`，规则及指南哈希不变。13:45 自然调度 execution `34ee3151c1a54775b5cd249ebf4e4601` 于 13:46:01 完成，评估 61 为 `no_alerts / exit_code=0`、通知正常 suppressed，失败 incident 自动 resolved，本地 pending 为空；未手动重跑、未改任务或账户。修复前后证据在 `policy-recovery-da00d9c-20261113-1342/`。契约 2/3 对照仍待按真实新报告及 2026 年报披露观察。
+入口 [stock.keyi.win](https://stock.keyi.win)。**当前应用 `5d97d85`，数据库 v22**。11-13 15:17–15:20 固定发布入口完成该版发布（报告展示层阅读排序与去免责套话改写 + 所有者当次明确授权窗口外提前启用的契约 4 语言治理 `5d97d85`）；三个运行容器与发布清单一致，`worker` Pi 预检（`ready=true`）及完整性巡检（`ok=true`）通过，自动清理旧备份 `backup-pre-2180beb-20261113-100659.db` 及旧镜像标签 `46003cc`、`rollback-2180beb`。因应用源码变更，`policy_installed=false`（待所有者用本地入口以原参数续接登记并激活 `5d97d85` 源码身份，不代为切换政策；此前激活记录 5 `policy:91d1e013...c744` 对应 `da00d9c`）。契约 4 对照仍待按真实新报告观察。
 
 生产 `tools` 仍仅监听 `127.0.0.1:8621`，独立 `.env.tools` 仅有行情凭据；账户开关为 1，外部研究/外部复核为 0。11-12 16:41:39 新账本成为唯一账户写入来源，旧库已持久封锁且只读保留。五宿主统一入口与 Hermes 替代脚本已安装，原账户定时任务已恢复。研究与复核继续使用 `openai-codex / gpt-6.1-sol / high`，本次未改模型。
 
-当前发布证据 `deploy-da00d9c-20261113-132652/`；备份 `backup-pre-da00d9c-20261113-132654.db` 与同名 `.bundle/`（此前一次发布证据 `deploy-2180beb-20261113-100656/`）。已用 Playwright 真实浏览器（390×844）核验 `https://stock.keyi.win/login` 无水平溢出且无控制台错误；需 GitHub 登录态的 30 天记住设备交互与页面按钮仍待所有者登录后实测。
+当前发布证据 `deploy-5d97d85-20261113-151742/`；备份 `backup-pre-5d97d85-20261113-151744.db` 与同名 `.bundle/`（此前一次发布证据 `deploy-da00d9c-20261113-132652/`）。已用 Playwright 真实浏览器（390×844）核验 `https://stock.keyi.win/login` 无水平溢出且无控制台错误，本机 `/ready` 正常；需 GitHub 登录态的报告页与 30 天记住设备交互仍待所有者登录后实测。
 
-**直接应用回退基线**：`rollback-da00d9c` = `2180beb`（二级保留 `rollback-2180beb` = `46003cc`，均为 v22 合并版）。回退保持新账本和现有客户端，绝不能恢复旧 Skills 写入或用旧数据库覆盖；因包含 `797d22c` 附加认证表，回退旧镜像前须按 README 暂停 web 并事务清理 `remembered_devices` / `device_sessions` 及对应派生 `sessions`，若回退至 `2180beb` 须按 README 重新激活其对应的同参数政策（`policy:fab80171...371`）。固定发布入口仍执行实际兼容检查，失败则停止，不绕过。
+**直接应用回退基线**：`rollback-5d97d85` = `da00d9c`（二级保留 `rollback-da00d9c` = `2180beb`，均为 v22 合并版）。回退保持新账本和现有客户端，绝不能恢复旧 Skills 写入或用旧数据库覆盖；若回退至 `da00d9c` 须按 README 重新激活其对应的同参数政策（`policy:91d1e013...c744`）；若回退至 `2180beb` 除重新激活 `policy:fab80171...371` 外，还须因 `797d22c` 附加认证表按 README 暂停 web 并事务清理 `remembered_devices` / `device_sessions` 及对应派生 `sessions`。固定发布入口仍执行实际兼容检查，失败则停止，不绕过。
 
 本节只维护当前部署；第 1、2 段首次发布与早期故障记录见 `git show 5bade10:docs/implementation-plan.md`。
 
