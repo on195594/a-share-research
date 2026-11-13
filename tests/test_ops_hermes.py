@@ -148,3 +148,42 @@ def test_apply_refuses_dirty_source(installer_repo, tmp_path, change):
     assert result.returncode == 1
     assert "未提交改动" in result.stdout
     assert not target.exists()
+
+
+def test_apply_refuses_ignored_script(installer_repo, tmp_path):
+    repo, git = installer_repo
+    (repo / ".gitignore").write_text("ops/hermes/*.local.sh\n")
+    git("add", ".gitignore")
+    git("-c", "user.name=Hermes Test", "-c", "user.email=hermes-test@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-qm", "Add gitignore")
+    (repo / "ops/hermes/secret.local.sh").write_text("#!/usr/bin/env bash\n")
+    target = tmp_path / "not-created"
+    result = run_install(repo, target, "--apply")
+    assert result.returncode == 1
+    assert "被忽略的脚本文件" in result.stdout
+    assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    ("inspect_rc", "inspect_stdout", "expected"),
+    [
+        (0, "sha256:aaa111\n", "9fd1f6b"),
+        (0, "sha256:ccc333\n", None),  # latest tag points elsewhere; running container matches neither
+        (0, "\n", None),               # stopped container
+        (1, "", None),                 # missing container
+    ],
+)
+def test_production_commit_reads_running_container(milestones, monkeypatch, inspect_rc, inspect_stdout, expected):
+    def fake_run(cmd, **_kwargs):
+        if cmd[:2] == ["docker", "inspect"]:
+            return subprocess.CompletedProcess(cmd, inspect_rc, stdout=inspect_stdout, stderr="")
+        if cmd[:3] == ["docker", "image", "ls"]:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout="latest sha256:bbb222\n9fd1f6b sha256:aaa111\n5d97d85 sha256:bbb222\n",
+                stderr="",
+            )
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(milestones.subprocess, "run", fake_run)
+    assert milestones.production_commit() == expected

@@ -134,19 +134,19 @@ v16 新增 `account_position_books`。内部 `position_store.initialize` 在首�
 
 分红可以用 batch.position_dividends 将本批事件下标绑定明确 cycle_id。同股票已有多个周期或没有活动周期时必须绑定；允许向已关闭周期记分红，周期须匹配公司且已在付款前存在。股数和退出日期保持原值。业务身份、周期和元数据均保留在不可变批次，重复请求不会重复计入收益。
 
-当前成本投影的 policy_evaluation 为 pending；账户层不执行投资规则。下面的独立适配层可显式提供 v0 旧表形状，生产账户来源继续按切换验收控制。
+当前成本投影的 policy_evaluation 为 pending；账户层不执行投资规则。下面的独立适配层可显式提供 v0 旧表形状；历史演进与当前生产切换状态见[实施计划](../../docs/implementation-plan.md)。
 
 ## v0 政策期初与旧表读取（影子入口）
 
 v17 新增不可变周期/事件整数编号、政策投影参数和期初快照。内部 `policy.v0.account_store.initialize` 在首笔金融事件前绑定成本期初与完整旧持仓/事件快照，要求证据、在仓周期、公司、股数、成本、日期一致，并具备参考成本、初始股数、主仓位和已保存止损字段。旧历史所有列原样保留；后续镜像刷新不会自动覆盖期初。
 
-`policy.v0.positions` 接收 account_id，使用 assistant 权限与账户影子开关，返回 holdings/holding_events、账本版本、期初哈希和 profile_identity。该 profile 记录当前投影算法哈希及止损/主仓位参数，仅供此适配器复算；完整投资政策身份与追加生效指针见下节；此投影 profile 不自动升级为完整身份，真实账户切换仍待验收。
+`policy.v0.positions` 接收 account_id，使用 assistant 权限与账户影子开关，返回 holdings/holding_events、账本版本、期初哈希和 profile_identity。该 profile 记录当前投影算法哈希及止损/主仓位参数，仅供此适配器复算；完整投资政策身份与追加生效指针见下节；此投影 profile 不自动升级为完整身份。
 
 新开仓的 position_entries 除 policy_identity 外，须明确 framework，可提供 framework_confident 和 name。policy_identity 须引用已登记 profile；金融事实可独立入账，但缺少这些政策条件时政策读取明确报缺口。旧周期先保留保存的止损线，买入或除权触发参考成本变动时才按绑定参数重算。
 
 `batch.position_distributions` 以事件下标提供每股现金除权金额，仅绑定分红或送转事件。到账现金与每股除权是独立事实，不能彼此反推；没有每股信息的分红只计收入。已有元数据不能通过重复事件补加或覆盖，须作废更正；同批同业务事件的元数据冲突会被拒绝。新增可选字段为空时保留旧请求哈希。
 
-显式设置 `POLICY_V0_ACCOUNT_SHADOW=账户编号` 后，v0 连接在同一只读事务内生成 TEMP holdings/holding_events，再启用 query_only；可与 `POLICY_V0_ANALYSIS_SHADOW=1` 联用。主库旧表不改，未设置时沿用旧来源。编号在金融入账事务内固定，读请求不分配编号，作废后也不复用。账户周期分析读取规则见下节；宿主流程和生产切换仍须整段验收。
+显式设置 `POLICY_V0_ACCOUNT_SHADOW=账户编号` 后，v0 连接在同一只读事务内生成 TEMP holdings/holding_events，再启用 query_only；可与 `POLICY_V0_ANALYSIS_SHADOW=1` 联用。主库旧表不改，未设置时沿用旧来源。编号在金融入账事务内固定，读请求不分配编号，作废后也不复用。账户周期分析读取规则见下节。
 
 ## 账户周期分析分支（影子入口）
 
@@ -158,7 +158,7 @@ v18 在同一 `account_analysis_history` 表增加 account_id/cycle_id 作用域
 
 已导入分支独立追加，旧镜像或旧分析后续更新不会自动覆盖它。基线不能重建覆盖，旧来源始终可追溯。没有显式导入分支的期初周期继续使用既有旧分析投影；新在仓周期缺少分析基线时，双投影读取明确拒绝，不拼接其他账户或旧周期的分析。双投影先生成持仓，再按账户/周期加载分析，最后封闭写入；已关闭周期保留其分支的最后快照供历史读取。
 
-未识别作用域的旧工具版本会混读新分支，不能作为含新分支数据库的回退目标。按合一方案，正式切换后的前一级回退镜像也必须能读写新账本；回退保留新账本，不恢复旧 Skills 或旧账户库。证据备份与独立目录恢复已接入 [README](../../README.md)，镜像兼容性及切换后回退仍待演练；生产目前沿用旧账户来源。
+未识别作用域的旧工具版本会混读新分支，不能作为含新分支数据库的回退目标。按合一方案，正式切换后的前一级回退镜像也必须能读写新账本；回退保留新账本，不恢复旧 Skills 或旧账户库。证据备份与独立目录恢复已接入 [README](../../README.md)，生产当前来源、切换证据与回退基线见[实施计划](../../docs/implementation-plan.md)。
 
 
 ## 完整政策身份、生效指针与固定输入重放（影子入口）
@@ -226,7 +226,7 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
-mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256。当前只有该绑定的读取和验证，没有生产切换写入器，私有测试中设置绑定不算完成切换。
+mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256；生产绑定与切换证据见[实施计划](../../docs/implementation-plan.md#合一重构与实盘割接2026-11-12-已上线第-4-段收尾中)。
 
 ledger 采集校验资金与成本重放、政策期初、编号、活动周期的账户作用域分析及全部关联证据，不能回退旧分析基线。来源摘要覆盖相关账本记录、分析、资产观察、已入账批次、实际政策投影与财务缓存；观察或无成交快照改变时即使账本版本不变也会改变摘要。子进程仅对明确绑定账户启用连接内双投影，前后再次核对来源。
 

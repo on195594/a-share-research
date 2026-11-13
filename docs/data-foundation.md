@@ -337,7 +337,7 @@ R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 
 | `companies` 维度表 | 同一公司名称无冲突，报告里的名称本就是历史快照 |
 | 记分结果落表 | V0 明确不建表；成熟读数沿用判断验证方案 |
 | `replay_of`、`coverage` 触发器改生成列 | 运行正常；`coverage` 含子查询，生成列不支持 |
-| Skills 账本改造 | 归 `a-stock-agent-skills`，消费者不直连 SQLite；本方案只保证 id 稳定、API 不变 |
+| Skills 账本改造 | 归原 `a-stock-agent-skills`（现已并入本仓 `account/`、`policy/v0/`），消费者不直连 SQLite；本方案只保证 id 稳定、API 不变 |
 
 **原文档已修正的错误**：
 

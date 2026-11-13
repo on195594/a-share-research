@@ -64,12 +64,22 @@ def render(rows: list[dict], today: date, *, production: str | None, released,
 
 
 def production_commit() -> str | None:
-    """The running web image's commit tag; a rollback or unknown image reads as unconfirmed."""
-    out = subprocess.run(["docker", "image", "ls", "a-share-research-web", "--format", "{{.Tag}} {{.ID}}"],
-                         capture_output=True, text=True, check=True).stdout
-    images = dict(line.split() for line in out.splitlines())
-    latest = images.get("latest")
-    tags = [tag for tag, image in images.items() if image == latest and re.fullmatch(r"[0-9a-f]{7,40}", tag)]
+    """The running web container's commit tag; a stopped, missing, or untagged image reads as unconfirmed."""
+    inspected = subprocess.run(
+        ["docker", "inspect", "--format", "{{if .State.Running}}{{.Image}}{{end}}", "a-share-research-web"],
+        capture_output=True, text=True,
+    )
+    running_id = inspected.stdout.strip()
+    if inspected.returncode or not running_id:
+        return None
+    out = subprocess.run(
+        ["docker", "image", "ls", "a-share-research-web", "--no-trunc", "--format", "{{.Tag}} {{.ID}}"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    tags = [
+        tag for tag, image in (line.split() for line in out.splitlines() if line.strip())
+        if image == running_id and re.fullmatch(r"[0-9a-f]{7,40}", tag)
+    ]
     return tags[0] if len(tags) == 1 else None
 
 

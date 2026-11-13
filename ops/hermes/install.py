@@ -59,6 +59,12 @@ def apply(target: Path) -> None:
     )
     if result.stdout:
         raise ValueError("拒绝安装：ops/hermes/ 有未提交改动，请先提交后再 --apply。")
+    ignored = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--", "ops/hermes"],
+        cwd=repo, capture_output=True, text=True, check=True,
+    )
+    if any(Path(line).suffix in {".py", ".sh"} for line in ignored.stdout.splitlines() if line.strip()):
+        raise ValueError("拒绝安装：ops/hermes/ 存在被忽略的脚本文件，请清理后再 --apply。")
     target.mkdir(parents=True, exist_ok=True)
     for source in scripts():
         temporary = None

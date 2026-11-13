@@ -336,6 +336,14 @@ uv run python -m a_share_research.deploy "$release_code" \
 
 已启用政策服务时，镜像就绪与政策实装一致是两项检查：应用代码参与政策身份，升级或回退后 `policy.current.installed` 可能为 false，新计算会拒绝，已有请求仍可查回原回执。所有者须按[政策本地入口](a_share_research/tools/README.md#完整政策身份生效指针与固定输入重放影子入口)，用核对后的参数在目标镜像下登记身份并追加生效指针；回退同样适用。发布工具不代替所有者切换政策，也不改写既存回执与旧周期参数。
 
+已完成的发布如需手动回退至兼容基线（见[当前部署](docs/implementation-plan.md#当前部署)的 `rollback-*` 标签），必须保持新账本 `data/app.db` 为唯一事实来源，绝不恢复旧库或旧 Skills 写入：
+
+1. 核对 worker 空闲后，经 tools 控制 socket 暂停受理并等待在途清零：`docker compose --profile tools exec -T tools python -m a_share_research.tools.control pause --socket /run/ashare-tools/control.sock --timeout 30`（核对返回 `{"paused": true, "in_flight": 0}`）。
+2. 停止服务：`docker compose --profile tools stop -t 30 web worker && docker compose --profile tools stop -t 60 tools`。
+3. 以目标回退镜像对当前数据副本执行只读兼容核对（`python -c 'from pathlib import Path; from a_share_research import rollback; print(rollback.assess({"web":"a-share-research-web:<目标>","worker":"a-share-research-worker:<目标>"}, Path("/home/lin/a-share-research-data/app.db"), Path("<私有证据目录>")))'`），不通过则停服排查；若跨过 `797d22c`，按上文“回退旧镜像前须暂停 web”步骤清理新增认证表。
+4. 将 `a-share-research-{web,worker}:latest` 重新打标签到目标回退镜像并启动：`docker compose --profile tools up -d --no-build --no-deps web worker tools`。
+5. 按上文政策本地入口在目标镜像下以原参数登记并激活新指针，然后恢复受理：`docker compose --profile tools exec -T tools python -m a_share_research.tools.control resume --socket /run/ashare-tools/control.sock`，核对 `tools` `/ready`、`web` 登录态/页面与 worker 预检。
+
 首次 v9→v22 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。v9 漏传此参数会在停服和更改镜像标签前拒绝。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
 
 ```sh
