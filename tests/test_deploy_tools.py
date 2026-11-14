@@ -60,8 +60,10 @@ def operations(monkeypatch,tmp_path):
             if args[:3]==('docker','compose','config'):
                 if '--hash' in args:
                     return f'{args[-1]} config-{args[-1]}'
-                return json.dumps({'services':{'tools':{'image':'a-share-research-worker',
-                    'environment':state.env,'volumes':[{'source':str(data),'target':'/data','type':'bind'}]}}})
+                volume={'source':str(data),'target':'/data','type':'bind'}
+                return json.dumps({'services':{'web':{'volumes':[volume]},'worker':{'volumes':[volume]},
+                    'tools':{'image':'a-share-research-worker','environment':state.env,'volumes':[volume],
+                             'tmpfs':['/run/ashare-tools:uid=1000,gid=1000,mode=0700']}}})
             if args[:3]==('docker','compose','stop'):
                 for service in args[5:]:
                     state.running[service]=False
@@ -147,6 +149,8 @@ def operations(monkeypatch,tmp_path):
         monkeypatch.setattr(deploy,'idle',lambda database:record('idle'))
         monkeypatch.setattr(deploy,'fingerprints',lambda database:{'rows':'unchanged'})
         monkeypatch.setattr(deploy,'_source_version',lambda database:21)
+        # This fixture has no database file; the policy status read is covered in test_deploy.py.
+        monkeypatch.setattr(deploy,'policy_installed_status',lambda database:None)
         monkeypatch.setattr(deploy,'create_release_backup',backup)
         monkeypatch.setattr(deploy.rollback,'assess',assess)
         monkeypatch.setattr(deploy,'prune_backups',lambda data:[])

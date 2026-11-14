@@ -321,7 +321,7 @@ git archive "$release_code" | docker build --target web -t "a-share-research-web
 git archive "$release_code" | docker build --target worker -t "a-share-research-worker:$release_code" -
 ```
 
-按 [AGENTS.md 例行发布授权](AGENTS.md#授权)调用仓库内的发布工具（经当次授权有配置变更时追加 `--allow-config`）；不再从历史证据目录复制脚本，也不重新编写临时 SQL：
+按 [AGENTS.md 例行发布授权](AGENTS.md#授权)调用仓库内的发布工具（经当次授权有配置变更时追加 `--allow-config`，此时容器挂载按已提交 `compose.yaml` 的声明核对，其余项仍须与发布前一致）；不再从历史证据目录复制脚本，也不重新编写临时 SQL：
 
 ```bash
 uv run python -m a_share_research.deploy "$release_code" \

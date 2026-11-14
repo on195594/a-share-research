@@ -241,3 +241,55 @@ def test_describe_accepts_null_tmpfs_on_containers_without_it(monkeypatch):
     captured['HostConfig']['Tmpfs'] = None
     monkeypatch.setattr(deploy, 'run', lambda *args: json.dumps([captured]))
     assert deploy.describe('web')['mounts'] == {'/data': ['/private/rehearsal-data', True]}
+
+
+# Captured from `docker compose --profile tools config --format json` on the production host (2026-11-14).
+_COMPOSE_CONFIG = {'services': {
+    'web': {'volumes': [{'type': 'bind', 'source': '/home/lin/a-share-research-data', 'target': '/data', 'bind': {}}]},
+    'worker': {'volumes': [
+        {'type': 'bind', 'source': '/home/lin/a-share-research-data', 'target': '/data', 'bind': {}},
+        {'type': 'bind', 'source': '/home/lin/.pi', 'target': '/home/lin/.pi', 'bind': {}},
+        {'type': 'bind', 'source': '/home/lin/wiki/concepts/company-analysis', 'target': '/method-cards',
+         'read_only': True, 'bind': {}}]},
+    'tools': {'volumes': [{'type': 'bind', 'source': '/home/lin/a-share-research-data', 'target': '/data', 'bind': {}}],
+              'tmpfs': ['/run/ashare-tools:uid=1000,gid=1000,mode=0700']}}}
+_WORKER_BEFORE = {'/data': ['/home/lin/a-share-research-data', True], '/home/lin/.pi': ['/home/lin/.pi', True]}
+_WORKER_DECLARED = _WORKER_BEFORE | {'/method-cards': ['/home/lin/wiki/concepts/company-analysis', False]}
+
+
+def test_declared_mounts_match_describe_shape_on_the_captured_compose_config(monkeypatch):
+    monkeypatch.setattr(deploy, 'run', lambda *args: json.dumps(_COMPOSE_CONFIG))
+    assert deploy.declared_mounts('worker') == _WORKER_DECLARED
+    assert deploy.declared_mounts('tools') == {'/data': ['/home/lin/a-share-research-data', True],
+                                               '/run/ashare-tools': ['tmpfs', True]}
+
+
+@pytest.mark.parametrize('allow_config, actual, accepted', [
+    (True, _WORKER_DECLARED, True),    # authorized change: the declared read-only mount is present
+    (False, _WORKER_DECLARED, False),  # routine release: any mount change is rejected
+    (True, _WORKER_BEFORE, False),     # declared mount missing from the running container
+    # Minimal tampered variant of the captured mount: writable instead of the declared read-only.
+    (True, _WORKER_BEFORE | {'/method-cards': ['/home/lin/wiki/concepts/company-analysis', True]}, False),
+])
+def test_verify_release_checks_mounts_against_compose_only_for_authorized_config(
+        monkeypatch, allow_config, actual, accepted):
+    def run(*args):
+        if 'config' in args:
+            return json.dumps(_COMPOSE_CONFIG)
+        return json.dumps({'ok': True, 'ready': True})
+
+    before = {'worker': {'image': 'old', 'running': True, 'config_hash': 'h1', 'cpus': 600_000_000,
+                         'ports': {}, 'mounts': _WORKER_BEFORE}}
+    monkeypatch.setattr(deploy, 'run', run)
+    monkeypatch.setattr(deploy, 'wait_ready', lambda: None)
+    monkeypatch.setattr(deploy, 'describe', lambda service: before['worker'] | {
+        'image': 'new', 'config_hash': 'h2' if allow_config else 'h1', 'mounts': actual})
+
+    def verify():
+        return deploy._verify_release({'worker': 'new'}, before, ('worker',), allow_config=allow_config,
+                                      save=lambda name, value: None)
+    if accepted:
+        assert verify()['worker']['mounts'] == actual
+    else:
+        with pytest.raises(RuntimeError, match='worker 镜像、运行状态或部署配置不一致'):
+            verify()

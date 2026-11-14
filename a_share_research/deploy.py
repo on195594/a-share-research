@@ -199,6 +199,17 @@ def describe(service: str) -> dict:
             "mounts": mounts}
 
 
+def declared_mounts(service: str) -> dict:
+    """Mounts the committed Compose file declares for a service, in `describe` shape."""
+    configured = json.loads(run('docker', 'compose', '--profile', 'tools', 'config', '--format', 'json'))
+    spec = configured['services'][service]
+    mounts = {v['target']: [v['source'], not v.get('read_only', False)] for v in spec.get('volumes') or []}
+    for entry in spec.get('tmpfs') or []:
+        target, _, options = entry.partition(':')
+        mounts[target] = ['tmpfs', 'ro' not in options.split(',')]
+    return mounts
+
+
 def verify_images(code: str) -> dict:
     archive = subprocess.check_output(["git", "archive", code, "a_share_research"], cwd=ROOT)
     with tarfile.open(fileobj=io.BytesIO(archive)) as source:
@@ -289,7 +300,9 @@ def _verify_release(images, before, services, *, allow_config, save):
     for service in before:
         expected = before[service] | {'image': images[service]}
         if allow_config:
+            # An authorized config change may add or drop mounts; the committed Compose file is the reference.
             expected['config_hash'] = after[service]['config_hash']
+            expected['mounts'] = declared_mounts(service)
         if after[service] != expected:
             raise RuntimeError(f'{service} 镜像、运行状态或部署配置不一致')
     if 'tools' in services:
