@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 import time
 from copy import deepcopy
@@ -16,7 +17,7 @@ from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
 from a_share_research.checking import SECTIONS, check
 from a_share_research.prompts import RULES, output_schema, parse_json
-from a_share_research.research_tools import Acquisition, active_methods_digest, explore, method_catalog
+from a_share_research.research_tools import Acquisition, active_methods_digest, explore, run_method_catalog
 
 log = logging.getLogger(__name__)
 
@@ -512,7 +513,9 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                 frozen = conn.execute("SELECT created_at FROM batches WHERE id=?", (int(batch[1]),)).fetchone()
                 if frozen:
                     cutoff = frozen["created_at"]
-            material.extra["method_catalog"] = method_catalog(conn, before=cutoff)
+            material.extra["method_catalog"] = run_method_catalog(
+                conn, before=cutoff, batch=bool(batch) or run["batch_id"] is not None,
+                cards_dir=os.environ.get("METHOD_CARDS_DIR"))
         identity["methods_sha256"] = active_methods_digest(conn, catalog=material.extra.get("method_catalog", []))
         db.update_run(conn, run_id, identity=json.dumps(identity))
         db.update_run(conn, run_id, code=material.code, name=material.name)

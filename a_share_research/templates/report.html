@@ -215,8 +215,8 @@
   {% endif %}
   {% if body.methods_used %}
   <details>
-    <summary>参考过的历史方法</summary>
-    {% for entry in body.methods_used %}<p>{{ entry.method.text }} {% if entry.report_id %}<a href="/reports/{{ entry.report_id }}">查看来源报告</a>{% endif %}</p>{% endfor %}
+    <summary>检索到的方法</summary>
+    {% for entry in body.methods_used %}<p>{% if entry.card %}方法卡：{{ entry.title }}{% for url in entry.source_urls %} <a href="{{ url }}" rel="noopener">来源{{ loop.index }}</a>{% endfor %}{% else %}{{ entry.method.text }} {% if entry.report_id %}<a href="/reports/{{ entry.report_id }}">查看来源报告</a>{% endif %}{% endif %}</p>{% endfor %}
   </details>
   {% endif %}
 

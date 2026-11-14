@@ -19,7 +19,7 @@
 | `docs/roadmap.md` | 演进原则、阶段日期与到期默认动作、方法论借鉴 | 具体工作包状态与部署记录 |
 | `docs/implementation-plan.md` | 当前工作包状态、剩余验收项、当前生产部署与回退命令 | 产品长文与设计规范 |
 | `docs/data-foundation.md` | 数据层结构、迁移与治理规则的设计和验收口径 | 当前部署与工作包状态（归实施计划） |
-| `docs/screening-experiment.md`、`docs/investment-upgrade.md`、`docs/research-accumulation.md`、`docs/judgment-validation.md`、`docs/investment-advisor.md` | 各自专题（初筛实验 E、基本面升级 F、研究积累 K、判断验证 V、投资顾问闭环 A）的设计、验收口径与实验结论 | 当前部署与工作包状态（归实施计划） |
+| `docs/screening-experiment.md`、`docs/investment-upgrade.md`、`docs/research-accumulation.md`、`docs/judgment-validation.md`、`docs/investment-advisor.md`、[研究方法库方案](docs/research-method-library.md) | 各自专题（初筛实验 E、基本面升级 F、研究积累 K、判断验证 V、投资顾问闭环 A、研究方法库）的设计、验收口径与实验结论 | 当前部署与工作包状态（归实施计划） |
 
 冲突按内容归属解决：目标与体验看 `PRODUCT.md`，授权与执行规则看本文件，具体设计看对应方案，已实现能力以代码和验证证据为准。旧阶段的“不做”、固定参数和技术选型不自动成为永久禁令；发现冲突时修正 owner 文档，不要求用户反复裁决已授权事项，也不把规划写成已上线能力。
 

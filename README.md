@@ -179,7 +179,7 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 每次研究在 `runs.identity` 记录应用文件内容哈希、Python/Lib 版本和材料哈希，在 `calls.identity` 记录模型、pi/Node 版本、调用参数和提示词哈希；未知一律留空，不用当前版本回填。`runs.material` 保存实际送入流程的财务表、行情时点、文档身份和原文页。
 
-方法目录保存在材料快照，`methods_sha256` 标识实际可用的目录；检索使用这一快照。普通研究按开始时间、批次研究按批次创建时间固定方法；`methods_used` 仍只表示检索召回。
+方法目录保存在材料快照，`methods_sha256` 标识实际可用的目录；检索使用这一快照。普通研究按开始时间、批次研究按批次创建时间固定方法；`methods_used` 仍只表示检索召回。非批次单股研究的目录还并入共享 Wiki 的分析方法卡：worker 经 `METHOD_CARDS_DIR` 只读挂载卡片目录（compose 默认 `/home/lin/wiki/concepts/company-analysis`，可用 `METHOD_CARDS_SOURCE` 改），未设置时没有卡片，见[研究方法库](docs/research-method-library.md)。
 
 `--replay` 复用该快照重新执行成文、检查、复核和修复（包括修正阶段都不开放取证工具、不重新探索、不取数），保存为新任务；快照缺失、版本不支持、哈希或公司不一致时失败。重放报告在网页上标明来源，首页最新报告和“今日已研究”判断排除重放。
 

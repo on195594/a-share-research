@@ -1,14 +1,19 @@
 """Method retrieval and revision using two real, reviewed Moutai corrections."""
 
+import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from a_share_research import db, service
 from a_share_research.checking import check
 from a_share_research.research import _research_context
-from a_share_research.research_tools import active_methods_digest, method_catalog, research_methods, ResearchTools
+from a_share_research.research_tools import (
+    ResearchTools, active_methods_digest, method_cards, method_catalog, research_methods, run_method_catalog,
+)
 from support.reports import MATERIAL, report
 
+CARDS = Path(__file__).parent / "data/method-cards"  # real card copied from the shared wiki, 2026-11-14
 CAPTURED = json.loads((Path(__file__).parent / "data/research-methods.json").read_text())["reports"]
 
 
@@ -59,3 +64,39 @@ def test_method_claims_must_have_evidence_in_this_material():
     problems = check(result, MATERIAL)
     assert problems and all(p["where"].startswith("methods[") for p in problems)
     assert check(report(methods=[]), MATERIAL) == []
+
+
+def test_method_cards_join_only_single_stock_catalogs_and_carry_no_evidence_identity(tmp_path, caplog):
+    raw = (CARDS / "cyclical-earnings-normalization.md").read_bytes()
+    cards = method_cards(CARDS)
+    assert [card["card"] for card in cards] == ["cyclical-earnings-normalization"]
+    card = cards[0]
+    assert card["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert card["source_urls"] == [
+        "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/littlebook/commodityvaluedrivers.htm"]
+    assert card["title"] and card["verified_at"] == "2026-11-14"
+    assert card["method"]["text"].startswith("# ") and "status: stable" not in card["method"]["text"]
+    # A card is guidance only: it has no report, evidence source or table row a report could cite.
+    assert not {"report_id", "sources", "table", "code"} & set(card)
+
+    conn = db.connect(tmp_path / "app.db")
+    assert run_method_catalog(conn, before=None, batch=False, cards_dir=CARDS) == cards
+    assert run_method_catalog(conn, before=None, batch=True, cards_dir=CARDS) == []
+    assert run_method_catalog(conn, before=None, batch=False, cards_dir=None) == []
+    conn.close()
+
+    # Retrieval, the returned-record trail and the digest reuse the existing frozen-catalog path.
+    material = deepcopy(MATERIAL)
+    material.extra["method_catalog"] = cards
+    tools = ResearchTools(material, None)
+    assert tools.research_methods("低PE 正常化") == cards
+    assert tools.research_methods("应收保理") == []
+    assert material.extra["methods_used"] == cards
+    assert '"card": "cyclical-earnings-normalization"' in material.prompt_block()
+    assert active_methods_digest(None, catalog=cards) != active_methods_digest(None, catalog=[])
+
+    # Minimal labelled variants of the real card: drafts and pages without frontmatter are not loaded.
+    (tmp_path / "draft.md").write_bytes(raw.replace(b"status: stable", b"status: draft"))
+    (tmp_path / "plain.md").write_text("# no frontmatter")
+    assert method_cards(tmp_path) == []
+    assert "draft.md" in caplog.text and "plain.md" in caplog.text

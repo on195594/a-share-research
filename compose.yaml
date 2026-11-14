@@ -32,9 +32,12 @@ services:
     env_file: .env  # TUSHARE_TOKEN, MODEL_PROVIDER, MODEL_ID, MODEL_REASONING, MODEL_MAX_TOKENS, MODEL_REVIEW_*, PI_*
     environment:
       DATA_DIR: /data
+      METHOD_CARDS_DIR: /method-cards
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
       - /home/lin/.pi:/home/lin/.pi
+      # Reviewed analysis method cards maintained in the shared wiki; read-only, single-stock runs only.
+      - ${METHOD_CARDS_SOURCE:-/home/lin/wiki/concepts/company-analysis}:/method-cards:ro
 
   # Explicit opt-in during consolidation; shares worker image, never its model credentials.
   tools:

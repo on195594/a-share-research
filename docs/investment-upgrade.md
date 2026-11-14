@@ -288,6 +288,8 @@
 
 ### 7.11 方法参考与适用范围
 
+有公开来源的分析方法卡在共享 Wiki 维护，单股研究可按需检索，接入与去留口径见[研究方法库](research-method-library.md)。以下方法参考是本方案的设计依据，不是运行时可检索的卡片。
+
 - [CFA Institute：Equity Valuation: Applications and Processes（2026）](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/equity-valuation-applications-and-processes)：业务与行业理解、经营预测、适配估值方法再形成结论的顺序，支持把“经营质量”与“价格是否有吸引力”分开。
 - [CFA Institute：Company Analysis: Forecasting（2026）](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/company-analysis-forecasting)：预测对象依赖资料与可验证性，需考虑业务模式、周期、营运资本、资本支出和情景。
 
