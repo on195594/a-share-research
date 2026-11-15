@@ -43,6 +43,17 @@
 
 完整离线回归：`nice -n 15 uv run pytest -x -q tests`。仅在确有跨模块影响时使用；这不是模型评估集，也不代替真实浏览器验收。模型或全局成文/复核契约变化的评估要求见 [AGENTS.md](../AGENTS.md)。已有 `.venv` 但离线缓存缺失时，可用 `uv run --no-sync --offline pytest ...` 复用已安装依赖；这不验证锁文件安装。
 
+## 实际 Wiki 方法卡
+
+默认测试只保证包内 fixture 的回归行为。验收 Wiki 的方法卡改动时，显式指定实际目录；不设置变量时，这一跨库测试会明确跳过，不算实际卡已验证：
+
+```bash
+WIKI_METHOD_CARDS_TEST_DIR=/path/to/wiki/concepts/company-analysis \
+  nice -n 15 uv run pytest -x -q -s tests/test_research_methods.py tests/test_judgment_contract.py
+```
+
+`test_actual_wiki_cards_when_explicitly_requested` 直接核对三张 stable 卡和两张 draft 的标题、完整来源列表、原文件哈希与关键词；输出每个原文件及兼容副本的哈希。仅在 pytest 临时目录将 draft 副本改为 stable，演练读取/关键词/批次排除/冻结边界；不改原 Wiki，不提升生命周期，不读取生产材料或调用研究。来源链接核对只覆盖文本与读取器往返，不证明网络可达或已读原文。检索仍是既有的大小写敏感子串匹配，已检查 `Dechow–Dichev` / `Dechow-Dichev` 两种写法，不声称解决通用同义词检索。
+
 ## 清理边界
 
 可删除可再生的 `__pycache__/`、`.pytest_cache/`、`.ruff_cache/` 等缓存；不删除 `data/` 下的真实样本，不把仓库根目录运行数据 `../data/`、`.env*` 或历史评估证据当作测试垃圾。相似测试若覆盖不同数据来源、缺失状态或回归故障，应保留，不按行数或文件数裁剪。重复准备步骤可以共享，但异常测试须证明实际重查或拒绝，不能只凭相同返回值声称覆盖。
