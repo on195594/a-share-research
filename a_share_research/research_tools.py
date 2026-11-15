@@ -157,7 +157,19 @@ def research_methods(conn, query: str, *, catalog=None) -> list[dict]:
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 80:
         raise ValueError("方法检索关键词须为 1–80 字")
     methods = method_catalog(conn) if catalog is None else catalog
-    return [method for method in methods if any(term in method["method"]["text"] for term in query.split())][:5]
+    terms = query.split()
+    found = [method for method in methods if any(term in method["method"]["text"] for term in terms)]
+    if len(found) > 5 and any("card" in method for method in found):
+        def explicit_card(method):
+            if "card" not in method:
+                return False
+            line = re.search(r"^关键词：(.+)$", method["method"]["text"], re.M)
+            keywords = {word.strip() for word in line[1].removesuffix("。").split("、")} if line else set()
+            return query.strip() == method["title"] or any(term in keywords for term in terms)
+
+        # Stable partition on a new list; Relations links remain ordinary substring hits.
+        found = sorted(found, key=lambda method: not explicit_card(method))
+    return found[:5]
 
 
 def _operand(side: dict, rows: dict, material) -> dict:

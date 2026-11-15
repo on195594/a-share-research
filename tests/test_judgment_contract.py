@@ -13,7 +13,8 @@ SURFACE = {
     **{f'research.{n}': inspect.getsource(getattr(research, n))
        for n in ('compose', 'review', 'repair_prompt', 'repair', 'program_valuation')},
     'research.PATCH_SCHEMA': research.PATCH_SCHEMA,
-    'research_tools.explore': inspect.getsource(research_tools.explore),
+    **{f'research_tools.{n}': inspect.getsource(getattr(research_tools, n))
+       for n in ('explore', 'research_methods')},
     **{f'research_tools.{n}': getattr(research_tools, n) for n in ('TOOLS', 'REPAIR_TOOLS', 'STOPPED_CALL')},
     'reviewing.PROTOCOL': reviewing.PROTOCOL,
     **{f'screening.{n}': getattr(screening, n) for n in ('QUESTION', 'SELECT_SCHEMA', 'RANK_SCHEMA')},
