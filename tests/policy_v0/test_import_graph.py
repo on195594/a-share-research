@@ -90,7 +90,7 @@ def test_unused_cache_facade_does_not_return() -> None:
     for owner, name in (
         (db, "read_only_db_session"),
         (domain, "parse_timestamp_utc"),
-        (risk_gates, "regulatory_gate"),
+        (risk_gates, "liquidity_shock_gate"),
         (db, "get_db"),
         (domain, "cst_today"),
         (store, "get_fundamentals"),

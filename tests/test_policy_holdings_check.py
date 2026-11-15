@@ -29,7 +29,7 @@ def configured(setup, monkeypatch):
         assert market_token is False and not conn.in_transaction
         calls.append(deepcopy(payload))
         return dict(risk_policy=deepcopy(bundle['risk_policy']), now=bundle['now'], holdings=[],
-                    defers=[], quotes={}, fundamentals={}, market_snapshot=None)
+                    defers=[], quotes={}, market_snapshot=None)
     monkeypatch.setattr(monitor, '_capture', capture)
     return setup, calls
 
@@ -117,7 +117,7 @@ def test_fixed_collector_drops_credentials_and_uses_only_own_module(setup, monke
             value = json.loads(payload)
             assert set(value) == {'parameters', 'source'} and value['source'] is None
             return gate.canonical(dict(risk_policy=value['parameters'], now=bundle['now'], holdings=[],
-                                       defers=[], quotes={}, fundamentals={}, market_snapshot=None)).encode(), b''
+                                       defers=[], quotes={}, market_snapshot=None)).encode(), b''
     def popen(argv, **kwargs):
         assert argv[-1] == 'a_share_research.policy.holdings_check'
         assert not {'TUSHARE_TOKEN', 'ASHARE_OWNER_TOKEN', 'MODEL_API_KEY'} & set(kwargs['env'])
@@ -141,14 +141,12 @@ def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path,
         now = datetime.fromisoformat('2026-11-02T15:35:00+08:00')
         monkeypatch.setattr(domain, 'cst_now', lambda: now)
         monkeypatch.setattr(domain, 'cst_today', lambda: now.date().isoformat())
-        quote_calls, fundamental_calls, market_calls = [], [], []
+        quote_calls, market_calls = [], []
         def quotes(codes):
             quote_calls.append(list(codes)); return {code: None for code in codes}
-        def fundamentals(code):
-            fundamental_calls.append(code); return None
         monkeypatch.setattr(market_quotes, 'fetch_current_price_quotes', quotes)
         monkeypatch.setattr(market_quotes, 'fetch_market_limit_down_snapshot', lambda: market_calls.append(True))
-        monkeypatch.setattr(store, 'get_fundamentals', fundamentals)
+        monkeypatch.setattr(store, 'get_fundamentals', lambda code: pytest.fail('P0-P2 gates removed'))
         monkeypatch.setattr(capture.monitor_research, 'fetch_cards', lambda: pytest.fail('no research capture'))
         monkeypatch.setattr(daily_brief, '_dividend_response', lambda *a: pytest.fail('no dividends capture'))
         source = monitor._source(conn, tmp_path)
@@ -159,8 +157,8 @@ def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path,
         assert len(value['defers']) == 1 and len(value['defers'][0]) == 3
         assert value['defers'][0][0] == value['holdings'][0][0]
         assert value['defers'][0][1:] == ['{}', '2026-11-03']
-        assert quote_calls == [['600001']] and fundamental_calls == ['600001'] and market_calls == [True]
-        assert set(value['quotes']) == set(value['fundamentals']) == {'600001'}
+        assert quote_calls == [['600001']] and market_calls == [True]
+        assert set(value['quotes']) == {'600001'} and 'fundamentals' not in value
         result = holdings_check_evaluation.evaluate(value, scoped_parameters())
         assert result['status'] == 'ready' and result['exit_code'] == 0 and len(result['checks']) == 1
         assert list(conn.iterdump()) == before
@@ -171,7 +169,7 @@ def test_actual_empty_child_does_not_request_market_data(setup):
     before = account_rows(conn)
     saved = holdings_check.run(conn, principals['assistant'], path, 'actual-empty-holdings-check', active['id'])
     assert saved['input']['holdings'] == [] and saved['input']['defers'] == []
-    assert saved['input']['quotes'] == saved['input']['fundamentals'] == {}
+    assert saved['input']['quotes'] == {} and 'fundamentals' not in saved['input']
     assert saved['input']['market_snapshot'] is None
     assert saved['result']['status'] == 'no_holdings' and account_rows(conn) == before
 
@@ -189,5 +187,5 @@ def test_empty_collector_skips_all_providers(setup, monkeypatch):
     monkeypatch.setattr(daily_brief, '_dividend_response', forbidden)
     before = list(conn.iterdump())
     value = holdings_check.collect(manifest['parameters'])
-    assert value['holdings'] == [] and value['quotes'] == value['fundamentals'] == {}
+    assert value['holdings'] == [] and value['quotes'] == {} and 'fundamentals' not in value
     assert value['market_snapshot'] is None and list(conn.iterdump()) == before

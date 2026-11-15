@@ -51,7 +51,7 @@ _ESCALATION_REASON_ORDER = (
     "l3_candidate",
     "l3_watch",
     "research_thesis_review",
-    "governance_gate",
+    "governance_gate",  # retired 2026-11-15, no longer emitted; mirrors monitor_contract
     "risk_budget_exceeded",
     "quote_gap",
     "denominator_missing",
@@ -96,12 +96,10 @@ def _load_monitor_local_snapshot() -> dict[str, Any]:
             """SELECT h.id, h.code, h.name, h.cost_price, h.shares, h.buy_date,
                       h.stop_loss_15, h.stop_loss_20, h.framework,
                       h.framework_confident, h.reference_cost,
-                      f.data, f.updated_at, f.ttl_hours,
                       t.tier1_status, t.tier2_status, t.tier3_status,
                       t.exit_path, t.exit_target_pct, t.exemption_framework,
                       t.updated_at
                FROM holdings h
-               LEFT JOIN stock_fundamentals f ON f.code=h.code
                LEFT JOIN holding_tier_state t ON t.holding_id=h.id
                WHERE h.exit_date IS NULL ORDER BY h.code, h.id"""
         ).fetchall()
@@ -192,18 +190,6 @@ def _load_monitor_local_snapshot() -> dict[str, Any]:
         )
     holdings = []
     for row in holding_rows:
-        try:
-            fundamentals = (
-                json.loads(row[11], parse_constant=_reject_json_constant)
-                if row[11]
-                else None
-            )
-            malformed_fundamentals = row[11] is not None and not isinstance(
-                fundamentals, dict
-            )
-        except (TypeError, ValueError, json.JSONDecodeError):
-            fundamentals = None
-            malformed_fundamentals = True
         holdings.append(
             {
                 "id": row[0],
@@ -217,18 +203,14 @@ def _load_monitor_local_snapshot() -> dict[str, Any]:
                 "framework": row[8],
                 "framework_confident": bool(row[9]),
                 "reference_cost": _number(row[10]),
-                "fundamentals": fundamentals,
-                "fundamentals_updated_at": row[12],
-                "fundamentals_ttl_hours": row[13],
-                "fundamentals_malformed": malformed_fundamentals,
                 "tier": {
-                    "tier1_status": row[14],
-                    "tier2_status": row[15],
-                    "tier3_status": row[16],
-                    "exit_path": row[17],
-                    "exit_target_pct": _number(row[18]),
-                    "exemption_framework": row[19],
-                    "updated_at": row[20],
+                    "tier1_status": row[11],
+                    "tier2_status": row[12],
+                    "tier3_status": row[13],
+                    "exit_path": row[14],
+                    "exit_target_pct": _number(row[15]),
+                    "exemption_framework": row[16],
+                    "updated_at": row[17],
                 },
                 "alerts": alerts.get(row[0], []),
                 "theses": theses.get(row[0], []),
@@ -698,54 +680,6 @@ def build_monitor_snapshot(
                     candidate=candidate,
                 )
 
-        fundamentals = holding["fundamentals"]
-        gate_state = risk_gates.aggregate_fundamentals_gates(fundamentals)
-        gate_updated_at = holding["fundamentals_updated_at"]
-        gate_ttl = holding["fundamentals_ttl_hours"]
-        gate_freshness_available = bool(
-            isinstance(gate_updated_at, str)
-            and gate_updated_at
-            and _finite(gate_ttl)
-            and gate_ttl >= 0
-        )
-        fundamentals_stale = gate_freshness_available and domain.is_expired(
-            gate_updated_at, gate_ttl
-        )
-        if holding["fundamentals_malformed"]:
-            partial = True
-            _add_gap(
-                gaps, code, "governance_gates", "repair malformed fundamentals JSON"
-            )
-        if not gate_freshness_available:
-            partial = True
-            _add_gap(
-                gaps,
-                code,
-                "governance_gates",
-                "restore risk-gate freshness metadata",
-            )
-        if fundamentals_stale:
-            stale = True
-            _add_gap(gaps, code, "governance_gates", "refresh expired governance gates")
-        if gate_state is None or not gate_freshness_available or fundamentals_stale:
-            gates = {}
-            gate_status = "incomplete"
-            gate_reasons = ["governance gates unavailable or stale"]
-        else:
-            gate_status, gate_reasons, gates = gate_state
-        if gate_status != "clear":
-            _add_escalation(
-                escalations,
-                code,
-                "governance_gate",
-                ", ".join(gate_reasons) or gate_status,
-            )
-            if gate_status == "incomplete":
-                partial = True
-                _add_gap(
-                    gaps, code, "governance_gates", "refresh required gate evidence"
-                )
-
         quote_output = {
             "status": (
                 "conflicted"
@@ -782,7 +716,6 @@ def build_monitor_snapshot(
                 "stop_loss_20": _number(holding["stop_loss_20"]),
                 "quote": quote_output,
                 **risk,
-                "risk_gates": gates,
                 "p3_gate": p3,
                 "alerts": alert_output,
                 "l3": l3,
@@ -1077,7 +1010,6 @@ _BRIEF_REASONS = {
     "l3_candidate": "L3待复核",
     "l3_watch": "L3观察中",
     "research_thesis_review": "研究论点待复核",
-    "governance_gate": "门禁未通过",
     "risk_budget_exceeded": "风险预算超限",
     "quote_gap": "行情缺失",
     "data_conflict": "数据冲突",

@@ -22,13 +22,10 @@
 | 复用价格历史计算五交易日涨跌 | [08-30 工具链效率][toolchain] | `fetcher.py` 的 `compute_price_change_5d` / `_load_price_df`；保留来源日期与缺失原因。跨宿主审计路由和旧交付流程不作为本包的可执行能力。 |
 | PE/PS 数据能力与按需加载说明 | [09-01 合同对齐][disclosure] | 旧缓存合同（已退役）、[Monitor 指南](guide/a-stock-monitor/SKILL.md)。字段能力不等于当前输入必然有效；5 年与 10 年窗口不可互代。 |
 | incomplete 的 QA 语义与 PB 兼容性 | [09-02 QA / 估值兼容][compatibility] | `fetcher.py` 的 `compute_valuation_compatibility`、旧报告合同（已退役）、旧QA rubric（已退役）。跨期 BPS 的早期全局否决已由 09-09 收窄；旧 QA 指南保留不表示已接入新入账门。 |
-| P0 监管、P1 ROE、P2 现金流、P3 流动性休克 | [09-07 风控增强][gates] | [risk_gates.py](risk_gates.py) 的 `regulatory_gate` / `roe_structural_gate` / `cash_flow_gate`、[commands_monitor.py](commands_monitor.py)、[L3 指南](guide/a-stock-monitor/references/daily-monitoring-and-l3.md)。后续时效、资本开支复核和证据沿用修订分别见下表。 |
+| P3 流动性休克（P0 监管、P1 ROE、P2 现金流已删除） | [09-07 风控增强][gates] | [risk_gates.py](risk_gates.py) 的 `liquidity_shock_gate`、[commands_monitor.py](commands_monitor.py)、[L3 指南](guide/a-stock-monitor/references/daily-monitoring-and-l3.md)。P0–P2 去向见文末。 |
 | monitor-v1 正交状态、升级原因与快照审计 | [09-08 监控治理][monitor] | [commands_monitor.py](commands_monitor.py) 的 `build_monitor_snapshot`、[monitor_contract.py](monitor_contract.py) 的 `validate_monitor_snapshot`、[决策表](guide/a-stock-monitor/references/decision-table.json)。快照合同与文本路由分开；原定宿主调度方式不等于新 tools 服务。 |
 | TTM / PEG、财务门接线、PB 跨期更新与框架路由 | [09-09 决策可用性][availability] | `fetcher.py` 的 `_build_risk_gate_inputs` / `_compute_ttm_valuation` / `compute_valuation_compatibility`、`commands_analysis.py` 的 `_decision_meta`、[framework_catalog.py](framework_catalog.py)。基本面/时机资格分开；最终动作还须结合 11-04 修订，不能沿用旧版统一等待。 |
-| 监管规则来源身份与复核期限 | [09-13 规则时效][freshness] | [risk_gates.py](risk_gates.py) 的 `evaluate_rule_freshness`、`check_regulatory_freshness.py`。规则元数据过期不支持 clear；此索引不替代对官方规则的复核。 |
 | 风险状态闭环、单事务快照、政策参数与账户业绩 | [09-17 风险闭环与业绩][closure] | [monitor_contract.py](monitor_contract.py)、[commands_monitor.py](commands_monitor.py) 的 `_load_monitor_local_snapshot`、[risk_policy.py](risk_policy.py)、`performance.py`。规格中的 Tracker 实验不在 v0；“三仓保持不变”已被合一方案取代；旧基准不等于新增中证 800 全收益口径已完成。 |
-| A 框架高成长资本开支复核 | [09-30 Capex 缓冲][capex] | [risk_gates.py](risk_gates.py) 的 `cash_flow_gate` 与 `a_capex_review` 分支、旧A 框架（已退役）。仅显式证据及对应条件允许复核通行，不是全局放松现金流门。 |
-| P0 证据按年报期沿用与原始事实重判 | [10-22 P0 沿用][carry] | [store.py](store.py)、[risk_gates.py](risk_gates.py) 的 `carry_forward_regulatory_gate`、`commands_analysis.py` 的 `cmd_regulatory_evidence`。同年报期沿用不等于事件风险自动更新，仍须监控新事实。 |
 | 策略现金分母、浮盈回吐与本金归因 | [10-22 分母与超限归因][denominator] | [risk_policy.py](risk_policy.py) 的 `resolve_risk_parameters`、[risk_budget.py](risk_budget.py) 的 `assess`、[commands_monitor.py](commands_monitor.py)。超限复核不能凭空生成卖出标的或股数；参数文件仍是外部输入。 |
 | 论点卡、待复核升级、分红敏感性换仓比较 | [11-01 研究卡片提醒][cards] | [monitor_research.py](monitor_research.py) 的 `summarize`、[monitor_contract.py](monitor_contract.py)、[research_client.py](research_client.py)。分类与提醒规则保留；读取传输已改为进程内，旧 HTTP 配置与提交路径不适用本包。 |
 | 机会成本提示按候选合并与七日时效 | [11-02 换仓提示][digest] | [monitor_research.py](monitor_research.py) 的 `summarize` / `_fresh`、[估值复查指南](guide/a-stock-monitor/references/valuation-and-annual-review.md)。完整比较保留在 `research.opportunity_costs`，提示时效不抹掉比较记录。 |
@@ -42,8 +39,9 @@
 - 账户/政策表结构由主仓迁移拥有，逐表逐列映射见 [account/mirror.py](../../account/mirror.py)；旧 `schema.py` / `schema_ledger.py` 不再是结构所有者。
 - 数据库路径与权限由 [paths.py](paths.py) 和 [db.py](db.py) 处理；旧 `CACHE_DB_PATH` / `A_STOCK_STATE_DIR` 不作为本包连接入口。
 - A–F 分类（[framework_catalog.py](framework_catalog.py)）只决定止损比例与定仓，作为 v0 基线保留；确定性评分器与各框架评分文件已退役。C/D 分级加仓所需的股息率档位已抄入 [步骤 3.5](guide/a-stock-monitor/references/step3.5-cd-accumulation.md)。
-- 旧首次研究流程（2026-11-15 退役）：评分阈值与清零红线、格雷厄姆预筛、择时分、双轨评级矩阵、异动清单、报告模板、缓存与搜索预算编排删除，单一行业 40% 上限按所有者决定不保留；周期分红传导、基本面与股价背离、汇兑同口径剔除、催化证据阶梯四项分析思路写入共享 Wiki 方法卡；股息率交叉验证与 PB 同期检查记为 2027-01-01 契约窗口候选。评估依据在仓库外证据目录 `legacy-local-flow-eval-20261115/`。
-- 旧 QA 的 22 项文本检查（同日退役）去向：框架路由（2）归 `holding-framework` 与止损定仓；唯一动作出口与仓位范围（13）归研究立场、`position-size` 与板块权限；P0–P3 门（19–21）归 [risk_gates.py](risk_gates.py) 与监控快照；来源、期间、估值算术与最新财报核验（1、5、8、12、15、22）由研究服务的机械校验和独立复核处理；其余随评分器删除（3、4、6、9–11、14、16–18），其中股息率交叉验证（7）见上条窗口候选。这是去向说明，不是逐项等价证明。
+- 旧首次研究流程（2026-11-15 退役）：评分阈值与清零红线、格雷厄姆预筛、择时分、双轨评级矩阵、异动清单、报告模板、缓存与搜索预算编排删除，单一行业 40% 上限按所有者决定不保留；周期分红传导、基本面与股价背离、汇兑同口径剔除、催化证据阶梯四项分析思路写入共享 Wiki 方法卡；股息率交叉验证与 PB 同期检查记为 2027-01-01 月批前的契约候选。评估依据在仓库外证据目录 `legacy-local-flow-eval-20261115/`。
+- 旧 QA 的 22 项文本检查（同日退役）去向：框架路由（2）归 `holding-framework` 与止损定仓；唯一动作出口与仓位范围（13）归研究立场、`position-size` 与板块权限；P3 门归 [risk_gates.py](risk_gates.py) 与监控快照，P0–P2 门（19–21）随下条删除；来源、期间、估值算术与最新财报核验（1、5、8、12、15、22）由研究服务的机械校验和独立复核处理；其余随评分器删除（3、4、6、9–11、14、16–18），其中股息率交叉验证（7）见上条契约候选。这是去向说明，不是逐项等价证明。
+- P0 监管、P1 ROE、P2 现金流三道门（2026-11-15 按所有者决定删除）：旧抓取器与 `regulatory-evidence` 补录命令退役后 `stock_fundamentals` 已无写入方，三道门在生产上对每只持仓都只能报过期，补数步骤不可执行。监控快照、持仓检查与指南不再消费它们，决策表 D03P0 随之删除；已证实的监管与诚信事件仍由治理红线和决策表的论点破坏条件覆盖，ROE 与利润连续恶化仍由 D03 覆盖，现金流质量交由研究判断。
 - 阶段进度与对照结果只维护在[实施计划](../../../docs/implementation-plan.md)及仓库外交接证据中，避免本索引成为第二份状态台账。
 
 [audit]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-08-09-audit-remediation-spec.md
@@ -61,10 +59,7 @@
 [gates]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-09-07-investment-framework-and-risk-control-enhancement-spec.md
 [monitor]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-09-08-a-stock-monitoring-efficiency-and-safety-governance.md
 [availability]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-09-09-research-decision-availability-and-qa-integrity-repair-spec.md
-[freshness]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-09-13-regulatory-freshness-lifecycle-spec.md
 [closure]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-09-17-a-stock-risk-closure-and-performance-validation-spec-v1.1.md
-[capex]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-09-30-high-growth-capex-buffer-spec.md
-[carry]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-10-22-p0-evidence-annual-carry-forward-spec.md
 [denominator]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-10-22-risk-denominator-and-breach-attribution-spec.md
 [cards]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-11-01-research-card-review-prompts-spec.md
 [digest]: https://github.com/on195594/a-stock-agent-skills/blob/1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8/docs/specs/2026-11-02-opportunity-cost-digest-spec.md

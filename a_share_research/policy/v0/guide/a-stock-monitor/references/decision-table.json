@@ -22,16 +22,6 @@
       "heuristic": false
     },
     {
-      "id": "D03P0",
-      "priority": 85,
-      "condition": "p0_p1_p2_status IN (blocked, incomplete, review_required)",
-      "effect": "freeze_accumulation_and_open_red_review",
-      "action_source": "none",
-      "requires_user_confirmation": false,
-      "requires_executable_sizing": false,
-      "heuristic": false
-    },
-    {
       "id": "D03",
       "priority": 80,
       "condition": "roe_yoy_drop_gt_5pts_two_quarters OR adjusted_profit_yoy_negative_two_quarters",

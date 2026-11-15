@@ -77,9 +77,9 @@ scope/action合法、`materiality_basis`可追溯、临时出场规则已定义�
 
 （暴跌恐慌下，分析者可能主动放大证据、把"竞争加剧"解读为"核心逻辑被否定"，为恐慌性清仓找程序化借口——这正是"候选—待确认"分支要防止的道德风险，不得跳过。）
 
-### P0-P3 运行时硬门
+### P3 流动性休克门
 
-价格或加仓判断前读取基本面 payload 的 `regulatory_gate`、`roe_structural_gate`、`cash_flow_gate`。状态为 `blocked` 时冻结新增风险敞口并生成红色复核；`incomplete` 或 `review_required` 时生成红色复核，加仓上限降为 `position-size` 首批（`tranches[0]`），补齐前不追加后续批次（[2026-11-04 规格](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/specs/2026-11-04-proactive-decision-spec.md)；runtime 状态与升级项不变）。均不自动清仓。P3 只包装实际 `stop_loss_20` 第二档：全市场有效跌停数严格超过500家时，使用同一 `holding_alerts` reason code 延迟一次24小时；前置窗口不输出股数，停牌/一字跌停/无效报价保持 `untradeable` 或 `incomplete`，不得伪造成交。
+P3 只包装实际 `stop_loss_20` 第二档：全市场有效跌停数严格超过500家时，使用同一 `holding_alerts` reason code 延迟一次24小时；前置窗口不输出股数，停牌/一字跌停/无效报价保持 `untradeable` 或 `incomplete`，不得伪造成交。
 
 **基本面止损**（配置型持仓优先使用）：
 - C框架：商品价格逻辑根本性破坏 → 考虑清仓；分红能力下修>30%且无回升迹象 → 触发复查

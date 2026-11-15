@@ -36,7 +36,7 @@ a-stock-cache monitor-snapshot --json
 - 先比对用户最新确认的持仓与快照；股数、清仓事实或账户范围冲突时，不把旧账本风险汇总当作当前账户结果，按下表账户差异路由请求最小对账资料，不改写快照或心算补齐。
 - runtime 返回干净快速路径且无上述账户冲突时，输出结构化 `action_status`、异常项、覆盖率、as-of 与 `stop_reason`，完成默认交付后立即停止；即使 `escalations` 为空，也须转述已有 `review_prompts`，不得为研究提醒新增升级项或改变动作状态。
 - runtime 返回阻断、复核候选、触发、到期、异常或冲突时，仅对 `escalations` 指定的持仓和证据进入 Level 2。
-- 缺少 required 数据时不得输出确定性无动作、继续持有或仓位不变；点名最小补数动作（如针对 governance_gates 过期指明执行 `a-stock-fetch fetch <代码>`；`regulatory_gate` 仍 incomplete 时按数据操作资料的“P0 监管门证据补录”，每个年报期一次），并冻结相关交易与风险变更。
+- 缺少 required 数据时不得输出确定性无动作、继续持有或仓位不变；点名最小补数动作，并冻结相关交易与风险变更。
 
 ### Level 2：按升级项展开
 

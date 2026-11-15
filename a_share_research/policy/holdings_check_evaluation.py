@@ -1,4 +1,4 @@
-"""Strict replay boundary for the legacy holding stop/governance checks."""
+"""Strict replay boundary for the legacy holding stop and P3 liquidity checks."""
 import re
 
 from pydantic import BaseModel, ConfigDict
@@ -16,7 +16,6 @@ class Bundle(BaseModel):
     holdings: list[list]
     defers: list[list]
     quotes: dict[str, evaluation.QuoteInput | None]
-    fundamentals: dict[str, dict | None]
     market_snapshot: dict | None
 
 
@@ -50,8 +49,8 @@ def evaluate(bundle: dict, parameters: dict) -> dict:
         codes.append(code)
     if codes != sorted(codes):
         raise evaluation.EvaluationError('holdings must be ordered by code')
-    if set(parsed.quotes) != set(codes) or set(parsed.fundamentals) != set(codes):
-        raise evaluation.EvaluationError('quotes and fundamentals must exactly match holding codes')
+    if set(parsed.quotes) != set(codes):
+        raise evaluation.EvaluationError('quotes must exactly match holding codes')
     for row in parsed.defers:
         if (len(row) != 3 or type(row[0]) is not int or row[0] <= 0
                 or any(value is not None and type(value) is not str for value in row[1:])):
@@ -60,7 +59,7 @@ def evaluate(bundle: dict, parameters: dict) -> dict:
         raise evaluation.EvaluationError('empty holdings require no market snapshot')
     quotes = {code: None if value is None else PriceQuote(**value.model_dump()) for code, value in parsed.quotes.items()}
     try:
-        result = holdings_check_input.calculate(parsed.holdings, parsed.defers, quotes, parsed.fundamentals,
+        result = holdings_check_input.calculate(parsed.holdings, parsed.defers, quotes,
                                               parsed.market_snapshot, now)
     except TypeError:
         raise evaluation.EvaluationError('holding inputs cannot be evaluated by the legacy calculation') from None

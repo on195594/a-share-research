@@ -22,7 +22,6 @@ from a_share_research.policy.v0 import (
     risk_budget,
     risk_gates,
     risk_policy,
-    store,
 )
 from a_share_research.policy.v0.market_quotes import PriceQuote
 from a_share_research.policy.v0.benchmark_input import BENCHMARKS
@@ -2271,6 +2270,5 @@ def cmd_check_holdings(args: list[str] | None = None) -> None:
     codes = [row[1] for row in holdings]
     quotes = market_quotes.fetch_current_price_quotes(codes)
     market_snapshot = market_quotes.fetch_market_limit_down_snapshot()
-    fundamentals = {code: store.get_fundamentals(code) for code in codes}
-    result = calculate(holdings, defer_rows, quotes, fundamentals, market_snapshot, now)
+    result = calculate(holdings, defer_rows, quotes, market_snapshot, now)
     print(result['stdout'], end='')

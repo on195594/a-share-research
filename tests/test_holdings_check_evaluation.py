@@ -25,7 +25,7 @@ def bundle(price=40.):
     return dict(risk_policy=risk_budget.policy(), now=NOW,
                 holdings=[[1, '600036', '招商银行', 40., 34., 32.]], defers=[],
                 quotes={'600036': asdict(PriceQuote(price, '2026-09-07', '11:00:00', 'sina', False, False, 'trading'))},
-                fundamentals={'600036': None}, market_snapshot=None)
+                market_snapshot=None)
 
 
 def active(value):
@@ -61,7 +61,6 @@ def test_original_golden_current_cli_and_pure_parity(deferred, monkeypatch, caps
     monkeypatch.setattr(commands_holdings.domain, 'cst_now', lambda: datetime.fromisoformat(value['now']))
     monkeypatch.setattr(commands_holdings.market_quotes, 'fetch_current_price_quotes', lambda codes: {c:PriceQuote(**q) for c,q in value['quotes'].items()})
     monkeypatch.setattr(commands_holdings.market_quotes, 'fetch_market_limit_down_snapshot', lambda: None)
-    monkeypatch.setattr(commands_holdings.store, 'get_fundamentals', lambda code: None)
     original = deepcopy(value)
     commands_holdings.cmd_check_holdings()
     result = evaluate(value)
@@ -74,7 +73,7 @@ def test_original_golden_current_cli_and_pure_parity(deferred, monkeypatch, caps
 
 def test_no_holdings_keeps_closed_defers_without_fetch_inputs():
     value = bundle()
-    value.update(holdings=[], quotes={}, fundamentals={}, defers=[[99, 'malformed', DUE]])
+    value.update(holdings=[], quotes={}, defers=[[99, 'malformed', DUE]])
     assert evaluate(value) == dict(status='no_holdings', exit_code=0, stdout='暂无持仓\n', stderr='', checks=[])
 
 
@@ -88,17 +87,6 @@ def test_old_timestamp_and_missing_quote_remain_observations():
     result = evaluate(value)
     assert '无实时价格' in result['stdout'] and result['checks'][0]['is_alert'] is False
     assert evaluate(active(value))['checks'][0]['p3']['reason_code'] == 'quote_or_stop_line_missing'
-
-
-def test_fundamental_governance_and_cache_metadata_preserved():
-    value = bundle()
-    failed = dict(status='incomplete', reason_code='structural-missing')
-    value['fundamentals']['600036'] = dict(regulatory_gate=failed, roe_structural_gate={'status':'clear'},
-                                          cash_flow_gate={'status':'not_applicable'}, _cache_meta={'source':'captured'})
-    result = evaluate(value)
-    assert result['checks'][0]['governance_gates'] == [failed]
-    assert '风险门冻结加仓(structural-missing)' in result['stdout']
-    assert '不自动卖出/清仓' in result['stdout']
 
 
 @pytest.mark.parametrize('price,locked,reason', [(31., False, 'stop_loss_20_reconfirmed'),
@@ -148,7 +136,7 @@ def test_explicit_timezone_conversion():
     lambda b: b['holdings'][0].append(1), lambda b: b['holdings'][0].__setitem__(0, True),
     lambda b: b['holdings'].append(deepcopy(b['holdings'][0])), lambda b: b['holdings'][0].__setitem__(1,'６０００３６'),
     lambda b: b['holdings'][0].__setitem__(3,float('nan')), lambda b: b['holdings'][0].__setitem__(4,'0'),
-    lambda b: b['quotes'].clear(), lambda b: b['fundamentals'].update({'000001':None}),
+    lambda b: b['quotes'].clear(), lambda b: b.update(fundamentals={'600036': None}),
     lambda b: b['defers'].append([0,None,None]), lambda b: b['defers'].append([1,{},None]),
     lambda b: b['quotes']['600036'].update(extra=True)])
 def test_invalid_boundary(mutation):
@@ -168,7 +156,6 @@ def test_policy_identity_effectiveness_and_holding_order():
     value = bundle()
     value['holdings'].append([2,'000001',None,10.,8.5,8.])
     value['quotes']['000001'] = None
-    value['fundamentals']['000001'] = None
     with pytest.raises(ValueError, match='ordered'):
         evaluate(value)
 

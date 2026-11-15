@@ -24,16 +24,6 @@ from policy_v0.helpers import mock_price_quotes
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "monitor"
 
 
-def _gate(status: str = "clear") -> dict:
-    return {
-        "status": status,
-        "action_eligible": status == "clear",
-        "reason_code": f"fixture_{status}",
-        "sources": ["official fixture"],
-        "as_of": domain.cst_today(),
-    }
-
-
 def _seed_holding(
     database: Path,
     code: str = "600036",
@@ -41,7 +31,6 @@ def _seed_holding(
     holding_id: int | None = None,
     closed: bool = False,
     shares: int = 100,
-    gate_status: str = "clear",
     l3_status: str = "not_triggered",
     l3_action: str = "review",
     next_review: str = "2999-01-01",
@@ -67,22 +56,6 @@ def _seed_holding(
             ),
         )
         row_id = int(cursor.lastrowid if holding_id is None else holding_id)
-        gates = {
-            "regulatory_gate": _gate(gate_status),
-            "roe_structural_gate": _gate(gate_status),
-            "cash_flow_gate": _gate(gate_status),
-        }
-        conn.execute(
-            """INSERT OR REPLACE INTO stock_fundamentals
-               (code, name, industry, data, updated_at, ttl_hours)
-               VALUES (?, ?, 'fixture', ?, ?, 24)""",
-            (
-                code,
-                f"fixture-{code}",
-                json.dumps(gates),
-                domain.utc_now_iso(),
-            ),
-        )
         if not closed:
             conn.execute(
                 """INSERT INTO holding_tier_state (holding_id, updated_at)
@@ -327,56 +300,26 @@ def test_missing_industry_comparison_blocks_clean_fast_gate(
     } >= {("600036", "industry_change_pct", "supply a same-day industry comparison")}
 
 
-def test_expired_risk_gates_are_stale_and_block_clean_fast_gate(
+def test_legacy_fundamentals_rows_do_not_affect_snapshot(
     isolated_cache_database, monkeypatch, capsys
 ) -> None:
+    """P0-P2 gates were removed; an expired or blocked legacy row is ignored."""
     _seed_holding(isolated_cache_database)
+    blocked = {"status": "blocked", "action_eligible": False, "reason_code": "legacy"}
     with sqlite3.connect(isolated_cache_database) as conn:
         conn.execute(
-            """UPDATE stock_fundamentals
-               SET updated_at='2000-01-01T00:00:00+00:00', ttl_hours=1
-               WHERE code='600036'"""
+            """INSERT INTO stock_fundamentals
+               (code, name, industry, data, updated_at, ttl_hours)
+               VALUES ('600036', 'fixture', 'fixture', ?, '2000-01-01T00:00:00+00:00', 1)""",
+            (json.dumps({"regulatory_gate": blocked}),),
         )
     mock_price_quotes(monkeypatch, _quotes)
 
-    result, payload = _run(capsys, ["--portfolio-value", "100000"])
+    _result, payload = _run(capsys, ["--portfolio-value", "100000"])
 
-    assert result == 1
-    assert payload["data_status"] == "stale"
-    assert payload["review_status"] == "blocked"
-    assert payload["action_status"] == "review_candidate"
-    assert payload["stop_reason"] is None
-    assert "governance_gate" in {item["reason_code"] for item in payload["escalations"]}
-    assert {
-        gap["minimum_action"]
-        for gap in payload["data_gaps"]
-        if gap["field"] == "governance_gates"
-    } >= {"refresh expired governance gates"}
-
-
-@pytest.mark.parametrize("case", ["missing", "malformed"])
-def test_unavailable_risk_gates_block_clean_fast_gate(
-    isolated_cache_database, monkeypatch, capsys, case
-) -> None:
-    _seed_holding(isolated_cache_database)
-    with sqlite3.connect(isolated_cache_database) as conn:
-        if case == "missing":
-            conn.execute("DELETE FROM stock_fundamentals WHERE code='600036'")
-        else:
-            conn.execute(
-                "UPDATE stock_fundamentals SET data='{malformed' WHERE code='600036'"
-            )
-    mock_price_quotes(monkeypatch, _quotes)
-
-    result, payload = _run(capsys, ["--portfolio-value", "100000"])
-
-    assert result == 1
-    assert payload["data_status"] == "partial"
-    assert payload["review_status"] == "review_required"
-    assert payload["action_status"] == "review_candidate"
-    assert payload["stop_reason"] is None
-    assert "governance_gate" in {item["reason_code"] for item in payload["escalations"]}
-    assert "governance_gates" in {gap["field"] for gap in payload["data_gaps"]}
+    assert "governance_gate" not in {item["reason_code"] for item in payload["escalations"]}
+    assert "governance_gates" not in {gap["field"] for gap in payload["data_gaps"]}
+    assert "risk_gates" not in payload["holdings"][0]
 
 
 @pytest.mark.parametrize(
@@ -389,7 +332,6 @@ def test_unavailable_risk_gates_block_clean_fast_gate(
         ("alert", "alert_review_due", "complete", "review_required"),
         ("l3_due", "l3_review_due", "complete", "review_required"),
         ("l3_candidate", "l3_candidate", "complete", "review_required"),
-        ("governance", "governance_gate", "complete", "review_required"),
         ("quote_gap", "quote_gap", "unavailable", "blocked"),
         ("denominator", "denominator_missing", "partial", "review_required"),
         ("conflict", "data_conflict", "conflicted", "blocked"),
@@ -405,8 +347,6 @@ def test_escalation_paths_are_stable_and_fail_closed(
     capsys,
 ) -> None:
     kwargs = {}
-    if case == "governance":
-        kwargs["gate_status"] = "blocked"
     if case == "l3_due":
         kwargs["next_review"] = "2000-01-01"
     if case == "l3_candidate":

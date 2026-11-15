@@ -330,7 +330,7 @@ TOOLS = {tool.name: tool for tool in (
          frozenset({'assistant'}), AccountNavReplay, Payload,
          lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
          account=True),
-    Tool('policy.holdings_check', '采集并保存原持仓检查、风险门和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
+    Tool('policy.holdings_check', '采集并保存原持仓检查和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
          frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True),
     Tool('policy.portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
          frozenset({'assistant'}), PolicyPortfolioScenario, Payload, _portfolio_scenario, access='write', account=True),

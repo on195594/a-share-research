@@ -11,7 +11,7 @@ from a_share_research.policy import monitor
 
 def collect(parameters: dict, *, source: dict | None = None) -> dict:
     from a_share_research.policy import capture, evaluation, holdings_check_evaluation
-    from a_share_research.policy.v0 import db, domain, market_quotes, store
+    from a_share_research.policy.v0 import db, domain, market_quotes
     with db.read_only_scope(), capture._ledger_projection(source):
         capture._current_policy(parameters, domain.cst_now())
         if source is not None and parameters.get('account_scope') != source['watermark']['account_scope']:
@@ -24,17 +24,16 @@ def collect(parameters: dict, *, source: dict | None = None) -> dict:
             defers = conn.execute("SELECT holding_id,evidence,review_due FROM holding_alerts "
                                  "WHERE reason_code='price_stop2_liquidity_defer' AND status!='resolved'").fetchall()
         now = domain.cst_now()
-        quotes, fundamentals, market_snapshot = {}, {}, None
+        quotes, market_snapshot = {}, None
         if holdings:
             codes = [row[1] for row in holdings]
             quotes = market_quotes.fetch_current_price_quotes(codes)
             # The v0 provider currently returns None. Retain that absence, never invent a market count.
             market_snapshot = market_quotes.fetch_market_limit_down_snapshot()
-            fundamentals = {code: store.get_fundamentals(code) for code in codes}
         capture._current_policy(parameters, domain.cst_now())
         bundle = evaluation.pack(dict(risk_policy=parameters, now=now, holdings=[list(row) for row in holdings],
                                       defers=[list(row) for row in defers], quotes=quotes,
-                                      fundamentals=fundamentals, market_snapshot=market_snapshot))
+                                      market_snapshot=market_snapshot))
         holdings_check_evaluation.evaluate(bundle, parameters)
         return bundle
 

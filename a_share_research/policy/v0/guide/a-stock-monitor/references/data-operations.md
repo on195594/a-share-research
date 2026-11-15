@@ -69,25 +69,6 @@ Research 不可用时同样不记录，稍后重试（事件不可改，关联�
 不让用户自己查分红；数据获取失败的代码报告“未核对”，不推定无分红。卖出时印花税按成交额×0.5‰计入
 `--tax`，不因回单未列明而记 0。
 
-### P0 监管门证据补录
-
-`regulatory_gate` 为 incomplete 时，每个年报期补一次官方证据；同一年报期内 `fetch` 刷新会沿用，
-出现新年报期后须重补。只用交易所、证监会、巨潮公司公告与年报原文（审计报告、内控审计报告、
-“处罚及整改/立案调查”一节、母公司报表），不用媒体或数据商转载；“未搜到负面”不能填 clear。
-状态由 runtime 计算（只传事实字段，不传 `listing_risk` 等预设子门对象，否则被拒），用户确认写入后执行：
-
-```bash
-echo '<P0事实JSON>' | $CACHE --confirm-write regulatory-evidence <代码>
-```
-
-事实 JSON 字段：`report_period`（须等于缓存 `data_period`，如 `2025年报`）、`exchange`/`board`、
-带时区 `as_of`、`sources`（逐项写明文件名与发布方）、`listing_status`（normal/st/*st/delisting）、
-`financial_opinion` 与 `internal_control_opinion`（unqualified/qualified/adverse/disclaimer）、
-`investigation_status`（none/company/related_person，none 须有年报“不适用”等正式陈述）、
-`latest_annual_attributable_profit`、`parent_unallocated_profit_at_year_end`（深市另需
-`consolidated_unallocated_profit_at_year_end`）、`three_year_cash_dividend`、`three_year_annual_profits`。
-缺项就留空，runtime 会判 incomplete；年报期内新出现风险警示或立案时，重补 blocked 证据。
-
 `corporate-action` 已自动生成对应现金分红事件；同一次分红不要再调用
 `record-dividend`，否则会重复计算回报。后者只用于不伴随规则参考成本调整的独立补录。
 

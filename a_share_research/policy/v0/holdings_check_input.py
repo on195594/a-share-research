@@ -4,7 +4,7 @@ import json
 from a_share_research.policy.v0 import domain, risk_gates
 
 
-def calculate(holdings, defers, quotes, fundamentals, market_snapshot, now) -> dict:
+def calculate(holdings, defers, quotes, market_snapshot, now) -> dict:
     lines = []
     def emit(value=''):
         lines.append(value)
@@ -37,32 +37,10 @@ def calculate(holdings, defers, quotes, fundamentals, market_snapshot, now) -> d
 
     checks = []
     alerts = []
-    governance_alerts = []
     for holding_id, code, name, _cost, sl15, sl20 in holdings:
         label, status, is_alert = domain.evaluate_holding_status(
             code, name, sl15, sl20, quotes.get(code), today_str, now
         )
-        fundamental = fundamentals.get(code)
-        gate_values = (
-            [
-                fundamental.get(name)
-                for name in ("regulatory_gate", "roe_structural_gate", "cash_flow_gate")
-            ]
-            if fundamental
-            else []
-        )
-        failed_gates = [
-            gate
-            for gate in gate_values
-            if isinstance(gate, dict)
-            and gate.get("status") not in {"clear", "not_applicable"}
-        ]
-        if failed_gates:
-            reasons = ", ".join(
-                str(gate.get("reason_code", "incomplete")) for gate in failed_gates
-            )
-            governance_alerts.append((label, reasons))
-            status += f" | 🔴 风险门冻结加仓({reasons})"
         quote = quotes.get(code)
         existing_defer = existing_defers.get(holding_id)
         p3 = risk_gates.liquidity_shock_gate(
@@ -92,7 +70,7 @@ def calculate(holdings, defers, quotes, fundamentals, market_snapshot, now) -> d
         if is_alert:
             alerts.append((label, status))
         checks.append(dict(holding_id=holding_id, code=code, label=label, status=status, is_alert=is_alert,
-                           p3=p3, governance_gates=failed_gates))
+                           p3=p3))
         emit(f"  {label:<16} {status}")
 
     emit()
@@ -100,11 +78,7 @@ def calculate(holdings, defers, quotes, fundamentals, market_snapshot, now) -> d
         emit(f"  共 {len(alerts)} 项预警，请及时处理：")
         for label, status in alerts:
             emit(f"    {label}: {status}")
-    if governance_alerts:
-        emit(f"  共 {len(governance_alerts)} 项风险门复核，已冻结新增风险敞口：")
-        for label, reasons in governance_alerts:
-            emit(f"    {label}: {reasons}（不自动卖出/清仓）")
-    if not alerts and not governance_alerts:
+    if not alerts:
         emit("  无预警，所有持仓价格在止损线之上")
     emit()
     return dict(status="ready", exit_code=0, stdout="\n".join(lines) + "\n", stderr="", checks=checks)

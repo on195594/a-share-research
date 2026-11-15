@@ -35,7 +35,7 @@ ESCALATION_REASON_CODES = frozenset(
         "l3_candidate",
         "l3_watch",
         "research_thesis_review",
-        "governance_gate",
+        "governance_gate",  # retired 2026-11-15; kept so stored snapshots still validate
         "risk_budget_exceeded",
         "quote_gap",
         "denominator_missing",
