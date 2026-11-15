@@ -1158,7 +1158,7 @@ def cmd_stop_alert(args: list[str]) -> None:
             print(
                 f"🚨 止损预警 {name}({code}) 现价{quote.price:.2f} 已跌破{label}止损{stop:.3f}{where}"
             )
-    print("按 a-stock-monitor 复核止损与 L3；预警不等于自动卖出。")
+    print("按 a-share 的生效政策复核止损与 L3；预警不等于自动卖出。")
     state_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = state_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")

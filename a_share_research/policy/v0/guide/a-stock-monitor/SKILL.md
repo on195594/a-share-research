@@ -9,7 +9,7 @@ compatibility: Requires local command execution, the installed a-stock-agent run
 
 ## 路由
 
-`a-stock-monitor` 是已有持仓的唯一 Primary Skill。明确排除交易判断的公开数据子任务不得加载本 Skill；首次研究改用 `a-stock-research`。用户仅要求阈值历史回放或策略复盘验证时，跳过 Level 1，直接读取 [阈值回放](references/backtest.md)。
+`a-stock-monitor` 是已有持仓的唯一 Primary Skill。明确排除交易判断的公开数据子任务不得加载本 Skill；首次研究改用 `a-stock-research`。
 
 用户仅要求核对持仓且尚未确认时，只读查询 `a-stock-cache holdings <股票代码> --active-only`；结果不完整时说明缺口并停止，不启动 Monitor，也不擅自转入首次研究。
 

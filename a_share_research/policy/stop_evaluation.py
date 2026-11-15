@@ -76,6 +76,6 @@ def evaluate(bundle: dict, parameters: dict) -> dict:
             stop = row.stop_loss_20 if level == 'stop2' else row.stop_loss_15
             label = '第二档' if level == 'stop2' else '第一档'
             lines.append(f'🚨 止损预警 {row.name}({code}) 现价{quote.price:.2f} 已跌破{label}止损{stop:.3f}{where}')
-    lines.append('按 a-stock-monitor 复核止损与 L3；预警不等于自动卖出。')
+    lines.append('按 a-share 的生效政策复核止损与 L3；预警不等于自动卖出。')
     return result | dict(status='alerts', stdout='\n'.join(lines) + '\n', state=state,
                          alerts=[dict(code=code, level=level) for code, level in alerts])

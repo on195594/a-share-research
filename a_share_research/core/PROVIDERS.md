@@ -1,12 +1,10 @@
 # TuShare 生产主源 Provider API
 
-> 本文件随 a-stock-lib 0.10.2（`7bda9cd`）并入 `a_share_research/core/`，仍是 Provider 的现行合同；下文“安装”与发版相关段落描述并入前的 wheel 流程，已不适用。
+> 本文件随 a-stock-lib 0.10.2（`7bda9cd`）并入 `a_share_research/core/`，仍是 Provider 的现行合同。
 
 本文描述当前源码合同；源码版本以 `pyproject.toml` 为准。生产消费者的已发布版本以各自锁文件和部署记录为准，源码修复不代表已发布或激活。
 
-## 安装
-
-本地候选验证应安装本提交构建并校验过哈希的 wheel；生产安装必须使用已发布的不可变 Release wheel 及固定 SHA-256，流程见 [发版清单](RELEASE_CHECKLIST.md)。
+## 凭据
 
 本版本固定 `tushare==1.4.29`。Token 优先级：构造参数 → `TUSHARE_TOKEN` → 显式 `env_path` 指向的文件。默认不搜索相邻项目或主目录下的 `.env`；未配置时返回 `AUTH_MISSING`，显式空 Token 仍表示禁用。旧调用若依赖隐式文件发现，须改为环境变量或显式路径。禁止在代码中硬编码 Token。
 
@@ -34,7 +32,7 @@
 ### 接口变动记录
 
 - **0.10.x**：稳定公共表面以 `a_share_research.core.providers.__all__` 与 `a_share_research.core.market_data.__all__` 为准，包含 `py.typed`；`MarketDataResult.fetched_at` 统一为带 `+08:00` 的上海时间 ISO 字符串；移除无消费者的 `fetch_daily_bars_range` 与 `MarketSession` 顶层导出。
-- **0.9.0**：移除旧 Tracker 遗留 `MarketDataProvider`、`fetch_l3_bars` 与十年月度分位算法；`fetch_score_price` / `fetch_outcome_price` 合并为 `fetch_close_price`；`fetch_index_bars` 要求显式起止日期并支持全收益指数。详细过程见 [CHANGELOG.md](../CHANGELOG.md)。
+- **0.9.0**：移除旧 Tracker 遗留 `MarketDataProvider`、`fetch_l3_bars` 与十年月度分位算法；`fetch_score_price` / `fetch_outcome_price` 合并为 `fetch_close_price`；`fetch_index_bars` 要求显式起止日期并支持全收益指数。
 
 ## 估值
 
@@ -118,10 +116,6 @@ result = provider.fetch_dividend_history("600036")
 - `cash_div_tax`：每股分红，税前。
 
 官方文档：[分红送股](https://tushare.pro/document/2?doc_id=103)。
-
-## 送转
-
-`a_share_research.core.fetcher_utils.detect_split_ratio(df, latest_report_year, *, as_of=None)` 计算报告期后、`as_of`（默认上海当日）及之前已实施送转的累计摊薄系数。需要可复现结果时请显式传 `as_of`。同时接受 AKShare `stock_fhps_detail_em` 列（每 10 股）与 `TushareDividendProvider` 原生列（`stk_bo_rate + stk_co_rate`，缺失时 `stk_div`，每股；`div_proc == "实施"`）。
 
 ## 限流、重试和错误
 
