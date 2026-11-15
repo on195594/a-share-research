@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 
@@ -113,6 +114,10 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
         pytest.skip("set WIKI_METHOD_CARDS_TEST_DIR to check the actual Wiki files")
     root = Path(configured).resolve()
     assert root.is_dir() and root != CARDS.resolve()
+    # Explicit acceptance revision, not a runtime-derived expectation.
+    assert subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip() == (
+        "e123b1a35496f19a51dce54dd06d0e706c556933")
+    original_bytes = {path.name: path.read_bytes() for path in root.glob("*.md")}
     # title, lifecycle, primary source, source count, retrieval queries
     expected = {
         "cyclical-earnings-normalization": (
@@ -128,17 +133,40 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
             "https://www.expectationsinvesting.com/about",
             3, ["隐含预期", "反向DCF"]),
         "free-cash-flow-and-valuation-basis": (
-            "自由现金流与估值口径", "draft",
+            "自由现金流与估值口径", "stable",
             "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/definitions.html",
-            6, ["FCFF", "少数股东权益"]),
+            7, ["FCFF", "少数股东权益"]),
         "earnings-quality-and-cash-conversion": (
-            "盈利质量与现金转化", "draft",
+            "盈利质量与现金转化", "stable",
             "https://doi.org/10.2308/tar-9608042309",
-            6, ["Dechow–Dichev", "Dechow-Dichev"]),
+            8, ["Dechow–Dichev", "Dechow-Dichev"]),
+    }
+    expected_sources = {
+        "cyclical-earnings-normalization": [
+            "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/littlebook/commodityvaluedrivers.htm"],
+        "growth-reinvestment-and-return-on-capital": [
+            "https://pages.stern.nyu.edu/~adamodar/pdfiles/papers/returnmeasures.pdf",
+            "https://pages.stern.nyu.edu/~adamodar/podcasts/valspr20/session9slides.pdf"],
+        "price-implied-expectations-analysis": [
+            "https://www.expectationsinvesting.com/about", "https://www.expectationsinvesting.com/tutorials",
+            "https://www.expectationsinvesting.com/online-tutorial-8"],
+        "free-cash-flow-and-valuation-basis": [
+            "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/definitions.html",
+            "https://pages.stern.nyu.edu/~adamodar/pdfiles/valn2ed/ch15.pdf",
+            "https://pages.stern.nyu.edu/~adamodar/pdfiles/valn2ed/ch14.pdf",
+            "https://www.berkshirehathaway.com/letters/1986.html", "https://www.berkshirehathaway.com/letters/1992.html",
+            "https://cas.xmu.edu.cn/info/2083/4954.htm", "https://www.shui5.cn/article/9e/24800.html"],
+        "earnings-quality-and-cash-conversion": [
+            "https://www.cuhk.edu.hk/acy2/workshop/June2009Wasley/1996TAR).pdf",
+            "https://doi.org/10.2308/tar-9608042309", "https://api.crossref.org/works/10.2308/tar-9608042309",
+            "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=277231",
+            "https://api.crossref.org/works/10.2139/ssrn.277231", "https://doi.org/10.2308/accr.2002.77.s-1.35",
+            "https://api.crossref.org/works/10.2308/accr.2002.77.s-1.35", "https://cas.xmu.edu.cn/info/2083/4954.htm"],
     }
     actual = method_cards(root)
+    assert {card["card"] for card in actual} == set(expected)
     actual_by_id = {card["card"]: card for card in actual}
-    copies = tmp_path / "compatibility-copies"
+    copies = tmp_path / "frozen-copies"
     copies.mkdir()
     metadata = {}
     for slug, (title, status, primary, count, queries) in expected.items():
@@ -148,26 +176,20 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
         assert meta["title"] == title and meta["status"] == status
         assert meta["sources"].startswith("[") and meta["sources"].endswith("]")
         urls = re.findall(r"https?://[^\s,\]]+", meta["sources"])
+        assert urls == expected_sources[slug]
         assert len(urls) == count and primary in urls
         assert all(url.startswith("https://") for url in urls)
         assert all(query in body for query in queries)
         digest = hashlib.sha256(raw).hexdigest()
         metadata[slug] = (title, urls, digest, queries)
-        if status == "stable":
-            assert actual_by_id[slug]["sha256"] == digest
-            assert actual_by_id[slug]["title"] == title
-            assert actual_by_id[slug]["source_urls"] == urls
-            for query in queries:
-                assert slug in {card["card"] for card in research_methods(None, query, catalog=actual)}
-            copy = raw
-        else:
-            assert slug not in actual_by_id
-            copy = raw.replace(b"\nstatus: draft\n", b"\nstatus: stable\n", 1)
-            assert copy != raw
-        (copies / f"{slug}.md").write_bytes(copy)
+        assert actual_by_id[slug]["sha256"] == digest
+        assert actual_by_id[slug]["title"] == title
+        assert actual_by_id[slug]["source_urls"] == urls
+        for query in queries:
+            assert slug in {card["card"] for card in research_methods(None, query, catalog=actual)}
+        (copies / f"{slug}.md").write_bytes(raw)
         print(json.dumps({"card": slug, "status": status, "title": title, "source_count": count,
-                          "sha256": digest, "compatibility_copy_sha256": hashlib.sha256(copy).hexdigest(),
-                          "queries": queries}, ensure_ascii=False))
+                          "sha256": digest, "queries": queries}, ensure_ascii=False))
 
     staged = method_cards(copies)
     assert {card["card"] for card in staged} == set(expected)
@@ -177,8 +199,7 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
         assert card["sha256"] == hashlib.sha256((copies / f"{card['card']}.md").read_bytes()).hexdigest()
         for query in queries:
             assert card["card"] in {entry["card"] for entry in research_methods(None, query, catalog=staged)}
-        if expected[card["card"]][1] == "draft":
-            assert card["sha256"] != digest
+        assert card["sha256"] == digest
 
     conn = db.connect(tmp_path / "app.db")
     assert run_method_catalog(conn, before=None, batch=False, cards_dir=root) == actual
@@ -197,3 +218,110 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
     assert method_cards(copies) != frozen
     assert material.extra["method_catalog"] == frozen
     assert active_methods_digest(None, catalog=frozen) == digest
+    assert {path.name: path.read_bytes() for path in root.glob("*.md")} == original_bytes
+    _assert_mixed_catalog_retrieval(tmp_path, root, actual)
+
+
+def _assert_mixed_catalog_retrieval(tmp_path, root, cards):
+    """Real completed corrections + actual Wiki; diagnostic queries, not production calls."""
+    conn = db.connect(tmp_path / "mixed.db")
+    for row in CAPTURED:
+        conn.execute("INSERT INTO runs(id,code,status,created_at,request) VALUES (?,?,?,?,?)",
+                     (row["run_id"], row["code"], "done", row["created_at"], json.dumps(row["request"])))
+        conn.execute("INSERT INTO reports(id,run_id,code,period,passed,body,created_at) VALUES (?,?,?,?,?,?,?)",
+                     (row["id"], row["run_id"], row["code"], row["period"], row["passed"],
+                      json.dumps(row["body"]), row["created_at"]))
+    historical = method_catalog(conn)
+    assert [(entry["report_id"], entry["location"]) for entry in historical] == [(12, "methods[0]"), (11, "methods[1]")]
+    catalog = run_method_catalog(conn, before=None, batch=False, cards_dir=root)
+    assert catalog == historical + cards
+    assert run_method_catalog(conn, before=None, batch=True, cards_dir=root) == historical
+    frozen = deepcopy(catalog)
+    digest = active_methods_digest(None, catalog=catalog)
+    old = lambda query, entries: [x for x in entries if any(t in x["method"]["text"] for t in query.split())][:5]
+    # Positions in the frozen catalog; both priority and remainder must be stable.
+    expected = {
+        "利润 ROIC": [5, 0, 1, 2, 3],
+        "利润 反向估值": [6, 0, 1, 2, 3],
+        "利润 ROIC 反向估值": [5, 6, 0, 1, 2],
+        "现金流 反向估值": [6, 0, 1, 3, 4],
+    }
+    material = deepcopy(MATERIAL)
+    material.extra["method_catalog"] = catalog
+    tools = ResearchTools(material, conn)
+    used = []
+    for query, positions in expected.items():
+        found = tools.research_methods(query)
+        assert found == [catalog[i] for i in positions]
+        assert found != old(query, catalog) and len(found) == 5
+        for entry in found:
+            if entry not in used:
+                used.append(entry)
+        assert material.extra["methods_used"] == used
+        assert tools.research_methods(query) == found  # Repeat calls do not duplicate the trail.
+        assert material.extra["methods_used"] == used
+        assert research_methods(conn, query, catalog=historical) == old(query, historical)
+        assert research_methods(conn, query) == old(query, historical)
+    for query in ("ROIC", "反向估值", "正常化", "应收保理从未出现_9a7e"):
+        assert research_methods(None, query, catalog=catalog) == old(query, catalog)
+    assert research_methods(None, "应收保理从未出现_9a7e", catalog=catalog) == []
+    for query in ("利润 RO", "利润 roic", "利润 normalization", "利润 正常化"):
+        assert research_methods(None, query, catalog=catalog) == old(query, catalog)
+    # Known broad substring behavior: "no" matches normalization in Relations, not a negative example.
+    assert research_methods(None, "no matching research method", catalog=catalog) == old(
+        "no matching research method", catalog)
+    assert research_methods(None, "no matching research method", catalog=catalog)
+    assert research_methods(None, "利润", catalog=historical * 4) == old("利润", historical * 4)
+    # Real titles have only one hit in this Wiki revision. Use a title-only labelled variant
+    # to exercise title priority under overflow, without inventing/copying card prose.
+    target = deepcopy(cards[-1])
+    target["title"] = "利润"
+    overflow = catalog[:-1] + [target]
+    assert research_methods(None, "利润", catalog=overflow) == [target] + overflow[:4]
+    # Even an explicit keyword cannot reorder a <=5-hit catalog.
+    short = [historical[0], cards[-1]]
+    assert research_methods(None, "利润 反向估值", catalog=short) == short
+    # Five actual card hits do not overflow, regardless of explicit names.
+    assert research_methods(None, "利润 ROIC 反向估值", catalog=cards) == cards
+    assert catalog == frozen and material.extra["method_catalog"] == frozen
+    assert active_methods_digest(None, catalog=catalog) == digest
+    assert digest == "b23d70db389b33e372f372856db5c20adc45adeef2cea6e606e92bb7f2ba6e0d"
+    conn.close()
+
+
+@pytest.mark.parametrize("query", [None, 42, [], "", "  \t", "x" * 81])
+def test_method_query_rejects_invalid_input(query):
+    with pytest.raises(ValueError, match="1–80"):
+        research_methods(None, query, catalog=[])
+
+
+def test_method_query_empty_and_boundary_inputs():
+    assert research_methods(None, "x" * 80, catalog=[]) == []
+    assert research_methods(None, "  x  ", catalog=[]) == []
+
+
+@pytest.mark.parametrize("term,prioritize", [("低PE", True), ("正常化", False)])
+def test_overflow_priority_with_captured_card_without_wiki(term, prioritize):
+    # Multiplicity-only boundary fixture: real correction text and a real card, no new prose.
+    historical = [{"method": CAPTURED[1]["body"]["methods"][0]},
+                  {"method": CAPTURED[0]["body"]["methods"][1]}] * 3
+    card = method_cards(CARDS)[0]
+    catalog = historical + [card]
+    frozen = deepcopy(catalog)
+    digest = active_methods_digest(None, catalog=catalog)
+    found = research_methods(None, f"利润 {term}", catalog=catalog)
+    assert found == ([card] + historical[:4] if prioritize else historical[:5])
+    assert catalog == frozen and active_methods_digest(None, catalog=catalog) == digest
+
+
+def test_retrieved_methods_page_label_is_not_adoption():
+    from support.templates import render
+    from support.valuation import BODY, RECORD
+
+    cards = method_cards(CARDS)
+    body = deepcopy(BODY) | {"methods_used": cards}
+    html = render("report.html", report=RECORD | {"passed": True}, body=body,
+                  rows={row["id"]: row for row in body["table"]}, fin=[], market=[],
+                  comparison={"old": None}, retry={"label": "重试原研究问题", "note": ""})
+    assert "检索到的方法" in html and cards[0]["title"] in html
+    assert cards[0]["source_urls"][0] in html
