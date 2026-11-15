@@ -64,29 +64,9 @@ def test_runtime_version_is_frozen_at_last_release() -> None:
     from a_share_research.policy import v0
 
     assert v0.__version__ == "0.1.43"
-    for skill in ("a-stock-research", "a-stock-monitor", "a-stock-qa"):
+    for skill in ("a-stock-monitor",):
         text = (PROJECT_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
         assert "\nversion:" not in text
-
-
-def test_research_routes_product_cycle_analysis_to_grounded_reference() -> None:
-    skill_root = PROJECT_ROOT / "a-stock-research"
-    skill = (skill_root / "SKILL.md").read_text(encoding="utf-8")
-    reference = (skill_root / "references" / "catalyst-cycle-analysis.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "references/catalyst-cycle-analysis.md" in skill
-    assert "公司被正式点名或另有公司公告时，才能映射为公司订单" in reference
-    assert "客户保密时不要从行业生态名单反推公司订单" in reference
-    assert "映射为公司订单" not in skill
-    for contract in (
-        "延续研究也不能沿用早先盘中价格",
-        "强制反证",
-        "AI 服务器平台出货不等于公司供应关系",
-        "条件区间，不是目标价",
-    ):
-        assert contract in reference
 
 
 @pytest.mark.parametrize(

@@ -94,6 +94,7 @@ a-stock-cache portfolio-scenario --snapshot <仓库外快照JSON> --sell <代码
 
   输出 `max_shares` 与 `tranches`（1/3、2/3、1 三阶段累计股数，不足一手的阶段为 0；首批恒为 `tranches[0]`）：股数 ×（买价 − 第二档止损）同时不超过单股剩余预算与组合剩余预算，并按板块交易单位取整。`budget_below_one_lot` 如实说明，不换别的上限。现在分批带 `add_trigger` 或旧等证据带 `trigger` 时，动作只限 `tranches[0]`，检查点参考不阻止首批；不得将 `max_shares` 当成当前可买股数，也不得反复以首批名义追加。披露达标且更新有效研究确认后才加后续批次，未达标复核是否减仓。结果 `action_status=not_formed`、`execution_status=not_checked`，不核验涨跌停、滑点与可成交量。
 - 账户板块权限：风险政策可选字段 `untradable_boards`（`STAR`/`BSE`）所列板块照常研究，但不出机会提示、不作换仓候选、`position-size` 拒绝定仓；未提供账户范围时也生效，被排除代码写入 `research.reason`（[2026-11-04 板块权限规格](https://github.com/on195594/a-stock-agent-skills/blob/master/docs/specs/2026-11-04-untradable-boards-spec.md)）。
+- 治理红线（所有者 2026-11-15 保留，原载首次研究指南）：公司公告、交易所监管函或证监会处罚决定证实控股股东或关联方非经营性占用资金、或公司违规担保的，该股不新增仓位——新仓与加仓均不给股数，已有持仓列红色复核，不自动清仓。新闻与检索结果只标“待核实”，不触发也不解除；解除须有同等级官方披露确认占款已清偿、担保已解除。
 
 ### 组合复盘与换仓比较
 

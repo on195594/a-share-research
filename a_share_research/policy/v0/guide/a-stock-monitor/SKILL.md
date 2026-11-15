@@ -1,6 +1,6 @@
 ---
 name: a-stock-monitor
-description: "用于 A股持仓、账户截图与成交对账、止损/L3/仓位复核。首次配置或纯公开证据问答用 a-stock-research。"
+description: "用于 A股持仓、账户截图与成交对账、止损/L3/仓位复核。首次配置或纯公开证据问答走研究服务。"
 license: Proprietary
 compatibility: Requires local command execution, the installed a-stock-agent runtime and a-stock-lib, plus network access for live monitoring.
 ---
@@ -9,7 +9,7 @@ compatibility: Requires local command execution, the installed a-stock-agent run
 
 ## 路由
 
-`a-stock-monitor` 是已有持仓的唯一 Primary Skill。明确排除交易判断的公开数据子任务不得加载本 Skill；首次研究改用 `a-stock-research`。
+`a-stock-monitor` 是已有持仓的唯一 Primary Skill。明确排除交易判断的公开数据子任务不得加载本 Skill；首次研究按 [Research 服务](references/research-service.md) 在研究服务发起。
 
 用户仅要求核对持仓且尚未确认时，只读查询 `a-stock-cache holdings <股票代码> --active-only`；结果不完整时说明缺口并停止，不启动 Monitor，也不擅自转入首次研究。
 
@@ -83,5 +83,4 @@ a-stock-cache monitor-snapshot --json
 - 数据缺失、过期、冲突、不可交易或 runtime 失败时 fail-closed，不得补造触发、股数或成交。
 - 持仓、交易账本、预警、L3 与 Tier 写入均属 W1。仅在用户确认具体动作后追加全局 `--confirm-write`；建议、授权、申报与成交必须分开。用户请求的 W1 写入尚待具体确认时，整体任务为待确认（结构化状态 `blocked`），不能因快照 `data_status=complete` 标记任务完成；保留 runtime 的 `action_status`。
 - 冻结新增风险仅约束拟议决策与建议授权，不阻断用户确认的已成交事实记账；即使实际买入造成超预算，也按原 W1 门禁记录并报告异常，不拒记、不改写成交。预算只读复核的 `requires_user_confirmation=false` 不授予任何写权限。
-- `a-stock-qa` 尚无 monitor rubric，监控任务不得调用它。
 - 本 Skill 基于公开信息和用户提供的账户状态，不构成投资建议。

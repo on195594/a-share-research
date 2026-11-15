@@ -141,7 +141,7 @@ ops/hermes/       全部定时脚本
 | Skills | 运行合同（`monitor-v1` 字段、降级与时效语义） | 随代码进 `policy/v0/`，仍是现行机器合同 |
 | Skills | 三个 `SKILL.md` 与 `references/` | `policy/v0/guide/`；路由收敛为一个 Skill |
 | Skills | `docs/specs/` 带日期规格 | 随归档仓库保留；`policy/v0/RULES.md` 建索引：规则 → 规格 → 归档仓库的固定提交 → 当前实现 |
-| Skills | `a-stock-qa` | Skill 删除；其中仓位、分批与板块权限的检查迁入政策校验，其余逐项标明由入账门承接或退役 |
+| Skills | `a-stock-qa` | Skill 删除（2026-11-15 完成）；其中仓位、分批与板块权限的检查迁入政策校验，其余逐项标明由入账门承接或退役，去向见[规则索引](../a_share_research/policy/v0/RULES.md#合仓时保留与替换的边界) |
 | 账户库 | 业务表、`account-snapshot.json`、`risk-policy.json`、业绩报告的外部输入文件 | 导入账本；逐表逐列的去向与守恒核对见第 1 段；原文件切换后保留 |
 | 账户库 | `retro_notes`、`analysis_results` | 提供读取工具；旧分析标为历史记录，不算经过入账门的研究 |
 

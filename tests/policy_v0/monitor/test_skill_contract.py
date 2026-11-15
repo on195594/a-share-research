@@ -81,8 +81,6 @@ def test_generic_single_holding_request_has_bounded_delivery_contract():
         in SKILL
     )
     assert "默认不启动研究子代理" in SKILL
-    assert "a-stock-qa` 尚无 monitor rubric" in SKILL
-    assert "监控任务不得调用它" in SKILL
 
 
 def test_level1_failure_snapshot_and_context_contract_is_bounded():
@@ -287,10 +285,6 @@ def test_news_topics_and_pending_writes_are_explicit():
 
 def test_shared_research_service_waits_and_checks_latest_disclosure():
     monitor = (ROOT / "references/research-service.md").read_text(encoding="utf-8")
-    research = (
-        ROOT.parent / "a-stock-research/references/research-service.md"
-    ).read_text(encoding="utf-8")
-    assert monitor == research
     for marker in (
         "同一问题二选一",
         "轮询间隔至少 30 秒",
@@ -340,3 +334,35 @@ def test_research_prompts_preserve_action_and_route_pending_cards():
         assert marker not in SKILL
     for marker in ("Research 注", "参考加仓检查点", "情景未经记分"):
         assert marker in VALUATION_REVIEW
+
+
+def test_guide_is_self_contained_after_legacy_research_flow_retired():
+    guide = ROOT.parent
+    assert sorted(path.name for path in guide.iterdir()) == ["a-stock-monitor"]
+    corpus = "".join(
+        path.read_text(encoding="utf-8") for path in sorted(ROOT.rglob("*.md"))
+    )
+    # Outputs of the retired scoring flow must not gate any account action.
+    for retired in ("a-stock-research", "a-stock-qa", "★", "时机评级", "矩阵建议仓位"):
+        assert retired not in corpus
+    # C/D accumulation tiers carry their own thresholds and stress-test basis.
+    assert "| C 资源 | >3% | >5% | 利润下降 20%" in CD_ACCUMULATION
+    assert "| D 公用 | >2.5% | >4% | 业务量下降 10% × 经营杠杆 1.5" in CD_ACCUMULATION
+    assert "发起一次新研究" in CD_ACCUMULATION
+    assert "更新的有效研究立场为“现在分批”" in TIER_RULES
+
+
+def test_governance_red_line_blocks_new_exposure_on_official_evidence_only():
+    line = next(
+        line for line in PORTFOLIO_RISK.splitlines() if line.startswith("- 治理红线")
+    )
+    for marker in (
+        "公司公告、交易所监管函或证监会处罚决定",
+        "非经营性占用资金",
+        "违规担保",
+        "新仓与加仓均不给股数",
+        "不自动清仓",
+        "新闻与检索结果只标“待核实”，不触发也不解除",
+        "解除须有同等级官方披露",
+    ):
+        assert marker in line
