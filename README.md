@@ -5,8 +5,8 @@
 本项目生产有出处的公司判断并为判断记分，数据与确定性计算归 `core/`，账户事实归 `account/`，配置与持仓规则归 `policy/`；宿主通过统一 `a-share` Skill 和受控工具访问同一服务，旧账户库只读保留。定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
 
 - 产品目标与使用流程：[PRODUCT.md](PRODUCT.md)；领域设计与研究方案：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
-- 三仓合一重构（阶段与日期见[固定里程碑](docs/implementation-plan.md#固定里程碑)）：[方案](docs/consolidation.md)；现行能力与状态归属：[系统架构](ARCHITECTURE.md)。
-- AI 能力演进原则与阶段日期：[路线图](docs/roadmap.md)。
+- 现行能力与状态归属：[系统架构](ARCHITECTURE.md)；三仓合一的设计决定：[合一方案](docs/consolidation.md)。
+- AI 能力演进原则与阶段：[路线图](docs/roadmap.md)；到期日期：[固定里程碑](docs/implementation-plan.md#固定里程碑)。
 - 候选发现与研究实验：[方案](docs/screening-experiment.md)，用法见下文[候选初筛](#候选初筛)。
 - 基本面深度、经营序列与投资论证：[升级方案](docs/investment-upgrade.md)。
 - 接续研究、检查点与归因复盘：[积累方案](docs/research-accumulation.md)。
@@ -19,7 +19,7 @@
 | `a_share_research/` | `web.py` 鉴权/参数/渲染，`worker.py` 后台入口，`reading.py` 只读查询，`service.py` 提交；`research.py` 编排研究，`screening.py` / `backtest.py` 候选批次/回测；`contract.py` 判断契约，`report.py` 正文类型与视图，`market.py` TuShare 唯一网关（网页不加载行情依赖），`limits.py` 运行上限与依据；`core/` 并入的 a-stock-lib（Provider 与确定性计算，合同见 `core/PROVIDERS.md`）；`policy/v0/` 并入的旧 Skills 运行时（政策 v0，规则资料在 `policy/v0/guide/`；生产账户经受控工具接入，见[合一重构方案](docs/consolidation.md)） |
 | `a_share_research/templates/`、`static/` | Jinja 页面、样式和渐进增强脚本 |
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
-| `docs/` | 领域方案、项目契约、路线图、实施与部署状态；产品目标见根目录 `PRODUCT.md`，视觉规范见 `DESIGN.md` |
+| `docs/` | 领域方案、路线图、实施与部署状态；产品目标见根目录 `PRODUCT.md`，视觉规范见 `DESIGN.md` |
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
 | `Dockerfile`、`compose.yaml`、`ops/hermes/` | Web / worker 构建部署；Hermes 定时脚本源与安装工具 |
 
@@ -31,17 +31,7 @@
 
 生产仅通过 HTTPS 登记，Cookie 为 host-only、Secure、HttpOnly、SameSite=Lax；服务器只保存随机凭据的 SHA-256 哈希与截止时间，并核对当前 GitHub owner。凭据是浏览器持有的 bearer cookie，不是硬件绑定；被复制后在撤销或到期前可重放。清除 Cookie 或云浏览器环境重置后需重新登录。多实例必须共享同一应用数据库；会话密钥和 owner 配置保持一致。
 
-新增 `remembered_devices`、`device_sessions` 为可重入的附加认证表，保留 v22 与 `sessions` 两列结构，旧镜像可读写业务数据库。**回退旧镜像前须暂停 web，事务撤销所有设备及其派生会话**（只清理新增认证记录，不回滚业务数据库）：
-
-```sql
-BEGIN IMMEDIATE;
-DELETE FROM sessions WHERE token_hash IN (SELECT session_hash FROM device_sessions);
-DELETE FROM device_sessions;
-DELETE FROM remembered_devices;
-COMMIT;
-```
-
-旧镜像的退出操作不认识设备表；未撤销就回退，之后升级可能使旧 Cookie 再次生效。应用发布失败而自动回退时，同样执行上述认证清理后再恢复访问。初次部署需按认证配置/附加表变更处理，不把此节视为上线授权。
+`remembered_devices`、`device_sessions` 是可重入的附加认证表，不改 `sessions` 结构。
 
 ## 运行
 
@@ -91,15 +81,15 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## Agent 研究 API
 
-Skills 等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
+Hermes 脚本等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
 
 ```bash
-DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create skills-runtime
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create hermes-advisor
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编号>
 ```
 
-`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_STOCK_RESEARCH_URL` 指向服务，`A_STOCK_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存哈希，`list` 只显示编号、名称与创建时间。管理命令仅由 owner 本地执行；Key 只授予研究 API 权限。
+`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_SHARE_RESEARCH_URL` 指向服务，`A_SHARE_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存哈希，`list` 只显示编号、名称与创建时间。管理命令仅由 owner 本地执行；Key 只授予研究 API 权限。
 
 轮换：创建新 Key → 更新配置并验证读取 → 按编号撤销旧 Key。同名 Key 可并存；环境变量优先于文件，须排除旧值覆盖。Key 不受服务重启或浏览器登录/退出影响。401 后先修复凭据，再沿用原 `request_id` 重试。
 
@@ -136,7 +126,7 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 
-统一 `a-share` Skill 与受控客户端通过 `ashare` / MCP 接入本 API 与工具服务，先复用旧报告，再按缺口发起追问或受控取证；配置与使用见[客户端安装说明](ops/clients/README.md)与[工具目录](a_share_research/tools/README.md)，发布状态见实施计划。原 `a-stock-agent-skills` 仓库已只读归档。
+统一 `a-share` Skill 与受控客户端通过 `ashare` / MCP 接入本 API 与工具服务，先复用旧报告，再按缺口发起追问或受控取证；配置与使用见[客户端安装说明](ops/clients/README.md)与[工具目录](a_share_research/tools/README.md)，开关状态见[当前部署](docs/implementation-plan.md#当前部署)。
 
 纠错报告的 `methods` 是已核查的方法线索；`evidence.methods_used` 记录检索召回，不证明实际采用或收益贡献。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
 
@@ -162,7 +152,7 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 材料版本只追加，原文页、来源编号和计算行不会被后续取证改写。提交按“草稿哈希＋材料哈希”去重：同草稿绑定新证据产生新提交，指定原材料重试仍返回原回执。为兼容旧调用，省略 `material_revision` 的提交绑定版本 0；新调用应始终显式填写。独立复核只读该提交绑定的材料，后续取证不改变旧复核；`accepted=true` 仅表示机械检查通过，不代表独立复核通过或报告发布。
 
-该链路要求数据库 v22；旧材料与提交迁移为材料版本 0。发布空闲检查包括取证操作，备份收录所有历史材料版本的 PDF。仅支持 v21 的回退镜像会被兼容检查拒绝，须准备支持 v22 的回退基线；这里说明代码接口，不代表生产已切换，部署与真实验收状态见[实施记录](docs/implementation-plan.md)。
+旧材料与提交为材料版本 0。发布空闲检查包括取证操作，备份收录所有历史材料版本的 PDF。两个开关的生产状态见[当前部署](docs/implementation-plan.md#当前部署)。
 
 ## 账户净值工具
 
@@ -207,27 +197,6 @@ uv run python -m a_share_research.backup restore /absolute/private/new-backup /a
 
 默认从数据库同目录的 `pdf/`、`account-evidence/` 读取原件；副本验收可用 `--pdf-directory`、`--evidence-directory` 明确来源。目标目录必须不存在，目录/文件分别为 0700/0600；操作不会覆盖现库。恢复只是生成经校验的独立副本，不启动服务、不自动迁移、不抬升序列，也不代表允许丢弃备份之后的写入。实际数据恢复仍按[数据层回退步骤](docs/data-foundation.md#7-验收与治理规则)处理高水位与引用；合一切换后应用回退保持新账本为唯一事实来源，见[合一回退规则](docs/consolidation.md#5-验收与割接实施)。
 
-账户切换使用本地 owner 入口，要求 `ASHARE_OWNER_TOKEN` 已通过私有环境提供。按[合一退出条件](docs/consolidation.md)完成验收、停用并排空旧宿主与定时任务后，先运行末次镜像，核对资金/成本零版本期初、全部旧持仓及事件历史、账户周期分析与原始证据，再登记并启用匹配当前代码及账户范围的政策。正式切换日期和阶段状态见[实施计划](docs/implementation-plan.md)；命令只检查技术状态，不证明券商资金完整、五交易日对照通过或允许提前启用宿主。
-
-```bash
-DATA_DIR=/absolute/new-data uv run python -m a_share_research.account.mirror --source /absolute/old-state/cache.db
-uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json prepare \
-  --source /absolute/old-state/cache.db --state-directory /absolute/old-state \
-  --account-id confirmed-account --account-scope confirmed-scope
-uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json fence
-uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json commit
-uv run python -m a_share_research.cutover --database /absolute/new-data/app.db --plan /absolute/private/cutover.json transfer-stop-state \
-  --destination /absolute/private/new-stop/state.json
-```
-
-`prepare` 只读既有数据库，计划以 0600 新建于 0700 私有目录，不覆盖旧计划。`--state-directory` 必须是旧运行时实际提醒状态目录，可与旧库目录不同。若旧应用目录还存放备份、日志或发布记录，逐项追加 `--preserve-entry /absolute/old-state/entry`，明确保留每个顶层旁支；不递归读取或修改其内容和权限，也不证明旁支内写入者已停。未列明的新条目、缺失保留项、符号链接数据库、共享目录和 HOME 均拒绝，不能把账户文件列为保留项。新库和计划必须位于封锁目录之外。
-
-`fence` 再核对镜像指针、源哈希、期初/分析摘要、提醒状态及生效政策，给旧业务表和迁移表安装持久写入拒绝触发器，排空 WAL、转为 DELETE 日志，并将账户文件改为 0400、专用目录改为 0500；不会改旧运行时源码。`commit` 必须证明完整封锁仍在，并在新库事务内比较更新镜像指针为明确的账户/范围绑定。不新增表、不迁移、不自动启用政策或服务；准备后数据、政策或文件身份变化即拒绝。期初或旧分析基线过期时须重新协调和准备，不改写冻结历史。
-
-中途失败保持已有封锁，排空连接或修复原因后可重试；需要新准备时使用新的计划文件名。同一已绑定账户的 `commit` 重试只返回原绑定时间，不覆盖后续入账或政策；不同绑定被拒。重复回执不表示重新验收当前账本。切换成功后镜像入口拒绝运行，应用回退继续使用新账本，不能恢复旧写入口。权限与触发器用于防止旧进程误写，不防御属主主动改权限、重命名目录或删除触发器。
-
-启用新 Hermes 止损任务前，以同一计划执行 `transfer-stop-state`；目标须为新客户端实际使用的状态路径（默认 `~/.local/state/ashare-stop-alert/state.json`，示例路径须相应调整）。命令重验 owner、已完成的相同账本绑定、旧封锁及旧提醒状态哈希，持有客户端锁后原子新建 0600 状态，原文件日期与档位逐字节保留。只有计划记录缺失且封锁后仍缺失时才初始化空对象，回执明确 `source_absent=true`；不补日期或档位。相同内容重试不写文件；目标已有不同内容、已升级格式或待查请求时拒绝覆盖。顾问/月批/记分沿用原状态路径，无需导入；后续安装与任务验收见 [Hermes 交接](ops/hermes/README.md)。命令不安装脚本、启用任务或发送通知。
-
 价格参考支持沪深主板、创业板（300/301）和科创板（688），继续排除 ST、退市风险股及北交所；公式与旧 `price-reference-v2` 记录保持兼容。
 
 ## 候选初筛
@@ -240,7 +209,7 @@ uv run python -m a_share_research.cutover --database /absolute/new-data/app.db -
 
 自 2026-12 批次起，新批次使用 `screen-v1.3`，同批增加独立的小市值组：30 亿 ≤ 总市值 <100 亿元、近 20 日日均成交额 ≥3000 万元，沿用相同财务资格与四因子，分池计算行业分位。S10 为前 10 家（单行业最多 2 家），在 Q20 深挖完成后按顺序研究（同样复用 7 天内有效报告），仍处于 `researching` 阶段；两组研究完成后分别比较，冻结 SL3（最多 3 家、单行业最多 1 家）；SQ3 为机械前 3 家（同样单行业最多 1 家，凑不满留现金）。相对 `screen-v1.2` 只对齐 SQ3 的行业约束，历史规则快照不改。大市值 Q20/Q5/L5 规则不变，两组互不挤占；小组无可选草案时可留空按现金计，不阻塞大组冻结。批次页分组展示候选、比较与最终名单；手动冻结表单的 `codes` 仍代表大组，小组使用 `small_codes`（可为空）。
 
-新批次冻结时为 Q20/S10 逐家保存近 90 日卖方覆盖机构数及缓存实际覆盖的交易日数；只读已缓存的按日全市场 `report_rc`，不补查缺失日，页面明确显示无缓存、截断及其他缺口，零机构不能解读为完整覆盖下无人跟踪。SQ3/SL3 与大组同日入场、同费率及期限，另加中证 1000 全收益（`H00852.CSI`）辅助基准，S10 不单独生成模拟组合；旧批次继续原规则与原展示。SL3 先只作模拟，不进入披露扫描或 Skills 换仓候选。
+新批次冻结时为 Q20/S10 逐家保存近 90 日卖方覆盖机构数及缓存实际覆盖的交易日数；只读已缓存的按日全市场 `report_rc`，不补查缺失日，页面明确显示无缓存、截断及其他缺口，零机构不能解读为完整覆盖下无人跟踪。SQ3/SL3 与大组同日入场、同费率及期限，另加中证 1000 全收益（`H00852.CSI`）辅助基准，S10 不单独生成模拟组合；旧批次继续原规则与原展示。SL3 先只作模拟，不进入披露扫描或账户换仓候选。
 
 月度自动发起（启用状态与时间/额度记录见[实施计划](docs/implementation-plan.md)）：Bearer API Key 可调用 `POST /api/batches/monthly`（`{"month":"2026-12"}`）入队当月批次，`GET /api/batches/monthly/2026-12` 只读查询当月首批状态。服务端仅接受上海当前自然月自动发起，旧月拒绝；同月已有任意状态批次（含失败）均不另建，网页手动重开不受此限；已入队但跨月仍未开始初筛的自动批次直接失败停止，不使用后来数据补跑。
 
@@ -283,7 +252,7 @@ V1 可加 `--html review.html` 导出可直接打开的手机友好静态快照�
 - **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
 - **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码（Research 不存持仓标签），扫描范围另含最近冻结批次的 L5；`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回事件、失败与 `notify`，`GET /api/scans/weekly` 返回周报数据。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
-- **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 新版源码已接入独立待查状态与整轮预算，已安装启用，详见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。
+- **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 客户端的待查状态与整轮预算见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。
 - **区间条件收益诊断**（只读，不调模型）：
 
 ```bash
@@ -292,14 +261,12 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 ## 部署
 
-v21 增加 `scan_requests` 及扫描引用索引，不改已有扫描或研究记录。后续顾问客户端的回退基线必须同时支持 v21、新请求 API 和 tools 就绪；旧 v20 镜像不满足，应用回退检查会明确拒绝，保留停服/暂停现场。准备期新增接口不代表已满足首次生产迁移的发布准入；须先按下文验证兼容镜像，不能将旧代码能读取新增表当作完整回退证明。
-
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移：v1 幂等补齐历史列；v2 增加并回填 `runs.replay_of`、`reports.coverage` 及查询索引，v3 建立维护这两列的触发器；v4 `calls.prompt_base` 与 v5 `prompt_blocks` / `calls.prompt_block` 让工具循环后续轮次只存新增消息、研究资料块按内容哈希只存一份；v6 建立 `calls.run_id`、`runs.status` 和 `sessions.expires_at` 高频索引；`db.call_prompt()` 逐字节还原，完整性巡检核对调用时记录的提示哈希。v9 重建 `runs`、`reports`、`calls` 把大字段放到表尾，增加 `company_key` 等生成列，`runs`、`reports` 改为 `AUTOINCREMENT`，设计与门禁见[数据层治理方案](docs/data-foundation.md)。迁移须另获授权并备份，日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测；做不到的不能使用日常参数，须准备一次性迁移路径，v9→v22 入口见下文。回退旧镜像时保留新增结构，旧应用照常读写原字段并写完整提示，派生列由触发器继续维护（v4 镜像的巡检不认识 `prompt_block`，会误报哈希不符）。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移（现行 v22，各版本内容见 `db.py`）。迁移须另获授权并备份；日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测，做不到的不能使用日常参数，须单独设计回退。设计与门禁见[数据层治理方案](docs/data-foundation.md)。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
 - web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
-- tools（账户工具已启用，研究排队开关状态见实施计划）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
+- tools（开关状态见[当前部署](docs/implementation-plan.md#当前部署)）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
 - worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口；每次推理单独启动 Node（冷启动约 1.2 秒），不常驻进程。
 
 主模型使用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；独立复核可同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID`，仅 `review` 阶段使用该模型，其他阶段仍用主模型。`MODEL_REVIEW_REASONING` 未设置时继承主模型思考强度；未配置独立复核时沿用主模型。当前生产选择只在[实施记录](docs/implementation-plan.md#当前部署)维护。
@@ -328,11 +295,11 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次、扫描与外部取证）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)），并删除比当前镜像及最近两级 `rollback-*` 目标更早的 web/worker 镜像标签（较新但未发布的构建不动，删除失败只记入 `manifest.json` 的 `pruned_images`）；失败时仅在旧镜像通过读取兼容检查后恢复原应用，保留数据、证据、全部备份和镜像，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和旧镜像跑不了新结构的迁移需要单独安排回退，不使用此工具；旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像（首例 `05d0c3f`）。工具的表指纹比较都在迁移之前，不证明迁移后数据守恒，迁移发布须另外复查。
+工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次、扫描与外部取证）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)），并删除比当前镜像及最近两级 `rollback-*` 目标更早的 web/worker 镜像标签（较新但未发布的构建不动，删除失败只记入 `manifest.json` 的 `pruned_images`）；失败时仅在旧镜像通过读取兼容检查后恢复原应用，保留数据、证据、全部备份和镜像，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和旧镜像跑不了新结构的迁移需要单独安排回退，不使用此工具；旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像。工具的表指纹比较都在迁移之前，不证明迁移后数据守恒，迁移发布须另外复查。
 
 业务表指纹只在本次纳入的全部服务停止后比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `MODEL_REASONING` 分别记录，模型与推理强度未变时不追加模型配置检查或研究调用。
 
-发布备份保留原 `backup-pre-<提交>-<时间>.db` 入口，同时生成同名 `.bundle/` 完整证据包；两份数据库独立存储，文件哈希一致。清理旧备份时先核对包的完整性及其与 `.db` 的归属，再成对清理；发现额外文件、损坏或归属不符时保留并报告。发布失败仍保留所有备份，不自动恢复数据库。首次启用 tools 时追加 `--with-tools --allow-config`；已有 tools 容器自动纳入发布。部署先通过私有控制 socket 暂停新请求并排空，再停止服务、备份和切换；新进程读取持久暂停标记，数据库就绪、worker 预检、容器配置和完整性检查通过后才恢复 tools 受理。已被其他操作暂停的服务不会被本次发布接管。恢复受理的回执丢失时，回退前会重新排空，排空失败则不替换进程。切换后失败会先停止写入者，对当时数据库、PDF、账户证据和资产侧文件制作私有副本，再以原 web、worker 镜像分别运行禁网、只读的兼容检查；旧代码必须读懂实际账户来源、政策回执和采集上下文，不能仅凭数据库版本号或 `/ready` 判断。结果保存在发布证据目录的 `rollback-compatibility.json`，副本在 `rollback-probe/`。检查失败、超时或无法完成时保留当前镜像、停服及 tools 暂停状态，不删首次新增的 tools 容器、不恢复受理；须依据报告核对副本并准备兼容应用，不能用恢复旧数据库绕过。通过后才清理本次新增 tools 容器或让已有 tools 随 worker 回退，账本不回滚。此门禁只验证读取，正式账户切换前仍须独立验证前一级合并镜像能够读写新账本。
+发布备份保留原 `backup-pre-<提交>-<时间>.db` 入口，同时生成同名 `.bundle/` 完整证据包；两份数据库独立存储，文件哈希一致。清理旧备份时先核对包的完整性及其与 `.db` 的归属，再成对清理；发现额外文件、损坏或归属不符时保留并报告。发布失败仍保留所有备份，不自动恢复数据库。已有 tools 容器自动纳入发布。部署先通过私有控制 socket 暂停新请求并排空，再停止服务、备份和切换；新进程读取持久暂停标记，数据库就绪、worker 预检、容器配置和完整性检查通过后才恢复 tools 受理。已被其他操作暂停的服务不会被本次发布接管。恢复受理的回执丢失时，回退前会重新排空，排空失败则不替换进程。切换后失败会先停止写入者，对当时数据库、PDF、账户证据和资产侧文件制作私有副本，再以原 web、worker 镜像分别运行禁网、只读的兼容检查；旧代码必须读懂实际账户来源、政策回执和采集上下文，不能仅凭数据库版本号或 `/ready` 判断。结果保存在发布证据目录的 `rollback-compatibility.json`，副本在 `rollback-probe/`。检查失败、超时或无法完成时保留当前镜像、停服及 tools 暂停状态，不删首次新增的 tools 容器、不恢复受理；须依据报告核对副本并准备兼容应用，不能用恢复旧数据库绕过。通过后才清理本次新增 tools 容器或让已有 tools 随 worker 回退，账本不回滚。此门禁只验证读取。
 
 已启用政策服务时，镜像就绪与政策实装一致是两项检查：应用代码参与政策身份，升级或回退后 `policy.current.installed` 可能为 false，新计算会拒绝，已有请求仍可查回原回执。所有者须按[政策本地入口](a_share_research/tools/README.md#完整政策身份生效指针与固定输入重放影子入口)，用核对后的参数在目标镜像下登记身份并追加生效指针；回退同样适用。发布工具不代替所有者切换政策，也不改写既存回执与旧周期参数。
 
@@ -340,22 +307,9 @@ uv run python -m a_share_research.deploy "$release_code" \
 
 1. 核对 worker 空闲后，经 tools 控制 socket 暂停受理并等待在途清零：`docker compose --profile tools exec -T tools python -m a_share_research.tools.control pause --socket /run/ashare-tools/control.sock --timeout 30`（核对返回 `{"paused": true, "in_flight": 0}`）。
 2. 停止服务：`docker compose --profile tools stop -t 30 web worker && docker compose --profile tools stop -t 60 tools`。
-3. 以目标回退镜像对当前数据副本执行只读兼容核对（`python -c 'from pathlib import Path; from a_share_research import rollback; print(rollback.assess({"web":"a-share-research-web:<目标>","worker":"a-share-research-worker:<目标>"}, Path("/home/lin/a-share-research-data/app.db"), Path("<私有证据目录>")))'`），不通过则停服排查；若跨过 `797d22c`，按上文“回退旧镜像前须暂停 web”步骤清理新增认证表。
+3. 以目标回退镜像对当前数据副本执行只读兼容核对（`python -c 'from pathlib import Path; from a_share_research import rollback; print(rollback.assess({"web":"a-share-research-web:<目标>","worker":"a-share-research-worker:<目标>"}, Path("/home/lin/a-share-research-data/app.db"), Path("<私有证据目录>")))'`），不通过则停服排查。
 4. 将 `a-share-research-{web,worker}:latest` 重新打标签到目标回退镜像并启动：`docker compose --profile tools up -d --no-build --no-deps web worker tools`。
 5. 按上文政策本地入口在目标镜像下以原参数登记并激活新指针，然后恢复受理：`docker compose --profile tools exec -T tools python -m a_share_research.tools.control resume --socket /run/ashare-tools/control.sock`，核对 `tools` `/ready`、`web` 登录态/页面与 worker 预检。
-
-首次 v9→v22 发布使用同一入口的专用参数；仅适用于当前没有 tools、源库仍为 v9 的部署，不能用于重试已迁移但未完成的现场。v9 漏传此参数会在停服和更改镜像标签前拒绝。目标提交须为已推送的 HEAD，两组镜像都须先按各自提交构建并带 `a-share-research-{web,worker}:<提交>` 标签；恢复提交必须已完成新结构下的读写演练。合一退出条件、配置准备和账户切换日期仍按[实施计划](docs/implementation-plan.md)，命令本身不替代这些条件：
-
-```sh
-uv run --offline --no-sync python -m a_share_research.deploy <目标提交> <新的私有证据目录> \
-  --with-tools --allow-config --initial-recovery <兼容恢复提交>
-```
-
-入口先校验两组镜像源码，固定其不可变 ID，对完整一致副本用目标镜像离线迁移并检查所有旧列（含生成列及序列）守恒、权限默认值和完整性，再用恢复镜像检查该副本；这一步失败不停止生产。准备通过后重新查空闲，暂停受理、停止服务并保留完整备份；目标镜像在没有服务写入者时迁移实际数据库，同样核对守恒，通过后才启动三服务。旧 v9 镜像不作为此次恢复目标。
-
-实际迁移未通过核对时保持停服和暂停标记；已通过迁移但启动或恢复受理失败时，先确认在途请求排空，检查包含最新写入的完整副本，再使用指定兼容镜像恢复全部三服务。新 tools 保留，数据库、原始证据和请求回执不倒退；恢复后再次检查镜像/配置、严格就绪、worker 离线预检和领域完整性，通过后才恢复受理。恢复仍失败则保持暂停；排空无法确认时不替换仍在处理请求的服务。`recovery-result.json` 区分 recovered/held，读取兼容检查另存 `rollback-compatibility.json`；即使兼容恢复成功，本次目标发布仍以失败退出，须核对证据再处理，不能盲重跑首次参数。
-
-首次入口保留全部准备证据、备份和镜像，不做日常清理；兼容镜像作为后续回退标签。成功或核实兼容恢复完成后，后续发布回到日常入口；已有 tools 会自动纳入。此入口不切换账户来源、不启用宿主定时任务、不代替所有者激活政策。
 
 最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
 

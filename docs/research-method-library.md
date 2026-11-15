@@ -81,42 +81,9 @@
 
 **来源范围。** 2026-11-14 实际核对：Damodaran 定义页、估值第14/15章相关段落及增长课件174–175页；FPP 第5章朴素基准、训练/测试与滚动起点段落；Bailey 等公开稿摘要、引言关于多次策略试验、普通留出局限和 PBO/CSCV 的说明，未复现其数值实验。Piotroski 只核 Crossref 书目；Sloan/DD 只核出版登记摘要；其余缺口沿用 Wiki 页内限制。理论、摘要或静态样本均不是本项目收益证明。
 
-## 8. 本轮静态适用性与接入边界（2026-11-14）
+## 8. 离线验收结论（2026-11-14/15）
 
-只复用仓库已有真实采集样本 `tests/data/600519-three-statements.json`、`tests/data/002648-three-statements.json`，没有额外取数或调用研究。两者的 2025 年度收入/现金流记录均为 `report_type=1`，公告版本分别为 2026-04-17、2026-03-24；样本保留[茅台2025年报链接](https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF)与[卫星化学2025年报链接](https://static.cninfo.com.cn/finalpage/2026-03-24/1225026053.PDF)。这里只核缓存字段，没有重新下载、逐页核年报或把样本元数据哈希当成本轮 PDF 核验。
-
-| 静态对照（单位：亿元，展示四位小数） | CFO | 购建长期资产支付现金 | 描述性差额 | 能说明什么 / 不能说明什么 |
-|---|---:|---:|---:|---|
-| 茅台 2025 年 | 615.2220 | 31.2759 | 583.9461 | 可作现金剩余起点；归母利润为 823.2007，但样本无合并净利润字段，不计算“匹配范围的转化率”，不由差异判会计异常 |
-| 卫星化学 2025 年 | 96.0689 | 26.5965 | 69.4724 | 购建支出对现金剩余影响可见；正差额不能直接命名 FCFF/FCFE，或据此推出可持续分红能力 |
-
-两样本均缺维护/增长资本开支可靠拆分、完整利润—CFO 补充桥接、利息税款重分类与净借款勾稽；不能据现有字段填 owner earnings、完整 FCFF/FCFE、ROIC 或维护支出，更不能推出舞弊。财务子公司、并购等合并影响亦需原附注核查，未从公司名称推定不存在。这说明新卡能定位当前材料缺口，不证明实际新研究会采用或效果更好。
-
-2026-11-14 的归档验收（Wiki `cd368a7`）针对当时两张实际新卡，而非仅旧 fixture：核标题、单行 `sources`、原文件 SHA-256、关键词命中与现有读取器的 draft 排除；临时 stable 副本仅用于兼容性演练，不提升原卡状态，副本哈希与原文件分别记录。正文尚有原文缺口，两卡保持 draft，因此本轮不能称为“新卡已进入正式研究目录”。不增加正文副本、索引服务或数据表。
-
-该版本实际离线结果：两卡标题、各 6 个来源链接、关键词（`FCFF` / `Dechow–Dichev`）与原始字节哈希均通过；原目录仍只加载原有 3 张 stable 卡，两张新 draft 被排除。将实际内容仅在临时副本改为 stable 后，现有读取器的标题、来源、哈希、关键词返回均通过，批次排除与冻结目录不变性通过；这只证明格式兼容，不是正式提升或生产采用。
-
-| 实际 Wiki 新卡 | 原文件 SHA-256（draft） | 临时 stable 兼容副本 SHA-256（非原文件） |
-|---|---|---|
-| `free-cash-flow-and-valuation-basis.md` | `d394c3c4de7fe19ca49382ac2a41f2421c8540a9a129fe1365c1510600ecfe79` | `dab523e24ad4a565598063ec2375b659965c95646cbc7dcac5a2c290edd046de` |
-| `earnings-quality-and-cash-conversion.md` | `e92fcb14c730b3f6dcecc9a21d3d95f7e44559bfa9edaa29fef615ace22d1491` | `17e2a8758eb1227c2b69ea8fd4399571cdeee7935576f53980082a2bcce83d08` |
-
-`uv run pytest -q -x tests/test_research_methods.py tests/test_judgment_contract.py`：7 passed；仅验证既有代码与契约边界，不替代上述实际新卡检查或原文核验。
-
-生命周期仅改变后续新开始的非批次单股研究的知识可用性，仍复用 `method_cards`、`research_methods`、`run_method_catalog` 和 `methods_sha256`。历史报告、已开始任务的目录快照、批次输入不动；不改契约、提示词、工具定义、输出结构、筛选权重、估值程序、记分或账户政策，不部署 a-share-research、不动其生产配置/挂载、不发起付费研究。**知识已入库（draft）、离线内容/兼容性检查、生产实际采用、投资效果验证是四件事；后两项本轮未完成。**
-
-### 审查修复后的可复跑验收（2026-11-15）
-
-显式设置 `WIKI_METHOD_CARDS_TEST_DIR` 后，执行[实际卡测试入口](../tests/README.md#实际-wiki-方法卡)：两份指定测试文件共 **8 passed**，其中一项直接读实际 Wiki 的五张页面，补齐此前三张 stable 卡的验收范围。下表是这次读取的原始字节哈希；前述 11-14 两卡哈希仅对应归档版本，不代表修复后的文件。
-
-| 实际文件（位于 Wiki 企业分析目录） | 状态 | 原文件 SHA-256 |
-|---|---|---|
-| `cyclical-earnings-normalization.md` | stable | `7feb9c754b678a65d2b814c4f24ff78d62651884f85fa80155bd6745828bff09` |
-| `growth-reinvestment-and-return-on-capital.md` | stable | `f13e8dc845b2d54210801435909037e0b7625105f92af1cdbd5898ae555ddbf5` |
-| `price-implied-expectations-analysis.md` | stable | `6b6214a3e7ded325d0379672f3ed5bfbc6d483f6497337810070001e46fa8632` |
-| `free-cash-flow-and-valuation-basis.md` | draft | `d25184665ee7012ecd81a914da9a8d50061814c69a0b7809a1a36707ecfb4b40` |
-| `earnings-quality-and-cash-conversion.md` | draft | `11358563a6ed3931600875bcdc2332fdd1aeea0529179f3741ed2e65c086be91` |
-
-五卡标题、完整来源链接列表及关键词均核对通过；实际目录加载三张 stable、排除两张 draft。两张 draft 的临时 stable 兼容副本哈希分别为 `fb1bf4a6d7f6edb60e68bf812d56ef98f04601c21a435fb28f009155ed3f4f55`、`3f8562ae459895a78590a7b8c1e7103917acc17d39559048a17afb9c274f3b4c`，与原文件分开，未改变生命周期。批次排除、方法留痕和冻结目录不变性通过；连接的是临时测试库而非生产数据库。测试未设置实际目录时会明确跳过跨库项，不能据其余 fixture 通过声称已验实际 Wiki。
-
-本次仅补强 FCFE 合并/归母与少数股东索取权的解释、可读摘要和术语写法，没有补读新的原始文献，原文获取缺口仍在，两卡保持 draft。三张 stable 卡具备被后续新研究读取的资格，但本次未核验生产实际读取、模型实际采用或投资效果。
+- 五张卡（三张 stable、两张 draft）的标题、来源链接、关键词与读取器行为已用实际 Wiki 页面核对：实际目录只加载三张 stable、排除两张 draft；批次排除、方法留痕与冻结目录不变性通过。复跑入口见[测试说明](../tests/README.md#实际-wiki-方法卡)；逐文件哈希与逐次记录见 `git show e239649:docs/research-method-library.md`。
+- 用仓库内茅台、卫星化学 2025 年真实三表样本做的静态对照：现有材料缺维护/增长资本开支拆分、完整利润—CFO 桥接与净借款勾稽，不能据现有字段填 owner earnings、完整 FCFF/FCFE 或 ROIC。新卡能定位这些材料缺口，不证明新研究会采用或改善判断。
+- 两张 draft 的原文获取缺口仍在（见第 4 节核对范围），保持 draft、不进入研究目录。
+- 未核验：生产实际读取、模型实际采用、投资效果。

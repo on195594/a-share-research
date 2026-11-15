@@ -226,7 +226,7 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
-mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256；生产绑定与切换证据见[实施计划](../../docs/implementation-plan.md#合一重构与实盘割接2026-11-12-已上线第-4-段收尾中)。
+mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256；生产绑定与切换证据见[实施计划](../../docs/implementation-plan.md#合一重构收尾)。
 
 ledger 采集校验资金与成本重放、政策期初、编号、活动周期的账户作用域分析及全部关联证据，不能回退旧分析基线。来源摘要覆盖相关账本记录、分析、资产观察、已入账批次、实际政策投影与财务缓存；观察或无成交快照改变时即使账本版本不变也会改变摘要。子进程仅对明确绑定账户启用连接内双投影，前后再次核对来源。
 

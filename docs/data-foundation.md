@@ -1,6 +1,6 @@
-# 数据层治理方案（Plan B 彻底版）
+# 数据层治理方案
 
-更新：2026-11-07（已按工程架构审查修订，见第 9 节）。取代 `company-key-schema-migration.md`（原文档的 4 处错误见第 8 节）。本文维护设计、发布顺序与验收口径；状态与部署归[实施计划](implementation-plan.md)。
+更新：2026-11-15。v9 迁移已于 2026-11-07 完成并上线。本文维护数据层的设计、不变量与治理规则；状态与部署归[实施计划](implementation-plan.md)。实施分解、逐项验证与审查修订见 `git show e239649:docs/data-foundation.md`。
 
 ## 1 目标与归类
 
@@ -11,7 +11,7 @@
 | 发现候选 | 批次与任务靠 `request_id` 字符串关联，四种拼接变体（`service.py:289-292`） | `runs.batch_id` |
 | 形成判断 | 同一公司在各表形态不同，靠 `substr` 匹配 | 五张表统一 `company_key` |
 | 记分 | “正式研究”条件散落 14 处，靠人工保持一致 | 样本条件收敛到一处定义，差异显式保留 |
-| 复盘归因 | Skills 的 `holding_events.report_id` 指向 `reports.id`，删除最新报告后 id 会复用 | 删除后 `reports`、`runs` 的 id 不复用；从备份恢复时按第 7 节保住序列 |
+| 复盘归因 | 账户账本的 `holding_events.report_id` 指向 `reports.id`，删除最新报告后 id 会复用 | 删除后 `reports`、`runs` 的 id 不复用；从备份恢复时按第 7 节保住序列 |
 
 **归类**：维护与基础设施。它让记分口径不漂移、交易归因不串号，但不直接改善任何判断，不计为投资进展，也不声称提高收益。
 
@@ -58,7 +58,7 @@ CASE WHEN length(code) IN (6, 9)
 | `reports` | `body` |
 | `calls` | `response`、`prompt` |
 
-这里选择调整列序而不是拆成 `run_materials`、`report_bodies`：不用改任何 JOIN，旧镜像也能照常运行，效果已实测（第 6 节）。
+这里选择调整列序而不是拆成 `run_materials`、`report_bodies`：不用改任何 JOIN，旧镜像也能照常运行，效果已实测（第 5 节）。
 
 ### 3.3 关系显式化
 
@@ -171,112 +171,26 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 - **不跑 `VACUUM`**：文件增长约 93 MB，都是可复用空闲页，磁盘余量 24 GB，不值得多一步生产操作。
 - **`integrity.py` 必须兼容 v8**：发布工具用新代码巡检迁移前的备份，新增检查要先用 `table_xinfo` 判断列是否存在。
 
-## 5 发布与工作分解
+## 5 实施结果（2026-11-07）
 
-只有先后顺序是硬依赖：R2、R3 要用 R1 加的列。三段分开发是为了便于定位和回退，不需要等待期，所有者决定同一天完成（2026-11-07）。
+P0、R1（结构迁移）、R2（查询切换）、R3（代码层收口）同日完成并上线；逐段分解、门禁与差分记录见 Git 历史。
 
-| 段 | 条件 |
-|---|---|
-| P0 | 例行，与 R1 一起提交 |
-| R1 | 第 7 节 R1 门禁全过，且所有者当次授权。门禁未过或空闲检查不通过就停止，不绕过 |
-| R2 | R1 后跑通一份真实研究（只是补充证据，不替代差分），R2 差分通过 |
-| R3 | R2 已发布，R3 差分与互变验证通过 |
-
-分工：Claude 写 P0、R1 和差分脚本并负责发布，Codex 在独立工作树写 R2、R3，agy 只读审查（R1 发布前一次，R2、R3 发布前一次）。当天未完成的部分最晚 11-28 发布；11-29 起月批保护期不发布，到时仍未发布的顺延到 12-05，并在实施计划公开标记。
-
-### P0 清理基线（例行）
-
-修复 HEAD 上已失败的测试：`test_attention::test_failed_report_hides_judgment_but_keeps_evidence_gaps`、`test_review_evidence::test_interrupted_repair_keeps_unresolved_opinion_and_safe_stage_in_api_and_page`。原因是直接渲染模板时没传 `retry`；生产路径 `web.py:399,468` 都传了，属测试缺陷。
-
-### R1 结构迁移（**需所有者当次授权**）
-
-只改结构和直接相关的写入校验，业务查询不动。除下面的入参校验外，行为应完全不变。
-
-- `db.py`：`_migrate_v9`、`connect()` 调整。
-- `service.py:26,79`：`\d` 改为 `[0-9]`。Python 的 `\d` 接受全角数字，新约束下 `６０３６０６` 会从“能提交”变成裸 `IntegrityError`，必须改为返回既有的 `RequestError`。其余写入入口已核对：`scans.py:132` 已是 `[0-9]{6}`，`reports`、`prices`、`scan_events` 的代码来自已校验的任务或订阅。
-- `integrity.py`：增加 `reports` 与所属任务 `company_key` 一致性检查（列不存在时跳过），以及第 3.4.1 节的关系检查。
-- `scans.py`：`subscriptions`、`events` 的 `SELECT *`、`e.*` 改显式列。这两处直接 `dict(row)` 进 API，不改会把 `company_key` 带给 Skills，所以不能留到 R2。
-- 测试：
-  - `test_db.py:43,173,176`、`test_batch_c.py:59`、`test_scans.py:216,222` 更新版本号；
-  - `test_feedback_retry.py:39` 回插前去掉生成列；
-  - `test_scans.py:217` 重写：列序变化后 `iterdump` 的 `INSERT` 行不再可比，改为按列比较行数据；
-  - 新增：全角代码提交返回 `RequestError`，生成列与第 3.3 节 `batch_id` 变体的约束测试。这些是 R1 的发布条件，不留到 R3。
-- `README.md` 部署节与 `deploy.py:180` 注释：现行规则是“非加法迁移不走发布工具”，而表重建不算加法。工具的应用回退实际只依赖旧镜像能跑在新结构上，所以把准入条件改为这一条，并以最终 DDL 和实际回退镜像的读写证据为门槛。**这是规则变更，随 R1 一并由所有者授权**；不同意则另写一次性迁移步骤。
-
-### R2 查询切换（例行）
-
-每处查询切到 `company_key` 时，它的入参归一化要在同一次发布交付，不留到 R3。
-
-| 位置 | 改动 |
-|---|---|
-| `reading.py` | `latest_reports`（`codes`、`code_prefix`、`GROUP BY`）、研究库搜索、`:467`、`latest_price`、`api_reports`、`stock_reports`、`:249`、`:741`、`:805-806`，以及 `$.parent_report_id`、`:332,339,738,783,785` 的 `LIKE 'batch-%'` |
-| `service.py` | `company_card`、`submit_price`、`:289-292` 改 `batch_id` + `company_key`（`JOIN batches` 保留）；`:135` 的 `startswith('batch-')` 改用 `batch_id` |
-| `worker.py:34` | 排队顺序改用 `batch_id IS NOT NULL` |
-| `scans.py`、`hypotheses.py`、`research.py` | `company_key` 与第 3.5 节常量 |
-| `validation.py`、`zones.py`、`screening.py` | 只在涉及公司比较的地方用 `company_key`，**选样谓词不动**（第 3.5 节；`screening.py` 批次复用于 R3 后改用 `FORMAL_REPORT`） |
-| 全部 `SELECT *` / `r.*`（`runs`、`reports` 共 9 处） | 改为显式列，既不把新列带进 API，也不再无谓读取大字段 |
-
-### R3 代码层收口（例行）
-
-- 约 35 处公司代码的 `[:6]`：有行数据的直接用 `company_key`，入参用 `stock_codes.normalize_key`。`backtest.py`、`industry.py` 的 `d[:6]` 是日期，不动。
-- 其余重复的代码正则（`service.py:226`、`web.py:587`、`reading.py:81,370`、`research_tools.py:347`）统一到 `stock_codes`，错误文案与状态码不变。有意变化：全角数字从 `web.py:587` 通过后查空，改为返回既有的校验错误；统一后公司卡片（原 404）和提交请求同样返回校验错误。
-- 外部接口的标识不属于上述 35 处：`sources.peer_members`、`scans.normalize_close` 保留 `[:6]`。真实 `index_member_all`（`is_new=Y`，2026-11-07 共 5922 行）含 `T00018.SH`，解析会让所在行业的同业查询整体报错。
-- 扩展 R1 创建的 `tests/test_data_foundation.py`，钉住不变量：
+- R1 发布后 13 张表逐列差异为 0；R2、R3 各以 3385 + 3596 个探针与 830 余条 HTTP 路径差分。有意的行为变化只有：六位代码能命中九位存量；全角代码在 `/api/reports`、公司卡片上改报校验错误；`/api/search` 空查询加非法代码时先报代码错误（仍是 422）。
+- 重建后元数据查询不再随大字段总量变慢（`pending_reviews` 16.98 ms → 0.12 ms）；`latest_reports` 剩余耗时来自读 `body` 里的检查点，未处理。
+- 外部接口的标识保留 `[:6]`（`sources.peer_members`、`scans.normalize_close`）：真实 `index_member_all` 含 `T00018.SH`，按内部规则解析会让所在行业的同业查询整体报错。
+- 不变量由 `tests/test_data_foundation.py` 钉住：
   - 五张表都有 `company_key`，三张重建表最后一列是大字段；
   - 五张表都拒绝非法代码；
   - 同一组输入：规范形式下 `company_key` 表达式与 `stock_codes.normalize_key` 结论一致；带首尾空白时入参函数接受、存储拒绝；
   - 删除最新报告后 id 不复用；
   - 内部查询函数 6 位和 9 位入参结果相同；
   - 源码扫描：SQL 中无 `substr(...code`，无 `LIKE 'batch-%'`；`replay_of IS NULL` 只出现在 `db.py` 常量和第 3.5 节列出的保留文件中，防止样本口径重新分叉。
-- `AGENTS.md` 工程约束增加第 7 节规则的一行摘要。
 
-## 6 已验证
+## 6 教训与遗留
 
-全部在发布备份的私有副本上完成，未触碰生产库：
-
-| 项目 | 结果 |
-|---|---|
-| 迁移耗时 | 0.93 s（远低于发布工具 30 s 就绪等待和 SQLite 锁等待） |
-| 迁移后状态 | `integrity_check` ok，外键 0 违规，4 个触发器保留，序列正确 |
-| 重入 / 新库 | 重入 0.00 s 无报错；新库直接到 v9 |
-| 旧代码跑在新结构上 | 读写、触发器正常，完整性巡检 0 问题（1323 次调用、141 份报告、348 个 PDF） |
-| 非法代码 | `603606.SS`、`60360`、全角数字、`603606.sh`、尾随空格全部拒绝 |
-| 现有测试 | 48 个接触数据库的测试文件（每个 `-x`）：45 个通过；2 个是 HEAD 上已有的失败（见 P0）；1 个是 `test_scans.py:217`（见 R1） |
-| 异常回滚 | 在 `DROP TABLE runs` 后注入异常：结构完全回滚、版本仍为 8；重入结构一致（架构审查复现，原型范围） |
-| SQLite 版本 | 当前生产镜像 3.46.1，满足生成列（≥ 3.31） |
-| `batch_id` 严格表达式 | 与旧四变体在 160 条真实任务及 15 个变体上结果相同（内存表，见第 3.3 节） |
-
-同一份旧代码在重建前后的耗时（141 份报告、160 个任务）：
-
-| 操作 | 之前 | 之后 |
-|---|---|---|
-| `pending_reviews` | 16.98 ms | 0.12 ms |
-| 任务元数据 + `request` 全表 | 23.01 ms | 0.29 ms |
-| 报告元数据全表 | 7.54 ms | 0.17 ms |
-| 调用元数据全表 | 16.69 ms | 3.64 ms |
-| `latest_reports` | 53.46 ms | 33.58 ms |
-
-绝对值目前不大。价值在于这类查询不再随大字段总量线性变慢。`latest_reports` 剩余耗时主要来自读 `body` 里的检查点，本次不处理。
-
-**尚未验证**：原型没有 `batch_id`，生成列位置也与最终设计不同，上表的迁移结果不能代替最终 DDL 的验收；进程崩溃和双进程同时启动未在最终版本上实测；R2、R3 的查询改动；未被上述 48 个文件覆盖的测试。前两项是 R1 门禁，其余在实施时验证。
-
-### 实施结果（2026-11-07）
-
-上面的“尚未验证”都已在实施时覆盖。发布记录见[实施计划](implementation-plan.md#当前部署)。
-
-| 段 | 差分与测试 | 差异归类 |
-|---|---|---|
-| R1 | 私有副本迁移门禁全过；发布后 13 张表逐列差异为 0 | 无 |
-| R2 | 3385 + 3596 个探针，HTTP 833 条路径，938 项测试 | 畸形批次编号；六位代码能命中九位存量；`/api/search` 空查询加非法代码时先报代码错误，两者都是 422 |
-| R3 | 3385 + 3596 个探针，HTTP 836 条路径，1136 项测试 | 只有全角代码在 `/api/reports`、公司卡片上改报校验错误；当时 K7 内部候选行多一个键，不进 API（K7 已退役） |
-
-`validation.source()` 与 `batch_id` 在有批次的任务上 38/38 一致。
-
-R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 杀死 12 处，包括其覆盖的全部查询入参。`latest_price` 由 `test_company_identity.py` 钉住，`submit_price`、页面入口等边界函数和存量行、已校验代码的处理，本轮只跑了这一个文件，靠差分确认与旧版一致，没有逐处钉住。
-
-差分的盲区：实现者只跑相关文件时漏过一个陈旧的 `batch-` 测试夹具，全量数据库测试才发现，所以每段都要跑全部数据库相关测试。`[:6]` 改解析函数也不能只靠差分，私有副本里没有 `T00018.SH` 的情形，要查外部接口的真实返回。
-
-未修：全新数据库并发切 WAL 约 2% 偶发失败（`test_db.py::test_concurrent_connections_migrate_once`），已是 WAL 的库为零，生产不受影响。
+- 只跑相关文件漏过一个陈旧的 `batch-` 测试夹具，全量数据库测试才发现；结构改动每段都跑全部数据库相关测试。
+- `[:6]` 改解析函数不能只靠差分：私有副本里没有 `T00018.SH` 的情形，要查外部接口的真实返回。
+- 未修：全新数据库并发切 WAL 约 2% 偶发失败（`test_db.py::test_concurrent_connections_migrate_once`），已是 WAL 的库为零，生产不受影响。
 
 ## 7 验收与治理规则
 
@@ -295,7 +209,7 @@ R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 
 - 合法 6 位入参：41 家公司调用 `latest_reports`、`stock_reports`、`latest_price`、`api_reports`、`company_card`，新旧完全一致；
 - 9 位入参：内部查询函数的新版结果与旧版对应 6 位结果一致（旧版查空是要修复的问题，不作基线）；`company_card` 和 HTTP 接口仍拒绝 9 位，错误文案和状态码不变；
 - 首页、研究库搜索、`pending_reviews`、批次视图的查询结果一致；
-- 研究 API 的 JSON 响应一致，字段集合单独严格比较（Skills 依赖，不得增减）；
+- 研究 API 的 JSON 响应一致，字段集合单独严格比较（账户与政策消费端依赖，不得增减）；
 - `validation.py`、`hypotheses.py` 选出的样本 id 严格零差分（不调用 TuShare，只比样本）；
 - 冻结语义：在副本上对真实行做最小变体（把已通过报告的任务改为 `failed`、`running`，加纠错），新旧选样结果必须相同。变体只用于本项，不进入研究或收益评估；
 - 批次归属：第 3.3 节的畸形编号变体与 `is_monthly_research`、`worker.recover` 的旧行为一致。
@@ -313,7 +227,7 @@ R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 
 
 - 应用问题：两服务 `docker tag a-share-research-{web,worker}:rollback-<提交> a-share-research-{web,worker}:latest`，再 `docker compose up -d --no-build --no-deps web worker`。数据库不动，也不改 `user_version`（`connect()` 不拒绝更高版本，旧代码已验证可运行）。
 - 数据问题：从 `backup-pre-<提交>-<时间>.db` 恢复，会丢失备份之后的写入，须所有者决定。旧备份的序列也是旧的，步骤必须是：
-  1. 停服后先记录 id 高水位：被替换的库中 `sqlite_sequence` 的 `runs`、`reports`，以及 Skills 账本的 `max(holding_events.report_id)`；
+  1. 停服后先记录 id 高水位：被替换的库中 `sqlite_sequence` 的 `runs`、`reports`，以及账户账本的 `max(holding_events.report_id)`；
   2. 恢复备份。如果备份是 v8，用目标镜像的一次性容器完成迁移；
   3. 开放写入前，把两个序列抬到不低于高水位，并核对账本引用的报告是否都存在；
   4. 高水位取不到可信值时，先完成归因核对，不得宣称恢复后 id 仍不复用。留在 v8 旧镜像上没有 `AUTOINCREMENT`，同样不能保证。
@@ -337,28 +251,4 @@ R3 互变：逐处去掉 `normalize_key` 共 42 处，`test_data_foundation.py` 
 | `companies` 维度表 | 同一公司名称无冲突，报告里的名称本就是历史快照 |
 | 记分结果落表 | V0 明确不建表；成熟读数沿用判断验证方案 |
 | `replay_of`、`coverage` 触发器改生成列 | 运行正常；`coverage` 含子查询，生成列不支持 |
-| Skills 账本改造 | 归原 `a-stock-agent-skills`（现已并入本仓 `account/`、`policy/v0/`），消费者不直连 SQLite；本方案只保证 id 稳定、API 不变 |
-
-**原文档已修正的错误**：
-
-1. `company_key IN (...)` 没有归一化，`web.py:313,446`、`reading.py:476` 传 9 位时会静默查空。
-2. 回滚命令 `docker compose down && up -d` 重启的仍是新镜像；`PRAGMA user_version = 8` 不需要。
-3. “不再依赖 `substr`”在只改两张表时做不到，现改为五张表全覆盖。
-4. 测试数量（实际 1241，289 是相关子集）、备份文件名、`test_scans:217` 的描述和 `< 0.1s` 门槛有误。
-
-## 9 架构审查修订（2026-11-07）
-
-Codex 只读审查，结论逐条对照源码和发布备份核实后修入本文，未发现已证实的 Critical。原文在 `~/.local/share/a-share-research-evaluations/data-foundation-20261107/codex-architecture-review.md`。
-
-| 问题 | 修订 |
-|---|---|
-| `batch_id` 弱解析会把 `batch-1oops-*`、公司错配归入月批 | 第 3.3 节改用严格表达式，差分验证 |
-| 恢复旧备份后 id 仍会复用 | 第 3.4 节写明保证范围，第 7 节增加恢复步骤 |
-| 父报告断链（任务 16、66）未纳入治理 | 第 2 节列证据，新增第 3.4.1 节和巡检 |
-| 选样缺 `status` 条件未列出，样本零差分可能掩盖规则变化 | 第 3.5 节逐处归类，第 7 节加变体，第 5 节加源码扫描 |
-| 差分要求新旧 9 位结果一致，与归一化目标矛盾 | 第 7 节分开比较，第 3.1 节区分内部函数与 HTTP 契约 |
-| P0 要恢复已退役的 `research_progress` 检查（11-03 主动移除） | 删除 |
-| 全角代码在 R1 后变成裸数据库异常 | 校验提前到 R1 |
-| 发布工具的指纹比较都在迁移之前，不能证明数据守恒 | 第 7 节新增 R1 门禁 |
-
-核实时补充：R2 范围漏了 `worker.py:34`、`service.py:135` 和 `reading.py` 的 5 处 `batch-%`，已补入。审查没有发现需要等待数天才能成立的验证条件，排期据此压缩。
+| 账户账本改造 | 归 `account/`、`policy/v0/`（[合一方案](consolidation.md)）；本方案只保证 id 稳定、API 不变 |
