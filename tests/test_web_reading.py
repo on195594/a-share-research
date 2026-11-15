@@ -57,7 +57,7 @@ def test_financial_periods_preserve_source_dates_and_explain_coverage():
         label = {'03-31': '一季度', '06-30': '上半年', '09-30': '前三季度', '12-31': '全年'}[period[5:]]
         assert f'<small>{label}</small>' in html
     template = (TEMPLATES / 'report.html').read_text()
-    assert '并非单季值' in template
+    assert '年初至报告期末累计值' in template
     assert '资产负债为期末时点值' in template
 
 

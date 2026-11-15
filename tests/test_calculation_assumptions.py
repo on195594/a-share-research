@@ -149,7 +149,7 @@ def test_assumptions_and_mixed_units_are_visible_in_the_existing_citation_ui():
     env = Environment(loader=FileSystemLoader(Path(__file__).parents[1] / "a_share_research/templates"), autoescape=True)
     html = env.from_string('{% from "_macros.html" import cites %}{{ cites(item, rows) }}').render(
         item={"cites": [{"ref": row["id"]}]}, rows={r["id"]: r for r in m.table})
-    assert "假设测算，不是披露事实" in html and "利润下降20%" in html
+    assert "假设测算：" in html and "利润下降20%" in html
     assert "输入单位分别为亿元、倍" in html and "计算输入统一为亿元" not in html
 
 

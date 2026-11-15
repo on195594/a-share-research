@@ -134,7 +134,7 @@ def test_known_explicit_metadata_and_missing_metadata_have_distinct_reading_note
     subject, other = peer['rows'][0]['cells']
     assert other['value'] == '87.53' and '明确记录累计' in other['period_note']
     assert '原行未保存独立期间类型' in subject['period_note']
-    assert '并非逐行重新证明' in panel(body)
+    assert '累计口径沿用生成时契约' in panel(body)
 
 
 def test_no_valid_pair_explains_the_gap_but_does_not_render_lone_company_values():
@@ -144,7 +144,7 @@ def test_no_valid_pair_explains_the_gap_but_does_not_render_lone_company_values(
     peer, = reading.peer_snapshots(body)
     assert not peer['rows'] and '来源或公司标识' in peer['reason']
     assert '<table' not in panel(body) and '暂不能形成同口径对照' in panel(body)
-    assert '该日期不等于期间口径已确认' in panel(body)
+    assert '期间口径待确认' in panel(body)
     assert all(value not in panel(body) for value in ('445.17', '87.53', '706.91', '-21.54'))
 
 

@@ -311,7 +311,7 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
         cumulative = CUMULATIVE.get(latest[5:], "")
         return chart and {"kind": "bars", "title": f"最新一期同比 · {latest[:4]} 年{cumulative}",
                           "headline": f"{latest} 累计，较上年同期", "chart": chart, "source": "财务数据表",
-                          "note": "年初至报告期末累计口径，来自财务数据表的同比指标；不是单季增速。"}
+                          "note": "年初至报告期末累计口径的同比，来自财务数据表。"}
 
     def balance():
         group = series.get("balance") or {}
@@ -331,8 +331,8 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
                       [{"label": "货币资金", "texts": texts[0]}, {"label": "四项债务合计", "texts": texts[1]}])
         return chart and {"kind": "lines", "title": "货币资金与四项债务合计", "chart": chart, "source": source,
                           "headline": f"期末时点值，亿元；图例为 {periods[-1]} 的值",
-                          "note": "四项债务合计只含短期借款、一年内到期的非流动负债、长期借款与应付债券，不代表全部有息负债；"
-                                  "时点值不代表期间流量，某期缺失时图例留空，不沿用更早的值。"}
+                          "note": "四项债务合计为短期借款、一年内到期的非流动负债、长期借款与应付债券之和，"
+                                  "均为期末时点值；某期缺失时图例留空。"}
 
     def ratios():
         chart = dumbbell(fin)
@@ -429,8 +429,7 @@ def financial_charts(body: dict, fin: list[dict]) -> list[dict]:
         annual_columns(["revenue"], ["营业总收入"], "营业总收入 · 年度", ""),
         annual_columns(["net_profit", "op_cash"], ["归母净利润", "经营活动现金流净额"], "利润与经营现金流 · 年度",
                        "两者口径不同：经营现金流为合并口径，归母净利润只含母公司股东部分。"),
-        annual_columns(["fcf"], ["经营现金流减购建长期资产现金"], "经营现金流减购建长期资产现金 · 年度",
-                       "不等于可分配现金。"),
+        annual_columns(["fcf"], ["经营现金流减购建长期资产现金"], "经营现金流减购建长期资产现金 · 年度", ""),
         balance(),
     ):
         if figure:
