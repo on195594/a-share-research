@@ -1,1 +1,1 @@
-"""Shared, credential-scoped tools; account writes stay disabled until cutover."""
+"""Shared, credential-scoped tools behind one registry."""

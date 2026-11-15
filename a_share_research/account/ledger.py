@@ -1,6 +1,6 @@
-"""Shadow account journal: immutable events, void corrections and atomic reconciliation receipts.
+"""Account journal: immutable events, void corrections and atomic reconciliation receipts.
 
-Does not update legacy holdings or switch account_source. Production cutover is a later gate.
+Does not update legacy holdings or switch account_source.
 """
 from __future__ import annotations
 

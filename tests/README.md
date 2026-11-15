@@ -31,7 +31,7 @@
 | 候选初筛与批次管理 | `test_screening.py`、`test_screening_entry.py`、`test_screening_preflight.py`、`test_batch_c.py`、`test_monthly_batch.py` |
 | 历史回测 | `test_backtest.py` |
 | 判断记分、投资立场与估值诊断（V0–V5、A1、A3、A4、契约面锁定） | `test_validation.py`、`test_forecast_review.py`、`test_judgment_contract.py`、`test_agenda.py`、`test_stance.py`、`test_hypotheses.py`、`test_valuation.py`、`test_valuation_ui.py`、`test_zones.py`、`test_scans.py`、`test_advisor_sources.py`、`test_r2_queries.py` |
-| 账户账本、净值与对账（`account/`） | `test_account.py`、`test_account_ledger.py`、`test_account_reconciliation.py`、`test_account_nav.py`、`test_account_nav_core.py`、`test_account_evidence.py`、`test_account_analysis.py`、`test_account_audit.py`、`test_account_current.py`、`test_account_retirement.py`、`test_account_valuation_time.py`、`test_cutover.py` |
+| 账户账本、净值与对账（`account/`） | `test_account.py`、`test_account_ledger.py`、`test_account_reconciliation.py`、`test_account_nav.py`、`test_account_nav_core.py`、`test_account_evidence.py`、`test_account_analysis.py`、`test_account_audit.py`、`test_account_current.py`、`test_account_valuation_time.py` |
 | 投资政策与监控（`policy/`、`policy/v0/`） | `test_policy_identity.py`、`test_policy_registry.py`、`test_policy_replay.py`、`test_policy_monitor.py`、`test_policy_derived.py`、`test_policy_stop_evaluation.py`、`test_policy_daily_evaluation.py`、`test_benchmark_evaluation.py`、`test_web_policy.py`、`policy_v0/` |
 | 受控工具、CLI/MCP 与外部入账（`tools/`） | `test_tools_service.py`、`test_tools_auth.py`、`test_tools_control.py`、`test_tools_external.py`、`test_tools_lifecycle.py`、`test_tools_cli.py`、`test_tools_mcp.py`、`test_tools_account.py`、`test_external_research.py`、`test_external_review.py`、`test_external_scoring.py` |
 | 公共数据与计算合同（`core/`） | `core/` |

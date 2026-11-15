@@ -288,7 +288,7 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
 # Account codes also hold non-A-share history (old analyses), so this key is nullable here.
 ACCOUNT_COMPANY_KEY = COMPANY_KEY.removesuffix(" NOT NULL")
 # Account and analysis-state tables of the former a-stock-agent-skills runtime (policy v0), under their
-# original names and column semantics. Until the account cutover they only hold a mirror of the old
+# original names and column semantics. Before the 2026-11-12 cutover they held a mirror of the old
 # account database (account/mirror.py). Large payload columns stay last.
 ACCOUNT_TABLES = {
     "holdings": "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL, name TEXT, cost_price REAL, shares INTEGER,"

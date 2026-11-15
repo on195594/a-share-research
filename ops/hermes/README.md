@@ -17,7 +17,7 @@
 
 ## 临时接续提醒
 
-`a-share-remind-monthly.sh`（任务 `1f1ead8a8a62`，计划 2026-12-04 10:00）只输出交给开发 Agent 的固定提示词，不调用模型或执行运维操作。第 3 段临时对照任务 `85806e8e4ea1` 及已完成的发布、切换、收尾三条提醒（`ba792c50aef5`、`4c5639ca558e`、`ba87fe98944e`）与对应脚本已于 2026-11-13 清理退役，仅保留待执行月批核验提醒；计划与维护记录见[实施计划](../../docs/implementation-plan.md#合一后续人工接续提醒11-12-所有者授权)。
+`a-share-remind-monthly.sh`（任务 `1f1ead8a8a62`，计划 2026-12-04 10:00）只输出交给开发 Agent 的固定提示词，不调用模型或执行运维操作。第 3 段临时对照任务 `85806e8e4ea1` 及已完成的发布、切换、收尾三条提醒（`ba792c50aef5`、`4c5639ca558e`、`ba87fe98944e`）与对应脚本已于 2026-11-13 清理退役，仅保留待执行月批核验提醒；计划与维护记录见[实施计划](../../docs/implementation-plan.md#合一重构收尾)。
 
 ## 合一替代调用与切换核对
 
@@ -69,15 +69,7 @@
 
 保留任务 ID 和原 shell 入口；新版 wrapper 执行同目录 `a-share-stop-alert.py`，与顾问共用 `ashare_tools.py` 的标准库客户端调用与原子状态写入。使用同一 Hermes assistant 配置，不加载旧 Skills 或旧 runtime.env。`ASHARE_STOP_ALERT_STATE` 可指定新状态文件；默认路径见上表。
 
-切换前先停旧任务、等在途结束，再核对旧配置的实际 A_STOCK_STATE_DIR（默认 `~/.local/share/a-stock-agent`），以该目录完成[账户切换准备、持久封锁和绑定](../../README.md#运行身份与材料重放)。随后从仓库根目录使用同一私有计划交接状态，`ASHARE_OWNER_TOKEN` 由私有环境提供：
-
-```sh
-uv run python -m a_share_research.cutover --database /absolute/new-data/app.db \
-  --plan /absolute/private/cutover.json transfer-stop-state \
-  --destination /home/lin/.local/state/ashare-stop-alert/state.json
-```
-
-命令重验账户绑定、旧封锁和准备时的提醒状态哈希，取得与新客户端相同的 `.lock` 后原子新建目标；原始日期和档位逐字节保留。旧文件不存在时，须同时匹配计划中的 `state_sha256=null` 和封锁后的实际缺失，才写入空对象并在回执标明 `source_absent=true`。客户端接受旧 `{date,levels}` 或空对象，首次调用时包成 `{schema_version:1,state,pending}`。同内容重复导入不写目标；已有不同状态、升级后的对象或 pending 一律保留并拒绝导入，不能通过删文件重新开始。目标为 0600、目录为属主私有；命令不改脚本、调度或通知。
+止损去重状态已在 2026-11-12 账户切换时从旧提醒状态逐字节交接；客户端接受旧 `{date,levels}` 或空对象，首次调用时包成 `{schema_version:1,state,pending}`。
 
 顾问 `opportunities.json`、月批 `<月>.receipt` 和记分 `state.json` 继续使用原路径，保留原通知键及回执，不迁移或清空。上线前保存状态副本，按前一级合并版客户端验证升级后的格式；不能回退到不识别新对象的旧 Skills 客户端。实际任务停用、安装、启用及送达结果由实施计划维护。
 
