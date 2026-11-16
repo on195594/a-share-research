@@ -328,11 +328,11 @@ uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目
 
 正常顺序：**pause 并排空 → 停服务、备份及停服表指纹核对 → 切换/启动且保持 pause → 网页、worker 离线预检、容器配置、数据库与完整性检查 → 必要时在实际 worker 容器内调用既有 register/activate → 回读 latest → 政策门禁 → resume → tools ready**。绝不先 resume 再从 HTTP 查询 current。门禁要求实际镜像正确，当前 activation/identity 等于本次预期、installed 严格为 true、参数仍有效、已应用且账户范围匹配。activate 回执丢失只重试同一 request_id/expected_id；历史幂等成功不代表 latest，不改 expected_id 绕过 CAS。
 
-证据沿用私有发布目录：`manifest.json`、`release-state.json`（阶段、held/recovered/succeeded、实际服务/image、政策、时间与安全原因）、`policy-observed.json`、`policy-gate.json`、`policy-committed.json`、预检/完整性与回退报告。进程被杀仍保留最后的 held 检查点和持久暂停；marker **没有 release_id，不证明归属**。无关文档未提交不阻断，应用/部署文件未提交仍拒绝。
+证据沿用私有发布目录：`manifest.json`、`release-state.json`（阶段、held/recovered/succeeded、实际服务/image、政策、时间与安全原因）、`policy-observed.json`、`policy-gate.json`、`policy-committed.json`、预检/完整性与回退报告。held 收尾重新只读观察实际政策，记录 `actual_policy.observation=observed` 与观察时间；探针失败则为 `unknown`，activation/identity/installed 等清为 null，不用旧观察冒充最终状态，也不作为门禁通过。进程被杀仍保留最后的 held 检查点和持久暂停；marker **没有 release_id，不证明归属**。无关文档未提交不阻断，应用/部署文件未提交仍拒绝。
 
 ### 回退前置条件与 held 恢复
 
-任何未通过门禁的路径都不得恢复 tools 受理或报发布成功；包括普通回退、首次迁移兼容恢复、同镜像与显式完成。回退成功记录 recovered，但原发布仍以失败退出码结束。恢复受理的回执丢失时，先再次 pause/drain；排空失败不替换或移除进程。
+任何未通过门禁的路径都不得恢复 tools 受理或报发布成功；包括普通回退、首次迁移兼容恢复、同镜像与显式完成。回退成功记录 recovered，但原发布仍以失败退出码结束。恢复受理后发生异常（含回执丢失、ready 或最终证据 I/O 失败）时，先再次 pause/drain，再尝试写 held 证据；证据故障不能挡住安全动作。排空失败不替换或移除进程。证据持续不可写时仅报告安全错误，原文件可能过时，须先修复存储并核对实时状态，不凭旧 succeeded/held 字段恢复受理或宣称成功。
 
 完整回退前置条件：
 
@@ -351,7 +351,7 @@ uv run python -m a_share_research.deploy --complete-held "<该发布证据目录
 
 已精确匹配时可省略 approval。此入口只接受本工具的 held 证据与冻结目标，重新核对实际服务、Compose/环境配置、完整性、空闲、持久 marker、paused=true/in_flight=0 和同一政策门禁；**不重新切镜像、不启动已停服务、不接管未知暂停、不接受新目标/新 expected_id**。证据或状态偏离就拒绝；没有可匹配的 held 检查点须另行人工核对并作新的明确决定，不直接复制 resume 命令。
 
-只有完整就绪成功后才清理旧备份/镜像：保留最近 3 份 `backup-pre-*.db` 和独立同名 `.bundle/`，成对核对归属后清理；镜像保留当前与最近两级回退。失败保留备份、镜像及全部后续业务写入；首次迁移与显式完成保留证据，不自动清理。暂停只覆盖 tools 受理；独立 Web/worker 披露扫描仍按原合同运行，不能据此声称全站停写或自动补发错过的定时任务。
+只有完整就绪成功后才清理旧备份/镜像：保留最近 3 份 `backup-pre-*.db` 和独立同名 `.bundle/`，成对核对归属后清理；镜像保留当前与最近两级回退。失败保留备份、镜像及全部后续业务写入；首次迁移与显式完成保留证据，不自动清理。暂停只覆盖 tools 受理；独立 Web/worker 披露扫描仍按原合同运行。顾问读取账户失败时保留现有 Web 订阅继续扫描；发送前持仓无法刷新则明确显示“持仓状态未知”，不当空仓、不沿用旧持仓事实，机会检查失败另行明确输出。不能据此声称全站停写或自动补发错过的定时任务。
 
 ### 服务端与宿主客户端同步顺序
 

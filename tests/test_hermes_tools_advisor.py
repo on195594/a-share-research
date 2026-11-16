@@ -65,8 +65,17 @@ def test_client_uses_private_config_and_suppresses_server_error_bodies(advisor, 
 @pytest.mark.parametrize('response', [{}, {'codes': [], 'source': {}}, {'codes': ['600001.SH'], 'source': {'mode': 'ledger'}}])
 def test_invalid_holdings_never_clear_subscriptions(advisor, monkeypatch, response):
     monkeypatch.setattr(advisor, 'tool', lambda *args: response)
-    monkeypatch.setattr(advisor, 'call', lambda *args: pytest.fail('invalid holdings must not update subscriptions'))
-    with pytest.raises(advisor.AdvisorError): advisor.scan()
+    calls = []
+    def call(method, path, body=None, **kwargs):
+        calls.append(path)
+        assert path != '/api/subscriptions', 'unknown holdings must never clear subscriptions'
+        if path.startswith('/api/scan-requests/'):
+            return dict(version='research-v1', request_id=path.rsplit('/', 1)[-1], scan_id=1)
+        return dict(version='research-v1', id=1, status='done', summary={}, notify=[],
+                    requested_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat())
+    monkeypatch.setattr(advisor, 'call', call)
+    output = advisor.scan()
+    assert '/api/scans/1' in calls and '未同步订阅' in output and '检查未完成' in output
 
 
 def test_scan_refreshes_holdings_at_delivery(advisor, monkeypatch):
@@ -219,4 +228,39 @@ def test_disclosure_scan_still_finishes_when_tools_opportunity_phase_is_paused(a
     output = advisor.scan()
     assert 'disclosure-scan-result' in output and '检查未完成' in output and '暂停' in output
     assert '/api/scans/1' in web_calls and advisor.read_scan_state()['pending'] is None
+    assert advisor.read_opportunity_state() == dict(schema_version=1, seen=['keep-seen'], pending=original)
+
+
+@pytest.mark.parametrize('paused_at', ['submit', 'delivery'])
+def test_real_holdings_failure_never_blocks_web_scan_or_claims_empty_account(advisor, monkeypatch, paused_at):
+    original = dict(request_id='opportunity-pending', expected_activation_id=7)
+    advisor.OPPORTUNITY_STATE.write_text(json.dumps(dict(schema_version=1, seen=['keep-seen'], pending=original)))
+    calls, account_reads = [], []
+    subscriptions = ['688001']
+    def call(method, path, body=None, **kwargs):
+        calls.append(path)
+        if path == '/api/subscriptions':
+            subscriptions[:] = body['codes']
+            return {}
+        if path.startswith('/api/scan-requests/'):
+            return dict(version='research-v1', request_id=path.rsplit('/', 1)[-1], scan_id=1)
+        return dict(version='research-v1', id=1, status='done', summary={},
+                    notify=[dict(code='688578', name='isolated notice', reason='major_risk', card=None,
+                                 detail='isolated disclosure', path='/stock/688578')],
+                    requested_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat())
+    def tools(name, args):
+        if name == 'account.current':
+            account_reads.append(name)
+            if paused_at == 'delivery' and len(account_reads) == 1:
+                return dict(codes=['688578'], source=dict(mode='ledger'))
+        raise advisor.AdvisorError('工具服务已暂停；原请求保留')
+    monkeypatch.setattr(advisor, 'call', call)
+    monkeypatch.setattr(advisor, 'tool', tools)  # Do not mock holdings() or render_scan().
+    output = advisor.scan()
+    assert '/api/scans/1' in calls and len(account_reads) == 2
+    assert subscriptions == (['688001'] if paused_at == 'submit' else ['688578'])
+    assert ('/api/subscriptions' in calls) is (paused_at == 'delivery')
+    assert '发现风险公告' in output and '持仓状态未知' in output and '检查未完成' in output
+    assert '当前未持仓' not in output and '你仍持仓' not in output
+    assert advisor.read_scan_state()['pending'] is None
     assert advisor.read_opportunity_state() == dict(schema_version=1, seen=['keep-seen'], pending=original)

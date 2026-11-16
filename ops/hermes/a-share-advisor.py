@@ -139,7 +139,7 @@ def change_lines(item: dict) -> list[str]:
     return [f"发生了什么：{item.get('detail') or REASONS.get(item['reason'], item['reason'])}"]
 
 
-def notice_text(item: dict, held_codes: set[str], public_base: str = "") -> str:
+def notice_text(item: dict, held_codes: set[str] | None, public_base: str = "") -> str:
     reason, card = item["reason"], item.get("card")
     pending = bool(card and card.get("status") != "有效") or reason == "pending_review"
     zone = ((card or {}).get("current") or {}).get("current_zone")
@@ -156,8 +156,10 @@ def notice_text(item: dict, held_codes: set[str], public_base: str = "") -> str:
     else:
         conclusion = ZONES.get(zone or "", "研究已更新，当前估值位置尚不明确") + "；这不是买卖指令。"
     # Subscription/L5 membership is not evidence of an account position.
-    held = item["code"] in held_codes
-    if held and reason == "add_trigger_missed":
+    held = None if held_codes is None else item["code"] in held_codes
+    if held is None:
+        action = "持仓状态未知：先核对账户与上述信息，不据此确认空仓、加仓或执行买卖。"
+    elif held and reason == "add_trigger_missed":
         action = "你仍持仓：加仓条件未达到，复核是否减仓。"
     elif held:
         action = "你仍持仓：优先复核上述风险及既有退出条件。" if reason == "major_risk" else (
@@ -180,7 +182,7 @@ def notice_text(item: dict, held_codes: set[str], public_base: str = "") -> str:
     return "\n".join(lines)
 
 
-def render_scan(result: dict, held_codes: set[str], public_base: str = "") -> str:
+def render_scan(result: dict, held_codes: set[str] | None, public_base: str = "") -> str:
     lines = []
     if result["status"] == "failed":
         lines.append(f"【研究扫描】扫描 #{result['scan_id']} 失败：{result.get('error')}")
@@ -284,8 +286,16 @@ def _scan(deadline: float) -> str:
     binding = service_binding(connection)
     def send(method, path, body=None):
         return call(method, path, body, connection=connection, deadline=deadline)
+    subscription_warning = ''
     if saved['pending'] is None:
-        send('PUT', '/api/subscriptions', {'codes': holdings()})
+        try:
+            codes = holdings()
+        except AdvisorError:
+            # Tools pause must not block independent Web/worker disclosure scanning.
+            # Unknown holdings never authorize clearing the existing subscriptions.
+            subscription_warning = '【研究扫描】账户读取未完成，未同步订阅；保留现有订阅继续扫描。'
+        else:
+            send('PUT', '/api/subscriptions', {'codes': codes})
         saved['pending'] = dict(request_id='hermes-scan-' + uuid.uuid4().hex, binding=binding,
                                 created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(), scan_id=None)
         save_json(SCAN_STATE, saved)
@@ -327,14 +337,19 @@ def _scan(deadline: float) -> str:
             break
         time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic() - 1)))
     # Refresh at delivery time: a position may have been closed while the scan ran.
-    held_codes = set(holdings()) if result.get("notify") else set()
+    held_codes: set[str] | None = set()
+    if result.get('notify'):
+        try:
+            held_codes = set(holdings())
+        except AdvisorError:
+            held_codes = None
     _, _, host = connection
     public_base = f"https://{host}" if host else ""
     text = render_scan(result | {"scan_id": scan_id}, held_codes, public_base)
     if text and requested.astimezone(ZoneInfo('Asia/Shanghai')).date() != datetime.now(ZoneInfo('Asia/Shanghai')).date():
         text = f'【研究扫描补回】原扫描时间 {requested.isoformat()}；以下为历史回执，不代表今日观察。\n\n' + text
     extra = opportunities(public_base)
-    output = "\n\n".join(part for part in (text, extra) if part)
+    output = "\n\n".join(part for part in (subscription_warning, text, extra) if part)
     save_json(SCAN_STATE, dict(schema_version=1, pending=None))
     return output
 

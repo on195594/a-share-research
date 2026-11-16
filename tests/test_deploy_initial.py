@@ -219,3 +219,36 @@ def test_initial_compatible_reader_without_policy_gate_never_resumes(initial, mo
     assert ('control', 'resume') not in state.events
     checkpoint = json.loads((state.evidence/'release-state.json').read_text())
     assert checkpoint['status'] == 'held' and checkpoint['phase'] == 'recovery-held'
+
+
+@pytest.mark.parametrize('checkpoint', ['tools-ready', 'result'])
+@pytest.mark.parametrize('redrain_failed', [False, True])
+def test_compatible_recovery_evidence_failure_cannot_leave_admission_open(initial, monkeypatch, checkpoint, redrain_failed):
+    state = initial(failure='preflight')
+    save, control = deploy.save_evidence, deploy.tools_control
+    failed = False
+    def write(directory, name, value):
+        nonlocal failed
+        trigger = (name == 'recovery-tools-ready.json' if checkpoint == 'tools-ready' else
+                   name == 'release-state.json' and value.get('phase') == 'recovery-ready')
+        if failed or trigger:
+            failed = True
+            raise OSError('injected recovery evidence failure')
+        return save(directory, name, value)
+    def admission(action):
+        result = control(action)
+        if action == 'pause' and ('control', 'resume') in state.events and redrain_failed:
+            state.in_flight = 1
+            raise RuntimeError('injected recovery redrain failure')
+        return result
+    monkeypatch.setattr(deploy, 'save_evidence', write)
+    monkeypatch.setattr(deploy, 'tools_control', admission)
+    with pytest.raises((OSError, RuntimeError)): release(state)
+    assert failed and state.paused and state.in_flight == (1 if redrain_failed else 0)
+    assert state.containers['worker'] == 'recovery-worker'
+    resumed_at = index(state, ('control', 'resume'))
+    later = state.events[resumed_at+1:]
+    assert ('control', 'pause') in later
+    assert not any(e[:4] in (('run','docker','compose','up'), ('run','docker','compose','rm')) for e in later)
+    if redrain_failed:
+        assert not any(e[:4] == ('run','docker','compose','stop') for e in later)

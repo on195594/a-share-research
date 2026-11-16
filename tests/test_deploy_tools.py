@@ -502,11 +502,17 @@ def test_plan_is_read_only_not_held_or_approval(operations, local_policy):
     assert not (state.evidence/'release-state.json').exists() and local.count() == 1
 
 
-def test_both_activation_and_restore_receipts_lost_can_finish_only_saved_held(operations, local_policy, monkeypatch):
+@pytest.mark.parametrize('final_probe_failed', [False, True])
+def test_both_activation_and_restore_receipts_lost_can_finish_only_saved_held(operations, local_policy, monkeypatch, final_probe_failed):
     state = operations()
     local = local_policy(state)
-    command = deploy.policy_command
+    command, probe = deploy.policy_command, deploy.policy_probe
     remaining = {'new-worker': 2, 'old-worker': 2}
+    def observe(**kwargs):
+        if final_probe_failed and local.count() == 3 and remaining['old-worker'] == 0:
+            raise RuntimeError('injected final observation failure')
+        return probe(**kwargs)
+    monkeypatch.setattr(deploy, 'policy_probe', observe)
     def lost(script, payload, **kwargs):
         result = command(script, payload, **kwargs)
         selected = state.containers['worker']
@@ -521,6 +527,93 @@ def test_both_activation_and_restore_receipts_lost_can_finish_only_saved_held(op
     assert held['status'] == 'held' and held['policy']['committed_activation']['id'] == 2
     assert state.paused and local.count() == 3
     assert state.containers['worker'] == 'old-worker'
+    if final_probe_failed:
+        assert held['actual_policy']['observation'] == 'unknown'
+        assert all(held['actual_policy'][k] is None for k in ('activation', 'identity', 'installed'))
+    else:
+        assert held['actual_policy']['observation'] == 'observed'
+        assert held['actual_policy']['activation']['id'] == 3
+        assert held['actual_policy']['identity'] == local.old['identity']
+        assert held['actual_policy']['installed'] is True
+    monkeypatch.setattr(deploy, 'policy_probe', probe)
     deploy.complete_held(state.evidence)
     assert not state.paused and local.count() == 3
     assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'recovered'
+
+
+@pytest.mark.parametrize('path', ['normal', 'rollback'])
+@pytest.mark.parametrize('checkpoint', ['tools-ready', 'result'])
+@pytest.mark.parametrize('redrain_failed', [False, True])
+def test_evidence_failure_cannot_prevent_redrain_or_allow_process_replacement(operations, monkeypatch, path, checkpoint, redrain_failed):
+    state = operations(failure='preflight' if path == 'rollback' else None)
+    save, control = deploy.save_evidence, deploy.tools_control
+    failed = False
+    resumed_images = None
+    def write(directory, name, value):
+        nonlocal failed
+        after_resume = ('control', 'resume') in state.events
+        trigger = (name == ('tools-ready.json' if path == 'normal' else 'rollback-tools-ready.json')
+                   if checkpoint == 'tools-ready' else
+                   name == 'release-state.json' and value.get('phase') in ('ready', 'rollback-ready'))
+        if failed or after_resume and trigger:
+            failed = True
+            raise OSError('injected persistent evidence failure')
+        return save(directory, name, value)
+    def admission(action):
+        nonlocal resumed_images
+        result = control(action)
+        if action == 'resume':
+            resumed_images = state.containers.copy()
+        elif action == 'pause' and resumed_images is not None and redrain_failed:
+            state.in_flight = 1
+            raise RuntimeError('injected second drain failure')
+        return result
+    monkeypatch.setattr(deploy, 'save_evidence', write)
+    monkeypatch.setattr(deploy, 'tools_control', admission)
+    with pytest.raises((OSError, RuntimeError)):
+        deploy.deploy('revision', state.evidence)
+    assert failed and resumed_images is not None
+    assert state.paused and state.containers == resumed_images
+    assert state.in_flight == (1 if redrain_failed else 0)
+    resumed_at = index(state, ('control', 'resume'))
+    later = state.events[resumed_at+1:]
+    assert ('control', 'pause') in later
+    assert not any(e[:3] == ('run', 'docker', 'compose') and e[3] in ('stop', 'up', 'rm', 'start') for e in later)
+
+
+@pytest.mark.parametrize('checkpoint', ['tools-ready', 'result'])
+@pytest.mark.parametrize('redrain_failed', [False, True])
+def test_completion_evidence_failure_redrains_before_any_recording(operations, monkeypatch, checkpoint, redrain_failed):
+    state = operations(failure='resume_lost_redrain_failed')
+    with pytest.raises(RuntimeError): deploy.deploy('revision', state.evidence)
+    state.failure, state.in_flight = None, 0
+    save, control = deploy.save_evidence, deploy.tools_control
+    failed = False
+    def write(directory, name, value):
+        nonlocal failed
+        trigger = (name == 'completion-tools-ready.json' if checkpoint == 'tools-ready' else
+                   name == 'release-state.json' and value.get('phase') == 'completion-ready')
+        if failed or trigger:
+            failed = True
+            raise OSError('injected completion evidence failure')
+        return save(directory, name, value)
+    def admission(action):
+        if action == 'pause':
+            # Replace the original release's persistent redrain fault with this
+            # completion attempt's own success/failure, without losing its marker.
+            state.events.append(('control', 'pause'))
+            Gate(state.data/'.tools-paused').pause(0)
+            state.paused, state.in_flight = True, 1 if redrain_failed else 0
+            if redrain_failed:
+                raise RuntimeError('injected completion redrain failure')
+            return {'paused': True, 'in_flight': 0}
+        return control(action)
+    monkeypatch.setattr(deploy, 'save_evidence', write)
+    monkeypatch.setattr(deploy, 'tools_control', admission)
+    before = state.containers.copy()
+    with pytest.raises((OSError, RuntimeError)): deploy.complete_held(state.evidence)
+    assert failed and state.paused and state.containers == before
+    assert state.in_flight == (1 if redrain_failed else 0)
+    resumed_at = [i for i, e in enumerate(state.events) if e == ('control', 'resume')][-1]
+    assert ('control', 'pause') in state.events[resumed_at+1:]
+    assert not any(e[:3] == ('run', 'docker', 'compose') for e in state.events[resumed_at+1:])

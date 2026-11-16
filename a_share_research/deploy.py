@@ -323,6 +323,18 @@ def policy_summary(state):
     return {k: state.get(k) for k in ('applicable', 'activation', 'identity', 'installed', 'valid')}
 
 
+def observe_held_policy(state: dict) -> None:
+    """Best-effort read-only evidence, never an admission gate or inferred approval."""
+    try:
+        observed = policy_summary(policy_probe()) | dict(observation='observed', at=db.now())
+    except Exception:
+        # A lost activation receipt can mean a committed append. Never present the
+        # earlier observation as current when the actual container cannot be read.
+        observed = dict(applicable=None, activation=None, identity=None, installed=None, valid=None,
+                        observation='unknown', at=db.now(), reason='最终只读政策探针失败；状态未确认')
+    state['actual_policy'] = observed
+
+
 def identity_diff(old, new):
     """Only hashes/paths and parameter equality; never approval credentials."""
     def changed(a, b):
@@ -776,17 +788,19 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
                                "policy": policy_summary(policy_state), "at": db.now()})
         log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
     except BaseException:
-        record('release-failed', reason='发布失败；须核对兼容性和政策后恢复')
-        log.error('发布失败，核对兼容性和政策后回退；保留数据、备份与证据')
-        if recovery_images is not None and switched and not migration_verified:
-            raise RuntimeError('首次迁移未通过守恒核对；保持停服和暂停标记，不自动恢复任何镜像')
-        # Default rollback requires the old image; an initial release pins a separate compatible baseline.
+        state.update(status='held', phase='release-failed', reason='发布失败；须核对兼容性和政策后恢复')
+        # Safety cannot depend on an evidence filesystem that may itself have failed.
         if include_tools and switched and not tools_paused:
             # Never replace a process that may now be handling a newly admitted financial call.
             drained = tools_control('pause')
             if drained != {'paused':True,'in_flight':0}:
                 raise RuntimeError('tools 回退前排空失败；保持当前镜像和暂停状态')
             tools_paused = True
+        record('release-failed', reason=state['reason'])
+        log.error('发布失败，核对兼容性和政策后回退；保留数据、备份与证据')
+        if recovery_images is not None and switched and not migration_verified:
+            raise RuntimeError('首次迁移未通过守恒核对；保持停服和暂停标记，不自动恢复任何镜像')
+        # Default rollback requires the old image; an initial release pins a separate compatible baseline.
         if switched:
             # Pin the post-failure state, including writes admitted after a lost resume reply.
             compose('stop', '-t', '30', 'web')
@@ -827,6 +841,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
                 recovery_save('result.json', dict(status='recovered', images=recovery_images, after=recovered))
                 record('recovery-ready', 'recovered')
             except BaseException:
+                state.update(status='held', phase='recovery-held', reason='兼容恢复未完成')
                 if not tools_paused:
                     if tools_control('pause') != {'paused': True, 'in_flight': 0}:
                         raise RuntimeError('兼容恢复失败且未确认排空；不替换当前服务')
@@ -855,27 +870,33 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
         policy_state = policy_gate(old_images, frozen, approval=approval, restoring=True, save=save)
         state['actual_policy'] = policy_summary(policy_state)
         record('rollback-resuming')
-        if tools_paused:
-            if has_tools:
-                tools_paused = False
-                try:
+        try:
+            if tools_paused:
+                if has_tools:
+                    tools_paused = False
                     if tools_control('resume')['paused']:
                         raise RuntimeError('回退后 tools 未恢复受理')
                     save('rollback-tools-ready.json', wait_tools_ready())
-                except BaseException:
-                    # A lost resume response is not evidence that admission stayed closed.
-                    tools_control('pause')
-                    record('rollback-held', reason='回退 resume/ready 不确定；已请求再次排空')
-                    raise
-            else:
-                from a_share_research.tools.control import Gate
-                Gate(marker=marker).resume()
-        record('rollback-ready', 'recovered')
+                else:
+                    from a_share_research.tools.control import Gate
+                    Gate(marker=marker).resume()
+            record('rollback-ready', 'recovered')
+        except BaseException:
+            state.update(status='held', phase='rollback-held', reason='回退 resume/ready 或证据未完成')
+            if has_tools and not tools_paused:
+                if tools_control('pause') != {'paused': True, 'in_flight': 0}:
+                    raise RuntimeError('回退后二次排空失败；不替换当前进程')
+                tools_paused = True
+            raise
         raise
     finally:
         if state['status'] == 'held':
-            # Persist the final actual stack even when rollback/probing itself failed.
-            record(state['phase'], reason=state.get('reason') or '核验未完成；保持暂停，不报成功')
+            # Reobserve possible committed activation/compensation after lost receipts.
+            observe_held_policy(state)
+            try:
+                record(state['phase'], reason=state.get('reason') or '核验未完成；保持暂停，不报成功')
+            except OSError:
+                log.error('最终 held 证据写入失败；旧证据可能过时，不能据此宣称发布成功')
 
 
 @serialized
@@ -912,24 +933,30 @@ def complete_held(evidence: Path, *, approval_path: Path | None = None):
     approval = private_json(approval_path) if approval_path else None
     idle(data / 'app.db')
     _verify_release(images, before, services, allow_config=state['allow_config'], save=save)
-    current = policy_gate(images, state['policy'], approval=approval, restoring=state['restoring'], save=save)
-    state.update(actual_policy=policy_summary(current), phase='completion-resuming', at=db.now())
-    save_evidence(evidence, 'release-state.json', state)
+    resume_attempted = False
     try:
+        current = policy_gate(images, state['policy'], approval=approval, restoring=state['restoring'], save=save)
+        state.update(actual_policy=policy_summary(current), phase='completion-resuming', at=db.now())
+        save_evidence(evidence, 'release-state.json', state)
+        resume_attempted = True
         if tools_control('resume')['paused']:
             raise RuntimeError('完成入口未恢复受理')
         save('tools-ready.json', wait_tools_ready())
+        state.update(status='recovered' if state['restoring'] else 'succeeded', phase='completion-ready', at=db.now())
+        save_evidence(evidence, 'release-state.json', state)
     except BaseException:
-        # Never switch processes here, including when redrain fails.
-        try:
-            if tools_control('pause') != {'paused': True, 'in_flight': 0}:
-                raise RuntimeError('完成入口二次排空失败；不替换进程')
-        finally:
-            state.update(status='held', phase='completion-held', at=db.now(), reason='resume/ready 回执不确定')
-            save_evidence(evidence, 'release-state.json', state)
+        state.update(status='held', phase='completion-held', at=db.now(), reason='政策、resume/ready 或证据未完成')
+        # Never let an evidence error prevent redrain; never switch processes here.
+        if resume_attempted and tools_control('pause') != {'paused': True, 'in_flight': 0}:
+            raise RuntimeError('完成入口二次排空失败；不替换进程')
         raise
-    state.update(status='recovered' if state['restoring'] else 'succeeded', phase='completion-ready', at=db.now())
-    save_evidence(evidence, 'release-state.json', state)
+    finally:
+        if state['status'] == 'held':
+            observe_held_policy(state)
+            try:
+                save_evidence(evidence, 'release-state.json', state)
+            except OSError:
+                log.error('完成入口 held 证据写入失败；旧证据可能过时，不能据此宣称成功')
 
 
 def main() -> None:

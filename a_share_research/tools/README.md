@@ -45,7 +45,7 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 进程内最多两个调用。运维经私有 Unix socket（目录 0700、socket 0600）调用 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`；普通 HTTP 凭据没有暂停/恢复入口。pause 先拒绝新发现/调用，再等待在途请求归零，超时仍保持暂停。`.tools-paused` 标记在数据目录保存并跨重启生效；resume 核对并移除标记后恢复受理，未知文件或符号链接不会被覆盖/删除。
 
-发布的受理恢复还必须经过 [deploy 政策门禁](../../README.md#发布批准与暂停完成)：实际镜像内读取当前政策、installed=true、参数有效且账户适用，required 的缺失/异常一律保持暂停。register/activate 仍只有 owner 本地入口，允许在 tools pause 内执行；不新增 HTTP 激活工具、授权数据库或编排服务。凭据经临时 0600 批准输入和 stdin 传递，不能写入 `.env.tools`。暂停 marker 没有 release_id；未知暂停不接管，工具留下的 held 才能由操作者明确选择 `--complete-held` 重核。
+发布的受理恢复还必须经过 [deploy 政策门禁](../../README.md#发布批准与暂停完成)：实际镜像内读取当前政策、installed=true、参数有效且账户适用，required 的缺失/异常一律保持暂停。register/activate 仍只有 owner 本地入口，允许在 tools pause 内执行；不新增 HTTP 激活工具、授权数据库或编排服务。凭据经临时 0600 批准输入和 stdin 传递，不能写入 `.env.tools`。暂停 marker 没有 release_id；未知暂停不接管，工具留下的 held 才能由操作者明确选择 `--complete-held` 重核。异常后的 pause/drain 优先于证据写入；held 的最终政策观察失败会明确记为 unknown，不能把旧 activation/installed 当作当前状态或授权。证据 I/O 持续失败时旧文件可能过时，仍须核对实时状态。
 
 Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。三个功能开关 `ASHARE_TOOLS_EXTERNAL_ENABLED`、`ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED`、`ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认均为 0，仅接受 0/1，复核须同时启用外部研究。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产启用仍需整段验收。
 

@@ -59,7 +59,9 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 审查基线 main=`a5cee3f71b6516643860c3f9e10c2d91b1a9a43a`；修复分支 `fix/release-policy-reliability`。现有 deploy 内串联宿主 flock、实际镜像候选/只读政策探针、本次精确批准、所有 resume 路径的统一政策门禁、追加式获批恢复与 held 显式完成；未新增服务或授权库。三消费者复用专用 `policy_activation_changed`/CLI 退出码 20 的最多一次 pending 转接，旧回执始终优先，不确定错误保留原请求。操作协议只在 [README](../README.md#发布批准与暂停完成)、[tools](../a_share_research/tools/README.md#跨激活-pending-的确定拒绝协议) 与 [Hermes](../ops/hermes/README.md#跨激活-pending-转接) 维护。
 
-验证结果：最终影响面测试 **664 passed**（155.98s，1 条既有 Starlette/httpx 弃用警告），覆盖 deploy/control/initial/backup、policy 全入口、tools、CLI/MCP、三消费者、顾问两段流程与客户端包；改动范围 ruff 和 git diff --check 均通过。真实本地镜像隔离测试另 **1 passed**（20.01s），同一镜像/探针结果沿用，不重复运行。针对性测试使用真实 registry/完整 identity、临时 SQLite、Gate；Docker 编排故障注入不代表生产验收。已实际运行本地镜像对新建空白 v23 库的禁网只读 rollback_probe 与真实 tools HTTP /ready，脱敏报告 [`tests/data/release-policy-isolated-v23.json`](../tests/data/release-policy-isolated-v23.json)：f480507/v22 拒绝，cb9a035/v23 通过（暂停时 /ready 为 503 且 database_ready=true）。这是空白库隔离结果，不是生产数据兼容或生产回退验证。
+首轮 `c642481` 验证：影响面测试 **664 passed**（155.98s，1 条既有 Starlette/httpx 弃用警告），覆盖 deploy/control/initial/backup、policy 全入口、tools、CLI/MCP、三消费者、顾问两段流程与客户端包；改动范围 ruff 和 git diff --check 均通过。真实本地镜像隔离测试另 **1 passed**（20.01s），同一镜像/探针结果沿用，不重复运行。针对性测试使用真实 registry/完整 identity、临时 SQLite、Gate；Docker 编排故障注入不代表生产验收。已实际运行本地镜像对新建空白 v23 库的禁网只读 rollback_probe 与真实 tools HTTP /ready，脱敏报告 [`tests/data/release-policy-isolated-v23.json`](../tests/data/release-policy-isolated-v23.json)：f480507/v22 拒绝，cb9a035/v23 通过（暂停时 /ready 为 503 且 database_ready=true）。这是空白库隔离结果，不是生产数据兼容或生产回退验证。
+
+Codex 只读审查 `a5cee3f..c642481` 发现并确认 3 项（1 P1、2 P2）：证据 I/O 失败阻断二次排空、顾问真实 holdings 调用阻断独立 Web 扫描、补偿回执双丢失后 held 政策观察陈旧。新增回归在修复前逐项失败；本轮已修复并扩展到普通回退、首次迁移兼容恢复、显式完成的同类证据失败路径。最终针对性测试 **289 passed**（147.22s，deploy/initial/backup/control、顾问真实 holdings 链及恢复/预算、客户端包等），改动范围 ruff 与 diff 检查通过。held 探针失败明确 unknown，不冒充最终政策状态；账户未知不清订阅、不当空仓。未变代码与既有镜像结果沿用，不重复研究或生产验收。
 
 生产 pending：本轮未发布、未激活政策、未迁移生产库、未改生产配置、未安装宿主脚本或通知。合并后仍须另行准备精确批准与真实数据的完整回退前置条件，按服务端→CLI→helper/三调用方顺序同步，保留全部客户端状态，再观察自然定时任务与独立披露扫描；应用发布不会自动安装 ops 脚本。当前生产版本与参数继续以下节历史记录为准。
 
