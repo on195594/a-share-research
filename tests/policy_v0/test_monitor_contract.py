@@ -5,13 +5,7 @@ import math
 
 import pytest
 
-from a_share_research.policy.v0 import commands_monitor, monitor_contract, risk_budget
-
-
-def test_escalation_sort_order_matches_contract_vocabulary() -> None:
-    assert set(commands_monitor._ESCALATION_REASON_ORDER) == set(
-        monitor_contract.ESCALATION_REASON_CODES
-    )
+from a_share_research.policy.v0 import monitor_contract, risk_budget
 
 
 def _snapshot(*, clean: bool = True) -> dict:

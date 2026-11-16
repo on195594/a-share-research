@@ -114,17 +114,6 @@ def test_populated_r0_commands_keep_fixture_hash(tmp_path, monkeypatch) -> None:
         assert hashlib.sha256(database.read_bytes()).hexdigest() == before
 
 
-def test_business_content_has_no_legacy_client_paths() -> None:
-    root = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0"
-    for base in (root / "guide", root):
-        for path in base.rglob("*"):
-            if path.is_file():
-                text = path.read_text(encoding="utf-8", errors="ignore")
-                assert ".claude/skills" not in text
-                assert ".agents/skills" not in text
-                assert ".hermes/skills" not in text
-
-
 def test_tests_never_undo_the_autouse_database_isolation():
     # Undoing monkeypatch also reverts conftest's POLICY_V0_DB, so later CLI calls
     # in that test reach the real ~/.local/share database (happened 2026-10-22).

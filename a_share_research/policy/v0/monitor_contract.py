@@ -23,25 +23,25 @@ ACTION_STATUSES = frozenset({"no_action", "review_candidate", "trade_candidate"}
 INDUSTRY_CONTEXT_STATUSES = frozenset(
     {"complete", "stale", "invalid", "unavailable", "not_applicable"}
 )
-ESCALATION_REASON_CODES = frozenset(
-    {
-        "price_stop_1",
-        "price_stop_2",
-        "daily_drop",
-        "relative_underperformance",
-        "tier_review_due",
-        "alert_review_due",
-        "l3_review_due",
-        "l3_candidate",
-        "l3_watch",
-        "research_thesis_review",
-        "governance_gate",  # retired 2026-11-15; kept so stored snapshots still validate
-        "risk_budget_exceeded",
-        "quote_gap",
-        "denominator_missing",
-        "data_conflict",
-    }
+# Ordered by escalation priority; commands_monitor sorts escalations by this order.
+ESCALATION_REASON_ORDER = (
+    "price_stop_1",
+    "price_stop_2",
+    "daily_drop",
+    "relative_underperformance",
+    "tier_review_due",
+    "alert_review_due",
+    "l3_review_due",
+    "l3_candidate",
+    "l3_watch",
+    "research_thesis_review",
+    "governance_gate",  # retired 2026-11-15; kept so stored snapshots still validate
+    "risk_budget_exceeded",
+    "quote_gap",
+    "denominator_missing",
+    "data_conflict",
 )
+ESCALATION_REASON_CODES = frozenset(ESCALATION_REASON_ORDER)
 _REQUIRED_FIELDS = {
     "schema_version",
     "as_of",

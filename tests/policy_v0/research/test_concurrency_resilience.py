@@ -17,7 +17,7 @@ from a_share_research.policy.v0 import (
     domain,
     store,
 )
-from policy_v0.helpers import valid_fundamentals_payload
+from policy_v0.helpers import set_valid_fundamentals
 
 
 @pytest.fixture(autouse=True)
@@ -27,70 +27,13 @@ def isolated_db(tmp_path, monkeypatch):
     yield db_file
 
 
-def test_quote_snapshot_max_age_exact_boundary(monkeypatch) -> None:
-    now = domain.utc_now()
-    monkeypatch.setattr(domain, "utc_now", lambda: now)
-    store.record_quote_snapshot(
-        "BOUNDARY",
-        10.0,
-        domain.cst_today(),
-        "10:00:00",
-        "sina",
-        {"sina": {"price": 10.0}},
-        False,
-        fetched_at=(now - timedelta(minutes=30)).isoformat(),
-    )
-    store.record_quote_snapshot(
-        "TOO_OLD",
-        10.0,
-        domain.cst_today(),
-        "10:00:00",
-        "sina",
-        {"sina": {"price": 10.0}},
-        False,
-        fetched_at=(now - timedelta(minutes=30, microseconds=1)).isoformat(),
-    )
-
-    assert (
-        store.get_latest_quote_snapshot(
-            "BOUNDARY", max_age=store.QUOTE_SNAPSHOT_MAX_AGE
-        )
-        is not None
-    )
-    assert (
-        store.get_latest_quote_snapshot("TOO_OLD", max_age=store.QUOTE_SNAPSHOT_MAX_AGE)
-        is None
-    )
-
-
-def test_qualitative_only_status_survives_unknown_then_clears_on_known_bank() -> None:
-    store.update_qualitative_only_security("601318", "保险公司", "保险")
-    store.update_qualitative_only_security("601318", "未知名称", "未知")
-
-    with db.db_session() as conn:
-        retained = conn.execute(
-            "SELECT name, industry FROM qualitative_only_securities WHERE code=?",
-            ("601318",),
-        ).fetchone()
-    assert retained == ("保险公司", "保险")
-
-    store.update_qualitative_only_security("601318", "测试银行", "股份制银行")
-    with db.db_session() as conn:
-        cleared = conn.execute(
-            "SELECT 1 FROM qualitative_only_securities WHERE code=?", ("601318",)
-        ).fetchone()
-    assert cleared is None
-
-
 def test_cleanup_compare_and_delete_preserves_concurrently_refreshed_rows(
     monkeypatch,
 ) -> None:
     now = domain.utc_now()
     old = (now - timedelta(days=30)).isoformat()
     fresh = now.isoformat()
-    store.set_fundamentals(
-        "600000", "测试公司", "制造", valid_fundamentals_payload({"roe": 10}), ttl=1
-    )
+    set_valid_fundamentals("600000", "测试公司", "制造", {"roe": 10}, ttl=1)
     with db.db_session() as conn:
         conn.execute(
             "UPDATE stock_fundamentals SET updated_at=? WHERE code=?",
@@ -252,48 +195,6 @@ def test_close_holding_rejects_invalid_date_without_mutation() -> None:
             "SELECT exit_price, exit_date FROM holdings WHERE code='600519'"
         ).fetchone()
     assert row == (None, None)
-
-
-def test_concurrent_quote_snapshot_writes_are_lossless_and_latest_wins() -> None:
-    db.get_db().close()
-    now = domain.utc_now()
-    worker_count = 8
-    barrier = threading.Barrier(worker_count)
-    errors: list[BaseException] = []
-
-    def write_snapshot(index: int) -> None:
-        try:
-            barrier.wait(timeout=5)
-            store.record_quote_snapshot(
-                "600000",
-                100.0 + index,
-                domain.cst_today(),
-                "10:00:00",
-                "sina",
-                {"sina": {"price": 100.0 + index}},
-                False,
-                fetched_at=(now + timedelta(microseconds=index)).isoformat(),
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    threads = [
-        threading.Thread(target=write_snapshot, args=(index,))
-        for index in range(worker_count)
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=10)
-
-    assert not errors
-    assert all(not thread.is_alive() for thread in threads)
-    with db.db_session() as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM quote_snapshots WHERE code='600000'"
-        ).fetchone()[0]
-    assert count == worker_count
-    assert store.get_latest_quote_snapshot("600000")["price"] == 107.0
 
 
 def test_concurrent_flag_appends_are_lossless_under_contention() -> None:

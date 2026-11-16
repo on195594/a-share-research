@@ -243,7 +243,7 @@ class ScreenError(Exception):
     pass
 
 
-def _calendar_query(pro, api: str, **params) -> pd.DataFrame:
+def retrying_query(pro, api: str, **params) -> pd.DataFrame:
     """Cached TuShare call with two retries; the last error names the endpoint and parameters."""
     for attempt in range(3):
         try:
@@ -256,4 +256,4 @@ def _calendar_query(pro, api: str, **params) -> pd.DataFrame:
 
 
 def trade_days(pro, start: str, end: str) -> list[str]:
-    return sorted(_calendar_query(pro, "trade_cal", exchange="SSE", is_open="1", start_date=start, end_date=end)["cal_date"])
+    return sorted(retrying_query(pro, "trade_cal", exchange="SSE", is_open="1", start_date=start, end_date=end)["cal_date"])

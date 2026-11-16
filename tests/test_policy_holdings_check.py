@@ -130,7 +130,7 @@ def test_fixed_collector_drops_credentials_and_uses_only_own_module(setup, monke
 
 def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path, monkeypatch):
     from a_share_research.policy import capture, daily_brief
-    from a_share_research.policy.v0 import domain, market_quotes, store
+    from a_share_research.policy.v0 import domain, market_quotes
     for path, conn, principal, directory, sha in ledger_book.__wrapped__(tmp_path):
         cycle_analysis.update(conn, principal, 'a', 'legacy:1', analysis.Update(
             expected_version=0, evidence_hashes=[sha], reason='structural alert transport', changes=[
@@ -146,7 +146,6 @@ def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path,
             quote_calls.append(list(codes)); return {code: None for code in codes}
         monkeypatch.setattr(market_quotes, 'fetch_current_price_quotes', quotes)
         monkeypatch.setattr(market_quotes, 'fetch_market_limit_down_snapshot', lambda: market_calls.append(True))
-        monkeypatch.setattr(store, 'get_fundamentals', lambda code: pytest.fail('P0-P2 gates removed'))
         monkeypatch.setattr(capture.monitor_research, 'fetch_cards', lambda: pytest.fail('no research capture'))
         monkeypatch.setattr(daily_brief, '_dividend_response', lambda *a: pytest.fail('no dividends capture'))
         source = monitor._source(conn, tmp_path)
@@ -176,13 +175,12 @@ def test_actual_empty_child_does_not_request_market_data(setup):
 
 def test_empty_collector_skips_all_providers(setup, monkeypatch):
     from a_share_research.policy import capture, daily_brief
-    from a_share_research.policy.v0 import market_quotes, store
+    from a_share_research.policy.v0 import market_quotes
     path, conn, _, manifest, _, _, _ = setup
     monkeypatch.setenv('POLICY_V0_DB', str(path))
     def forbidden(*args, **kwargs): pytest.fail('empty holdings must not acquire provider data')
     monkeypatch.setattr(market_quotes, 'fetch_current_price_quotes', forbidden)
     monkeypatch.setattr(market_quotes, 'fetch_market_limit_down_snapshot', forbidden)
-    monkeypatch.setattr(store, 'get_fundamentals', forbidden)
     monkeypatch.setattr(capture.monitor_research, 'fetch_cards', forbidden)
     monkeypatch.setattr(daily_brief, '_dividend_response', forbidden)
     before = list(conn.iterdump())

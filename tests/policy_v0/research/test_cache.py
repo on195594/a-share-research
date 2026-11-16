@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes, store
+from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes
 from policy_v0.helpers import mock_price_quotes, record_valid_quote, set_valid_fundamentals
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -24,25 +24,6 @@ def isolated_db(tmp_path, monkeypatch):
     """每个测试用独立临时数据库，不影响生产 cache.db"""
     db_file = tmp_path / "test_cache.db"
     monkeypatch.setenv("POLICY_V0_DB", str(db_file))
-    monkeypatch.setattr(
-        store,
-        "get_latest_quote_snapshot",
-        lambda *args, **kwargs: {
-            "price": 10.0,
-            "quote_as_of": f"{domain.cst_today()}T10:00:00",
-            "source": "sina",
-        },
-    )
-    monkeypatch.setattr(
-        store,
-        "get_market_indicator_snapshot",
-        lambda *args, **kwargs: {
-            "value": 1.8,
-            "as_of": domain.cst_today(),
-            "source": "fixture",
-            "status": "ok",
-        },
-    )
     yield str(db_file)
 
 
@@ -57,28 +38,6 @@ def test_wal_mode_enabled():
 
 
 # ── 行业 TTL 推断 ──────────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "industry,expected_ttl",
-    [
-        ("国有大行", 72),
-        ("城商行", 72),
-        ("保险", 72),
-        ("水电", 72),
-        ("公用事业", 72),
-        ("高速公路", 72),
-        ("白酒", 12),
-        ("消费品", 12),
-        ("食品饮料", 12),
-        ("零售", 12),
-        ("半导体", 24),  # 默认
-        ("医药", 24),  # 默认
-        ("新能源", 24),  # 默认
-    ],
-)
-def test_industry_ttl(industry, expected_ttl):
-    assert domain.get_industry_ttl(industry) == expected_ttl
 
 
 # ── 缓存过期逻辑 ───────────────────────────────────────────────────────────────
@@ -98,31 +57,6 @@ def test_is_expired_boundary():
     # 恰好等于 TTL 已过期
     updated = (datetime.now() - timedelta(hours=24, minutes=1)).isoformat()
     assert domain.is_expired(updated, 24)
-
-
-# ── 基本面缓存：get/set + 过期返回 None ──────────────────────────────────────
-
-
-def test_set_and_get_fundamentals():
-    msg = set_valid_fundamentals("600000", "浦发银行", "国有大行", {"pe": 5.2})
-    assert "浦发银行" in msg
-    assert "TTL:72h" in msg
-
-    result = store.get_fundamentals("600000")
-    assert result is not None
-    assert result["pe"] == 5.2
-    assert result["_cache_meta"]["code"] == "600000"
-
-
-def test_get_fundamentals_miss():
-    assert store.get_fundamentals("000001") is None
-
-
-def test_get_fundamentals_expired(monkeypatch):
-    set_valid_fundamentals("000002", "平安银行", "股份制银行", {"pb": 0.6})
-    # 模拟缓存已过期
-    monkeypatch.setattr(domain, "is_expired", lambda *_: True)
-    assert store.get_fundamentals("000002") is None
 
 
 # ── CLI 分派 ───────────────────────────────────────────────────────────────

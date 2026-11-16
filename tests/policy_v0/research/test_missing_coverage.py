@@ -8,10 +8,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes, store
+from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes
 from policy_v0.helpers import (
     mock_price_quotes,
     record_valid_quote,
+    seed_indicator,
+    seed_qualitative_only,
     set_valid_fundamentals,
 )
 
@@ -194,8 +196,8 @@ class TestCleanupAndClear:
         set_valid_fundamentals("600036", "招商银行", "银行", {"roe": 15})
         _insert_analysis("600036")
         record_valid_quote("600036")
-        store.set_market_indicator_snapshot("bond_yield_10y", 1.7, "2026-07-14", "test")
-        store.update_qualitative_only_security("601318", "中国平安", "保险")
+        seed_indicator("bond_yield_10y", 1.7, "2026-07-14")
+        seed_qualitative_only("601318", "中国平安", "保险")
         commands_admin.cmd_clear([])
         capsys.readouterr()
 
@@ -221,8 +223,8 @@ class TestCleanupAndClear:
         set_valid_fundamentals("601318", "中国平安", "保险", {"pb": 1.2})
         record_valid_quote("600036")
         record_valid_quote("601318")
-        store.update_qualitative_only_security("600036", "招商银行", "证券")
-        store.update_qualitative_only_security("601318", "中国平安", "保险")
+        seed_qualitative_only("600036", "招商银行", "证券")
+        seed_qualitative_only("601318", "中国平安", "保险")
         commands_admin.cmd_clear(["600036"])
         capsys.readouterr()
 

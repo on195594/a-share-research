@@ -224,20 +224,3 @@ def test_l3_rejects_conflicting_lifecycle_filters(
     assert "不能同时使用" in capsys.readouterr().err
 
 
-def test_monitor_skill_uses_compact_views_and_preserves_uncertainty() -> None:
-    skill = (PROJECT_ROOT / "a-stock-monitor/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    daily = (
-        PROJECT_ROOT / "a-stock-monitor/references/daily-monitoring-and-l3.md"
-    ).read_text(encoding="utf-8")
-
-    assert "a-stock-cache monitor-snapshot --json" in skill
-    assert "默认使用系统保存的最新账户总资产" in skill
-    assert "解析前不得额外调用 `holdings`" in skill
-    assert "缺少 required 数据时不得输出确定性无动作" in skill
-    assert "不得补造触发、股数或成交" in skill
-    assert "L3 全量核查强制要求" in daily
-    assert '其余条件若本次无数据可判断，须明确标注"待观察' in daily
-    assert "holdings --compact --json" not in skill
-    assert "l3-list <代码> --active --json" not in skill

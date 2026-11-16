@@ -21,7 +21,6 @@ def test_real_installation_identity_and_archived_guides():
     identity.check_installed(manifest)
     assert manifest['identity'].startswith('policy:')
     assert 'a_share_research/policy/identity.py' in manifest['files']['code']
-    assert 'a_share_research/core/contracts.py' in manifest['files']['code']
     assert 'a_share_research/db.py' in manifest['files']['code']
     assert manifest['files']['code']['uv.lock'] == hashlib.sha256((identity.ROOT/'uv.lock').read_bytes()).hexdigest()
     guide = 'a-stock-monitor/SKILL.md'

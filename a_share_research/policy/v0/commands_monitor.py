@@ -40,36 +40,11 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
-_ESCALATION_REASON_ORDER = (
-    "price_stop_1",
-    "price_stop_2",
-    "daily_drop",
-    "relative_underperformance",
-    "tier_review_due",
-    "alert_review_due",
-    "l3_review_due",
-    "l3_candidate",
-    "l3_watch",
-    "research_thesis_review",
-    "governance_gate",  # retired 2026-11-15, no longer emitted; mirrors monitor_contract
-    "risk_budget_exceeded",
-    "quote_gap",
-    "denominator_missing",
-    "data_conflict",
-)
-_REASON_ORDER = {reason: index for index, reason in enumerate(_ESCALATION_REASON_ORDER)}
-
-
-def _finite(value: Any) -> bool:
-    return risk_budget.finite_number(value)
+_REASON_ORDER = {reason: index for index, reason in enumerate(monitor_contract.ESCALATION_REASON_ORDER)}
 
 
 def _number(value: Any) -> float | None:
-    return float(value) if _finite(value) else None
-
-
-def _runtime_version() -> str:
-    return _V0_VERSION
+    return float(value) if risk_budget.finite_number(value) else None
 
 
 def _reject_json_constant(value: str) -> None:
@@ -417,9 +392,9 @@ def build_monitor_snapshot(
         required_fields = {
             "shares": risk_budget.valid_shares(holding["shares"]),
             "framework": bool(holding["framework"] and holding["framework_confident"]),
-            "stop_loss_15": _finite(holding["stop_loss_15"])
+            "stop_loss_15": risk_budget.finite_number(holding["stop_loss_15"])
             and holding["stop_loss_15"] > 0,
-            "stop_loss_20": _finite(holding["stop_loss_20"])
+            "stop_loss_20": risk_budget.finite_number(holding["stop_loss_20"])
             and holding["stop_loss_20"] > 0,
         }
         for field, valid in required_fields.items():
@@ -481,7 +456,7 @@ def build_monitor_snapshot(
         )
         industry_change_pct = (
             quote.industry_change_pct
-            if quote_valid and quote and _finite(quote.industry_change_pct)
+            if quote_valid and quote and risk_budget.finite_number(quote.industry_change_pct)
             else None
         )
         if quote_valid and industry_change_pct is None:
@@ -596,13 +571,13 @@ def build_monitor_snapshot(
                 tier_gap = "verify quarterly/interim L3 evidence and three-star timing for path A"
             elif exit_path == "B":
                 target_pct = tier["exit_target_pct"]
-                if not _finite(target_pct) or target_pct <= 0:
+                if not risk_budget.finite_number(target_pct) or target_pct <= 0:
                     tier_gap = "restore the entry-time path B target"
             elif tier["tier1_status"] == "pending":
                 target_pct = 25
             if target_pct is not None and tier_gap is None:
                 reference_cost = holding["reference_cost"]
-                if not _finite(reference_cost) or reference_cost <= 0:
+                if not risk_budget.finite_number(reference_cost) or reference_cost <= 0:
                     tier_gap = "restore reference_cost for the configured Tier target"
                 elif (
                     current_price is not None
@@ -792,7 +767,7 @@ def build_monitor_snapshot(
     payload = {
         "schema_version": 1,
         "as_of": current.isoformat(),
-        "runtime_version": _runtime_version(),
+        "runtime_version": _V0_VERSION,
         "data_status": data_status,
         "valuation_status": valuation_status,
         "review_status": review_status,
@@ -865,7 +840,7 @@ def unavailable_monitor_snapshot(
     payload = {
         "schema_version": 1,
         "as_of": domain.cst_now().isoformat(),
-        "runtime_version": _runtime_version(),
+        "runtime_version": _V0_VERSION,
         "data_status": "unavailable",
         "valuation_status": "unavailable",
         "review_status": "blocked",

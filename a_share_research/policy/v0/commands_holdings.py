@@ -6,6 +6,7 @@ import json
 import math
 import sqlite3
 import sys
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from a_share_research.core.market_data import MarketDataResult
@@ -31,6 +32,8 @@ from a_share_research.policy.v0.position_ledger import (
 )
 
 from a_share_research.policy.v0.trading_costs import STAMP_TAX_RATE
+
+logger = logging.getLogger(__name__)
 
 
 def _single_open_holding(conn: sqlite3.Connection, code: str) -> tuple:
@@ -1855,17 +1858,16 @@ def cmd_update_return(args: list[str]) -> None:
                LIMIT 1""",
             (code,),
         ).fetchone()
+        start_date = (
+            holding_row[0] if holding_row and holding_row[0] else analysis_date
+        )
         try:
-            from datetime import date as _date
-
-            start_date = (
-                holding_row[0] if holding_row and holding_row[0] else analysis_date
-            )
             holding_days = (
-                _date.fromisoformat(domain.cst_today())
-                - _date.fromisoformat(start_date)
+                date.fromisoformat(domain.cst_today()) - date.fromisoformat(start_date)
             ).days
-        except Exception:
+        except ValueError:
+            # Legacy rows may carry free-text dates; keep the return, leave days unknown.
+            logger.warning("holding_days skipped for %s: invalid date %r", code, start_date)
             holding_days = None
 
         conn.execute(

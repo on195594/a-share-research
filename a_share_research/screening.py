@@ -55,16 +55,7 @@ def _save(conn, batch_id: int, **fields) -> None:
 
 # ---------- data ----------
 
-def _query(pro, api: str, **params) -> pd.DataFrame:
-    """Cached TuShare call with two retries; the last error names the endpoint and parameters."""
-    for attempt in range(3):
-        try:
-            return market.query(pro, api, **params)
-        except Exception as exc:
-            if attempt == 2:
-                raise ScreenError(f"{api} {params.get('ts_code') or params.get('trade_date') or ''}: {exc}") from exc
-            time.sleep(1 + attempt * 2)
-    raise AssertionError("unreachable")
+_query = market.retrying_query
 
 
 def _compact(d: date) -> str:

@@ -17,6 +17,8 @@ def captured_bodies():
     def walk(value, location):
         if isinstance(value, str) and location.rsplit('/', 1)[-1] == 'body':
             yield from walk(json.loads(value), location)
+        elif isinstance(value, dict) and 'http' in value and 'body' in value:
+            return  # captured HTTP response envelope, not a report body
         elif isinstance(value, dict):
             is_body = ('body' == location.rsplit('/', 1)[-1]
                        or ('risks' in value and ('summary' in value or location.endswith('/report')))

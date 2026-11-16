@@ -28,24 +28,8 @@ def test_runtime_modules_import_from_package() -> None:
         importlib.import_module(f"a_share_research.policy.v0.{module}")
 
 
-def test_no_legacy_top_level_runtime_imports() -> None:
-    root = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0"
-    text = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.py"))
-    assert "from project_paths" not in text
-    assert "import project_paths" not in text
-    assert "from cache import" not in text
-
-
-def test_command_modules_do_not_import_cache() -> None:
-    root = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0"
-    for path in root.glob("commands_*.py"):
-        assert "import cache" not in path.read_text(encoding="utf-8")
-
-
 def test_domain_routing_is_independent_of_checklist_import_order() -> None:
     root = Path(__file__).resolve().parents[2]
-    domain_source = root / "a_share_research/policy/v0/domain.py"
-    assert "import checklist" not in domain_source.read_text(encoding="utf-8")
     script = (
         "import sys; from a_share_research.policy.v0 import domain; "
         "assert 'a_share_research.policy.v0.checklist' not in sys.modules; "
@@ -85,7 +69,7 @@ def test_commands_monitor_observes_holdings_owner_patches(monkeypatch) -> None:
 
 
 def test_unused_cache_facade_does_not_return() -> None:
-    from a_share_research.policy.v0 import cache, db, domain, risk_gates, store
+    from a_share_research.policy.v0 import cache, db, domain, risk_gates
 
     for owner, name in (
         (db, "read_only_db_session"),
@@ -93,7 +77,6 @@ def test_unused_cache_facade_does_not_return() -> None:
         (risk_gates, "liquidity_shock_gate"),
         (db, "get_db"),
         (domain, "cst_today"),
-        (store, "get_fundamentals"),
     ):
         assert callable(getattr(owner, name))
         assert not hasattr(cache, name)

@@ -10,27 +10,6 @@ from a_share_research.policy.v0.market_quotes import PriceQuote
 _CST = timezone(timedelta(hours=8))
 _UTC = timezone.utc
 _UNSUPPORTED_FINANCIAL_KEYWORDS = ("保险", "券商", "证券")
-INDUSTRY_TTL_MAP = [
-    (
-        [
-            "银行",
-            "保险",
-            "券商",
-            "国有大行",
-            "股份制银行",
-            "城商行",
-            "农商行",
-            "水电",
-            "公用事业",
-            "电网",
-            "水务",
-            "燃气",
-            "高速",
-        ],
-        72,
-    ),
-    (["白酒", "消费", "食品", "零售", "饮料", "乳制品"], 12),
-]
 DEFAULT_STOP_LOSS_PCT = (0.85, 0.80)
 ANALYSIS_PRICE_INVALIDATION_THRESHOLD = 0.03
 FRAMEWORK_ALIASES = {
@@ -91,13 +70,6 @@ def is_unsupported_financial_industry(industry: str | None) -> bool:
         industry
         and any(keyword in industry for keyword in _UNSUPPORTED_FINANCIAL_KEYWORDS)
     )
-
-
-def get_industry_ttl(industry: str) -> int:
-    for keywords, ttl in INDUSTRY_TTL_MAP:
-        if any(keyword in industry for keyword in keywords):
-            return ttl
-    return 24
 
 
 def infer_framework(industry: str | None) -> tuple[str, bool]:

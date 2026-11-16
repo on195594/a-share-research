@@ -179,7 +179,7 @@ def test_pending_card_escalates_only_review_and_keeps_returns(run_snapshot, card
     row = actual["research"]["holdings"][0]
     assert row["zone"] == "测算透支区" and row["neutral_return"] is not None
     assert row["note"] == holding["current"]["note"]
-    order = commands_monitor._ESCALATION_REASON_ORDER
+    order = monitor_contract.ESCALATION_REASON_ORDER
     assert order.index("l3_watch") < order.index("research_thesis_review")
 
 
