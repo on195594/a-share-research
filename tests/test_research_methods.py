@@ -114,16 +114,20 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
         pytest.skip("set WIKI_METHOD_CARDS_TEST_DIR to check the actual Wiki files")
     root = Path(configured).resolve()
     assert root.is_dir() and root != CARDS.resolve()
-    # Explicit acceptance revision, not a runtime-derived expectation.
-    assert subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip() == (
-        "e123b1a35496f19a51dce54dd06d0e706c556933")
+    # Explicit acceptance revision of the card directory, not a runtime-derived expectation.
+    # Unrelated Wiki commits move HEAD, so pin the last commit that touched these cards
+    # and require them to be unmodified in the working tree.
+    git = ["git", "-C", str(root)]
+    assert subprocess.check_output([*git, "log", "-1", "--format=%H", "--", "."], text=True).strip() == (
+        "72d1d86bee689dff5b782cd6ae7a83ad89c5863c")
+    assert subprocess.check_output([*git, "status", "--porcelain", "--", "."], text=True) == ""
     original_bytes = {path.name: path.read_bytes() for path in root.glob("*.md")}
     # title, lifecycle, primary source, source count, retrieval queries
     expected = {
         "cyclical-earnings-normalization": (
             "周期利润正常化与低市盈率陷阱", "stable",
             "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/littlebook/commodityvaluedrivers.htm",
-            1, ["低PE", "正常化"]),
+            1, ["低PE", "正常化", "派息率"]),
         "growth-reinvestment-and-return-on-capital": (
             "增长、再投资与资本回报", "stable",
             "https://pages.stern.nyu.edu/~adamodar/pdfiles/papers/returnmeasures.pdf",
@@ -131,7 +135,7 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
         "price-implied-expectations-analysis": (
             "价格隐含预期分析（反向估值）", "stable",
             "https://www.expectationsinvesting.com/about",
-            3, ["隐含预期", "反向DCF"]),
+            3, ["隐含预期", "反向DCF", "证据阶梯"]),
         "free-cash-flow-and-valuation-basis": (
             "自由现金流与估值口径", "stable",
             "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/definitions.html",
@@ -139,7 +143,7 @@ def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
         "earnings-quality-and-cash-conversion": (
             "盈利质量与现金转化", "stable",
             "https://doi.org/10.2308/tar-9608042309",
-            8, ["Dechow–Dichev", "Dechow-Dichev"]),
+            8, ["Dechow–Dichev", "Dechow-Dichev", "汇兑损益"]),
     }
     expected_sources = {
         "cyclical-earnings-normalization": [
@@ -285,7 +289,7 @@ def _assert_mixed_catalog_retrieval(tmp_path, root, cards):
     assert research_methods(None, "利润 ROIC 反向估值", catalog=cards) == cards
     assert catalog == frozen and material.extra["method_catalog"] == frozen
     assert active_methods_digest(None, catalog=catalog) == digest
-    assert digest == "b23d70db389b33e372f372856db5c20adc45adeef2cea6e606e92bb7f2ba6e0d"
+    assert digest == "aa56a1000c5965138e05e16f796778bda52f0cbd043b1ac574cd8667b5fbefc9"
     conn.close()
 
 

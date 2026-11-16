@@ -52,7 +52,7 @@ WIKI_METHOD_CARDS_TEST_DIR=/path/to/wiki/concepts/company-analysis \
   nice -n 15 uv run pytest -x -q -s tests/test_research_methods.py tests/test_judgment_contract.py
 ```
 
-`test_actual_wiki_cards_when_explicitly_requested` 的当前验收版本固定为 Wiki `e123b1a35496f19a51dce54dd06d0e706c556933`：五张 stable 卡，逐项核对标题、生命周期、完整来源列表、原文件哈希与关键词，并输出原文件哈希。不以运行时实际值生成预期；Wiki 升版须明确审查并更新版本/预期。此前三 stable、两 draft 的验收事实仍保留在[方法库文档](../docs/research-method-library.md)，不代表当前生命周期。
+`test_actual_wiki_cards_when_explicitly_requested` 的当前验收版本固定为卡片目录最后一次改动的 Wiki 提交 `72d1d86bee689dff5b782cd6ae7a83ad89c5863c`（2026-11-16 起；此前为 `e123b1a`），并要求该目录在工作树中无未提交修改，因此 Wiki 其他目录的提交不会让测试失败：五张 stable 卡，逐项核对标题、生命周期、完整来源列表、原文件哈希与关键词，并输出原文件哈希。不以运行时实际值生成预期；Wiki 升版须明确审查并更新版本/预期。此前三 stable、两 draft 的验收事实仍保留在[方法库文档](../docs/research-method-library.md)，不代表当前生命周期。
 
 同一入口在临时数据库载入真实纠错样本，按 `method_catalog` 生效替换后两条历史方法加实际五卡，验证四组人工诊断的溢出稳定前置、Relations 不作明确优先依据、未溢出/纯历史/批次行为、返回记录去重及冻结哈希不变。默认单卡 fixture 的 draft 排除测试继续保留；不复制整套卡片正文入库、不回退真实卡状态来过测、不读取生产材料或调用研究。来源链接核对仅覆盖文本与读取器往返，不证明网络可达或已读原文。全文仍为大小写敏感子串 OR，已检查 `Dechow–Dichev` / `Dechow-Dichev` 两种写法；仅溢出时按现有关键词整项/完整标题前置，不声称解决通用同义词。空结果负例用已确认不存在的 `应收保理从未出现_9a7e`；`no matching research method` 因 `no` 命中关联链接中的 `normalization`，混合目录下不是空结果负例，此宽匹配局限本轮不修。
 
