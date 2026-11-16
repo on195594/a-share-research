@@ -36,7 +36,8 @@ def test_forecast_units_identity_and_duplicates():
     assert observation == {
         "source": "forecast", "period": "2025-12-31", "announced": "2026-01-23",
         "identity": "forecast:603960.SH:20251231:20260123",
-        "values": {"T.net_profit": {"low": Decimal("0.2691"), "high": Decimal("0.3341")}},
+        "values": {"T.net_profit": {"low": Decimal("0.2691"), "high": Decimal("0.3341"),
+                                     "tolerance": Decimal("0.0001")}},
         "type": "预减", "first_announced": "2026-01-23",
     }
     # Conflicting same-version numeric variant must not silently overwrite evidence.
@@ -55,7 +56,7 @@ def test_wrong_company_rejected(source, code):
 @pytest.mark.parametrize("low,high,outcome,direction", [
     (18, 22, "inside", None), (1, 2, "deviated", "above"),
     (22, 23, "deviated", "below"), (20, 22, "undetermined", None),
-    (18.5, 21.5, "inside", None), (21.5, 23, "undetermined", None),
+    (18.4, 21.6, "inside", None), (21.5, 23, "undetermined", None),
 ])
 def test_forecast_interval_relations(low, high, outcome, direction):
     # Threshold-only variants of report 156, against real 688256 interval [18.5, 21.5].
@@ -121,9 +122,11 @@ def test_express_both_metrics_and_income_basis(code, profit, revenue):
     assert checks.revenue_basis_matches(ROWS["income"][code]) is True
     observation, = checks.normalize_express(ROWS["express"][code], code[:6], revenue_basis_matches=True)
     for metric, expected in (("T.net_profit", profit), ("T.revenue", revenue)):
-        assert observation["values"][metric] == {"low": Decimal(expected), "high": Decimal(expected)}
-        # Metric/interval variant isolates exact closed-point comparison.
-        item = shifted_item() | {"metric": metric, "low": expected, "high": expected}
+        assert {k: observation["values"][metric][k] for k in ("low", "high")} == {
+            "low": Decimal(expected), "high": Decimal(expected)}
+        # Metric/interval variant: a band wider than the source rounding is a clean hit.
+        item = shifted_item() | {"metric": metric, "low": Decimal(expected) - Decimal("0.1"),
+                                 "high": Decimal(expected) + Decimal("0.1")}
         assert checks.judge(item, observation)["outcome"] == "inside"
     assert observation["identity"] == f"express:{code}:20251231:20260123"
 
@@ -197,8 +200,8 @@ def test_malformed_trigger_variants_skipped(patch):
 
 
 @pytest.mark.parametrize("op,value,outcome", [
-    (">=", 18.5, "met"), (">=", 22, "missed"), (">=", 20, "undetermined"),
-    ("<=", 21.5, "met"), ("<=", 18, "missed"), ("<=", 20, "undetermined"),
+    (">=", 18.4, "met"), (">=", 22, "missed"), (">=", 20, "undetermined"),
+    ("<=", 21.6, "met"), ("<=", 18, "missed"), ("<=", 20, "undetermined"),
 ])
 @pytest.mark.parametrize("report_id", [156, 86])
 def test_trigger_interval_variants(report_id, op, value, outcome):
@@ -210,9 +213,9 @@ def test_trigger_interval_variants(report_id, op, value, outcome):
 
 
 @pytest.mark.parametrize("missing,op,value,outcome", [
-    ("net_profit_max", ">=", 18.5, "met"),
+    ("net_profit_max", ">=", 18.4, "met"),
     ("net_profit_min", ">=", 22, "missed"),
-    ("net_profit_min", "<=", 21.5, "met"),
+    ("net_profit_min", "<=", 21.6, "met"),
     ("net_profit_max", "<=", 18, "missed"),
     ("net_profit_max", ">=", 20, "undetermined"),
     ("net_profit_min", "<=", 20, "undetermined"),
@@ -269,3 +272,33 @@ def test_latest_source_identity_ties_and_ref_order():
     revision = result | {"announced": "2026-01-24"}
     assert checks.latest([periodic, revision]) == [revision]
     assert checks.latest([]) == []
+
+
+def test_express_tolerance_follows_the_published_rounding():
+    # 601009.SH publishes 555.40 / 218.07 亿元; 605016.SH publishes yuan-level figures rounded to 100 元.
+    nanjing, = checks.normalize_express(ROWS["express"]["601009.SH"], "601009", revenue_basis_matches=True)
+    assert nanjing["values"]["T.revenue"]["tolerance"] == Decimal("0.05")  # trailing zero of 555.40 widens, never narrows
+    assert nanjing["values"]["T.net_profit"]["tolerance"] == Decimal("0.005")
+    small, = checks.normalize_express(ROWS["express"]["605016.SH"], "605016", revenue_basis_matches=True)
+    assert small["values"]["T.revenue"]["tolerance"] == Decimal("0.0000005")
+
+
+@pytest.mark.parametrize("source,code,metric,low,high,outcome,direction", [
+    # Bound variants around the real 603960.SH forecast (0.2691–0.3341 亿元, TuShare rounds to 万元).
+    ("forecast", "603960.SH", "T.net_profit", "0.20", "0.26905", "undetermined", None),
+    ("forecast", "603960.SH", "T.net_profit", "0.20", "0.2689", "deviated", "above"),
+    ("forecast", "603960.SH", "T.net_profit", "0.33415", "0.40", "undetermined", None),
+    ("forecast", "603960.SH", "T.net_profit", "0.2691", "0.3341", "undetermined", None),
+    # Bound variants around the real 601009.SH express revenue (555.40 亿元).
+    ("express", "601009.SH", "T.revenue", "550", "555.38", "undetermined", None),
+    ("express", "601009.SH", "T.revenue", "550", "555.30", "deviated", "above"),
+])
+def test_rounding_tolerance_blocks_verdicts_at_the_boundary(source, code, metric, low, high, outcome, direction):
+    if source == "forecast":
+        observation = forecast(code)
+    else:
+        observation, = checks.normalize_express(ROWS["express"][code], code[:6], revenue_basis_matches=True)
+    item = shifted_item() | {"metric": metric, "low": low, "high": high}
+    result = checks.judge(item, observation)
+    assert (result["outcome"], result["direction"]) == (outcome, direction)
+    assert ("精度" in (result["reason"] or "")) == (outcome == "undetermined")

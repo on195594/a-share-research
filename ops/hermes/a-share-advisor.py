@@ -35,7 +35,8 @@ from advisor_budget import BudgetError, run_bounded
 
 ENV = Path(os.environ.get("A_SHARE_ADVISOR_ENV", Path.home() / ".config/a-share-advisor/runtime.env"))
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
-           "judgment_changed": "研究更新", "current_zone_changed": "估值位置变化"}
+           "judgment_changed": "研究更新", "current_zone_changed": "估值位置变化",
+           "checkpoint_deviated": "披露偏离预测区间", "add_trigger_missed": "加仓条件未达到"}
 ZONES = {"测算支持区": "模型认为估值较有吸引力", "中性区": "模型认为估值居中",
          "测算透支区": "模型认为价格偏贵"}
 VALUATION_NOTE = "注：估值参考不是技术支撑位或买卖指令，也不预测股价一定涨跌。"
@@ -146,13 +147,19 @@ def notice_text(item: dict, held_codes: set[str], public_base: str = "") -> str:
         conclusion = "发现风险公告，需要优先核实影响；不等于风险已确认或必须立即卖出。"
     elif reason == "review_failed":
         conclusion = "自动复核没有完成，暂不能确认新信息的影响；失败不代表风险消失。"
+    elif reason == "checkpoint_deviated":
+        conclusion = "披露值偏离原预测区间，需要复核判断及偏离原因。"
+    elif reason == "add_trigger_missed":
+        conclusion = "披露值未达到原加仓条件，需要重新核对持仓判断。"
     elif pending:
         conclusion = "新信息尚未核实，旧估值区间暂不能作为决策依据。"
     else:
         conclusion = ZONES.get(zone or "", "研究已更新，当前估值位置尚不明确") + "；这不是买卖指令。"
     # Subscription/L5 membership is not evidence of an account position.
     held = item["code"] in held_codes
-    if held:
+    if held and reason == "add_trigger_missed":
+        action = "你仍持仓：加仓条件未达到，复核是否减仓。"
+    elif held:
         action = "你仍持仓：优先复核上述风险及既有退出条件。" if reason == "major_risk" else (
             "你仍持仓：先核对新信息，不据此加仓。" if pending or reason == "review_failed" else
             "你仍持仓：先看这次变化，不因本提醒立即买卖。")

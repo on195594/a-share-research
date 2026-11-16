@@ -8,7 +8,7 @@ import math
 import re
 
 from a_share_research import report as report_body
-from a_share_research import companies, db, service, stock_codes, valuation
+from a_share_research import companies, db, disclosure_checks, service, stock_codes, valuation
 
 log = logging.getLogger(__name__)
 # Generic 风险提示 titles (trading-volatility or redemption notices) are routine and stay out of scope.
@@ -51,8 +51,8 @@ def pending_events(events: list[dict], completed_at: str) -> list[dict]:
     return pending
 
 
-def review_order(events: list[dict], scan_id: int) -> list[str]:
-    """Old backlog first; new companies by maximum severity then oldest announcement."""
+def review_order(events: list[dict], scan_id: int, priority: set[str] | None = None) -> list[str]:
+    """Priority companies first; within each group retain backlog/severity/date order."""
     grouped = {}
     for event in events:
         grouped.setdefault(event['code'], []).append(event)
@@ -62,12 +62,21 @@ def review_order(events: list[dict], scan_id: int) -> list[str]:
         old = [e for e in items if e['scan_id'] != scan_id]
         return (0, min(e['detected_at'] for e in old), -max(e['severity'] for e in items), code) if old else (
             1, -max(e['severity'] for e in items), min(e['announced'] for e in items), code)
-    return sorted(grouped, key=order)
+    return sorted(grouped, key=lambda code: (code not in (priority or set()), order(code)))
 
 
 def notification_reasons(before: dict | None, after: dict | None, events: list[dict],
-                         completions: list[dict], *, last_extreme_zone: str | None = None) -> list[dict]:
+                         completions: list[dict], *, checks: list[dict] | None = None, new_checks: list[dict] | None = None,
+                         last_extreme_zone: str | None = None) -> list[dict]:
     reasons = []
+    effective = disclosure_checks.latest(checks or [])
+    new_ids = {c['id'] for c in (new_checks or [])}
+    for kind, outcome, reason in (('forecast', 'deviated', 'checkpoint_deviated'),
+                                  ('add_trigger', 'missed', 'add_trigger_missed')):
+        matching = [c for c in effective if c['kind'] == kind and c['outcome'] == outcome]
+        if any(c['id'] in new_ids for c in matching):
+            reasons.append({'kind': 'disclosure_check', 'reason': reason,
+                            'detail': '；'.join(c['detail'] for c in matching), 'checks': matching})
     for event in events:
         if event['kind'] == 'major_risk':
             reasons.append({'kind': 'major_risk', 'reason': 'major_risk', 'event_id': event['id'],
@@ -280,6 +289,31 @@ class MarketSources:
         from a_share_research import market
         return market.trade_days(market.client(), start.replace('-', ''), end.replace('-', ''))
 
+    def disclosures(self, code: str, periods: list[str]) -> dict:
+        from a_share_research import market, material, sources
+        from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
+        pro = market.client()
+        result = {name: [row for period in periods for row in market.query(
+            pro, name, ts_code=to_tushare_stock_code(code), period=period.replace('-', '')
+        ).to_dict(orient='records')] for name in ('forecast', 'express')}
+        # The target period may not have an income statement yet: compare the
+        # latest disclosed consolidated basis, not only the forecast's period.
+        result['income'] = market.query(pro, 'income', ts_code=to_tushare_stock_code(code),
+                                        report_type='1').to_dict(orient='records')
+        fin = sources.financials(code)
+        table = material.financial_table(fin, {})
+        result['periodic'] = []
+        for statement, frame in fin.items():
+            rows = material._latest_rows(frame, consolidated=statement in ('income', 'cashflow', 'balance'))
+            metric_ids = {f'T.{m[0]}' for m in material.METRICS if m[3] == statement}
+            for period, row in rows.iterrows():
+                if period in periods:
+                    # Provider-normalized nulls must not become NaN date strings.
+                    clean = row.astype(object).where(row.notna(), None).to_dict()
+                    result['periodic'].append({'statement': statement, 'row': clean | {'end_date': period},
+                                              'table': [r for r in table if r['id'] in metric_ids]})
+        return result
+
     def report_rc_window(self, as_of):
         from a_share_research import sources
         return sources.report_rc_window(as_of)
@@ -341,11 +375,68 @@ def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
     return result
 
 
+def stored_checks(conn, report_id: int) -> list[dict]:
+    """Read append-only evidence in the pure judge's field vocabulary."""
+    rows = conn.execute('SELECT * FROM disclosure_checks WHERE report_id=? ORDER BY id', (report_id,))
+    return [dict(r) | {'ref': r['item_ref'], 'identity': r['source_identity'],
+                      'observed': json.loads(r['observed'])} for r in rows]
+
+
+def check_detail(check: dict, item: dict, body: dict) -> str:
+    row = next((r for r in body.get('table', []) if r['id'] == item['metric']), {})
+    label = row.get('label', item['metric'])
+    unit = row.get('unit', '')
+    observed = check['observed']
+    expected = f"[{item['low']}, {item['high']}]" if item['kind'] == 'forecast' else f"{item['op']} {item['value']}"
+    direction = {'above': '高于预测区间', 'below': '低于预测区间'}.get(check['direction'], '未达到条件')
+    return (f"{label} {item['period']}：披露 [{observed['low']}, {observed['high']}] {unit}，"
+            f"原条件 {expected} {unit}，{direction}；{check['source']} {check['announced']}")
+
+
+def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int, at: str) -> list[dict]:
+    if card is None:
+        return []
+    pending = [e for e in pending_events(events(conn, code=code), card['completed_at'])
+               if e['kind'] in ('forecast', 'periodic')]
+    if not pending:
+        return []
+    body = report_body.load(conn.execute('SELECT body FROM reports WHERE id=?', (card['report_id'],)).fetchone()['body'])
+    items = disclosure_checks.items(body)
+    if not items:
+        return []
+    raw = source.disclosures(code, sorted({i['period'] for i in items}))
+    observations = (disclosure_checks.normalize_forecast(raw['forecast'], code)
+                    + disclosure_checks.normalize_express(raw['express'], code,
+                        revenue_basis_matches=disclosure_checks.revenue_basis_matches(raw['income']))
+                    + disclosure_checks.normalize_periodic(raw['periodic'], code))
+    event = max(pending, key=lambda e: (e['announced'], e['id']))
+    inserted = []
+    with db.transaction(conn):
+        for observation in observations:
+            if not after_card(observation, card['completed_at']):
+                continue
+            for item in items:
+                check = disclosure_checks.judge(item, observation)
+                if check is None:
+                    continue
+                row = conn.execute(
+                    'INSERT INTO disclosure_checks(code,report_id,scan_id,scan_event_id,item_ref,kind,metric,period,'
+                    'source,source_identity,announced,outcome,direction,reason,checked_at,observed) '
+                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING id',
+                    (code, card['report_id'], scan_id, event['id'], *[check[k] for k in
+                     ('ref', 'kind', 'metric', 'period', 'source', 'identity', 'announced', 'outcome', 'direction', 'reason')],
+                     at, json.dumps(check['observed']))).fetchone()
+                if row:
+                    inserted.append(check | {'id': row['id'], 'report_id': card['report_id']})
+    return inserted
+
+
 def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
     scope = {stock_codes.normalize_key(code) for code in scope}
     with db.transaction(conn):
         pending = [e for e in events(conn) if e['action'] == 'deferred' and e['code'] in scope]
         eligible = []
+        priority = set()
         for event in pending:
             card = card_or_none(conn, event['code'])
             if card is None:
@@ -355,10 +446,13 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
                 conn.execute("UPDATE scan_events SET action='covered' WHERE id=?", (event['id'],))
             else:
                 eligible.append(event)
+                if any(c['outcome'] in ('deviated', 'missed') for c in
+                       disclosure_checks.latest(stored_checks(conn, card['report_id']))):
+                    priority.add(event['code'])
         # Runs, rather than events, count toward the Shanghai calendar-day budget.
         used = sum(instant(r['created_at']).date() == instant(at).date() for r in conn.execute(
             'SELECT DISTINCT u.id,u.created_at FROM runs u JOIN scan_events e ON e.run_id=u.id'))
-        selected = review_order(eligible, scan_id)[:max(0, 5 - used)]
+        selected = review_order(eligible, scan_id, priority)[:max(0, 5 - used)]
         queued = []
         for code in selected:
             run_id = service.submit(conn, code, f'scan-{scan_id}-{code}')
@@ -378,7 +472,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                            (at, scan_id)).fetchone()
     if not claimed:
         return
-    summary = {'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
+    summary = {'checks': {}, 'check_failures': [], 'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
                'announcements_succeeded': []}
     try:
         prefetch = source.report_rc_window((instant(at).date() - timedelta(days=1)).isoformat())
@@ -433,6 +527,14 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                 summary['failures'].append({'code': code, 'stage': 'valuation', 'reason': str(exc)})
         # Make L5 closes available to the same read-only card projection as explicit subscriptions.
         conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary, ensure_ascii=False), scan_id))
+        for subscription in scope:
+            code = subscription['code']
+            try:
+                summary['checks'][code] = _check_disclosures(
+                    conn, source, code, card_or_none(conn, code, scan_id=scan_id), scan_id, fixed_at or db.now())
+            except Exception as exc:
+                log.exception('scan %s disclosure checks %s failed', scan_id, code)
+                summary['check_failures'].append({'code': code, 'reason': str(exc)})
         summary['queued_runs'] = _dispatch(conn, scan_id, fixed_at or db.now(), {s['code'] for s in scope})
         completed = completed_reviews(conn, previous['started_at'] if previous else None, at)
         new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)]
@@ -447,8 +549,14 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                 before = before | {'status': '有效'}
             related = [e for e in events(conn, code=code)
                        if e['scan_id'] == scan_id or e['run_id'] in {r['id'] for r in completed}]
+            checks = stored_checks(conn, card['report_id']) if card else []
+            if checks:
+                body = report_body.load(conn.execute('SELECT body FROM reports WHERE id=?', (card['report_id'],)).fetchone()['body'])
+                items = {i['ref']: i for i in disclosure_checks.items(body)}
+                checks = [c | {'detail': check_detail(c, items[c['ref']], body)} for c in checks if c['ref'] in items]
             for reason in notification_reasons(before, card, [e for e in new_events if e['code'] == code],
                                                [r for r in completed if stock_codes.normalize_key(r['code']) == code],
+                                               checks=checks, new_checks=summary['checks'].get(code, []),
                                                last_extreme_zone=summary['last_extreme_zones'].get(code)):
                 candidates.append({'code': code, 'name': (card or {}).get('name') or summary['names'].get(code), **reason,
                                    'card': card, 'path': f'/stock/{code}', 'card_path': f'/api/companies/{code}/card',

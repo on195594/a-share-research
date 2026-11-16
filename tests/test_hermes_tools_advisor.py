@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from a_share_research.policy.v0 import monitor_research
+from a_share_research import disclosure_checks
 from test_ops_hermes import ROOT, load
 
 
@@ -154,3 +155,26 @@ def test_concurrent_and_corrupt_state_do_not_execute_tools(advisor, monkeypatch)
     advisor.OPPORTUNITY_STATE.write_text('{')
     assert '检查未完成' in advisor.opportunities()
     assert advisor.OPPORTUNITY_STATE.read_text() == '{'
+
+
+@pytest.mark.parametrize(('reason', 'label'), [
+    ('checkpoint_deviated', '披露偏离预测区间'), ('add_trigger_missed', '加仓条件未达到'),
+])
+@pytest.mark.parametrize('held', [True, False])
+def test_disclosure_notice_shows_detail_and_review_action(advisor, reason, label, held):
+    capture = json.loads((ROOT / 'tests/data/disclosure-checks.json').read_text())
+    observation, = disclosure_checks.normalize_forecast(capture['tushare']['forecast']['603960.SH'], '603960')
+    bounds = observation['values']['T.net_profit']
+    # Rendering-only envelope around the captured disclosure, not a company judgment.
+    detail = (f"归母净利润 {observation['period']}：披露区间 {bounds['low']}–{bounds['high']} 亿元；"
+              f"业绩预告 {observation['announced']}")
+    item = dict(code='603960', reason=reason, detail=detail, kind='disclosure_check')
+    text = advisor.notice_text(item, {'603960'} if held else set())
+    assert f'【{label}】' in text
+    assert f'发生了什么：{detail}' in text
+    if reason == 'add_trigger_missed' and held:
+        assert '对你：你仍持仓：加仓条件未达到，复核是否减仓。' in text
+    if not held:
+        assert '当前未持仓：无需处理持仓' in text
+        assert '复核是否减仓' not in text
+    assert '%' not in text and '卖出比例' not in text

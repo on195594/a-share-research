@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from a_share_research import db, scans, service, stance, valuation
+from a_share_research import companies, db, disclosure_checks, scans, service, stance, valuation
 from support.continuation import BODY as CAPTURED_BODIES, load
 from support.valuation import BODY, RECORD, STORED, assumptions
 
@@ -21,6 +21,7 @@ ANNOUNCEMENTS = sum((json.loads((DATA / f).read_text())['items'] for f in
 CATALOG = {item['code']: item['raw'] for item in ANNOUNCEMENTS}
 DAYS = [date.fromisoformat(d).isoformat() for d in json.loads((DATA / 'backtest-dates.json').read_text())['days']]
 AT = '2026-10-30T18:00:00+08:00'
+DISCLOSURES = json.loads((DATA / 'disclosure-checks.json').read_text())
 
 
 class CapturedSources:
@@ -45,6 +46,11 @@ class CapturedSources:
             day, close = next(iter(row['values'].items()))
             return {'ts_code': RECORD['code'], 'trade_date': day, 'close': close}
         raise LookupError(f'无该公司真实行情夹具：{code}')
+
+    def disclosures(self, code, periods):
+        rows = DISCLOSURES['tushare']
+        return {**{kind: deepcopy(next((v for k, v in rows[kind].items() if k[:6] == code), []))
+                   for kind in ('forecast', 'express', 'income')}, 'periodic': []}
 
     def trade_days(self, start, end):
         self.calendar_windows.append((start, end))
@@ -358,7 +364,8 @@ def test_pending_state_and_failed_review_completion(conn):
     assert not any(n['reason'] == 'review_failed' for n in third['notify'])
 
 
-def test_severity_order_daily_budget_backlog_and_shanghai_date(conn):
+@pytest.mark.parametrize('deviated_first', [False, True])
+def test_severity_order_daily_budget_backlog_and_shanghai_date(conn, deviated_first):
     # Use real company identities/reports and mutate event severity only, never financial inputs.
     records = json.loads((DATA / 'continuation-records.json').read_text())['records']
     codes = sorted({r['report']['code'][:6] for r in records})
@@ -380,9 +387,26 @@ def test_severity_order_daily_budget_backlog_and_shanghai_date(conn):
         conn.execute('INSERT INTO scan_events(scan_id,code,doc_key,title,announced,url,kind,severity,detected_at,action,run_id) '
                      "VALUES (?,?,?,?,?,?,?,?,?,'queued_review',?)", (scan_id, original['code'], original['doc_key'] + str(i),
                        original['title'], original['announced'], original['url'], original['kind'], 2, AT, run))
+    expected = codes[-1]
+    if deviated_first:
+        # Explicit cross-company storage variant of the captured 603960 forecast
+        # and report 156 threshold, only testing queue priority (not performance).
+        expected = codes[1]
+        report_id = service.company_card(conn, expected)['report_id']
+        item = deepcopy(DISCLOSURES['reports'][2]['checkpoints'][0]['forecast'])
+        item.update(period='2025-12-31', ref='checkpoints[0]', kind='forecast')
+        observation = disclosure_checks.normalize_forecast(DISCLOSURES['tushare']['forecast']['603960.SH'], '603960')[0]
+        check = disclosure_checks.judge(item, observation)
+        assert check['outcome'] == 'deviated'
+        conn.execute('INSERT INTO disclosure_checks(code,report_id,item_ref,kind,metric,period,source,source_identity,'
+                     'announced,outcome,direction,checked_at,observed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                     (expected, report_id, *[check[k] for k in ('ref', 'kind', 'metric', 'period', 'source', 'identity',
+                                                               'announced', 'outcome', 'direction')], AT,
+                      json.dumps(check['observed'])))
+        assert scans.review_order(scans.events(conn), scan_id, {expected})[0] == expected
     queued = scans._dispatch(conn, scan_id, AT, set(codes))
     assert len(queued) == 1
-    assert conn.execute('SELECT code FROM runs WHERE id=?', (queued[0],)).fetchone()[0] == codes[-1]
+    assert conn.execute('SELECT code FROM runs WHERE id=?', (queued[0],)).fetchone()[0] == expected
     assert scans._dispatch(conn, scan_id, AT, set(codes)) == []
     # UTC 16:00 is the start of the next Shanghai day.
     assert len(scans._dispatch(conn, scan_id, '2026-10-30T16:00:00+00:00', set(codes))) == 2
@@ -605,3 +629,146 @@ def test_queue_concurrency_and_release_idle_guard(tmp_path):
     connection.execute("UPDATE scans SET status='done'")
     deploy.idle(path)
     connection.close()
+
+
+@pytest.fixture
+def disclosure_replay(conn):
+    # Cross-company routing/period variant, never investment evidence: reuse captured
+    # report 156's frozen thresholds with 603960's untouched 2025 forecast. The
+    # report shell comes from BODY; its price fields are irrelevant to this check.
+    report = deepcopy(next(r for r in DISCLOSURES['reports'] if r['report_id'] == 156))
+    body = deepcopy(BODY)
+    body['checkpoints'] = report['checkpoints'][:1]
+    body['checkpoints'][0]['forecast']['period'] = '2025-12-31'
+    body['stance'] = {'action': report['stance']}
+    body['stance_calc'] = report['stance_calc']
+    # Metric/period variant makes the captured add threshold testable by forecasts.
+    body['stance_calc']['add_trigger'].update(metric='T.net_profit', period='2025-12-31')
+    code = '603960'
+    run = service.submit(conn, code, 'disclosure-replay')
+    db.save_report(conn, run, code, code, '2025-12-31', True, RECORD['verdict'], body)
+    db.update_run(conn, run, status='done', finished_at='2026-01-01T18:00:00+08:00')
+    conn.execute('INSERT INTO subscriptions(code,added_at) VALUES (?,?)', (code, AT))
+    # Announcement identity/company variant of the captured directory, used only
+    # to put a forecast event in the pending queue. Disclosure facts stay untouched.
+    original = next(i for i in ANNOUNCEMENTS if scans.classify(i['raw']['announcementTitle']) == ('forecast', 2))
+    announcement = deepcopy(original)
+    announcement['code'] = code
+    announcement['raw']['secCode'] = code
+    source = CapturedSources([announcement])
+    return code, body, source
+
+
+def test_disclosure_scan_append_only_pending_retry_and_cooldown(conn, disclosure_replay):
+    code, body, source = disclosure_replay
+    first = run_scan(conn, source)
+    assert first['status'] == 'done' and first['summary']['check_failures'] == []
+    stored = scans.stored_checks(conn, service.company_card(conn, code)['report_id'])
+    assert len(stored) == len(first['summary']['checks'][code]) == 2
+    assert {c['outcome'] for c in stored} == {'deviated', 'missed'}
+    assert all(c['scan_id'] == first['id'] and c['scan_event_id'] == first['events'][0]['id'] for c in stored)
+    notices = [n for n in first['notify'] if n['kind'] == 'disclosure_check']
+    assert {n['reason'] for n in notices} == {'checkpoint_deviated', 'add_trigger_missed'}
+    assert all('bypass_cooldown' not in n and '2026-01-23' in n['detail'] for n in notices)
+    for notice in notices:
+        history = [notice | {'notified_at': '2026-09-30T18:00:00+08:00'}]
+        assert not scans.allow_notification(notice, history, '2026-10-09T18:00:00+08:00', DAYS)
+        assert scans.allow_notification(notice, history, '2026-10-16T18:00:00+08:00', DAYS)
+    second = run_scan(conn, source, '2026-10-31T18:00:00+08:00')
+    assert second['summary']['checks'][code] == [] and second['notify'] == []
+    assert len(scans.stored_checks(conn, stored[0]['report_id'])) == 2
+    # A later version is new evidence but remains inside the same cooldown.
+    class Revision(CapturedSources):
+        def disclosures(self, code, periods):
+            raw = super().disclosures(code, periods)
+            raw['forecast'][0]['ann_date'] = '20260124'  # Announcement-date-only revision variant.
+            return raw
+    third = run_scan(conn, Revision(source.items), '2026-11-01T18:00:00+08:00')
+    assert len(third['summary']['checks'][code]) == 2
+    assert not [n for n in third['notify'] if n['kind'] == 'disclosure_check']
+
+
+def test_disclosure_failure_does_not_change_announcement_window(conn, disclosure_replay):
+    code, _, source = disclosure_replay
+    # Use 603606's captured close only as an explicit identity variant so this test
+    # isolates disclosure failure from the existing valuation-failure window rule.
+    class Failure(CapturedSources):
+        def valuation(self, requested):
+            return super().valuation('603606') | {'ts_code': requested}
+
+        def disclosures(self, code, periods):
+            raise RuntimeError('披露取数暂不可用')
+    failing = Failure(source.items)
+    first = run_scan(conn, failing)
+    assert first['status'] == 'done' and first['summary']['failures'] == []
+    assert first['summary']['check_failures'] == [{'code': code, 'reason': '披露取数暂不可用'}]
+    assert scans.announcement_failure(conn, code) is None
+    card = service.company_card(conn, code)
+    second = run_scan(conn, failing, '2026-10-31T18:00:00+08:00')
+    assert second['status'] == 'done' and failing.windows == [(code, 30), (code, 3)]
+    assert service.company_card(conn, code)['status'] == card['status']
+    assert second['summary']['checks'] == {}
+
+
+def test_disclosure_effective_only_and_old_card_date(conn, disclosure_replay):
+    code, body, source = disclosure_replay
+    first = run_scan(conn, source)
+    card = service.company_card(conn, code)
+    stored = scans.stored_checks(conn, card['report_id'])
+    items = {i['ref']: i for i in disclosure_checks.items(body)}
+    stored = [c | {'detail': scans.check_detail(c, items[c['ref']], body)} for c in stored]
+    # Later overlapping/inside revisions suppress stale newly inserted deviations.
+    later = [c | {'id': c['id'] + 100, 'announced': '2026-01-24', 'outcome': 'inside'} for c in stored]
+    assert scans.notification_reasons(card, card, [], [], checks=stored + later, new_checks=stored) == []
+    assert first['summary']['checks'][code]
+    # Card-day-only variant excludes all disclosures before the new completion day.
+    complete_cards_at(conn, [code], at='2026-02-01T18:00:00+08:00')
+    assert scans._check_disclosures(conn, source, code, service.company_card(conn, code), first['id'], AT) == []
+
+
+def test_disclosures_network_boundary_and_periodic_versions(monkeypatch):
+    import pandas as pd
+    from a_share_research import market, material, sources
+    from support.financials import CAPTURES, frames
+
+    captured = deepcopy(CAPTURES['000858'])
+    fin = frames(captured)
+    periods = ['2025-12-31', '2025-09-30']
+    calls = []
+    sentinel = object()
+
+    def query(client, api, **params):
+        assert client is sentinel
+        calls.append((api, params))
+        # No 000858 forecast/express is captured. Empty results model provider lag;
+        # financial statements are replayed from the existing real captures.
+        return fin['income'].copy() if api == 'income' else pd.DataFrame()
+
+    monkeypatch.setattr(market, 'client', lambda: sentinel)
+    monkeypatch.setattr(market, 'query', query)
+    monkeypatch.setattr(sources, 'financials', lambda code: frames(captured) if code == '000858' else None)
+    raw = scans.MarketSources().disclosures('000858', periods)
+    assert calls == [(api, {'ts_code': '000858.SZ', 'period': period})
+                     for api in ('forecast', 'express') for period in ('20251231', '20250930')] + [
+                         ('income', {'ts_code': '000858.SZ', 'report_type': '1'})]
+    observations = disclosure_checks.normalize_periodic(raw['periodic'], '000858')
+    assert observations
+    table = material.financial_table(fin, {})
+    for observation in observations:
+        assert observation['period'] in periods
+        for metric, bounds in observation['values'].items():
+            row = next(r for r in table if r['id'] == metric)
+            if reason := row.get('unavailable', {}).get(observation['period']):
+                assert bounds == {'low': None, 'high': None, 'reason': reason}
+            else:
+                assert str(bounds['low']) == row['exact_values'][observation['period']]
+    with pytest.raises(companies.SourceError, match='其他公司'):
+        disclosure_checks.normalize_periodic(raw['periodic'], '603960')
+    # Explicit announcement-date correction variant must produce a new version
+    # without changing the captured exact table values.
+    revised = deepcopy(raw['periodic'])
+    revised[0]['row']['f_ann_date'] = '2026-11-16'
+    original = disclosure_checks.normalize_periodic(raw['periodic'][:1], '000858')[0]
+    changed = disclosure_checks.normalize_periodic(revised[:1], '000858')[0]
+    assert changed['identity'] != original['identity'] and changed['announced'] == '2026-11-16'
+    assert changed['values'] == original['values']

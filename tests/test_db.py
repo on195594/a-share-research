@@ -261,3 +261,55 @@ def test_legacy_sql_inserts_and_updates_maintain_derived_columns(tmp_path):
     conn.execute("UPDATE runs SET identity = NULL WHERE id = ?", (replay["id"],))
     assert_derived(conn)
     conn.close()
+
+
+def test_disclosure_checks_v23_is_additive_reentrant_and_rollback_compatible(tmp_path, monkeypatch):
+    from pathlib import Path
+    from a_share_research import disclosure_checks
+
+    path = tmp_path / 'v22.db'
+    with monkeypatch.context() as old:
+        old.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:22])
+        conn = db.connect(path)
+        load(conn)
+        before = list(conn.iterdump())
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 22
+        conn.close()
+    conn = db.connect(path)
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS) == 23
+    assert all(line in list(conn.iterdump()) for line in before)
+    assert conn.execute('PRAGMA foreign_key_list(disclosure_checks)').fetchall() == []
+    assert [r['name'] for r in conn.execute('PRAGMA index_info(disclosure_checks_by_company_report)')] == [
+        'company_key', 'report_id']
+    capture = json.loads((Path(__file__).with_name('data') / 'disclosure-checks.json').read_text())
+    report = next(r for r in capture['reports'] if r['report_id'] == 156)
+    # Explicit period-shift / cross-company variant tests storage, not investment performance.
+    item = disclosure_checks.items(report)[0] | {'period': '2025-12-31'}
+    observation = disclosure_checks.normalize_forecast(capture['tushare']['forecast']['603960.SH'], '603960')[0]
+    check = disclosure_checks.judge(item, observation)
+    old_report = RECORDS[0]['report']
+    values = ('603960', old_report['id'], check['ref'], check['kind'], check['metric'], check['period'],
+              check['source'], check['identity'], check['announced'], check['outcome'], check['direction'],
+              check['reason'], report['created_at'], json.dumps(check['observed']))
+    sql = ('INSERT INTO disclosure_checks(code,report_id,item_ref,kind,metric,period,source,source_identity,'
+           'announced,outcome,direction,reason,checked_at,observed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+           ' ON CONFLICT DO NOTHING')
+    assert conn.execute(sql, values).rowcount == 1
+    assert conn.execute(sql, values).rowcount == 0
+    after = list(conn.iterdump())
+    with db.transaction(conn):
+        db._migrate_v23(conn)
+        db._migrate_v23(conn)
+    assert list(conn.iterdump()) == after
+    conn.close()
+    conn = db.connect(path)
+    assert conn.total_changes == 0 and list(conn.iterdump()) == after
+    for statement in ('UPDATE disclosure_checks SET outcome=outcome', 'DELETE FROM disclosure_checks'):
+        with pytest.raises(sqlite3.IntegrityError, match='append-only'):
+            conn.execute(statement)
+    # Rollback images can delete captured reports/runs without knowing this new table.
+    conn.execute('DELETE FROM reports WHERE id=?', (old_report['id'],))
+    conn.execute('DELETE FROM runs WHERE id=?', (old_report['run_id'],))
+    assert conn.execute('SELECT count(*) FROM disclosure_checks').fetchone()[0] == 1
+    assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
+    conn.close()

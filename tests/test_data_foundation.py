@@ -42,7 +42,7 @@ def stored(conn, table):
     return names, [tuple(row) for row in conn.execute(f"SELECT {', '.join(names)} FROM {table} ORDER BY id")]
 
 
-COMPANY_TABLES = ("runs", "reports", "prices", "scan_events", "subscriptions")
+COMPANY_TABLES = ("runs", "reports", "prices", "scan_events", "subscriptions", "disclosure_checks")
 CANONICAL_CODES = (("603606", "603606"), ("603606.SH", "603606"),
                    ("000333.SZ", "000333"), ("920001.BJ", "920001"))
 INVALID_CODES = ("603606.SS", "60360", "６０３６０６", "603606.sh", "603606 ", "", "6036060", "60360x")
@@ -51,7 +51,8 @@ INVALID_CODES = ("603606.SS", "60360", "６０３６０６", "603606.sh", "60360
 def test_rebuilt_tables_keep_payload_last_and_ids_are_never_reused(conn):
     for table in COMPANY_TABLES:
         assert "company_key" in {row["name"] for row in conn.execute(f"PRAGMA table_xinfo({table})")}
-    for table, payload in (("runs", "material"), ("reports", "body"), ("calls", "prompt")):
+    for table, payload in (("runs", "material"), ("reports", "body"), ("calls", "prompt"),
+                           ("disclosure_checks", "observed")):
         assert list(conn.execute(f"PRAGMA table_xinfo({table})"))[-1]["name"] == payload
     report = conn.execute("SELECT * FROM reports ORDER BY id DESC LIMIT 1").fetchone()
     first = conn.execute("SELECT MAX(id) FROM runs").fetchone()[0]
@@ -72,6 +73,20 @@ def insert_company(conn, table, code):
         conn.execute('INSERT INTO runs(code,created_at) VALUES (?,?)', (code, RECORD['created_at']))
     elif table == 'subscriptions':
         conn.execute('INSERT INTO subscriptions(code,added_at) VALUES (?,?)', (code, RECORD['created_at']))
+    elif table == 'disclosure_checks':
+        from a_share_research import disclosure_checks
+        capture = json.loads((Path(__file__).with_name('data') / 'disclosure-checks.json').read_text())
+        report = next(r for r in capture['reports'] if r['report_id'] == 156)
+        # Period-shift and cross-company pairing are storage-only identity variants.
+        item = disclosure_checks.items(report)[0] | {'period': '2025-12-31'}
+        observation = disclosure_checks.normalize_forecast(capture['tushare']['forecast']['603960.SH'], '603960')[0]
+        check = disclosure_checks.judge(item, observation)
+        conn.execute('INSERT INTO disclosure_checks(code,report_id,item_ref,kind,metric,period,source,'
+                     'source_identity,announced,outcome,direction,reason,checked_at,observed)'
+                     ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                     (code, report['report_id'], check['ref'], check['kind'], check['metric'], check['period'],
+                      check['source'], check['identity'], check['announced'], check['outcome'], check['direction'],
+                      check['reason'], report['created_at'], json.dumps(check['observed'])))
     elif table == 'scan_events':
         document = VALUATION_BODY['document']
         scan = scans.submit(conn)

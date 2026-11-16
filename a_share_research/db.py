@@ -478,8 +478,23 @@ def _migrate_v22(conn: sqlite3.Connection) -> None:
     migrate(conn)
 
 
+def _migrate_v23(conn: sqlite3.Connection) -> None:
+    conn.execute('CREATE TABLE IF NOT EXISTS disclosure_checks ('
+                 f'id INTEGER PRIMARY KEY, code TEXT NOT NULL, {COMPANY_KEY},'
+                 ' report_id INTEGER NOT NULL, scan_id INTEGER, scan_event_id INTEGER,'
+                 ' item_ref TEXT NOT NULL, kind TEXT NOT NULL, metric TEXT NOT NULL, period TEXT NOT NULL,'
+                 ' source TEXT NOT NULL, source_identity TEXT NOT NULL, announced TEXT NOT NULL,'
+                 ' outcome TEXT NOT NULL, direction TEXT, reason TEXT, checked_at TEXT NOT NULL,'
+                 ' observed TEXT NOT NULL, UNIQUE(report_id, item_ref, source_identity))')
+    conn.execute('CREATE INDEX IF NOT EXISTS disclosure_checks_by_company_report'
+                 ' ON disclosure_checks(company_key, report_id)')
+    for event in ('UPDATE', 'DELETE'):
+        conn.execute(f'CREATE TRIGGER IF NOT EXISTS disclosure_checks_no_{event.lower()} BEFORE {event}'
+                     " ON disclosure_checks BEGIN SELECT RAISE(ABORT, 'disclosure_checks is append-only'); END")
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22, _migrate_v23)
 
 
 def now() -> str:

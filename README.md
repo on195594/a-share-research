@@ -261,7 +261,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 ## 部署
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移（现行 v22，各版本内容见 `db.py`）。迁移须另获授权并备份；日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测，做不到的不能使用日常参数，须单独设计回退。设计与门禁见[数据层治理方案](docs/data-foundation.md)。
+`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移（现行 v23，新增只追加披露判定表 `disclosure_checks`，各版本内容见 `db.py`）。迁移须另获授权并备份；日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测，做不到的不能使用日常参数，须单独设计回退。设计与门禁见[数据层治理方案](docs/data-foundation.md)。
 
 Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
 
