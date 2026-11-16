@@ -1,0 +1,529 @@
+{
+ "_meta": {
+  "captured_at": "2026-11-16",
+  "tushare": "forecast/express/income rows returned by market.query with the production TuShare credential on 2026-11-16 (period 20251231); NaN converted to null",
+  "reports": "checkpoints and stance triggers copied verbatim from production app.db reports (read-only) on 2026-11-16; their target period is 2026-12-31, so tests that pair them with 2025-12-31 rows must mark the period shift as a variant"
+ },
+ "tushare": {
+  "forecast": {
+   "603960.SH": [
+    {
+     "ts_code": "603960.SH",
+     "ann_date": "20260123",
+     "end_date": "20251231",
+     "type": "预减",
+     "p_change_min": -51.12,
+     "p_change_max": -39.32,
+     "net_profit_min": 2691.0,
+     "net_profit_max": 3341.0,
+     "last_parent_net": 5506.29,
+     "first_ann_date": "20260123",
+     "summary": "预计:净利润2691-3341",
+     "change_reason": "本期业绩预减主要受主营业务的影响：2025年度公司智能装备业务受下游市场需求影响，营业收入较上年同期有所减少；汽车零部件业务同样受下游客户排产计划和销售单价下降的影响，营业收入和毛利率较上年同期均有所下降。",
+     "update_flag": "0"
+    }
+   ],
+   "300024.SZ": [
+    {
+     "ts_code": "300024.SZ",
+     "ann_date": "20260130",
+     "end_date": "20251231",
+     "type": "续亏",
+     "p_change_min": -127.1765,
+     "p_change_max": -60.0562,
+     "net_profit_min": -44000.0,
+     "net_profit_max": -31000.0,
+     "last_parent_net": -19368.2,
+     "first_ann_date": "20260114",
+     "summary": "预计:净利润-44000--31000",
+     "change_reason": "1、近年来，机器人与自动化行业进入到技术快速迭代的高速发展阶段，推高了公司升级技术与优化工艺的成本，在行业竞争日益激烈的环境下，公司深度践行“国际化”战略，持续扩张海外业务，报告期内，公司海外项目在陆续稳步的推进交付与验收工作，受年末美元兑人民币汇率下降以及上述多重因素的影响，2025年，预计公司综合毛利率同比下降约2%左右。2、报告期内，受公司部分联营公司经营亏损的影响，公司以权益法核算的长期股权投资收益同比有所下降。3、报告期内，公司深化“产品化”战略转型，以提升产品化占比为主要任务，深入推进标准化产品模式，对研发完成并通过市场验证的标准化产品实施市场化推广。2025年，部分新产品尚未达到规模化量产阶段，对本年度业绩未能产生积极影响。",
+     "update_flag": "0"
+    },
+    {
+     "ts_code": "300024.SZ",
+     "ann_date": "20260114",
+     "end_date": "20251231",
+     "type": "续亏",
+     "p_change_min": null,
+     "p_change_max": null,
+     "net_profit_min": null,
+     "net_profit_max": null,
+     "last_parent_net": -19368.2013,
+     "first_ann_date": "20260114",
+     "summary": "续亏",
+     "change_reason": null,
+     "update_flag": "0"
+    }
+   ],
+   "688082.SH": [
+    {
+     "ts_code": "688082.SH",
+     "ann_date": "20260123",
+     "end_date": "20251231",
+     "type": "不确定",
+     "p_change_min": null,
+     "p_change_max": null,
+     "net_profit_min": null,
+     "net_profit_max": null,
+     "last_parent_net": 115318.809,
+     "first_ann_date": "20260115",
+     "summary": "不确定",
+     "change_reason": "（一）全球半导体行业发展活跃，延续增长态势，尤其是中国大陆市场需求强劲。公司凭借技术差异化优势，成功把握市场机遇，积累了充足订单储备。公司销售交货及调试验收工作持续高效推进，有效保障了经营业绩的稳步增长；（二）公司深入推进产品平台化，产品技术水平和性能持续提升，产品布局日趋完善，满足了客户的多样化需求，市场认可度不断提高，在新客户拓展和新市场开发方面继续取得显著成效，成功开发了多个新客户并获得客户调试验证认可，良好的市场口碑为收入增长提供了有力支撑，提升了整体营业收入；（三）公司稳步推进客户全球化，持续加大市场开拓力度，在深化与现有客户合作的同时，积极开拓全球市场，进一步实现客户群的扩充，推动营业收入稳步提升。",
+     "update_flag": "0"
+    }
+   ],
+   "688256.SH": [
+    {
+     "ts_code": "688256.SH",
+     "ann_date": "20260131",
+     "end_date": "20251231",
+     "type": "扭亏",
+     "p_change_min": 508.9855,
+     "p_change_max": 575.3074,
+     "net_profit_min": 185000.0,
+     "net_profit_max": 215000.0,
+     "last_parent_net": -45233.88,
+     "first_ann_date": "20250829",
+     "summary": "预计:净利润185000-215000",
+     "change_reason": "公司始终深耕人工智能芯片产品的研发与技术创新领域。报告期内，受益于人工智能行业算力需求的持续攀升，公司凭借产品的优异竞争力持续拓展市场，积极推动人工智能应用场景落地，本期营业收入较上年同期大幅增长，进而带动公司整体经营业绩提升，净利润实现扭亏为盈。",
+     "update_flag": "0"
+    },
+    {
+     "ts_code": "688256.SH",
+     "ann_date": "20250829",
+     "end_date": "20251231",
+     "type": "不确定",
+     "p_change_min": null,
+     "p_change_max": null,
+     "net_profit_min": null,
+     "net_profit_max": null,
+     "last_parent_net": -45233.8791,
+     "first_ann_date": "20250829",
+     "summary": "不确定",
+     "change_reason": null,
+     "update_flag": "0"
+    }
+   ]
+  },
+  "express": {
+   "605016.SH": [
+    {
+     "ts_code": "605016.SH",
+     "ann_date": "20260123",
+     "end_date": "20251231",
+     "revenue": 1379053700.0,
+     "operate_profit": 432215600.0,
+     "total_profit": 431631300.0,
+     "n_income": 365783200.0,
+     "total_assets": 2435308500.0,
+     "total_hldr_eqy_exc_min_int": 1957787000.0,
+     "diluted_eps": 0.87,
+     "diluted_roe": 19.35,
+     "yoy_net_profit": 245598500.0,
+     "bps": null,
+     "perf_summary": null,
+     "update_flag": "0"
+    }
+   ],
+   "601009.SH": [
+    {
+     "ts_code": "601009.SH",
+     "ann_date": "20260123",
+     "end_date": "20251231",
+     "revenue": 55540000000.0,
+     "operate_profit": 26174000000.0,
+     "total_profit": 26094000000.0,
+     "n_income": 21807000000.0,
+     "total_assets": 3022424000000.0,
+     "total_hldr_eqy_exc_min_int": 206530000000.0,
+     "diluted_eps": 1.76,
+     "diluted_roe": 12.04,
+     "yoy_net_profit": 20177000000.0,
+     "bps": null,
+     "perf_summary": null,
+     "update_flag": "0"
+    }
+   ]
+  },
+  "income": {
+   "603960.SH": [
+    {
+     "ts_code": "603960.SH",
+     "ann_date": "20260424",
+     "f_ann_date": "20260424",
+     "end_date": "20251231",
+     "report_type": "1",
+     "update_flag": "1",
+     "total_revenue": 497570726.92,
+     "revenue": 497570726.92,
+     "n_income": 27259986.17,
+     "n_income_attr_p": 27582435.38
+    }
+   ],
+   "300024.SZ": [
+    {
+     "ts_code": "300024.SZ",
+     "ann_date": "20260424",
+     "f_ann_date": "20260424",
+     "end_date": "20251231",
+     "report_type": "1",
+     "update_flag": "1",
+     "total_revenue": 4121805440.05,
+     "revenue": 4121805440.05,
+     "n_income": -388495752.35,
+     "n_income_attr_p": -397880934.47
+    }
+   ],
+   "605016.SH": [
+    {
+     "ts_code": "605016.SH",
+     "ann_date": "20260408",
+     "f_ann_date": "20260408",
+     "end_date": "20251231",
+     "report_type": "1",
+     "update_flag": "0",
+     "total_revenue": 1379053687.2,
+     "revenue": 1379053687.2,
+     "n_income": 368550234.74,
+     "n_income_attr_p": 368550234.74
+    },
+    {
+     "ts_code": "605016.SH",
+     "ann_date": "20260408",
+     "f_ann_date": "20260408",
+     "end_date": "20251231",
+     "report_type": "1",
+     "update_flag": "1",
+     "total_revenue": 1379053687.2,
+     "revenue": 1379053687.2,
+     "n_income": 368550234.74,
+     "n_income_attr_p": 368550234.74
+    }
+   ],
+   "601009.SH": [
+    {
+     "ts_code": "601009.SH",
+     "ann_date": "20260423",
+     "f_ann_date": "20260423",
+     "end_date": "20251231",
+     "report_type": "1",
+     "update_flag": "1",
+     "total_revenue": 55541916000.0,
+     "revenue": 55541916000.0,
+     "n_income": 22057408000.0,
+     "n_income_attr_p": 21807089000.0
+    }
+   ],
+   "688256.SH": [
+    {
+     "ts_code": "688256.SH",
+     "ann_date": "20260313",
+     "f_ann_date": "20260313",
+     "end_date": "20251231",
+     "report_type": "1",
+     "update_flag": "0",
+     "total_revenue": 6497196198.68,
+     "revenue": 6497196198.68,
+     "n_income": 2058487389.36,
+     "n_income_attr_p": 2059228538.67
+    }
+   ]
+  }
+ },
+ "reports": [
+  {
+   "report_id": 53,
+   "code": "002847.SZ",
+   "created_at": "2026-11-01T10:28:10+08:00",
+   "stance": null,
+   "stance_trigger": null,
+   "stance_calc": {},
+   "checkpoints": [
+    {
+     "text": "观察全年收入能否超过上年，以及电商和定量流通渠道是否真正企稳。若全年营业总收入不及上年的57.62亿元，或继续仅靠蛋类、海味增长抵消旧渠道下滑，将削弱渠道修复假设。",
+     "forecast": {
+      "metric": "T.revenue",
+      "period": "2026-12-31",
+      "low": 58.3,
+      "high": 60.1,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察第四季度利润及毛利率能否企稳，且改善不能只靠去年第四季度归母利润1.44亿元的较低基数。若单季毛利率继续低于第三季度29.39%，同时费用投入未换来收入改善，将进一步削弱盈利修复预期。",
+     "forecast": {
+      "metric": "T.net_profit",
+      "period": "2026-12-31",
+      "low": 7.0,
+      "high": 7.7,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察经营现金流能否继续累积，并由销售回款而不只是采购付款收缩支撑。若应收款从9月末3.21亿元重新上升、现金改善仍主要依赖少采购，或新增投资吞噬现金余量，将削弱现金安全垫判断。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 10.5,
+      "high": 12.3,
+      "confidence": 60
+     }
+    }
+   ]
+  },
+  {
+   "report_id": 107,
+   "code": "600887.SH",
+   "created_at": "2026-11-05T12:26:49+08:00",
+   "stance": "等价格",
+   "stance_trigger": null,
+   "stance_calc": {},
+   "checkpoints": [
+    {
+     "text": "观察全年归母与扣非利润能否同步恢复，以及新增减值是否减轻；若没有显著新增减值，利润仍持续恶化，将削弱“集中损失而非主业全面衰退”的判断。",
+     "forecast": {
+      "metric": "T.net_profit",
+      "period": "2026-12-31",
+      "low": 99,
+      "high": 115,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察经营现金流是否继续改善，同时核对供应商付款、存货减值和租赁偿还。若现金流增长主要依赖应付延后，或分红及回购需持续新增融资支持，将削弱防御性判断。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 180,
+      "high": 215,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察液体乳改善能否延续并转化为全年收入；若营业总收入未达到年报计划的1,215亿元，且渠道及价格证据同步转弱，应降低对恢复路径的信心。经营计划不是业绩承诺。",
+     "forecast": {
+      "metric": "T.revenue",
+      "period": "2026-12-31",
+      "low": 1200,
+      "high": 1235,
+      "confidence": 75
+     }
+    }
+   ]
+  },
+  {
+   "report_id": 156,
+   "code": "002468.SZ",
+   "created_at": "2026-11-09T15:04:29+08:00",
+   "stance": "现在分批",
+   "stance_trigger": null,
+   "stance_calc": {
+    "add_trigger": {
+     "metric": "T.op_cash",
+     "period": "2026-12-31",
+     "op": ">=",
+     "value": 45.0
+    }
+   },
+   "checkpoints": [
+    {
+     "text": "观察2026年第四季度及全年归母净利润能否维持旺季盈利韧性。若第四季度单季净利润受燃油成本等压制而低于上年同期单季的6.13亿元，将削弱盈利持续改善的判断。",
+     "forecast": {
+      "metric": "T.net_profit",
+      "period": "2026-12-31",
+      "low": 20.5,
+      "high": 23.5,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察2026年全年毛利率能否守住前三季度的改善成果。若全年毛利率较前三季度的7.58%明显滑落，甚至跌破2025年全年的6.41%，将表明成本压力无法有效传导，削弱高质量增长逻辑。",
+     "forecast": {
+      "metric": "T.gross_margin",
+      "period": "2026-12-31",
+      "low": 7.2,
+      "high": 8.0,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察2026年全年经营活动现金流净额能否扭转单季同比负增长并重回增长轨道。若全年经营现金流低于2025年全年的37.99亿元，现金流与利润背离的风险将被进一步证实。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 42.0,
+      "high": 52.0,
+      "confidence": 75
+     }
+    }
+   ]
+  },
+  {
+   "report_id": 90,
+   "code": "688578.SH",
+   "created_at": "2026-11-04T15:41:03+08:00",
+   "stance": "现在分批",
+   "stance_trigger": null,
+   "stance_calc": {
+    "add_trigger": {
+     "metric": "T.core_profit",
+     "period": "2026-12-31",
+     "op": ">=",
+     "value": 28.8
+    }
+   },
+   "checkpoints": [
+    {
+     "text": "观察全年收入及产品结构。若末季营业收入同比继续弱于第三季度33.58%，同时对伏美替尼的依赖没有减轻，将削弱增长持续性判断；增长企稳及新产品贡献提升则支持后续批次。",
+     "forecast": {
+      "metric": "T.revenue",
+      "period": "2026-12-31",
+      "low": 68.5,
+      "high": 71.5,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察扣非盈利能否继续兑现。如果全年毛利率弱于前三季度94.89%，销售费用率又高于36.60%，且扣非增长明显放缓，将削弱现有业务足以支撑买入的判断；单纯研发进展不能替代经营验证。",
+     "forecast": {
+      "metric": "T.core_profit",
+      "period": "2026-12-31",
+      "low": 27.5,
+      "high": 30,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察经营现金是否继续覆盖利润，并核实其他应付款构成。如果现金转弱、应收重新积累，同时应付款继续增加，应降低对盈利质量的信任，而不是因为估值更低继续加仓。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 30,
+      "high": 34,
+      "confidence": 60
+     }
+    }
+   ]
+  },
+  {
+   "report_id": 86,
+   "code": "300750.SZ",
+   "created_at": "2026-11-04T14:02:26+08:00",
+   "stance": "等证据",
+   "stance_trigger": {
+    "metric": "T.op_cash",
+    "period": "2026-12-31",
+    "op": ">=",
+    "value": 1000
+   },
+   "stance_calc": {
+    "trigger": {
+     "metric": "T.op_cash",
+     "period": "2026-12-31",
+     "op": ">=",
+     "value": 1000
+    }
+   },
+   "checkpoints": [
+    {
+     "text": "观察全年经营现金流能否摆脱第三季度14.09亿元的低位，并同时核对销售收款、预付款和供应商付款。若恢复主要依赖延后付款，或发出商品未转为验收及回款，将削弱“压力只是阶段性”的解释。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 880,
+      "high": 1100,
+      "confidence": 60
+     }
+    },
+    {
+     "text": "观察全年利润能否保持增长，同时以第三季度毛利率20.69%为边际复核基线，核查扣非表现、产品结构和税费分担。若毛利率继续下降且扣非增速进一步放缓，即使归母利润仍增长，也会削弱正常盈利修复假设。",
+     "forecast": {
+      "metric": "T.net_profit",
+      "period": "2026-12-31",
+      "low": 850,
+      "high": 930,
+      "confidence": 75
+     }
+    }
+   ]
+  },
+  {
+   "report_id": 88,
+   "code": "002946.SZ",
+   "created_at": "2026-11-04T14:11:20+08:00",
+   "stance": "等证据",
+   "stance_trigger": {
+    "metric": "T.op_cash",
+    "period": "2026-12-31",
+    "op": ">=",
+    "value": 15.1
+   },
+   "stance_calc": {
+    "trigger": {
+     "metric": "T.op_cash",
+     "period": "2026-12-31",
+     "op": ">=",
+     "value": 15.1
+    }
+   },
+   "checkpoints": [
+    {
+     "text": "观察全年归母与扣非利润是否同步改善，并拆解毛利、销售费用和税负。上年第四季度归母利润仅1.08亿元，不能仅凭较高同比判定经营重新加速；若增长主要依靠低基数或损失减少，而核心毛利继续承压，将削弱当前判断。",
+     "forecast": {
+      "metric": "T.net_profit",
+      "period": "2026-12-31",
+      "low": 8.1,
+      "high": 8.8,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察全年经营现金流能否恢复至上年15.10亿元水平，并核对回款、应付账款与资本开支。若现金流低于上年且偿债后借款回升，现金支持分红与去杠杆的判断将减弱；不能把延后付款造成的现金改善当作回款质量提升。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 14.5,
+      "high": 16.2,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "核验转债实际兑付或转股、兑付后现金及银行借款，以及H股发行状态。若只是债务期限或工具替换，不能认定净债务同步下降；若发行落地，应重算每股盈利和分红基础。"
+    }
+   ]
+  },
+  {
+   "report_id": 166,
+   "code": "600938.SH",
+   "created_at": "2026-11-15T11:53:21+08:00",
+   "stance": "等价格",
+   "stance_trigger": null,
+   "stance_calc": {},
+   "checkpoints": [
+    {
+     "text": "观察全年累计归母净利润，并拆分末季油价、产量和减值贡献；若落在预测区间以下且源于持续经营恶化，应下调正常化盈利。",
+     "forecast": {
+      "metric": "T.net_profit",
+      "period": "2026-12-31",
+      "low": 1420,
+      "high": 1600,
+      "confidence": 75
+     }
+    },
+    {
+     "text": "观察全年累计经营现金流及应收增长是否收敛；若现金流低于预测区间，且应收增速继续快于营业总收入，应降低对现金转化和分红支撑的判断。",
+     "forecast": {
+      "metric": "T.op_cash",
+      "period": "2026-12-31",
+      "low": 2380,
+      "high": 2650,
+      "confidence": 60
+     }
+    },
+    {
+     "text": "核对年报减值资产、可收回金额和关键假设；若继续出现重大减值，且显示项目长期现金创造能力下降，应进一步压低正常化利润。"
+    }
+   ]
+  }
+ ]
+}
