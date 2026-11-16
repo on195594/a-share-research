@@ -153,11 +153,16 @@ def test_unsafe_config_files_fail_without_echoing_content(tmp_path,monkeypatch,c
     path=private_config(tmp_path)
     if variant=='public': path.chmod(0o644)
     elif variant=='symlink':
-        target=path;path=tmp_path/'link.json';path.symlink_to(target)
+        target=path
+        path=tmp_path/'link.json'
+        path.symlink_to(target)
     elif variant=='symlink-parent':
-        parent=tmp_path/'linked';parent.symlink_to(tmp_path,target_is_directory=True);path=parent/'client.json'
+        parent=tmp_path/'linked'
+        parent.symlink_to(tmp_path,target_is_directory=True)
+        path=parent/'client.json'
     elif variant=='fifo':
-        path=tmp_path/'fifo';cli.os.mkfifo(path,0o600)
+        path=tmp_path/'fifo'
+        cli.os.mkfifo(path,0o600)
     elif variant=='directory': path=tmp_path
     elif variant=='missing': path=tmp_path/'missing'
     elif variant=='relative': path='relative-client.json'
@@ -174,3 +179,22 @@ def test_unsafe_config_files_fail_without_echoing_content(tmp_path,monkeypatch,c
 def test_cli_rejects_overflow_and_duplicate_arguments(payload,monkeypatch):
     monkeypatch.setattr(cli,'request',lambda *args:pytest.fail('must not connect'))
     assert cli.main(['call','fixture.read','--json',payload])==1
+
+
+@pytest.mark.parametrize(('status', 'body', 'exit_code'), [
+    (409, b'{"ok":false,"error":{"code":"policy_activation_changed","message":"asr_secret"}}', 20),
+    (409, b'{"ok":false,"error":{"code":"conflict","message":"policy_activation_changed"}}', 1),
+    (503, b'{"ok":false,"error":{"code":"policy_activation_changed"}}', 1),
+    (409, b'{"ok":false,"error":{"code":"policy_activation_changed","code":"conflict"}}', 1),
+    (409, b' ' * 4097 + b'{"ok":false,"error":{"code":"policy_activation_changed"}}', 1),
+    (409, b'bad asr_secret', 1),
+])
+def test_activation_changed_has_only_bounded_whitelisted_exit_protocol(monkeypatch, capsys, status, body, exit_code):
+    monkeypatch.setenv('ASHARE_TOKEN', 'asr_secret')
+    class Opener:
+        def open(self, req, timeout):
+            raise urllib.error.HTTPError(req.full_url, status, 'asr_secret', {}, io.BytesIO(body))
+    monkeypatch.setattr(cli.urllib.request, 'build_opener', lambda *args: Opener())
+    assert cli.main(['call', 'policy.monitor', '--json', '{}']) == exit_code
+    output = capsys.readouterr()
+    assert output.out == '' and 'asr_secret' not in output.err

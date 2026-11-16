@@ -10,7 +10,7 @@ import uuid
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError, save_json, tool
+from ashare_tools import ToolsError, policy_receipt, save_json, tool
 
 STATE = Path(os.environ.get('ASHARE_DAILY_BRIEF_STATE', Path.home() / '.local/state/ashare-daily-brief/state.json'))
 
@@ -45,7 +45,7 @@ def check() -> tuple[str, str, int]:
                 raise ToolsError('尚无与实装一致的生效政策')
             saved['pending'] = dict(request_id='hermes-daily-' + uuid.uuid4().hex, expected_activation_id=active['id'])
             save_json(STATE, saved)
-        receipt = tool('policy.daily_brief', saved['pending'])
+        receipt = policy_receipt('policy.daily_brief', saved, STATE, call=tool)
         try:
             if (receipt['mode'] != 'service_daily_brief_capture'
                     or receipt['request_id'] != saved['pending']['request_id']

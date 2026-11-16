@@ -18,9 +18,10 @@ import urllib.request
 class ClientError(ValueError):
     """Safe error message for the CLI."""
 
-    def __init__(self, message, *, status=None):
+    def __init__(self, message, *, status=None, code=None):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -85,6 +86,20 @@ def base_url(value):
 def http_error(error):
     """Translate bounded, known service codes without exposing raw error contents."""
     with error:
+        if error.code == 409:
+            try:
+                raw = error.read(4097)
+                if len(raw) > 4096:
+                    raise ValueError
+                body = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant,
+                                  parse_float=finite_float)
+                if (isinstance(body, dict) and body.get('ok') is False
+                        and isinstance(body.get('error'), dict)
+                        and body['error'].get('code') == 'policy_activation_changed'):
+                    return ClientError('生效政策已变化；原请求确定未写入评估', status=409,
+                                       code='policy_activation_changed')
+            except (ValueError, UnicodeError, RecursionError, OSError):
+                pass
         if not 500 <= error.code < 600:
             return ClientError(f'服务拒绝请求（HTTP {error.code}），请检查凭据、权限与参数', status=error.code)
         message = '工具服务暂不可用，请检查服务状态'
@@ -324,7 +339,8 @@ def main(argv=None):
             return 0
     except ClientError as exc:
         print(str(exc), file=sys.stderr)
-        return 1
+        # Dedicated exit status; old CLI/service failures remain ambiguous (1).
+        return 20 if exc.code == 'policy_activation_changed' else 1
 
 
 if __name__ == '__main__':

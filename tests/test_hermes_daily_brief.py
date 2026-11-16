@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta
 import fcntl
+import json
 
 import pytest
 
@@ -119,3 +120,22 @@ def test_state_write_failure_does_not_send_brief(client, source, monkeypatch, ca
     captured = capsys.readouterr()
     assert captured.out == '' and 'private-file' not in captured.err
     assert client.load_state()['pending'] is not None
+
+
+def test_certain_activation_change_recollects_with_new_durable_uuid(client, source, monkeypatch):
+    original = dict(request_id='daily-before-release', expected_activation_id=3)
+    client.STATE.write_text(json.dumps(dict(schema_version=1, pending=original)))
+    calls = []
+    def tool(name, args):
+        calls.append((name, deepcopy(args)))
+        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        assert client.load_state()['pending'] == args
+        if args['request_id'] == original['request_id']:
+            raise client.ToolsError('certain', code='policy_activation_changed')
+        return dict(mode='service_daily_brief_capture', request_id=args['request_id'], activation_id=4,
+                    input=deepcopy(source), result=daily_evaluation.evaluate(source, source['risk_policy']))
+    monkeypatch.setattr(client, 'tool', tool)
+    output, error, status = client.check()
+    assert status == 0 and not error and output
+    assert len(calls) == 3 and calls[-1][1]['expected_activation_id'] == 4
+    assert client.load_state()['pending'] is None

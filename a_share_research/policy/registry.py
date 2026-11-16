@@ -11,9 +11,10 @@ from a_share_research.policy import identity
 
 
 class PolicyError(ValueError):
-    def __init__(self, message, status=409):
+    def __init__(self, message, status=409, *, code=None):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 def _authorize(conn, principal, *, owner=False):

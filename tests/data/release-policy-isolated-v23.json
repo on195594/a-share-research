@@ -1,0 +1,107 @@
+{
+  "scope": "isolated_empty_v23_only",
+  "production_acceptance": false,
+  "policy_activation_and_orchestration": "covered separately by local registry and simulated Docker tests",
+  "reports": {
+    "f480507": {
+      "images": {
+        "web": "sha256:eee2776cf64058f98c48705acf57d7e16f8c738983bcb22655eb513c8d7d90a5",
+        "worker": "sha256:daeffca6dca991130f1f9fd24dedf4ef3523d8e2a3c3984c8b4dcb81491456aa"
+      },
+      "read_compatibility": {
+        "ok": false,
+        "reason": "image_probe_failed",
+        "scope": "read_only",
+        "images": {
+          "web": {
+            "ok": false,
+            "reason": "external_acquisition_unsupported",
+            "image": "sha256:eee2776cf64058f98c48705acf57d7e16f8c738983bcb22655eb513c8d7d90a5"
+          },
+          "worker": {
+            "ok": false,
+            "reason": "external_acquisition_unsupported",
+            "image": "sha256:daeffca6dca991130f1f9fd24dedf4ef3523d8e2a3c3984c8b4dcb81491456aa"
+          }
+        }
+      },
+      "tools": {
+        "image_schema": 22,
+        "ready": {
+          "http": 503,
+          "body": {
+            "status": "not-ready",
+            "mode": "account-shadow",
+            "schema_version": 23,
+            "database_ready": false,
+            "paused": false,
+            "in_flight": 0
+          }
+        },
+        "paused_ready": {
+          "http": 503,
+          "body": {
+            "status": "not-ready",
+            "mode": "account-shadow",
+            "schema_version": 23,
+            "database_ready": false,
+            "paused": true,
+            "in_flight": 0
+          }
+        }
+      }
+    },
+    "cb9a035": {
+      "images": {
+        "web": "sha256:4be180c5c3e0ca2dd8ed64e2d51ea8afaee730a49ee658d782bd6f004f493eff",
+        "worker": "sha256:a6c253c874f6c80feb2bcfd0c3567edfcdc61e0384b3e467be0e58df94889cd3"
+      },
+      "read_compatibility": {
+        "ok": true,
+        "reason": "read_compatible",
+        "scope": "read_only",
+        "images": {
+          "web": {
+            "ok": true,
+            "reason": "read_compatible",
+            "image": "sha256:4be180c5c3e0ca2dd8ed64e2d51ea8afaee730a49ee658d782bd6f004f493eff",
+            "account_state": false,
+            "source_mode": null
+          },
+          "worker": {
+            "ok": true,
+            "reason": "read_compatible",
+            "image": "sha256:a6c253c874f6c80feb2bcfd0c3567edfcdc61e0384b3e467be0e58df94889cd3",
+            "account_state": false,
+            "source_mode": null
+          }
+        }
+      },
+      "tools": {
+        "image_schema": 23,
+        "ready": {
+          "http": 200,
+          "body": {
+            "status": "ready",
+            "mode": "account-shadow",
+            "schema_version": 23,
+            "database_ready": true,
+            "paused": false,
+            "in_flight": 0
+          }
+        },
+        "paused_ready": {
+          "http": 503,
+          "body": {
+            "status": "not-ready",
+            "mode": "account-shadow",
+            "schema_version": 23,
+            "database_ready": true,
+            "paused": true,
+            "in_flight": 0
+          }
+        }
+      }
+    }
+  }
+}

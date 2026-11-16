@@ -106,7 +106,8 @@ def test_cli_passes_the_explicit_initial_recovery_option(monkeypatch, tmp_path):
     monkeypatch.setattr(deploy.os, 'umask', lambda value: 0o077)
     deploy.main()
     assert calls == [(('target', tmp_path/'proof'),
-                      dict(with_tools=True, allow_config=True, initial_recovery='baseline'))]
+                      dict(with_tools=True, allow_config=True, initial_recovery='baseline', approval_path=None,
+                           policy_not_applicable=False, plan_policy=False))]
 
 
 def test_initial_preparation_before_pause_and_stopped_migration_before_start(initial):
@@ -203,3 +204,18 @@ def test_initial_option_cannot_override_existing_deployment_or_configuration_gua
         deploy.deploy('revision', state.evidence, initial_recovery='baseline',
                       with_tools=with_tools, allow_config=allow_config)
     assert not commands(state, 'stop') and not commands(state, 'up')
+
+
+def test_initial_compatible_reader_without_policy_gate_never_resumes(initial, monkeypatch):
+    state = initial(failure='preflight')
+    def refuse(images, frozen, **kwargs):
+        assert kwargs['restoring'] is True
+        assert images['tools'] == 'recovery-worker'
+        raise RuntimeError('required policy status unknown')
+    monkeypatch.setattr(deploy, 'policy_gate', refuse)
+    with pytest.raises(RuntimeError, match='policy status unknown'):
+        release(state)
+    assert state.paused and not any(state.running.values())
+    assert ('control', 'resume') not in state.events
+    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
+    assert checkpoint['status'] == 'held' and checkpoint['phase'] == 'recovery-held'

@@ -178,3 +178,45 @@ def test_disclosure_notice_shows_detail_and_review_action(advisor, reason, label
         assert '当前未持仓：无需处理持仓' in text
         assert '复核是否减仓' not in text
     assert '%' not in text and '卖出比例' not in text
+
+
+def test_opportunity_rebind_preserves_seen_until_success(advisor, monkeypatch, prompts):
+    original = dict(request_id='advisor-before-release', expected_activation_id=3)
+    advisor.OPPORTUNITY_STATE.write_text(json.dumps(dict(schema_version=1, seen=['old-key'], pending=original)))
+    calls = []
+    def tool(name, args):
+        calls.append((name, deepcopy(args)))
+        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        assert advisor.read_opportunity_state()['seen'] == ['old-key']
+        assert advisor.read_opportunity_state()['pending'] == args
+        if args['request_id'] == original['request_id']:
+            raise advisor.AdvisorError('certain', code='policy_activation_changed')
+        return dict(mode='service_monitor_capture', request_id=args['request_id'], activation_id=4,
+            capture_context={'capture_finished_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()},
+            result={'review_prompts': deepcopy(prompts)})
+    monkeypatch.setattr(advisor, 'tool', tool)
+    assert advisor.opportunities()
+    assert len(calls) == 3 and calls[-1][1]['expected_activation_id'] == 4
+    assert advisor.read_opportunity_state()['pending'] is None
+
+
+def test_disclosure_scan_still_finishes_when_tools_opportunity_phase_is_paused(advisor, monkeypatch):
+    original = dict(request_id='opportunity-before-pause', expected_activation_id=7)
+    advisor.OPPORTUNITY_STATE.write_text(json.dumps(dict(schema_version=1, seen=['keep-seen'], pending=original)))
+    web_calls = []
+    monkeypatch.setattr(advisor, 'holdings', lambda: ['688578'])
+    def call(method, path, body=None, **kwargs):
+        web_calls.append(path)
+        if path == '/api/subscriptions': return {}
+        if path.startswith('/api/scan-requests/'):
+            return dict(version='research-v1', request_id=path.rsplit('/',1)[-1], scan_id=1)
+        return dict(version='research-v1', id=1, status='done', notify=[{}], summary={},
+                    requested_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat())
+    monkeypatch.setattr(advisor, 'call', call)
+    monkeypatch.setattr(advisor, 'render_scan', lambda *a: 'disclosure-scan-result')
+    def paused(*a): raise advisor.AdvisorError('工具服务已暂停；原请求保留')
+    monkeypatch.setattr(advisor, 'tool', paused)
+    output = advisor.scan()
+    assert 'disclosure-scan-result' in output and '检查未完成' in output and '暂停' in output
+    assert '/api/scans/1' in web_calls and advisor.read_scan_state()['pending'] is None
+    assert advisor.read_opportunity_state() == dict(schema_version=1, seen=['keep-seen'], pending=original)

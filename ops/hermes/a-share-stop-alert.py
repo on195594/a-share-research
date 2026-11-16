@@ -11,7 +11,7 @@ import uuid
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError, save_json, tool
+from ashare_tools import ToolsError, policy_receipt, save_json, tool
 
 STATE = Path(os.environ.get('ASHARE_STOP_ALERT_STATE', Path.home() / '.local/state/ashare-stop-alert/state.json'))
 
@@ -66,7 +66,7 @@ def check() -> tuple[str, str, int]:
             saved['pending'] = dict(request_id='hermes-stop-' + uuid.uuid4().hex,
                 expected_activation_id=activation['id'], previous_state=saved['state'])
             save_json(STATE, saved)
-        receipt = tool('policy.stop_alert', saved['pending'])
+        receipt = policy_receipt('policy.stop_alert', saved, STATE, call=tool)
         try:
             if (receipt['mode'] != 'service_stop_alert_capture'
                     or receipt['request_id'] != saved['pending']['request_id']

@@ -30,7 +30,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError as AdvisorError, save_json, tool
+from ashare_tools import ToolsError as AdvisorError, policy_receipt, save_json, tool
 from advisor_budget import BudgetError, run_bounded
 
 ENV = Path(os.environ.get("A_SHARE_ADVISOR_ENV", Path.home() / ".config/a-share-advisor/runtime.env"))
@@ -394,7 +394,7 @@ def _opportunities(public_base: str) -> str:
         state['pending'] = dict(request_id='hermes-advisor-' + uuid.uuid4().hex,
                                 expected_activation_id=activation['id'])
         save_opportunity_state(state)
-    saved = tool('policy.monitor', state['pending'])
+    saved = policy_receipt('policy.monitor', state, OPPORTUNITY_STATE, call=tool)
     try:
         if (saved['mode'] != 'service_monitor_capture' or saved['request_id'] != state['pending']['request_id']
                 or saved['activation_id'] != state['pending']['expected_activation_id']):

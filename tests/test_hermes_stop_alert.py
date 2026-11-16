@@ -137,3 +137,25 @@ def test_failed_state_commit_does_not_print_or_lose_pending(client, monkeypatch,
     output = capsys.readouterr()
     assert output.out == '' and 'private-path' not in output.err
     assert client.load_state()['pending'] is not None
+
+
+def test_certain_activation_change_preserves_levels_and_uses_durable_replacement(client, monkeypatch):
+    original = dict(request_id='before-release', expected_activation_id=3,
+                    previous_state=dict(date='2026-11-04', levels={'600519': 'near'}))
+    client.STATE.write_text(json.dumps(dict(schema_version=1, state=original['previous_state'], pending=original)))
+    calls = []
+    def tool(name, args):
+        calls.append((name, deepcopy(args)))
+        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        assert client.load_state()['pending'] == args
+        assert args['previous_state'] == original['previous_state']
+        if args['request_id'] == original['request_id']:
+            raise client.ToolsError('certain', code='policy_activation_changed')
+        return dict(mode='service_stop_alert_capture', request_id=args['request_id'], activation_id=4,
+                    input={'previous_state': args['previous_state'], 'now': client.datetime.current.isoformat()},
+                    result=dict(status='no_alerts', exit_code=0, stdout='', stderr='', state=args['previous_state'], alerts=[]))
+    monkeypatch.setattr(client, 'tool', tool)
+    assert client.check() == ('', '', 0)
+    assert len(calls) == 3 and calls[-1][1]['expected_activation_id'] == 4
+    assert client.load_state()['state'] == original['previous_state']
+    assert len(list(client.STATE.parent.glob('*.rejected-*.json'))) == 1

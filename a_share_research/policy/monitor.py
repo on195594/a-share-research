@@ -125,8 +125,8 @@ def _run(conn, principal, database, request_id, request, collect, evaluate, *, c
         saved=_existing(conn,principal,request_id,request)
         if saved is not None: return saved
         activation=registry._current(conn)
-        if activation is None or activation['id']!=request['expected_activation_id']:
-            raise registry.PolicyError('生效政策已变化或尚未启用，请先读取当前指针')
+        if activation is None:
+            raise registry.PolicyError('生效政策尚未启用，请先读取当前指针')
         manifest=registry._version(conn,activation['identity'])
         try: identity.check_installed(manifest)
         except identity.IdentityError:
@@ -134,6 +134,12 @@ def _run(conn, principal, database, request_id, request, collect, evaluate, *, c
         source=_source(conn,database.resolve().parent)
         if source['mode']=='ledger' and manifest['parameters'].get('account_scope')!=source['watermark']['account_scope']:
             raise registry.PolicyError('生效政策的账户范围与账本绑定不一致',409)
+        if activation['id']!=request['expected_activation_id']:
+            previous = conn.execute('SELECT id FROM policy_activations WHERE id=?',
+                                    (request['expected_activation_id'],)).fetchone()
+            changed = previous is not None and request['expected_activation_id'] < activation['id']
+            raise registry.PolicyError('生效政策指针不匹配，未保存评估',
+                                       code='policy_activation_changed' if changed else None)
     started=db.now()
     bundle=collect(database,manifest['parameters'],source)
     try:
@@ -148,10 +154,22 @@ def _run(conn, principal, database, request_id, request, collect, evaluate, *, c
         registry._authorize(conn,principal)
         saved=_existing(conn,principal,request_id,request)
         if saved is not None: return saved
-        if registry._current(conn)!=activation:
-            raise registry.PolicyError('采集期间生效政策改变，未保存评估，请重新发现当前指针')
         if _source(conn,database.resolve().parent)!=source:
             raise registry.PolicyError('采集期间账户来源改变，未保存评估，请重新采集')
+        latest = registry._current(conn)
+        if latest != activation:
+            # A missing or uninstalled pointer is not a safe rebinding signal.
+            if latest is not None:
+                try:
+                    latest_manifest = registry._version(conn, latest['identity'])
+                    identity.check_installed(latest_manifest)
+                except identity.IdentityError:
+                    raise registry.PolicyError('当前代码与生效政策身份不一致') from None
+                if (source['mode'] == 'ledger'
+                        and latest_manifest['parameters'].get('account_scope') != source['watermark']['account_scope']):
+                    raise registry.PolicyError('生效政策的账户范围与账本绑定不一致')
+            raise registry.PolicyError('采集期间生效政策改变，未保存评估，请重新发现当前指针',
+                                       code='policy_activation_changed' if latest is not None else None)
         cursor=conn.execute('INSERT INTO policy_evaluations '
             '(identity,activation_id,created_at,created_by,request_id,input_hash,result_hash,input,result,capture_context,capture_context_hash) '
             'VALUES (?,?,?,?,?,?,?,?,?,?,?)',

@@ -295,21 +295,67 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-工具只处理应用镜像切换：核对提交与镜像源码/读取权限、现有容器及 Compose 配置；以实际运行镜像建立 `rollback-$release_code` 标签；空闲检查（研究任务、批次、扫描与外部取证）→ 暂停受理并复查 → 备份巡检 → 切换 → 本机网页与 worker Pi 离线预检 → 完整性巡检。worker 预检结果保存为 `worker-preflight.json`，失败走同一应用回退流程。成功后只保留最近 3 份发布备份（[K4](docs/research-accumulation.md#k4-存储保留针对-p1-后半)），并删除比当前镜像及最近两级 `rollback-*` 目标更早的 web/worker 镜像标签（较新但未发布的构建不动，删除失败只记入 `manifest.json` 的 `pruned_images`）；失败时仅在旧镜像通过读取兼容检查后恢复原应用，保留数据、证据、全部备份和镜像，不自动恢复数据库。无关的文档未提交改动不阻断发布，应用/部署文件未提交则拒绝。配置、凭据变更和旧镜像跑不了新结构的迁移需要单独安排回退，不使用此工具；旧镜像可在新结构上照常运行的迁移，经当次授权后可走本工具，随新镜像启动执行，回退只换应用镜像。工具的表指纹比较都在迁移之前，不证明迁移后数据守恒，迁移发布须另外复查。
+### 发布、批准与暂停完成
 
-业务表指纹只在本次纳入的全部服务停止后比较；恢复受理与后台后允许正常任务/估值写入，再以一致读事务做完整性巡检。`MODEL_ID` 与 `MODEL_REASONING` 分别记录，模型与推理强度未变时不追加模型配置检查或研究调用。
+发布与 `--complete-held` 共用宿主标准库 `flock`（`.git/ashare-deploy.lock`），并发调用直接拒绝。先核对 main/HEAD、镜像源码、运行服务、Compose 配置与空闲；已有 tools 自动纳入，未知暂停不接管。**默认 required**：缺表、缺激活、未知状态、坏输出、异常或超时都失败；仅明确从未启用政策的纯研究实例可指定 `--policy-not-applicable`，实际出现政策时仍拒绝。旧镜像不能调用既有政策 API 时明确失败，不将探针缺失当“不适用”。
 
-发布备份保留原 `backup-pre-<提交>-<时间>.db` 入口，同时生成同名 `.bundle/` 完整证据包；两份数据库独立存储，文件哈希一致。清理旧备份时先核对包的完整性及其与 `.db` 的归属，再成对清理；发现额外文件、损坏或归属不符时保留并报告。发布失败仍保留所有备份，不自动恢复数据库。已有 tools 容器自动纳入发布。部署先通过私有控制 socket 暂停新请求并排空，再停止服务、备份和切换；新进程读取持久暂停标记，数据库就绪、worker 预检、容器配置和完整性检查通过后才恢复 tools 受理。已被其他操作暂停的服务不会被本次发布接管。恢复受理的回执丢失时，回退前会重新排空，排空失败则不替换进程。切换后失败会先停止写入者，对当时数据库、PDF、账户证据和资产侧文件制作私有副本，再以原 web、worker 镜像分别运行禁网、只读的兼容检查；旧代码必须读懂实际账户来源、政策回执和采集上下文，不能仅凭数据库版本号或 `/ready` 判断。结果保存在发布证据目录的 `rollback-compatibility.json`，副本在 `rollback-probe/`。检查失败、超时或无法完成时保留当前镜像、停服及 tools 暂停状态，不删首次新增的 tools 容器、不恢复受理；须依据报告核对副本并准备兼容应用，不能用恢复旧数据库绕过。通过后才清理本次新增 tools 容器或让已有 tools 随 worker 回退，账本不回滚。此门禁只验证读取。
+切换前冻结前驱 activation、全部原参数和目标镜像 ID；候选 identity 在目标镜像内构建，摘要记录代码/uv.lock、rules、guides 差异及参数是否相等。参数逐项原样复用（包括 account_scope、source、field_sources、confirmed_at、confirmation_ref、有效期），不因“参数没变”或持有 Token 推断批准。身份范围没有缩减，历史指南、政策与评估不重写。
 
-已启用政策服务时，镜像就绪与政策实装一致是两项检查：应用代码参与政策身份，升级或回退后 `policy.current.installed` 可能为 false，新计算会拒绝，已有请求仍可查回原回执。所有者须按[政策本地入口](a_share_research/tools/README.md#完整政策身份生效指针与固定输入重放影子入口)，用核对后的参数在目标镜像下登记身份并追加生效指针；回退同样适用。发布工具不代替所有者切换政策，也不改写既存回执与旧周期参数。
+若需要新 identity，先用同一固定入口生成**只读计划**（证据目录须新建）：
 
-已完成的发布如需手动回退至兼容基线（见[当前部署](docs/implementation-plan.md#当前部署)的 `rollback-*` 标签），必须保持新账本 `data/app.db` 为唯一事实来源，绝不恢复旧库或旧 Skills 写入：
+```bash
+uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目录>" --plan-policy
+```
 
-1. 核对 worker 空闲后，经 tools 控制 socket 暂停受理并等待在途清零：`docker compose --profile tools exec -T tools python -m a_share_research.tools.control pause --socket /run/ashare-tools/control.sock --timeout 30`（核对返回 `{"paused": true, "in_flight": 0}`）。
-2. 停止服务：`docker compose --profile tools stop -t 30 web worker && docker compose --profile tools stop -t 60 tools`。
-3. 以目标回退镜像对当前数据副本执行只读兼容核对（`python -c 'from pathlib import Path; from a_share_research import rollback; print(rollback.assess({"web":"a-share-research-web:<目标>","worker":"a-share-research-worker:<目标>"}, Path("/home/lin/a-share-research-data/app.db"), Path("<私有证据目录>")))'`），不通过则停服排查。
-4. 将 `a-share-research-{web,worker}:latest` 重新打标签到目标回退镜像并启动：`docker compose --profile tools up -d --no-build --no-deps web worker tools`。
-5. 按上文政策本地入口在目标镜像下以原参数登记并激活新指针，然后恢复受理：`docker compose --profile tools exec -T tools python -m a_share_research.tools.control resume --socket /run/ashare-tools/control.sock`，核对 `tools` `/ready`、`web` 登录态/页面与 worker 预检。
+核对 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数后，由所有者用私有编辑器准备**本次**批准 JSON：属主常规文件、0600、不经过 shell Token 变量或 argv、不提交仓库。字段示例（占位符不是实际值）：
+
+```json
+{
+  "identity": "policy:<本次精确目标>",
+  "expected_id": 10,
+  "request_id": "<本次稳定且唯一的请求键>",
+  "reason": "<本次批准原因>",
+  "owner_token": "<临时 owner 凭据>",
+  "rollback": {
+    "identity": "policy:<冻结前驱的完整 identity>",
+    "request_id": "<本次稳定的恢复请求键>",
+    "reason": "<本次明确批准恢复冻结前驱的原因>"
+  }
+}
+```
+
+`rollback` 整项可不提供；不提供表示**未批准新激活提交后的恢复激活**。恢复镜像必须实际实现冻结的旧 identity，不能从当前宿主源码推断。批准文件不能从历史授权复制，凭据只经子进程 stdin 临时传递，不写日志、发布证据、镜像或 `.env.tools`。计划不暂停/切换/激活，也不是 held 证据。实际调用在原固定命令后追加 `--approval "<0600 批准文件>"`；无批准而切前可知 identity 不匹配时直接拒绝，不制造停服。已匹配、有效且适用账户时不追加激活，不需要 owner 凭据。
+
+正常顺序：**pause 并排空 → 停服务、备份及停服表指纹核对 → 切换/启动且保持 pause → 网页、worker 离线预检、容器配置、数据库与完整性检查 → 必要时在实际 worker 容器内调用既有 register/activate → 回读 latest → 政策门禁 → resume → tools ready**。绝不先 resume 再从 HTTP 查询 current。门禁要求实际镜像正确，当前 activation/identity 等于本次预期、installed 严格为 true、参数仍有效、已应用且账户范围匹配。activate 回执丢失只重试同一 request_id/expected_id；历史幂等成功不代表 latest，不改 expected_id 绕过 CAS。
+
+证据沿用私有发布目录：`manifest.json`、`release-state.json`（阶段、held/recovered/succeeded、实际服务/image、政策、时间与安全原因）、`policy-observed.json`、`policy-gate.json`、`policy-committed.json`、预检/完整性与回退报告。进程被杀仍保留最后的 held 检查点和持久暂停；marker **没有 release_id，不证明归属**。无关文档未提交不阻断，应用/部署文件未提交仍拒绝。
+
+### 回退前置条件与 held 恢复
+
+任何未通过门禁的路径都不得恢复 tools 受理或报发布成功；包括普通回退、首次迁移兼容恢复、同镜像与显式完成。回退成功记录 recovered，但原发布仍以失败退出码结束。恢复受理的回执丢失时，先再次 pause/drain；排空失败不替换或移除进程。
+
+完整回退前置条件：
+
+1. 冻结并核对实际旧镜像/配置，worker 空闲、tools 暂停且 in_flight=0；停所有本次服务后保存当前数据库、PDF、账户证据和资产侧文件的私有副本。
+2. 原 web、worker 镜像分别禁网、只读运行 `rollback.assess`；须理解实际来源、全部政策回执/采集上下文与现行 schema。**页面可读不等于全栈可回退**；还须实际 tools 的严格版本就绪、原运行/完整性检查和政策门禁。报告在 `rollback-compatibility.json` 与 `rollback-probe/`。
+3. 新激活前失败，仅在旧镜像读兼容及实际政策门禁均通过后恢复。新激活已提交后，只有本次明确批准冻结旧 identity、且 latest 仍为本次激活，才追加 CAS 恢复激活；其他所有者已切换、无批准或任何核验失败均保持暂停。禁止 UPDATE/DELETE 激活或恢复旧 DB。
+4. v23 下 `f480507`（v22）不是可用全栈回退基线：隔离空白库实测其 rollback_probe 拒绝、tools /ready 为 503。优先准备 `cb9a035` 等 v23 候选；本轮只验证空白 v23 副本，**未验证当前生产数据或生产回退**。不得关闭 schema 检查或降库版本。
+5. 配置/迁移须另获授权。首次 v9→当前版仍用 `--with-tools --allow-config --initial-recovery <兼容构建>`，保留迁移守恒与专用兼容恢复；迁移未验证则停服，不把恢复旧数据库作为回退。
+
+若工具失败留在 paused，操作者核对证据后可明确选择这一份 held 目标：
+
+```bash
+uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>" \
+  --approval "<原本次批准文件，如仍需完成追加激活>"
+```
+
+已精确匹配时可省略 approval。此入口只接受本工具的 held 证据与冻结目标，重新核对实际服务、Compose/环境配置、完整性、空闲、持久 marker、paused=true/in_flight=0 和同一政策门禁；**不重新切镜像、不启动已停服务、不接管未知暂停、不接受新目标/新 expected_id**。证据或状态偏离就拒绝；没有可匹配的 held 检查点须另行人工核对并作新的明确决定，不直接复制 resume 命令。
+
+只有完整就绪成功后才清理旧备份/镜像：保留最近 3 份 `backup-pre-*.db` 和独立同名 `.bundle/`，成对核对归属后清理；镜像保留当前与最近两级回退。失败保留备份、镜像及全部后续业务写入；首次迁移与显式完成保留证据，不自动清理。暂停只覆盖 tools 受理；独立 Web/worker 披露扫描仍按原合同运行，不能据此声称全站停写或自动补发错过的定时任务。
+
+### 服务端与宿主客户端同步顺序
+
+先合并修复并按影响范围验证 → 构建并准备 v23 兼容回退镜像 → 只读计划/本次精确批准 → 另行获准后发布服务端 → 核对同一修复版本的 CLI（退出码协议）→ 同步 helper 与三个调用方脚本（保持原状态）→ 再按原调度观察。新服务端 + 旧 CLI/客户端只会安全保留 pending；新 helper/调用方 + 旧服务端或 CLI 不支持专用码时也保留 pending，不猜中文错误或清空状态。CLI 的原成功 JSON 协议不变。应用发布**不会自动安装** `ops/hermes/`；宿主安装、配置/凭据处理及恢复定时任务须作为独立步骤，详见[客户端说明](ops/hermes/README.md)。本轮代码修复与隔离测试不代表生产已上线，不执行上述生产步骤。
 
 最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
 

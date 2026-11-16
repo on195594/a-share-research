@@ -464,6 +464,8 @@ def invoke(ctx: Context, name: str, arguments: dict) -> dict:
     except policies.PolicyError as exc:
         code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments',
                 503: 'unavailable', 504: 'timeout'}[exc.status]
+        if exc.status == 409 and exc.code == 'policy_activation_changed':
+            code = exc.code
         raise ToolError(code, str(exc), exc.status) from None
     except ledger.LedgerError as exc:
         code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments'}[exc.status]

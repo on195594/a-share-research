@@ -59,6 +59,12 @@ def test_capture_receipt_binds_identity_source_inputs_and_is_idempotent(setup):
     assert context['capture_finished_at']>=context['capture_started_at']
     assert run(setup)==result
     assert len(captured)==1
+    registry.activate(conn,principals['owner'],manifest['identity'],expected_id=activation['id'],
+                      request_id='next-after-receipt',reason='receipt lookup must precede pointer check')
+    assert run(setup)==result and len(captured)==1
+    with pytest.raises(registry.PolicyError) as changed: run(setup, 'no-original-receipt')
+    assert changed.value.code == 'policy_activation_changed'
+    assert len(captured)==1
     assert registry.evaluation(conn,principals['assistant'],result['id'])==result
     assert registry.inspect(conn)==[]
 
@@ -86,8 +92,9 @@ def test_invalid_source_or_access_fails_before_collection(setup,case):
     if case=='asset-file':
         # Explicitly malformed transport input; it is never used as financial evidence.
         (path.parent/'account-snapshot.json').write_text('{}')
-    with pytest.raises(registry.PolicyError):
+    with pytest.raises(registry.PolicyError) as error:
         run(setup,expected=999 if case=='wrong-pointer' else None,role='research' if case=='unauthorized' else 'assistant')
+    assert error.value.code is None
     assert captured==[]
     assert conn.execute('SELECT COUNT(*) FROM policy_evaluations').fetchone()[0]==0
 
@@ -96,23 +103,24 @@ def test_no_activation_never_collects(setup):
     _,conn,_,_,_,_,captured=setup
     conn.execute('DROP TRIGGER policy_activations_no_delete')
     conn.execute('DELETE FROM policy_activations')
-    with pytest.raises(registry.PolicyError,match='尚未启用'):
+    with pytest.raises(registry.PolicyError,match='尚未启用') as error:
         run(setup)
+    assert error.value.code is None
     assert captured==[]
 
 
-@pytest.mark.parametrize('change',['policy','mirror','revocation'])
+@pytest.mark.parametrize('change',['policy','mirror','revocation','both'])
 def test_changes_during_capture_reject_without_receipt(setup,monkeypatch,change):
     path,conn,principals,manifest,activation,bundle,_=setup
     def capture(*_):
         other=sqlite3.connect(path,isolation_level=None)
         try:
-            if change=='policy':
+            if change in ('policy', 'both'):
                 registry.activate(other,principals['owner'],manifest['identity'],expected_id=activation['id'],
                                   request_id='during-capture',reason='concurrent owner choice')
-            elif change=='mirror':
+            if change in ('mirror', 'both'):
                 other.execute("UPDATE account_source SET updated_at='changed-during-capture'")
-            else:
+            elif change == 'revocation':
                 other.execute('DELETE FROM api_keys WHERE id=?',(principals['assistant'].key_id,))
         finally: other.close()
         return deepcopy(bundle)
@@ -120,6 +128,7 @@ def test_changes_during_capture_reject_without_receipt(setup,monkeypatch,change)
     with pytest.raises(registry.PolicyError) as error:
         run(setup)
     assert error.value.status==(403 if change=='revocation' else 409)
+    assert error.value.code == ('policy_activation_changed' if change == 'policy' else None)
     assert conn.execute('SELECT COUNT(*) FROM policy_evaluations').fetchone()[0]==0
     assert not conn.in_transaction
 
@@ -279,3 +288,17 @@ def test_real_capture_process_with_explicit_empty_account_needs_no_market_reques
     assert bundle['quotes']=={} and bundle['industry_result'] is None
     assert bundle['portfolio_value'] is None
     assert path.read_bytes()==before
+
+
+def test_changed_machine_code_survives_tools_mapping_but_no_other_conflict(setup):
+    from a_share_research.tools.registry import Context, ToolError, invoke
+    path, conn, principals, manifest, activation, _, _ = setup
+    registry.activate(conn, principals['owner'], manifest['identity'], expected_id=activation['id'],
+                      request_id='new-pointer', reason='test exact machine rejection')
+    ctx = Context(conn, path, principals['assistant'], account_shadow_enabled=True)
+    with pytest.raises(ToolError) as caught:
+        invoke(ctx, 'policy.monitor', dict(request_id='no-receipt', expected_activation_id=activation['id']))
+    assert caught.value.status == 409 and caught.value.code == 'policy_activation_changed'
+    with pytest.raises(ToolError) as caught:
+        invoke(ctx, 'policy.monitor', dict(request_id='unknown-pointer', expected_activation_id=999))
+    assert caught.value.code == 'conflict'

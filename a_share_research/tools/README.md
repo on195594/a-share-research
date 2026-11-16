@@ -45,6 +45,8 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 进程内最多两个调用。运维经私有 Unix socket（目录 0700、socket 0600）调用 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`；普通 HTTP 凭据没有暂停/恢复入口。pause 先拒绝新发现/调用，再等待在途请求归零，超时仍保持暂停。`.tools-paused` 标记在数据目录保存并跨重启生效；resume 核对并移除标记后恢复受理，未知文件或符号链接不会被覆盖/删除。
 
+发布的受理恢复还必须经过 [deploy 政策门禁](../../README.md#发布批准与暂停完成)：实际镜像内读取当前政策、installed=true、参数有效且账户适用，required 的缺失/异常一律保持暂停。register/activate 仍只有 owner 本地入口，允许在 tools pause 内执行；不新增 HTTP 激活工具、授权数据库或编排服务。凭据经临时 0600 批准输入和 stdin 传递，不能写入 `.env.tools`。暂停 marker 没有 release_id；未知暂停不接管，工具留下的 held 才能由操作者明确选择 `--complete-held` 重核。
+
 Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。三个功能开关 `ASHARE_TOOLS_EXTERNAL_ENABLED`、`ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED`、`ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认均为 0，仅接受 0/1，复核须同时启用外部研究。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产启用仍需整段验收。
 
 ## 外部研究提交暂存（开发入口，默认关闭）
@@ -187,7 +189,7 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 `bundle` 包含 local、quotes、portfolio_value、industry_result、now、risk_policy、denominator_evidence、account_scope_required、research_result；数据类以对应 JSON 字段表示，now 必须带时区，缺失和降级语义沿用 v0。`policy.evaluation.pack` 可把已受信内存输入转为 JSON；它不反序列化可执行内容。重放同请求幂等，参数/输入变化冲突，写入失败整体回滚。
 
-结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，所有者网页 `/policy` 只读展示登记、参数与账户来源；旧生产监控和持仓来源仍沿用切换前入口，所有生产评估入口统一留存与宿主激活尚待接入。镜像与明确绑定账本的采集见下节。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
+结果明确标记 `mode=supplied_input_replay`：仅证明给定输入的程序结果，不证明输入是真实/当前账户或行情，也不参与收益比较。当前生效指针用于新指南与重放归属，所有者网页 `/policy` 只读展示登记、参数与账户来源；服务化监控/止损/日报的统一留存与宿主恢复协议见下节，实际生产安装状态以实施计划为准。镜像与明确绑定账本的采集见下节。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
 
 
 ## 服务端监控采集（镜像或明确绑定账本，开发入口）
@@ -235,5 +237,13 @@ ledger 采集校验资金与成本重放、政策期初、编号、活动周期�
 子进程接收生效身份保存的参数，ledger 时另带已核对的来源上下文，使用单独的空私有配置，不加载宿主 risk-policy.json，不继承模型或 owner 令牌；监控和日报仅接收 tools 的行情令牌，用于在缺失或过期时刷新行业分类缓存。采集 HOME 固定为数据库目录，行业缓存保存在该目录的 `.cache/a_stock_lib/`，沿用 Provider 的 30 天有效期，容器重建后保留。实际资产分母与其账户范围、记录时间和缺失估值时点原样保留；参数范围不匹配或尚未生效时拒绝。未取得行情、行业缓存过期和旧财务缓存等缺口沿用 monitor-v1 的 data_status/逐项缺口，不把采集调用成功等同于证据完整。
 
 采集不持写锁。返回后再次核对当前 Key、生效指针和账户来源，任何漂移都拒绝保存；通过才原子追加评估及来源上下文。正常结果标为 `mode=service_monitor_capture`，context 包括来源哈希/更新时间/水位、请求和采集起止时间；ledger 的 context 版本为 2，另带账户版本、状态摘要及资产来源。旧回执只核验保存的结构和哈希，不要求仍等于当前账户。它表示服务端执行了采集，不保证每项行情都最新；必须继续查看原输入的来源时点及结果缺口。
+
+### 跨激活 pending 的确定拒绝协议
+
+`policy.monitor`、`policy.stop_alert`、`policy.daily_brief` 共用 `_run`：始终先查 `(created_by,request_id)` 的既有回执，跨激活仍原样返回；请求键用于不同输入仍是普通 conflict。只有确认没有回执、原 expected_activation_id 是已存在的前驱且 current 确实改变、未写评估时，返回 **HTTP 409 / error.code=`policy_activation_changed`**；采集后事务重检同样适用。无激活、未知指针、身份不匹配、来源/账户范围冲突、权限错误均不冒用该码。原成功包格式不变。
+
+错误体仍为 `{ok:false,error:{code,message}}`。`scripts/ashare.py` 只对白名单的 409、非重复键且 ≤4096 字节错误体识别该码，专用退出码 **20**；错误 stdout 为空，不透传原始错误体，中文 stderr 不作为协议。503 paused/busy、超时、坏包、通用 409 与旧服务均按原非零失败处理。MCP 的旧失败语义不变，不承诺自动转接。
+
+Hermes helper 只将 CLI 退出码 20 映射为同名 `ToolsError.code`，三消费者每轮最多封存/转接一次；状态、原回执优先级、过期与通知边界见 [宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。服务端先部署，CLI、helper、调用方再同步；回退到旧服务/CLI 时安全保留 pending，不能批量清空状态或回退旧对象不兼容的脚本。应用镜像发布不安装宿主客户端。
 
 同一 Key 的同 request_id 返回第一次已提交回执，不重新采集；希望获得新观察须使用新 request_id。并发重复请求可能各自取一次行情，但只保存并返回第一份回执。request_id 与不同操作/生效指针复用会冲突。子进程 25 秒超时后清理自身进程组，失败无成功回执；HTTP/CLI 超时后可用原请求查询重试，不假定已写入。`policy.evaluation` 同样可读取这类结果，`policy.replay` 不会把同请求的服务采集冒充为用户提供输入的重放。
