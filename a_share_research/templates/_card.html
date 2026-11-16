@@ -28,11 +28,15 @@
 {% endif %}
 {% endmacro %}
 
+{% macro disclosure_check(check) -%}
+<p class="card-note" data-disclosure-check="{{ check.ref }}"><strong{% if check.outcome in ('deviated', 'missed', 'undetermined') %} class="flag"{% endif %}>{{ {'inside': '区间内', 'deviated': '偏离', 'met': '已达到', 'missed': '未达到', 'undetermined': '未定'}[check.outcome] }}{% if check.direction %}（{{ {'above': '高于', 'below': '低于'}[check.direction] }}）{% endif %}</strong>{% if check.reason %} · {{ check.reason }}{% endif %} · 观测值 {% set low = check.observed.low %}{% set high = check.observed.high %}{% if low is none and high is none %}未披露{% elif low == high %}<span class="num">{{ low }}</span> {{ check.unit }}{% elif low is none %}≤ <span class="num">{{ high }}</span> {{ check.unit }}{% elif high is none %}≥ <span class="num">{{ low }}</span> {{ check.unit }}{% else %}<span class="num">[{{ low }}, {{ high }}]</span> {{ check.unit }}{% endif %} · {{ {'forecast': '业绩预告', 'express': '业绩快报', 'periodic': '定期报告'}[check.source] }} · <span class="date">公告 <time datetime="{{ check.announced }}">{{ check.announced }}</time></span></p>
+{%- endmacro %}
+
 {# `start` keeps claim links and numbering right when the first item is shown above the fold
    (`.after-first` starts the drawn counter at 2; the page CSP allows no inline style). #}
-{% macro listing(items, section, report_id, cls, start=0) %}
+{% macro listing(items, section, report_id, cls, start=0, checks=none) %}
 <ol class="card-list {{ cls }}{{ ' after-first' if start == 1 }}"{% if start %} start="{{ start + 1 }}"{% endif %}>
-{% for t in items %}{% set i = start + loop.index0 %}<li><a class="plain" href="/reports/{{ report_id }}?claim={{ section }}:{{ i }}#claim-{{ section }}-{{ i }}">{{ t }}</a></li>{% endfor %}
+{% for t in items %}{% set i = start + loop.index0 %}<li><a class="plain" href="/reports/{{ report_id }}?claim={{ section }}:{{ i }}#claim-{{ section }}-{{ i }}">{{ t }}</a>{% if checks and section ~ '[' ~ i ~ ']' in checks %}{{ disclosure_check(checks[section ~ '[' ~ i ~ ']']) }}{% endif %}</li>{% endfor %}
 </ol>
 {% endmacro %}
 
@@ -69,7 +73,7 @@
   <details class="card-fold">
     <summary>{% if c.risks[1:] %}其余 {{ c.risks | length - 1 }} 条风险与反证{% endif %}{% if c.risks[1:] and c.checkpoints %} · {% endif %}{% if c.checkpoints %}{{ c.checkpoints | length }} 个检查点{% endif %}</summary>
     {% if c.risks[1:] %}{{ listing(c.risks[1:], 'risks', c.id, 'risk', 1) }}{% endif %}
-    {% if c.checkpoints %}<p class="card-label">下期检查点</p>{{ listing(c.checkpoints, 'checkpoints', c.id, '') }}{% endif %}
+    {% if c.checkpoints %}<p class="card-label">下期检查点</p>{{ listing(c.checkpoints, 'checkpoints', c.id, '', checks=c.checks) }}{% endif %}
   </details>
   {% endif %}
   {% else %}{{ failed(c) }}{% endif %}
@@ -93,7 +97,9 @@
     <p><strong>报告时点研究立场：{{ c.stance.action }}</strong></p>
     <p class="card-note">报告日期 {{ c.created_at[:10] if c.created_at else '未记录' }} · 行情截至 {{ c.stance_market_date or '未记录' }}；这是已保存的判断，未按现价更新。</p>
     {% if c.stance.has_prices %}<p>报告收盘价 {{ '%.2f'|format(c.stance.close) }} 元 · 期望回报门槛价 {{ '%.2f'|format(c.stance.hurdle) }} 元{% if c.stance.valid_until %}（原有效期至 {{ c.stance.valid_until }}）{% endif %}。</p>{% endif %}
-    <p class="card-note">“值得继续研究”等研究价值判断与行动立场分别阅读；下方技术价格参考另按其行情日期计算。<a href="/reports/{{ c.id }}#stance">查看立场依据与出处</a></p>
+{% for ref in ('add_trigger', 'trigger') %}{% if ref in c.checks %}{% set check = c.checks[ref] %}
+    <div data-disclosure-trigger="{{ ref }}"><p class="card-note">{{ '后续加仓条件' if ref == 'add_trigger' else '等待证据条件' }}：{{ check.label }} {{ check.period }} {{ check.condition }} {{ check.unit }}</p>{{ disclosure_check(check) }}</div>
+    {% endif %}{% endfor %}    <p class="card-note">“值得继续研究”等研究价值判断与行动立场分别阅读；下方技术价格参考另按其行情日期计算。<a href="/reports/{{ c.id }}#stance">查看立场依据与出处</a></p>
   </section>{% endif %}
   {% if c.dims %}
   <section class="card-section" aria-labelledby="checkup-{{ c.code }}">
@@ -120,7 +126,7 @@
   {% if c.checkpoints %}
   <section class="card-section">
     <h2 class="card-label">下期检查点 <span class="muted">{{ c.checkpoints | length }} 个</span></h2>
-    {{ listing(c.checkpoints, 'checkpoints', c.id, '') }}
+    {{ listing(c.checkpoints, 'checkpoints', c.id, '', checks=c.checks) }}
   </section>
   {% endif %}
   {% else %}{{ failed(c) }}{% endif %}

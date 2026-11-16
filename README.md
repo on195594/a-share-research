@@ -105,7 +105,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `GET /api/research/budget` | 模型调用上限（循环保护而非金额预算） |
 | `GET /api/schema` | 正文 JSON Schema、判断契约版本与各视图字段清单（Bearer 鉴权） |
 | `GET /api/reports?code=600519` | 最近 100 份报告的身份、时间、状态 |
-| `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡；`current.valuation` 按最新收盘日滚动测算 |
+| `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡，含逐条目最新生效版本的披露判定 `checks`；`current.valuation` 按最新收盘日滚动测算 |
 | `GET /api/cards` | `research-v1` 信封：`cards` 为扫描范围（订阅＋最近冻结批次 L5）的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |
 | `GET /api/search?q=集采&code=&section=&history=&page=` | 跨公司内容检索：空白分隔最多 5 个词（AND、字面匹配），默认只查每家公司最新一份通过复核的非纠错报告，`history=true` 查全部；章节 `risks/checkpoints/answer/business/financial/stance/prior_status`；返回 `items`（`report_id`、`code`、`name`、`created_at`、`period`、`location`、`text`）、`page`、`more`，每页 20 条。结果是待核查线索，不含结论词和事后表现 |
 | `GET /api/reports/{report_id}` | `research-v1` 信封、核验结果、回答、来源页、表格及计算输入；GET 不刷新数据 |

@@ -6,7 +6,7 @@ from decimal import Decimal, DecimalException, ROUND_HALF_UP
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, service, stance as stances
-from a_share_research import stock_codes
+from a_share_research import disclosure_checks, stock_codes
 
 PAGE_SIZE = 20
 RECENT_FAILURE_DAYS = 30
@@ -631,7 +631,7 @@ CARD_KEYS = ('T.revenue_yoy', 'T.core_profit_yoy', 'M.pe_ttm', 'M.dv_ttm')
 CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
 
 
-def card(report, body: dict, last_passed=None) -> dict:
+def card(report, body: dict, last_passed=None, *, checks: list[dict] | None = None) -> dict:
     """One company's investment card from saved data; no market fetch or valuation recomputation.
 
     A report that failed review shows no verdict, summary, risks, checkpoints or figures. The last
@@ -650,6 +650,17 @@ def card(report, body: dict, last_passed=None) -> dict:
                 if isinstance(i, dict) and isinstance(i.get('text'), str) and i['text'].strip()] if passed else []
 
     table = {r['id']: r for r in body.get('table') or [] if isinstance(r, dict) and isinstance(r.get('id'), str)}
+    items = {item['ref']: item for item in disclosure_checks.items(body)}
+    check_views = {}
+    for check in checks or []:
+        if not passed or check['ref'] not in items:
+            continue
+        item = items[check['ref']]
+        row = table.get(check['metric'], {})
+        check_views[check['ref']] = check | {
+            'unit': row.get('unit', ''), 'label': row.get('label', check['metric']),
+            'condition': (f"{item['op'].replace('>=', '≥').replace('<=', '≤')} {item['value']:g}"
+                          if item['kind'] != 'forecast' else None)}
     periods = {p for k, r in table.items() if k.startswith('T.') for p in r.get('values') or {}}
     latest = max(periods) if periods else None
     prior = (f"{int(latest[:4]) - 1}{latest[4:]}"
@@ -680,6 +691,7 @@ def card(report, body: dict, last_passed=None) -> dict:
             'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
             'consensus': (body.get('valuation_calc') or {}).get('consensus') if passed else None,
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
+            'checks': check_views,
             'open_questions': body.get('open_questions', []) if passed else [],
             'boundary': stances.on_boundary(body.get('valuation_calc')) if passed else None,
             'flip_distance': stances.flip_distance(body.get('valuation_calc')) if passed else None,

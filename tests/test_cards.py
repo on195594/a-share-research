@@ -166,3 +166,42 @@ def test_failed_web_card_does_not_present_cautions_as_a_passed_judgment(macro):
     assert '边界立场' not in html and '复核认为尚未答完' not in html
     assert all(q['problem'] not in html for q in report['body']['open_questions'])
 
+
+
+@pytest.mark.parametrize('outcome,direction,bounds,source,reason,expected', [
+    ('inside', None, ('0.2691', '0.3341'), 'forecast', None, '区间内'),
+    ('deviated', 'above', ('0.2691', None), 'forecast', None, '偏离（高于）'),
+    ('deviated', 'below', (None, '0.3341'), 'forecast', None, '偏离（低于）'),
+    ('met', None, ('3.657832', '3.657832'), 'express', None, '已达到'),
+    ('missed', None, ('0.2758243538', '0.2758243538'), 'periodic', None, '未达到'),
+    ('undetermined', None, (None, None), 'forecast', '预告未给出数值区间', '未定'),
+])
+def test_disclosure_display_variants(outcome, direction, bounds, source, reason, expected):
+    from a_share_research import disclosure_checks
+    capture = json.loads((ROOT / 'tests/data/disclosure-checks.json').read_text())
+    report = RECORDS[39]
+    body = deepcopy(report['body'])
+    # Explicit display-only variants: report 86's legacy trigger and 603960 forecast
+    # bounds, 605016 express point, 603960 income point; outcomes exercise UI labels,
+    # not investment evidence or the pure judge (covered by test_disclosure_checks).
+    legacy = next(r for r in capture['reports'] if r['report_id'] == 86)
+    body['stance'] = {'action': legacy['stance'], 'trigger': legacy['stance_trigger']}
+    body['stance_calc'] = legacy['stance_calc']
+    item = next(i for i in disclosure_checks.items(body) if i['ref'] == 'trigger')
+    check = {**item, 'observed': dict(zip(('low', 'high'), bounds)), 'source': source,
+             'announced': '2026-01-23', 'outcome': outcome, 'direction': direction, 'reason': reason}
+    card = reading.card(report, body, checks=[check])
+    html = str(CARD.full_card(card))
+    assert 'data-disclosure-trigger="trigger"' in html
+    assert '等待证据条件' in html and '1000' in html and expected in html
+    assert {'forecast': '业绩预告', 'express': '业绩快报', 'periodic': '定期报告'}[source] in html
+    if reason:
+        assert reason in html and '未披露' in html
+    elif bounds[0] is None:
+        assert '≤ <span class="num">0.3341</span> 亿元' in html
+    elif bounds[1] is None:
+        assert '≥ <span class="num">0.2691</span> 亿元' in html
+    elif bounds[0] == bounds[1]:
+        assert f'<span class="num">{bounds[0]}</span> 亿元' in html
+    failed = reading.card(dict(report, passed=0), body, checks=[check])
+    assert 'data-disclosure-' not in str(CARD.full_card(failed))

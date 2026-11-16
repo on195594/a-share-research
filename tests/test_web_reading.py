@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from support.templates import ENV, TEMPLATES
+from test_company_card import server  # noqa: F401 — in-process HTTP fixture
 from a_share_research.evidence import report_source_view
 from markupsafe import escape
 
@@ -284,3 +285,33 @@ def test_noncritical_flip_sensitivity_folds_while_critical_stays_open():
     assert ' open>' in rendered(critical)
     assert ' open>' not in rendered(noncritical)
 
+
+
+def test_stock_page_checks_stay_with_checkpoint_and_trigger(server, monkeypatch):  # noqa: F811
+    from a_share_research import reading, service, web
+    from support.templates import ENV
+    from test_scans import disclosure_replay, run_scan
+
+    conn, client, url, *_ = server
+    code, body, source = disclosure_replay.__wrapped__(conn)
+    monkeypatch.setattr(web, 'current_session', lambda request: 'offline-owner')
+    before = client.get(url + f'/stock/{code}')
+    assert before.status_code == 200
+    assert 'data-disclosure-' not in before.text
+    run_scan(conn, source)
+    response = client.get(url + f'/stock/{code}')
+    assert response.status_code == 200
+    html = response.text
+    checkpoint = re.search(r'<li>(?:(?!</li>).)*?data-disclosure-check="checkpoints\[0\]".*?</li>', html, re.S)[0]
+    assert body['checkpoints'][0]['text'] in checkpoint
+    assert '偏离（低于）' in checkpoint and '[0.2691, 0.3341]' in checkpoint
+    assert '亿元' in checkpoint and '业绩预告' in checkpoint and '2026-01-23' in checkpoint
+    trigger = re.search(r'<div data-disclosure-trigger="add_trigger">.*?</div>', html, re.S)[0]
+    assert '后续加仓条件' in trigger and '≥ 45 亿元' in trigger and '未达到' in trigger
+    assert 'data-disclosure-check="checkpoints[0]"' not in trigger
+    assert html.count('data-disclosure-check=') == 2
+    # Both card macros share the same item-local rendering, including the folded list.
+    report = reading.report(conn, service.company_card(conn, code)['report_id'])
+    card = reading.card(report, body, checks=service.card_checks(conn, report['id']))
+    compact = str(ENV.get_template('_card.html').module.summary_card(card))
+    assert 'data-disclosure-check="checkpoints[0]"' in compact and '偏离（低于）' in compact

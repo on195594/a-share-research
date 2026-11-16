@@ -201,6 +201,16 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
     return result
 
 
+def card_checks(conn: sqlite3.Connection, report_id: int) -> list[dict]:
+    """Public effective disclosure checks; storage identities stay internal."""
+    from a_share_research import disclosure_checks, scans
+
+    fields = ('ref', 'kind', 'metric', 'period', 'source', 'announced',
+              'observed', 'outcome', 'direction', 'reason')
+    return [{key: check[key] for key in fields}
+            for check in disclosure_checks.latest(scans.stored_checks(conn, report_id))]
+
+
 def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = None) -> dict:
     """A2 read-only projection of the latest reviewed, non-feedback company research."""
     if not stock_codes.KEY_RE.fullmatch(code):
@@ -246,6 +256,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
     return {"version": VERSION, "code": code, "name": row['name'], "report_id": row["id"], "period": row["period"],
             "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
             "status": "待复核" if pending else "有效",
+            "checks": card_checks(conn, row["id"]),
             **{key: body.get(key) for key in report_body.CARD_FIELDS},
             # Four card fields are reshaped rather than copied from the stored body.
             "risks": [item["text"] for item in body.get("risks", [])[:3]],

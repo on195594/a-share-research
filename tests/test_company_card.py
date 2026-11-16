@@ -12,6 +12,31 @@ from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, 
 from test_advisor_sources import CALENDAR
 
 
+@pytest.fixture
+def server(tmp_path, monkeypatch):
+    """Exercise the HTTP app in process, without a listener or uvicorn subprocess."""
+    from fastapi.testclient import TestClient
+    from a_share_research import api_keys
+    from test_service_delivery import saved
+
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'http://localhost')
+    monkeypatch.setenv('SESSION_SECRET', 'isolated-test-only-not-a-real-secret')
+    monkeypatch.setenv('DEV_LOGIN', '1')
+    from a_share_research import web
+
+    conn = db.connect(tmp_path / 'app.db')
+    monkeypatch.setattr(web, 'conn', conn)
+    monkeypatch.setattr(web, 'settings', web.Settings.from_env())
+    run, report = saved(conn)
+    _, failed = saved(conn, passed=False)
+    queued = service.submit(conn, '600519', 'lost-http-response', question='现金流')
+    token = api_keys.create(conn, 'isolated-http-test')
+    with TestClient(web.app, base_url='http://localhost',
+                    headers={'Authorization': 'Bearer ' + token}) as client:
+        yield conn, client, 'http://localhost', run, report, failed, queued
+    conn.close()
+
+
 def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
     conn = db.connect(tmp_path / 'card.db')
     load(conn)
@@ -229,11 +254,12 @@ def test_card_http_authentication_read_only_and_404(server):
     conn, client, url, _run, report, _failed, _queued = server
     before = conn.total_changes
     route = url + '/api/companies/600519/card'
-    assert client.get(route, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
-    assert client.get(url + '/api/companies/603606/card', timeout=3).status_code == 404
-    assert client.get(url + '/api/companies/bad/card', timeout=3).status_code == 422
-    response = client.get(route, timeout=3)
+    assert client.get(route, headers={'Authorization': 'Bearer invalid'}).status_code == 401
+    assert client.get(url + '/api/companies/603606/card').status_code == 404
+    assert client.get(url + '/api/companies/bad/card').status_code == 422
+    response = client.get(route)
     assert response.status_code == 200
+    assert response.json()['checks'] == []
     assert response.json()['report_id'] == report and response.json()['version'] == 'research-v1'
     assert conn.total_changes == before
 
@@ -242,10 +268,10 @@ def test_cards_http_authentication_version_and_payload(server):
     conn, client, url, *_ = server
     scans.replace_subscriptions(conn, ['600519', '603606'], catalog=CATALOG)
     route = url + '/api/cards'
-    assert client.get(route, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
-    assert client.get(route, headers={'X-Research-Version': 'unsupported'}, timeout=3).status_code == 400
+    assert client.get(route, headers={'Authorization': 'Bearer invalid'}).status_code == 401
+    assert client.get(route, headers={'X-Research-Version': 'unsupported'}).status_code == 400
     before = list(conn.iterdump())
-    response = client.get(route, timeout=3)
+    response = client.get(route)
     assert response.status_code == 200
     assert response.json() == service.company_cards(conn)
     assert response.json()['missing'] == [{'code': '603606', 'origin': 'external'}]
@@ -324,3 +350,34 @@ def test_unpriced_or_missing_frozen_basis_is_unknown_not_false(tmp_path, calc):
         assert card['valuation_calc']['flip_distance'] is None
         assert current['flip_distance'] is None
     conn.close()
+
+
+def test_card_endpoints_return_only_effective_public_checks(server):
+    from test_scans import disclosure_replay
+    from a_share_research import disclosure_checks
+
+    conn, client, url, *_ = server
+    # Reuse T2's documented cross-company/period variants and real persistence path.
+    code, _, source = disclosure_replay.__wrapped__(conn)
+    run_scan(conn, source)
+
+    class Revision(CapturedSources):
+        def disclosures(self, code, periods):
+            raw = super().disclosures(code, periods)
+            # Announcement-date-only revision of captured 603960's forecast.
+            raw['forecast'][0]['ann_date'] = '20260124'
+            return raw
+
+    run_scan(conn, Revision(source.items), '2026-11-01T18:00:00+08:00')
+    report_id = service.company_card(conn, code)['report_id']
+    stored = scans.stored_checks(conn, report_id)
+    assert len(stored) == 4
+    fields = {'ref', 'kind', 'metric', 'period', 'source', 'announced',
+              'observed', 'outcome', 'direction', 'reason'}
+    expected = [{k: c[k] for k in fields} for c in disclosure_checks.latest(stored)]
+    assert len(expected) == 2 and all(c['announced'] == '2026-01-24' for c in expected)
+    single = client.get(url + f'/api/companies/{code}/card').json()
+    multiple = client.get(url + '/api/cards').json()
+    assert single['checks'] == expected
+    assert next(c for c in multiple['cards'] if c['code'] == code)['checks'] == expected
+    assert scans.weekly(conn)['subscriptions'][0]['card']['checks'] == expected
