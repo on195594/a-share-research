@@ -24,7 +24,7 @@ def choice(branch, hid=1, select='legacy', **overrides):
 
 
 def rebase_request(branch, choices=None, **overrides):
-    return analysis_rebase.Rebase.model_validate(dict(choices=choices or [choice(branch)],
+    return analysis.Rebase.model_validate(dict(choices=choices or [choice(branch)],
         evidence_hashes=[branch[3]], reason='Structural mirror reconciliation') | overrides)
 
 
@@ -48,7 +48,7 @@ def test_preview_shows_three_states_on_readonly_connection(branch):
         preview = analysis_rebase.preview(ro, principal, 1)
         assert preview['baseline'] == originals[0]['snapshot']
         assert preview['shadow'] == shadow['snapshot']
-        assert preview['legacy'] == analysis._capture(conn, 1)
+        assert preview['legacy'] == analysis.capture(conn, 1)
         assert preview['legacy_changed'] and preview['shadow_changed']
         assert preview['legacy_hash'] == gate.digest(preview['legacy'])
         assert not ro.in_transaction
@@ -62,19 +62,19 @@ def test_explicit_choice_preserves_history_and_allows_updates_and_projection(bra
     originals = seed(branch)
     shadow = append(branch, request(branch))
     mirror_change(conn)
-    mirrored = analysis._capture(conn, 1)
+    mirrored = analysis.capture(conn, 1)
     legacy = legacy_rows(conn)
     value = rebase_request(branch, [choice(branch, select=select)])
     result = rebase(branch, value)['revisions'][0]
     assert result['source'] == 'legacy_rebase' and result['version'] == 2
     assert result['snapshot'] == (mirrored if select == 'legacy' else shadow['snapshot'])
-    assert analysis_rebase.baseline(conn, 1) == mirrored
+    assert analysis.baseline(conn, 1) == mirrored
     assert analysis.history(conn, principal, 1)['revisions'][:2] == [originals[0], shadow]
     assert legacy_rows(conn) == legacy
     assert analysis.inspect(conn) == []
     continued = append(branch, request(branch, version=2, reason='Structural post-rebase update'))
     assert continued['version'] == 3
-    assert analysis_rebase.baseline(conn, 1) == mirrored
+    assert analysis.baseline(conn, 1) == mirrored
     path = conn.execute('PRAGMA database_list').fetchone()[2]
     ro = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
     try:
@@ -132,7 +132,7 @@ def test_cross_holding_collision_requires_joint_reconciliation(branch):
         rebase(branch, rebase_request(branch, [choice(branch, 2)]))
     result = rebase(branch, rebase_request(branch, [choice(branch, 2), choice(branch, 1)]))
     assert [r['holding_id'] for r in result['revisions']] == [1, 2]
-    assert all(r['snapshot'] == analysis._capture(conn, r['holding_id']) for r in result['revisions'])
+    assert all(r['snapshot'] == analysis.capture(conn, r['holding_id']) for r in result['revisions'])
     assert analysis.inspect(conn) == []
 
 

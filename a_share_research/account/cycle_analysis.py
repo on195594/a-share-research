@@ -74,11 +74,10 @@ def initialize(conn, principal, account_id: str, cycle_id: str, request: Initial
         snapshot = {table: [] for table in analysis.TABLES}
         legacy_id = subject['legacy_holding_id']
         if legacy_id is not None:
-            from a_share_research.account.analysis_rebase import baseline
-            source = analysis._latest(conn, legacy_id)
+            source = analysis.latest_revision(conn, legacy_id)
             if source is None or source['id'] != request.legacy_revision_id:
                 raise ledger.LedgerError('旧周期须明确选择当前分析版本编号')
-            if source['company_key'] != subject['company_key'] or baseline(conn, legacy_id) != analysis._capture(conn, legacy_id):
+            if source['company_key'] != subject['company_key'] or analysis.baseline(conn, legacy_id) != analysis.capture(conn, legacy_id):
                 raise ledger.LedgerError('旧分析身份或基线已变化，须先协调')
             snapshot = json.loads(source['snapshot'])
             if gate.digest(snapshot) != source['snapshot_hash']:
@@ -91,7 +90,7 @@ def initialize(conn, principal, account_id: str, cycle_id: str, request: Initial
             snapshot['holding_tier_state'] = [tier]
         envelope = dict(source='journal_baseline', account_id=account_id, cycle_id=cycle_id, holding_id=hid,
                         company_key=subject['company_key'], initialize=data, snapshot=snapshot)
-        return analysis._insert(conn, subject, 0, None, 'journal_baseline', principal, envelope,
+        return analysis.insert_revision(conn, subject, 0, None, 'journal_baseline', principal, envelope,
                                 request.evidence_hashes, snapshot, account_id=account_id, cycle_id=cycle_id)
 
 
@@ -120,11 +119,11 @@ def update(conn, principal, account_id, cycle_id, request: analysis.Update, evid
         old = conn.execute('SELECT * FROM account_analysis_history WHERE account_id=? AND holding_id=? AND request_hash=?',
                            (account_id, hid, gate.digest(data))).fetchone()
         if old:
-            return analysis._result(old)
+            return analysis.revision_result(old)
         subject, _ = holding(conn, account_id, cycle_id)
         if subject['exit_date'] is not None:
             raise ledger.LedgerError('已关闭持仓周期不能更新分析状态')
-        latest = analysis._latest(conn, hid, account_id=account_id)
+        latest = analysis.latest_revision(conn, hid, account_id=account_id)
         if latest is None:
             raise ledger.LedgerError('尚未建立该账户周期的分析基线', 404)
         if latest['version'] != request.expected_version:
@@ -133,7 +132,7 @@ def update(conn, principal, account_id, cycle_id, request: analysis.Update, evid
         for sha in request.evidence_hashes:
             evidence.verify(evidence_directory, sha)
         analysis.apply_changes(conn, subject, snapshot, request.changes)
-        return analysis._insert(conn, subject, latest['version']+1, latest['id'], 'assistant', principal,
+        return analysis.insert_revision(conn, subject, latest['version']+1, latest['id'], 'assistant', principal,
                                 data, request.evidence_hashes, snapshot, account_id=account_id, cycle_id=cycle_id)
 
 

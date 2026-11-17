@@ -115,6 +115,48 @@ class Update(Value):
         return self
 
 
+class Choice(Value):
+    holding_id: PositiveId
+    expected_version: Annotated[StrictInt, Field(ge=0)]
+    legacy_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+    select: Literal['legacy', 'shadow']
+
+
+class Rebase(Value):
+    choices: list[Choice] = Field(min_length=1)
+    evidence_hashes: list[Text] = Field(min_length=1)
+    reason: Text
+
+    @model_validator(mode='after')
+    def unique_holdings(self):
+        ids = [item.holding_id for item in self.choices]
+        if len(ids) != len(set(ids)):
+            raise ValueError('同批持仓周期不能重复')
+        return self
+
+
+def baseline(conn, holding_id):
+    """Read the most recently acknowledged mirror, preserving the original baseline forever."""
+    row = conn.execute("SELECT source,request,snapshot,request_hash,snapshot_hash FROM main.account_analysis_history WHERE holding_id=? AND account_id=''"
+                       " AND source IN ('legacy_baseline','legacy_rebase') ORDER BY version DESC LIMIT 1",
+                       (holding_id,)).fetchone()
+    if row is None:
+        raise ledger.LedgerError('尚未建立分析基线', 404)
+    try:
+        request, snapshot = json.loads(row[1]), json.loads(row[2])
+        if gate.digest(request) != row[3] or gate.digest(snapshot) != row[4]:
+            raise ValueError
+        if row[0] == 'legacy_baseline':
+            return snapshot
+        parsed = Rebase.model_validate(request['rebase'])
+        choice = next(c for c in parsed.choices if c.holding_id == holding_id)
+        if choice.legacy_hash != gate.digest(request['legacy_snapshot']):
+            raise ValueError
+        return request['legacy_snapshot']
+    except (ValueError, TypeError, KeyError, StopIteration):
+        raise ledger.LedgerError('已确认基线记录损坏，须检查完整性') from None
+
+
 def migrate(conn):
     conn.execute('''CREATE TABLE IF NOT EXISTS account_analysis_history (
         id INTEGER PRIMARY KEY, holding_id INTEGER NOT NULL, company_key TEXT,
@@ -129,12 +171,12 @@ def migrate(conn):
             BEGIN SELECT RAISE(ABORT,'analysis history is append-only'); END''')
 
 
-def _latest(conn, holding_id, *, account_id=""):
+def latest_revision(conn, holding_id, *, account_id=""):
     return conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id=? ORDER BY version DESC LIMIT 1',
                         (holding_id, account_id)).fetchone()
 
 
-def _result(row):
+def revision_result(row):
     return dict(revision_id=row['id'], holding_id=row['holding_id'], company_key=row['company_key'],
                 version=row['version'], parent_id=row['parent_id'], source=row['source'], mode='shadow',
                 actor_key_id=row['actor_key_id'], recorded_at=row['created_at'], request_hash=row['request_hash'],
@@ -142,14 +184,14 @@ def _result(row):
                 **(dict(account_id=row['account_id'],cycle_id=row['cycle_id']) if row['account_id'] else {}))
 
 
-def _holding(conn, holding_id):
+def read_holding(conn, holding_id):
     row = conn.execute('SELECT * FROM holdings WHERE id=?', (holding_id,)).fetchone()
     if row is None:
         raise ledger.LedgerError('持仓周期不存在', 404)
     return row
 
 
-def _capture(conn, holding_id):
+def capture(conn, holding_id):
     result = {}
     for table in TABLES:
         columns = MANIFEST[table]
@@ -158,34 +200,34 @@ def _capture(conn, holding_id):
     return result
 
 
-def _insert(conn, holding, version, parent, source, principal, request, hashes, snapshot, *, account_id="", cycle_id=""):
+def insert_revision(conn, holding, version, parent, source, principal, request, hashes, snapshot, *, account_id="", cycle_id=""):
     cursor = conn.execute('''INSERT INTO account_analysis_history
         (holding_id,company_key,version,parent_id,request_hash,source,actor_key_id,created_at,snapshot_hash,evidence_hashes,request,snapshot,account_id,cycle_id)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (holding['id'], holding['company_key'], version, parent, gate.digest(request), source, principal.key_id,
          db.now(), gate.digest(snapshot), gate.canonical(hashes), gate.canonical(request), gate.canonical(snapshot), account_id, cycle_id))
-    return _result(conn.execute('SELECT * FROM account_analysis_history WHERE id=?', (cursor.lastrowid,)).fetchone())
+    return revision_result(conn.execute('SELECT * FROM account_analysis_history WHERE id=?', (cursor.lastrowid,)).fetchone())
 
 
 def initialize(conn, principal, holding_id: int) -> dict:
     """Capture an exact legacy baseline once, including missing evidence; never reconstruct overwritten history."""
     with db.transaction(conn):
         ledger.authorize(conn, principal)
-        holding = _holding(conn, holding_id)
-        previous = _latest(conn, holding_id)
+        holding = read_holding(conn, holding_id)
+        previous = latest_revision(conn, holding_id)
         if previous:
-            return _result(previous)
-        snapshot = _capture(conn, holding_id)
+            return revision_result(previous)
+        snapshot = capture(conn, holding_id)
         request = {'source': 'legacy_baseline', 'holding_id': holding_id, 'snapshot': snapshot}
-        return _insert(conn, holding, 0, None, 'legacy_baseline', principal, request, [], snapshot)
+        return insert_revision(conn, holding, 0, None, 'legacy_baseline', principal, request, [], snapshot)
 
 
 def current(conn, principal, holding_id: int, *, account_id="") -> dict:
     ledger.authorize(conn, principal)
-    row = _latest(conn, holding_id, account_id=account_id)
+    row = latest_revision(conn, holding_id, account_id=account_id)
     if row is None:
         raise ledger.LedgerError('尚未建立该持仓周期的分析基线', 404)
-    return _result(row)
+    return revision_result(row)
 
 
 def history(conn, principal, holding_id: int, *, after_id: int = 0, limit: int = 100, account_id="") -> dict:
@@ -194,7 +236,7 @@ def history(conn, principal, holding_id: int, *, after_id: int = 0, limit: int =
         raise ledger.LedgerError('历史分页参数无效', 422)
     rows = conn.execute('SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id=? AND id>? ORDER BY id LIMIT ?',
                         (holding_id, account_id, after_id, limit)).fetchall()
-    return {'revisions': [_result(r) for r in rows], 'next_after_id': rows[-1]['id'] if rows else after_id}
+    return {'revisions': [revision_result(r) for r in rows], 'next_after_id': rows[-1]['id'] if rows else after_id}
 
 
 def _one(snapshot, table, identity):
@@ -299,11 +341,11 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
         previous = conn.execute("SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id='' AND request_hash=?",
                                 (holding_id, gate.digest(data))).fetchone()
         if previous:
-            return _result(previous)
-        holding = _holding(conn, holding_id)
+            return revision_result(previous)
+        holding = read_holding(conn, holding_id)
         if holding['exit_date'] is not None:
             raise ledger.LedgerError('已关闭持仓周期不能更新分析状态')
-        latest = _latest(conn, holding_id)
+        latest = latest_revision(conn, holding_id)
         if latest is None:
             raise ledger.LedgerError('尚未建立分析基线', 404)
         if holding['company_key'] != latest['company_key']:
@@ -311,14 +353,13 @@ def update(conn, principal, holding_id: int, request: Update, evidence_directory
         if request.expected_version != latest['version']:
             raise ledger.LedgerError(f"分析状态版本冲突，当前版本 {latest['version']}")
         # A mirror refresh must not silently make a shadow revision refer to another legacy state.
-        from a_share_research.account.analysis_rebase import baseline
-        if baseline(conn, holding_id) != _capture(conn, holding_id):
+        if baseline(conn, holding_id) != capture(conn, holding_id):
             raise ledger.LedgerError('旧分析基线已变化，须先显式核对影子分支')
         for sha in request.evidence_hashes:
             evidence.verify(evidence_directory, sha)
         snapshot = json.loads(latest['snapshot'])
         apply_changes(conn, holding, snapshot, request.changes)
-        return _insert(conn, holding, latest['version'] + 1, latest['id'], 'assistant', principal,
+        return insert_revision(conn, holding, latest['version'] + 1, latest['id'], 'assistant', principal,
                        data, request.evidence_hashes, snapshot)
 
 
@@ -362,7 +403,6 @@ def inspect(conn) -> list[str]:
                 if row['version'] == 0 or parsed.expected_version != row['version'] - 1 or hashes != parsed.evidence_hashes:
                     problems.append(label + '：追加请求版本或证据不一致')
             elif row['source'] == 'legacy_rebase':
-                from a_share_research.account.analysis_rebase import Rebase
                 parsed = Rebase.model_validate(request['rebase'])
                 choice = next((c for c in parsed.choices if c.holding_id == row['holding_id']), None)
                 group = rebases.setdefault(request['rebase_hash'], ({c.holding_id for c in parsed.choices}, set()))

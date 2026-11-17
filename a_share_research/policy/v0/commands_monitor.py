@@ -312,6 +312,323 @@ def _denominator_source(portfolio_value, denominator_evidence) -> str | None:
     )
 
 
+def _check_monitor_holding(
+    holding: dict[str, Any],
+    quote: commands_holdings.PriceQuote | None,
+    *,
+    duplicate_codes: list[str],
+    risk_value: float | None,
+    current: datetime,
+    gaps: list[dict[str, Any]],
+    escalations: list[dict[str, Any]],
+) -> tuple[dict[str, Any], bool, bool, bool, bool, bool]:
+    today = current.date()
+    today_text = today.isoformat()
+    partial = stale = conflicted = trade_requested = False
+    code = holding["code"]
+    required_fields = {
+        "shares": risk_budget.valid_shares(holding["shares"]),
+        "framework": bool(holding["framework"] and holding["framework_confident"]),
+        "stop_loss_15": risk_budget.finite_number(holding["stop_loss_15"])
+        and holding["stop_loss_15"] > 0,
+        "stop_loss_20": risk_budget.finite_number(holding["stop_loss_20"])
+        and holding["stop_loss_20"] > 0,
+    }
+    for field, valid in required_fields.items():
+        if not valid:
+            partial = True
+            _add_gap(gaps, code, field, f"reconcile holding {field}")
+
+    quote_valid = risk_budget.valid_quote(quote, today_text)
+    if quote and quote.conflicted:
+        conflicted = True
+        _add_escalation(
+            escalations, code, "data_conflict", "quote sources conflict"
+        )
+        _add_gap(gaps, code, "quote", "resolve quote source conflict")
+    elif quote and quote.quote_date and quote.quote_date != today_text:
+        stale = True
+        _add_escalation(escalations, code, "quote_gap", "quote is stale")
+        _add_gap(gaps, code, "quote", "refresh the current quote")
+    elif not quote_valid:
+        partial = True
+        _add_escalation(
+            escalations, code, "quote_gap", "quote or timestamp unavailable"
+        )
+        _add_gap(gaps, code, "quote", "retrieve a fresh timestamped quote")
+    current_price = float(quote.price) if quote_valid and quote else None
+
+    risk = commands_holdings.calculate_position_risk(
+        holding["shares"] if required_fields["shares"] and code not in duplicate_codes else None,
+        current_price,
+        holding["stop_loss_20"] if required_fields["stop_loss_20"] else None,
+        risk_value,
+        holding["reference_cost"],
+    )
+    if risk["stop_risk"] is None or (
+        risk_value is not None and risk["stop_risk_pct"] is None
+    ):
+        partial = True
+        _add_gap(gaps, code, "stop_risk", "restore valid risk inputs")
+
+    previous_close = _number(quote.previous_close) if quote else None
+    if previous_close is None or previous_close <= 0:
+        previous_close = None
+        partial = True
+        _add_gap(gaps, code, "previous_close", "retrieve a valid previous close")
+    if not quote_valid:
+        previous_close = None
+    daily_change_pct = (
+        (current_price - previous_close) / previous_close * 100
+        if current_price is not None
+        and previous_close is not None
+        and previous_close > 0
+        else None
+    )
+    industry_change_pct = (
+        quote.industry_change_pct
+        if quote_valid and quote and risk_budget.finite_number(quote.industry_change_pct)
+        else None
+    )
+    if quote_valid and industry_change_pct is None:
+        partial = True
+        _add_gap(
+            gaps,
+            code,
+            "industry_change_pct",
+            "supply a same-day industry comparison",
+        )
+    relative_change_pct = (
+        daily_change_pct - industry_change_pct
+        if daily_change_pct is not None and industry_change_pct is not None
+        else None
+    )
+
+    p3 = {"status": "not_applicable", "reason_code": "stop_loss_20_not_triggered"}
+    if current_price is not None and required_fields["stop_loss_20"]:
+        if current_price <= holding["stop_loss_20"]:
+            _add_escalation(
+                escalations,
+                code,
+                "price_stop_2",
+                "current price reached the stored second stop line",
+                candidate="trade",
+            )
+            existing_defer = next(
+                (
+                    alert
+                    for alert in holding["alerts"]
+                    if alert["reason_code"] == "price_stop2_liquidity_defer"
+                ),
+                None,
+            )
+            try:
+                defer_payload = (
+                    json.loads(
+                        existing_defer["evidence"],
+                        parse_constant=_reject_json_constant,
+                    )
+                    if existing_defer and existing_defer["evidence"]
+                    else None
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                defer_payload = None
+            p3 = risk_gates.liquidity_shock_gate(
+                {
+                    "stop_loss_triggered": True,
+                    "stop_loss_20": holding["stop_loss_20"],
+                    "quote": quote,
+                    "existing_defer": defer_payload,
+                    "now": current,
+                }
+            )
+            if not p3.get("action_eligible"):
+                partial = True
+                _add_gap(
+                    gaps,
+                    code,
+                    "p3_liquidity_gate",
+                    f"complete P3 review: {p3['reason_code']}",
+                )
+            else:
+                trade_requested = True
+    if (
+        current_price is not None
+        and required_fields["stop_loss_15"]
+        and current_price <= holding["stop_loss_15"]
+        and not (
+            required_fields["stop_loss_20"]
+            and current_price <= holding["stop_loss_20"]
+        )
+    ):
+        _add_escalation(
+            escalations,
+            code,
+            "price_stop_1",
+            "current price reached the stored first stop line",
+        )
+    if daily_change_pct is not None and daily_change_pct <= -3:
+        _add_escalation(
+            escalations,
+            code,
+            "daily_drop",
+            f"daily change {daily_change_pct:.2f}% is at or below -3%",
+        )
+    if relative_change_pct is not None and relative_change_pct <= -2:
+        _add_escalation(
+            escalations,
+            code,
+            "relative_underperformance",
+            f"relative change {relative_change_pct:.2f}pts is at or below -2pts",
+        )
+
+    # Route existing Step 4 entrances only; valuation/report evidence is
+    # not in this snapshot and must be reviewed before advancing a tier.
+    tier = holding["tier"]
+    framework = domain.FRAMEWORK_ALIASES.get(holding["framework"])
+    exit_path = tier["exit_path"]
+    tier_gap = None
+    target_pct = None
+    if exit_path is not None or framework in {"A通用", "E消费", "F科技"}:
+        if (
+            exit_path not in {None, "A", "B", "C"}
+            or tier["tier1_status"] not in {"pending", "completed", "exempted"}
+            or tier["tier2_status"] not in {"pending", "completed"}
+            or tier["tier3_status"] not in {"pending", "completed"}
+            or (exit_path is not None and tier["exemption_framework"] is not None)
+        ):
+            tier_gap = "reconcile structured Tier status and entry-time path configuration"
+        elif exit_path == "A":
+            tier_gap = "verify quarterly/interim L3 evidence and three-star timing for path A"
+        elif exit_path == "B":
+            target_pct = tier["exit_target_pct"]
+            if not risk_budget.finite_number(target_pct) or target_pct <= 0:
+                tier_gap = "restore the entry-time path B target"
+        elif tier["tier1_status"] == "pending":
+            target_pct = 25
+        if target_pct is not None and tier_gap is None:
+            reference_cost = holding["reference_cost"]
+            if not risk_budget.finite_number(reference_cost) or reference_cost <= 0:
+                tier_gap = "restore reference_cost for the configured Tier target"
+            elif (
+                current_price is not None
+                and current_price >= reference_cost + reference_cost * target_pct / 100
+            ):
+                _add_escalation(
+                    escalations,
+                    code,
+                    "tier_review_due",
+                    f"{'path ' + exit_path if exit_path else 'Tier1'} price target reached; review Step 4",
+                )
+        if tier_gap is not None:
+            partial = True
+            _add_gap(gaps, code, "tier", tier_gap)
+            _add_escalation(escalations, code, "tier_review_due", tier_gap)
+
+    alert_output = []
+    for alert in holding["alerts"]:
+        due = _due(alert["review_due"], today)
+        alert_output.append({**alert, "review_due_now": due})
+        if due is None:
+            partial = True
+            _add_gap(gaps, code, "alert.review_due", "repair the alert review date")
+        elif due:
+            _add_escalation(
+                escalations,
+                code,
+                "alert_review_due",
+                f"alert {alert['reason_code']} is due",
+            )
+
+    l3, l3_gaps, l3_unresolved = _l3_view(holding, today)
+    for gap in l3_gaps:
+        partial = True
+        _add_gap(gaps, code, "l3", gap)
+    if l3_unresolved:
+        partial = True
+        _add_escalation(
+            escalations,
+            code,
+            "l3_candidate",
+            f"L3 state requires verification ({l3['contract']})",
+        )
+    for condition in l3["conditions"]:
+        if condition.get("review_due"):
+            _add_escalation(
+                escalations,
+                code,
+                "l3_review_due",
+                f"L3 condition {condition['id']} is due",
+                evidence_cadence=condition.get("evidence_cadence", "unspecified"),
+            )
+        if condition["status"] == "watch":
+            _add_escalation(
+                escalations,
+                code,
+                "l3_watch",
+                f"L3 condition {condition['id']} is watch (as_of {condition['as_of']}, "
+                f"next_review {condition['next_review']}); no new risk",
+                evidence_cadence=condition.get("evidence_cadence", "unspecified"),
+            )
+        if condition["status"] == "triggered":
+            candidate = (
+                "trade"
+                if condition.get("valid_for_action")
+                and condition["action"] in {"reduce", "exit"}
+                else "review"
+            )
+            trade_requested = trade_requested or candidate == "trade"
+            _add_escalation(
+                escalations,
+                code,
+                "l3_candidate",
+                f"L3 condition {condition['id']} is triggered",
+                candidate=candidate,
+            )
+
+    quote_output = {
+        "status": (
+            "conflicted"
+            if quote and quote.conflicted
+            else "fresh"
+            if quote_valid
+            else "stale"
+            if quote and quote.quote_date and quote.quote_date != today_text
+            else "unavailable"
+        ),
+        "price": current_price,
+        "quote_date": quote.quote_date if quote else None,
+        "quote_time": quote.quote_time if quote else None,
+        "as_of": quote.quote_as_of if quote else None,
+        "source": quote.source if quote else None,
+        "previous_close": previous_close,
+        "daily_change_pct": daily_change_pct,
+        "industry_change_pct": industry_change_pct,
+        "industry_source": quote.industry_source if quote else None,
+        "industry_as_of": quote.industry_as_of if quote else None,
+        "relative_change_pct": relative_change_pct,
+    }
+    output = {
+        "id": holding["id"],
+        "code": code,
+        "name": holding["name"],
+        "shares": holding["shares"] if required_fields["shares"] else None,
+        "cost_price": holding["cost_price"],
+        "reference_cost": holding["reference_cost"],
+        "framework": holding["framework"],
+        "framework_confident": holding["framework_confident"],
+        "stop_loss_15": _number(holding["stop_loss_15"]),
+        "stop_loss_20": _number(holding["stop_loss_20"]),
+        "quote": quote_output,
+        **risk,
+        "p3_gate": p3,
+        "alerts": alert_output,
+        "l3": l3,
+        "tier": holding["tier"],
+    }
+    return output, quote_valid, partial, stale, conflicted, trade_requested
+
+
 def build_monitor_snapshot(
     local: dict[str, Any],
     quotes: dict[str, commands_holdings.PriceQuote | None],
@@ -329,8 +646,6 @@ def build_monitor_snapshot(
     portfolio_value = portfolio_value if risk_budget.positive_number(portfolio_value) else None
     limits = risk_policy if risk_policy is not None else risk_budget.policy()
     current = now or domain.cst_now()
-    today = current.date()
-    today_text = today.isoformat()
     holdings = local["holdings"]
     escalations: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
@@ -388,315 +703,22 @@ def build_monitor_snapshot(
     valued = 0
     total_market_value = 0.0
     for holding in holdings:
-        code = holding["code"]
-        required_fields = {
-            "shares": risk_budget.valid_shares(holding["shares"]),
-            "framework": bool(holding["framework"] and holding["framework_confident"]),
-            "stop_loss_15": risk_budget.finite_number(holding["stop_loss_15"])
-            and holding["stop_loss_15"] > 0,
-            "stop_loss_20": risk_budget.finite_number(holding["stop_loss_20"])
-            and holding["stop_loss_20"] > 0,
-        }
-        for field, valid in required_fields.items():
-            if not valid:
-                partial = True
-                _add_gap(gaps, code, field, f"reconcile holding {field}")
-
-        quote = quotes.get(code)
-        quote_valid = risk_budget.valid_quote(quote, today_text)
-        if quote and quote.conflicted:
-            conflicted = True
-            _add_escalation(
-                escalations, code, "data_conflict", "quote sources conflict"
+        output, quote_valid, holding_partial, holding_stale, holding_conflicted, holding_trade = (
+            _check_monitor_holding(
+                holding, quotes.get(holding["code"]), duplicate_codes=duplicate_codes,
+                risk_value=risk_value, current=current, gaps=gaps, escalations=escalations,
             )
-            _add_gap(gaps, code, "quote", "resolve quote source conflict")
-        elif quote and quote.quote_date and quote.quote_date != today_text:
-            stale = True
-            _add_escalation(escalations, code, "quote_gap", "quote is stale")
-            _add_gap(gaps, code, "quote", "refresh the current quote")
-        elif not quote_valid:
-            partial = True
-            _add_escalation(
-                escalations, code, "quote_gap", "quote or timestamp unavailable"
-            )
-            _add_gap(gaps, code, "quote", "retrieve a fresh timestamped quote")
-        current_price = float(quote.price) if quote_valid and quote else None
+        )
+        partial = partial or holding_partial
+        stale = stale or holding_stale
+        conflicted = conflicted or holding_conflicted
+        trade_requested = trade_requested or holding_trade
         if quote_valid:
             priced += 1
-
-        risk = commands_holdings.calculate_position_risk(
-            holding["shares"] if required_fields["shares"] and code not in duplicate_codes else None,
-            current_price,
-            holding["stop_loss_20"] if required_fields["stop_loss_20"] else None,
-            risk_value,
-            holding["reference_cost"],
-        )
-        if risk["market_value"] is not None:
+        if output["market_value"] is not None:
             valued += 1
-            total_market_value += risk["market_value"]
-        if risk["stop_risk"] is None or (
-            risk_value is not None and risk["stop_risk_pct"] is None
-        ):
-            partial = True
-            _add_gap(gaps, code, "stop_risk", "restore valid risk inputs")
-
-        previous_close = _number(quote.previous_close) if quote else None
-        if previous_close is None or previous_close <= 0:
-            previous_close = None
-            partial = True
-            _add_gap(gaps, code, "previous_close", "retrieve a valid previous close")
-        if not quote_valid:
-            previous_close = None
-        daily_change_pct = (
-            (current_price - previous_close) / previous_close * 100
-            if current_price is not None
-            and previous_close is not None
-            and previous_close > 0
-            else None
-        )
-        industry_change_pct = (
-            quote.industry_change_pct
-            if quote_valid and quote and risk_budget.finite_number(quote.industry_change_pct)
-            else None
-        )
-        if quote_valid and industry_change_pct is None:
-            partial = True
-            _add_gap(
-                gaps,
-                code,
-                "industry_change_pct",
-                "supply a same-day industry comparison",
-            )
-        relative_change_pct = (
-            daily_change_pct - industry_change_pct
-            if daily_change_pct is not None and industry_change_pct is not None
-            else None
-        )
-
-        p3 = {"status": "not_applicable", "reason_code": "stop_loss_20_not_triggered"}
-        if current_price is not None and required_fields["stop_loss_20"]:
-            if current_price <= holding["stop_loss_20"]:
-                _add_escalation(
-                    escalations,
-                    code,
-                    "price_stop_2",
-                    "current price reached the stored second stop line",
-                    candidate="trade",
-                )
-                existing_defer = next(
-                    (
-                        alert
-                        for alert in holding["alerts"]
-                        if alert["reason_code"] == "price_stop2_liquidity_defer"
-                    ),
-                    None,
-                )
-                try:
-                    defer_payload = (
-                        json.loads(
-                            existing_defer["evidence"],
-                            parse_constant=_reject_json_constant,
-                        )
-                        if existing_defer and existing_defer["evidence"]
-                        else None
-                    )
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    defer_payload = None
-                p3 = risk_gates.liquidity_shock_gate(
-                    {
-                        "stop_loss_triggered": True,
-                        "stop_loss_20": holding["stop_loss_20"],
-                        "quote": quote,
-                        "existing_defer": defer_payload,
-                        "now": current,
-                    }
-                )
-                if not p3.get("action_eligible"):
-                    partial = True
-                    _add_gap(
-                        gaps,
-                        code,
-                        "p3_liquidity_gate",
-                        f"complete P3 review: {p3['reason_code']}",
-                    )
-                else:
-                    trade_requested = True
-        if (
-            current_price is not None
-            and required_fields["stop_loss_15"]
-            and current_price <= holding["stop_loss_15"]
-            and not (
-                required_fields["stop_loss_20"]
-                and current_price <= holding["stop_loss_20"]
-            )
-        ):
-            _add_escalation(
-                escalations,
-                code,
-                "price_stop_1",
-                "current price reached the stored first stop line",
-            )
-        if daily_change_pct is not None and daily_change_pct <= -3:
-            _add_escalation(
-                escalations,
-                code,
-                "daily_drop",
-                f"daily change {daily_change_pct:.2f}% is at or below -3%",
-            )
-        if relative_change_pct is not None and relative_change_pct <= -2:
-            _add_escalation(
-                escalations,
-                code,
-                "relative_underperformance",
-                f"relative change {relative_change_pct:.2f}pts is at or below -2pts",
-            )
-
-        # Route existing Step 4 entrances only; valuation/report evidence is
-        # not in this snapshot and must be reviewed before advancing a tier.
-        tier = holding["tier"]
-        framework = domain.FRAMEWORK_ALIASES.get(holding["framework"])
-        exit_path = tier["exit_path"]
-        tier_gap = None
-        target_pct = None
-        if exit_path is not None or framework in {"A通用", "E消费", "F科技"}:
-            if (
-                exit_path not in {None, "A", "B", "C"}
-                or tier["tier1_status"] not in {"pending", "completed", "exempted"}
-                or tier["tier2_status"] not in {"pending", "completed"}
-                or tier["tier3_status"] not in {"pending", "completed"}
-                or (exit_path is not None and tier["exemption_framework"] is not None)
-            ):
-                tier_gap = "reconcile structured Tier status and entry-time path configuration"
-            elif exit_path == "A":
-                tier_gap = "verify quarterly/interim L3 evidence and three-star timing for path A"
-            elif exit_path == "B":
-                target_pct = tier["exit_target_pct"]
-                if not risk_budget.finite_number(target_pct) or target_pct <= 0:
-                    tier_gap = "restore the entry-time path B target"
-            elif tier["tier1_status"] == "pending":
-                target_pct = 25
-            if target_pct is not None and tier_gap is None:
-                reference_cost = holding["reference_cost"]
-                if not risk_budget.finite_number(reference_cost) or reference_cost <= 0:
-                    tier_gap = "restore reference_cost for the configured Tier target"
-                elif (
-                    current_price is not None
-                    and current_price >= reference_cost + reference_cost * target_pct / 100
-                ):
-                    _add_escalation(
-                        escalations,
-                        code,
-                        "tier_review_due",
-                        f"{'path ' + exit_path if exit_path else 'Tier1'} price target reached; review Step 4",
-                    )
-            if tier_gap is not None:
-                partial = True
-                _add_gap(gaps, code, "tier", tier_gap)
-                _add_escalation(escalations, code, "tier_review_due", tier_gap)
-
-        alert_output = []
-        for alert in holding["alerts"]:
-            due = _due(alert["review_due"], today)
-            alert_output.append({**alert, "review_due_now": due})
-            if due is None:
-                partial = True
-                _add_gap(gaps, code, "alert.review_due", "repair the alert review date")
-            elif due:
-                _add_escalation(
-                    escalations,
-                    code,
-                    "alert_review_due",
-                    f"alert {alert['reason_code']} is due",
-                )
-
-        l3, l3_gaps, l3_unresolved = _l3_view(holding, today)
-        for gap in l3_gaps:
-            partial = True
-            _add_gap(gaps, code, "l3", gap)
-        if l3_unresolved:
-            partial = True
-            _add_escalation(
-                escalations,
-                code,
-                "l3_candidate",
-                f"L3 state requires verification ({l3['contract']})",
-            )
-        for condition in l3["conditions"]:
-            if condition.get("review_due"):
-                _add_escalation(
-                    escalations,
-                    code,
-                    "l3_review_due",
-                    f"L3 condition {condition['id']} is due",
-                    evidence_cadence=condition.get("evidence_cadence", "unspecified"),
-                )
-            if condition["status"] == "watch":
-                _add_escalation(
-                    escalations,
-                    code,
-                    "l3_watch",
-                    f"L3 condition {condition['id']} is watch (as_of {condition['as_of']}, "
-                    f"next_review {condition['next_review']}); no new risk",
-                    evidence_cadence=condition.get("evidence_cadence", "unspecified"),
-                )
-            if condition["status"] == "triggered":
-                candidate = (
-                    "trade"
-                    if condition.get("valid_for_action")
-                    and condition["action"] in {"reduce", "exit"}
-                    else "review"
-                )
-                trade_requested = trade_requested or candidate == "trade"
-                _add_escalation(
-                    escalations,
-                    code,
-                    "l3_candidate",
-                    f"L3 condition {condition['id']} is triggered",
-                    candidate=candidate,
-                )
-
-        quote_output = {
-            "status": (
-                "conflicted"
-                if quote and quote.conflicted
-                else "fresh"
-                if quote_valid
-                else "stale"
-                if quote and quote.quote_date and quote.quote_date != today_text
-                else "unavailable"
-            ),
-            "price": current_price,
-            "quote_date": quote.quote_date if quote else None,
-            "quote_time": quote.quote_time if quote else None,
-            "as_of": quote.quote_as_of if quote else None,
-            "source": quote.source if quote else None,
-            "previous_close": previous_close,
-            "daily_change_pct": daily_change_pct,
-            "industry_change_pct": industry_change_pct,
-            "industry_source": quote.industry_source if quote else None,
-            "industry_as_of": quote.industry_as_of if quote else None,
-            "relative_change_pct": relative_change_pct,
-        }
-        output_holdings.append(
-            {
-                "id": holding["id"],
-                "code": code,
-                "name": holding["name"],
-                "shares": holding["shares"] if required_fields["shares"] else None,
-                "cost_price": holding["cost_price"],
-                "reference_cost": holding["reference_cost"],
-                "framework": holding["framework"],
-                "framework_confident": holding["framework_confident"],
-                "stop_loss_15": _number(holding["stop_loss_15"]),
-                "stop_loss_20": _number(holding["stop_loss_20"]),
-                "quote": quote_output,
-                **risk,
-                "p3_gate": p3,
-                "alerts": alert_output,
-                "l3": l3,
-                "tier": holding["tier"],
-            }
-        )
+            total_market_value += output["market_value"]
+        output_holdings.append(output)
 
     active_count = len(holdings)
     stock_market_value = _number(total_market_value) if valued else None
@@ -764,6 +786,7 @@ def build_monitor_snapshot(
         and not escalations
         and not gaps
     )
+    stop_reason = "clean_fast_gate" if clean else None
     payload = {
         "schema_version": 1,
         "as_of": current.isoformat(),
@@ -793,7 +816,7 @@ def build_monitor_snapshot(
         "holdings": output_holdings,
         "escalations": escalations,
         "data_gaps": gaps,
-        "stop_reason": "clean_fast_gate" if clean else None,
+        "stop_reason": stop_reason,
         "requires_user_confirmation": action_status == "trade_candidate",
         "manifest": {
             "sources": {
@@ -825,7 +848,7 @@ def build_monitor_snapshot(
             "stage_timings_ms": stage_timings_ms or {},
             "research_subagents": 0,
             "writes": False,
-            "stop_reason": "clean_fast_gate" if clean else None,
+            "stop_reason": stop_reason,
         },
     }
     return _with_research(payload, research_result)

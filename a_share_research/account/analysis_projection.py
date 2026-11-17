@@ -11,7 +11,7 @@ import sqlite3
 
 from a_share_research import gate
 from a_share_research.account.analysis import TABLES
-from a_share_research.account.analysis_rebase import baseline
+from a_share_research.account.analysis import baseline
 from a_share_research.account.mirror import MANIFEST
 
 

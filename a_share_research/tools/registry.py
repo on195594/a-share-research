@@ -169,7 +169,7 @@ class AnalysisUpdate(Analysis):
 
 
 class AnalysisRebase(Arguments):
-    rebase: analysis_rebase.Rebase
+    rebase: analysis.Rebase
 
 
 class CycleAnalysis(Account):
