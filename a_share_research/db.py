@@ -494,6 +494,8 @@ def _migrate_v23(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_v24(conn: sqlite3.Connection) -> None:
+    if 'evidence' in {r['name'] for r in conn.execute('PRAGMA table_xinfo(disclosure_checks)')}:
+        return
     # Same source identity can gain values or change availability. Keep every
     # observation revision, while preserving v23 IDs and notification references.
     conn.execute('CREATE TABLE disclosure_checks_v24 ('

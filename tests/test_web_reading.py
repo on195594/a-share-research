@@ -319,12 +319,24 @@ def test_stock_page_checks_stay_with_checkpoint_and_trigger(server, monkeypatch)
         def disclosures(self, code, periods):
             raise RuntimeError('变体：取数失败 <script>')
     failed = run_scan(conn, Failure(source.items))
-    page = client.get(url + f'/stock/{code}')
-    assert page.status_code == 200 and '披露机械核对未完成' in page.text
-    assert '变体：取数失败 &lt;script&gt;' in page.text
-    assert f'报告 #{report["id"]}' in page.text and f'扫描 #{failed["id"]}' in page.text
+    for route in (code, code + '.SH'):
+        page = client.get(url + f'/stock/{route}')
+        assert page.status_code == 200 and '披露机械核对未完成' in page.text
+        assert '变体：取数失败 &lt;script&gt;' in page.text
+        assert f'报告 #{report["id"]}' in page.text and f'扫描 #{failed["id"]}' in page.text
     summary = reading.report_cards(conn, [dict(report) | {'from_batch': False}], {})[0]
     compact = str(ENV.get_template('_card.html').module.summary_card(summary))
     assert '披露机械核对未完成' in compact and compact.index('机械核对') < compact.index('card-fold')
     run_scan(conn, source)
-    assert '披露机械核对未完成' not in client.get(url + f'/stock/{code}').text
+    for route in (code, code + '.SH'):
+        assert '披露机械核对未完成' not in client.get(url + f'/stock/{route}').text
+    class Conflict(type(source)):
+        def disclosures(self, code, periods):
+            raw = super().disclosures(code, periods)
+            # Explicit bound-doubling variant of the captured forecast.
+            raw['forecast'][0]['net_profit_min'] *= 2
+            raw['forecast'][0]['net_profit_max'] *= 2
+            return raw
+    run_scan(conn, Conflict(source.items))
+    page = client.get(url + f'/stock/{code}.SH')
+    assert '同一披露版本内容冲突' in page.text and '观测值 无可判数值' in page.text

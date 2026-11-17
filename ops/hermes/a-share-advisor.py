@@ -200,7 +200,7 @@ def render_scan(result: dict, held_codes: set[str] | None, public_base: str = ""
     if checks:
         lines.append("【研究扫描】披露核对未完成（机械检查；不等于披露符合预期；下次扫描自动重试）：" + "；".join(
             f"{f['code']} {f.get('stage', 'disclosure_checks')}：{f.get('reason')}"
-            f"（报告 #{f.get('report_id', 'pending')}，扫描 #{scan_id}）" for f in checks))
+            f"（报告 #{f.get('report_id') or 'pending'}，扫描 #{scan_id}）" for f in checks))
     gaps = result["summary"].get("coverage_gaps", [])
     if gaps:
         lines.append("【研究扫描】距上次成功扫描超过 30 日，以下区间的公告未覆盖，不能视为连续覆盖：" + "；".join(
@@ -495,7 +495,7 @@ def render_weekly(data: dict) -> str:
         if stages.get("disclosure_checks"):
             codes = "、".join(dict.fromkeys(f["code"] for f in data["failures"] if f.get("stage") == "disclosure_checks"))
             lines.append(f"其中披露核对失败 {stages['disclosure_checks']} 次（{codes}），下次扫描自动重试")
-            lines.extend(f"机械检查：{f['code']} · 报告 #{f.get('report_id', 'pending')} · 扫描 #{f['scan_id']}：{f['reason']}"
+            lines.extend(f"机械检查：{f['code']} · 报告 #{f.get('report_id') or 'pending'} · 扫描 #{f['scan_id']}：{f['reason']}"
                          for f in data["failures"] if f.get("stage") == "disclosure_checks")
     lines.append(f"后续观察项 {data['checkpoint_count']} 条（含预测 {data['forecast_count']} 条）")
     lines.append(VALUATION_NOTE)

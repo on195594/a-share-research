@@ -294,3 +294,13 @@ def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn,
     assert f'研究失败，可重试；重试任务 #{run_id}' in weekly
     service.retry_run(conn, run_id)
     assert '研究进行中' in advisor.render_weekly(json.loads(json.dumps(scans.weekly(conn, at=AT), default=str)))
+    # Explicit association-missing variant: a projection failure has no report ID.
+    unlinked = deepcopy(late)
+    for failure in unlinked['summary']['check_failures']:
+        failure['report_id'] = None
+    assert '报告 #pending' in advisor.render_scan(unlinked, set())
+    unlinked_week = scans.weekly(conn, at=AT)
+    for failure in unlinked_week['failures']:
+        if failure.get('stage') == 'disclosure_checks':
+            failure['report_id'] = None
+    assert '报告 #pending' in advisor.render_weekly(unlinked_week)

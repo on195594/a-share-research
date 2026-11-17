@@ -802,7 +802,7 @@ def stock_page(request: Request, code: str, report: int | None = None):
     if not (session := current_session(request)):
         return login_required()
     try:
-        stock_codes.normalize_key(code)
+        code = stock_codes.normalize_key(code)
     except ValueError:
         return not_found(request, session, "公司代码不存在。")
     reports = reading.stock_reports(conn, code, summaries=True)

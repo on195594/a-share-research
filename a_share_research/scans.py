@@ -370,6 +370,7 @@ def announcement_failure(conn, code: str, *, scan_id: int | None = None) -> dict
 
 def mechanical_failure(conn, code: str, report_id: int, *, scan_id: int | None = None) -> dict | None:
     """Only an explicit successful check clears the current report's failure."""
+    code = stock_codes.normalize_key(code)
     for row in conn.execute("SELECT id,summary FROM scans WHERE summary IS NOT NULL "
                             "AND (status IN ('done','failed') OR id=?) ORDER BY id DESC", (scan_id,)):
         summary = json.loads(row['summary'])
@@ -579,7 +580,8 @@ def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int,
                             c['observed'][k] is not None and check['observed'][k] is not None
                             and Decimal(c['observed'][k]) != Decimal(check['observed'][k])
                             for k in ('low', 'high')) for c in history):
-                        check.update(outcome='undetermined', direction=None, reason=disclosure_checks.IDENTITY_CONFLICT_REASON)
+                        check.update(outcome='undetermined', direction=None, observed={'low': None, 'high': None},
+                                     reason=disclosure_checks.IDENTITY_CONFLICT_REASON)
                 version = history[-1]['version'] + 1 if history else 1
                 row = conn.execute(
                     'INSERT INTO disclosure_checks(code,report_id,scan_id,scan_event_id,item_ref,kind,metric,period,'

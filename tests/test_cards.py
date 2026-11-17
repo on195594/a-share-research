@@ -197,7 +197,7 @@ def test_disclosure_display_variants(outcome, direction, bounds, source, reason,
     assert '等待证据条件' in html and '1000' in html and expected in html
     assert {'forecast': '业绩预告', 'express': '业绩快报', 'periodic': '定期报告'}[source] in html
     if reason:
-        assert reason in html and '未披露' in html
+        assert reason in html and '无可判数值' in html
     elif bounds[0] is None:
         assert '≤ <span class="num">0.3341</span> 亿元' in html
     elif bounds[1] is None:

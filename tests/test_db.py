@@ -309,16 +309,26 @@ def test_disclosure_checks_migrations_preserve_evidence_and_rollback_compatibili
     assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
     upgraded = dict(conn.execute('SELECT * FROM disclosure_checks').fetchone())
     assert upgraded == legacy | {'version': 1, 'evidence': None}
+    # Captured-bound, version-only variant: reentry must preserve multi-version evidence.
+    revision = {k: v for k, v in upgraded.items() if k not in ('id', 'company_key')}
+    revision.update(version=2, evidence=json.dumps({'value': observation['values'][item['metric']]}, default=str))
+    conn.execute(f"INSERT INTO disclosure_checks ({','.join(revision)}) VALUES ({','.join('?' for _ in revision)})",
+                 tuple(revision.values()))
     after = list(conn.iterdump())
+    with db.transaction(conn):
+        db._migrate_v24(conn)
+        db._migrate_v24(conn)
+    assert list(conn.iterdump()) == after
     conn.close()
     conn = db.connect(path)
     assert conn.total_changes == 0 and list(conn.iterdump()) == after
     for statement in ('UPDATE disclosure_checks SET outcome=outcome', 'DELETE FROM disclosure_checks'):
         with pytest.raises(sqlite3.IntegrityError, match='append-only'):
             conn.execute(statement)
-    # Rollback images can delete captured reports/runs without knowing this new table.
+    # Legacy SQL remains compatible; this is not a semantic rollback-reader check.
+    # Older A4b readers ignore version and must not read multi-version history.
     conn.execute('DELETE FROM reports WHERE id=?', (old_report['id'],))
     conn.execute('DELETE FROM runs WHERE id=?', (old_report['run_id'],))
-    assert conn.execute('SELECT count(*) FROM disclosure_checks').fetchone()[0] == 1
+    assert conn.execute('SELECT count(*) FROM disclosure_checks').fetchone()[0] == 2
     assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
     conn.close()

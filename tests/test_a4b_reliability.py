@@ -49,11 +49,16 @@ def test_same_identity_numeric_conflict_does_not_pick_arrival_or_hash(disclosure
         raw['forecast'][0]['net_profit_max'] *= 2
     changed = source_with(source, conflict)
     second = run_scan(conn, changed, '2026-11-01T18:00:00+08:00')
-    assert all(c['outcome'] == 'undetermined' and '冲突' in c['reason'] for c in effective(conn, code))
+    current = effective(conn, code)
+    assert all(c['outcome'] == 'undetermined' and '冲突' in c['reason'] for c in current)
+    assert all(c['observed'] == {'low': None, 'high': None} for c in current)
+    assert all(c['evidence']['value']['low'] is not None for c in current)
+    assert all(c['observed'] == {'low': None, 'high': None} for c in service.company_card(conn, code)['checks'])
     assert second['status'] == 'done'
     # A repeat or reappearance of the original cannot silently resolve a numeric conflict.
     run_scan(conn, source, '2026-11-02T18:00:00+08:00')
-    assert all(c['outcome'] == 'undetermined' for c in effective(conn, code))
+    assert all(c['outcome'] == 'undetermined' and c['observed'] == {'low': None, 'high': None}
+               and c['evidence']['value']['low'] is not None for c in effective(conn, code))
     def correction(raw):
         raw['forecast'][0]['ann_date'] = '20260124'
     run_scan(conn, source_with(source, correction), '2026-11-03T18:00:00+08:00')
@@ -118,6 +123,7 @@ def test_mechanical_failure_visible_separate_from_directory_and_cleared(disclosu
     card = service.company_card(conn, code)
     failure = card.get('check_failure')
     assert failure and failure['report_id'] == card['report_id'] and failure['scan_id'] == second['id']
+    assert scans.mechanical_failure(conn, code + '.SH', card['report_id']) == failure
     assert not any(e.get('kind') == 'scan_failure' for e in card['pending_events'])
     advisor = load('a-share-advisor')
     daily = advisor.render_scan(second, set())
