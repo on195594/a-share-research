@@ -75,7 +75,7 @@ a-stock-cache monitor-snapshot --json
 - 持有逻辑、现价新增价值、账户风险贡献分开；不能新增不等于必须卖出，未确认退出也不等于可以加仓。不得仅因浮盈或“防御股”标签确定卖出顺序。
 - 账户、证据和用户目标未变时，追问不改变行动结论，不凭空增加价格或股数；发现前次错误应明确纠正并解释依据，不能为保持一致延续错误。
 - 缺口逐项说明缺什么、由系统还是用户补、影响哪项判断、补齐后复核什么及复核时点/事件；成本对账完成不自动解除财务门禁。能自行取得的公开证据不转嫁用户，已提供材料不重复索取；追问未重述本会话已有材料或已确认的成交事实，不等于缺失；不可恢复时说明具体缺项。
-- **待确认写入**：列出拟议 W1 的完整、可复制命令，填入实际 ID、验证日期、结论/证据与复核日期：`a-stock-cache --confirm-write l3-update <id> <status> <as-of> <证据> [下次复核日期] [--evidence-cadence <值>]`，以及预警的 `alert-resolve` 或以原 reason_code 调用 `alert-open` 续期；仅列出，不执行，无拟议写入则写“无”。
+- **待确认写入**：列出拟议 W1 的完整 `account.cycle_analysis.update` 变更，填入实际 ID、验证日期、结论/证据与复核日期：L3 用 `kind: "l3"`（status、as_of、evidence、next_review_date、evidence_cadence），预警解除用 `kind: "alert"`、`status: "resolved"`，续期以原 reason_code 用 `kind: "alert_open"`；先以 `account.cycle_analysis.current` 取 expected_version 与当前状态。仅列出，不执行，无拟议写入则写“无”。
 
 ## 安全边界
 

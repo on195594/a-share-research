@@ -22,7 +22,8 @@ class RequestError(ValueError):
 
 
 def submit(conn, code: str, request_id: str, *, name: str | None = None,
-           question: str = "", parent_report_id: int | None = None, feedback: dict | None = None) -> int:
+           question: str = "", parent_report_id: int | None = None, feedback: dict | None = None,
+           events: list[dict] | None = None) -> int:
     valid_code = stock_codes.normalize_key(code) if stock_codes.CODE_RE.fullmatch(code) else ""
     if (not valid_code and (code or parent_report_id is None)) or not 1 <= len(request_id) <= 128 or len(question) > 4000:
         raise RequestError("需要 6 位公司代码、1–128 字请求编号；问题不超过 4000 字")
@@ -57,8 +58,11 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
             question = f"核查原报告 {location}：{text}。判断反馈是否成立，说明证据、根因与最小改进建议。"
     elif feedback is not None:
         raise RequestError("纠错必须关联原报告")
-    payload = json.dumps({"question": question, "parent_report_id": parent_report_id, "feedback": feedback},
-                         ensure_ascii=False, sort_keys=True)
+    request = {"question": question, "parent_report_id": parent_report_id, "feedback": feedback}
+    if events:
+        # Frozen public announcement identities from the scanner; older requests keep their exact payload.
+        request["events"] = events
+    payload = json.dumps(request, ensure_ascii=False, sort_keys=True)
     # The unique request_id resolves simultaneous submissions without a read/insert race.
     row = conn.execute(
         "INSERT INTO runs (request_id, kind, code, name, status, created_at, request)"
@@ -130,8 +134,12 @@ def retry_run(conn, run_id: int) -> int:
                 raise RequestError('重试编号已用于不同任务', 409)
             return submit_price(conn, run['code'], key)
         payload = json.loads(run['request'] or '{}') or {}
-        return submit(conn, run['code'], key, name=run['name'], question=payload.get('question') or '',
-                      parent_report_id=payload.get('parent_report_id'), feedback=payload.get('feedback'))
+        retried = submit(conn, run['code'], key, name=run['name'], question=payload.get('question') or '',
+                         parent_report_id=payload.get('parent_report_id'), feedback=payload.get('feedback'),
+                         events=payload.get('events'))
+        # Scan events follow the retry, so their pending state tracks the task that can still finish.
+        conn.execute('UPDATE scan_events SET run_id=? WHERE run_id=?', (retried, run_id))
+        return retried
 
 
 def _table_periods(body: dict) -> list[str]:
@@ -236,7 +244,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         summary["boundary"] = stances.on_boundary(calc)
         summary["flip_distance"] = stances.flip_distance(calc)
     from a_share_research import scans, valuation
-    pending = scans.pending_events(scans.events(conn, code=code), row['completed_at'])
+    pending = scans.open_events(conn, code)
     failure = scans.announcement_failure(conn, code, scan_id=scan_id)
     if failure:
         pending.append(failure)

@@ -13,20 +13,51 @@ from a_share_research import companies, db, disclosure_checks, service, stock_co
 log = logging.getLogger(__name__)
 # Generic 风险提示 titles (trading-volatility or redemption notices) are routine and stay out of scope.
 RISK = re.compile(r'立案|行政处罚|监管工作函|监管函|问询函|关注函|退市风险|终止上市|非标准|(?<!无)保留意见|无法表示意见|否定意见|重大诉讼|债务逾期')
+# Current governance red lines; a title hit only triggers investigation, never a finding of violation.
+GOVERNANCE = re.compile(r'资金占用|占用(?:上市)?公司资金|违规担保')
+# Policies, periodic fund-flow tables and no-occupation undertakings are routine filings.
+GOVERNANCE_ROUTINE = re.compile(r'制度|办法|规则|汇总表|专项说明|承诺函|不存在|其他关联资金往来')
 FORECAST = re.compile('业绩预告|业绩快报|业绩修正|业绩预亏|业绩预减|业绩预盈|业绩预增')
 PERIODIC = re.compile('年度报告|季度报告|年报|半年报|季报')
+PERIOD = re.compile(r'(\d{4})\s*年?\s*(前三季度|第?三季度?|半年度|上半年|第?一季度?|年度|全年)')
 EXTREMES = {'测算支持区', '测算透支区'}
+# Sections whose cited sources show a disclosure actually entered the reasoning.
+CITED_SECTIONS = ('answer', 'risks', 'business', 'financial', 'checkpoints', 'prior_status')
+RESOLVED = ('included', 'superseded')
+REVIEW_LABELS = {
+    'included': '已纳入研究（不等于风险排除）',
+    'superseded': '已由其后同期定期报告核对（不等于风险排除）',
+    'open': '研究引用了该公告，但复核留有待核问题',
+    'unable': '研究读取后写明无法判断',
+    'read_uncited': '研究读取了该公告但未引用',
+    'not_read': '研究未读取该公告',
+    'awaiting_research': '等待研究（每日最多 5 家）',
+    'researching': '研究进行中',
+    'research_failed': '研究失败，可重试',
+}
 
 
 def classify(title: str) -> tuple[str, int] | None:
     if RISK.search(title):
         return 'major_risk', 2 if any(word in title for word in ('问询函', '关注函')) and '回复' in title else 3
+    if GOVERNANCE.search(title) and not GOVERNANCE_ROUTINE.search(title):
+        return 'major_risk', 3
     if FORECAST.search(title):
         return 'forecast', 2
     # Corrections have their own announcement identity and must remain discoverable.
-    if PERIODIC.search(title) and not any(word in title for word in ('摘要', '英文', 'English', '取消')):
+    if PERIODIC.search(title) and not any(word in title for word in ('摘要', '英文', 'English', '取消', '说明会')):
         return 'periodic', 2
     return None
+
+
+def period_of(title: str) -> str | None:
+    """Financial period a periodic report or forecast title names; None when the title gives none."""
+    match = PERIOD.search(title or '')
+    if match is None:
+        return None
+    word = match[2]
+    end = '09-30' if '三季' in word else '06-30' if '半' in word else '03-31' if '一季' in word else '12-31'
+    return f'{match[1]}-{end}'
 
 
 def instant(value: str) -> datetime:
@@ -39,16 +70,95 @@ def after_card(event: dict, completed_at: str) -> bool:
     return instant(event['announced']).date() >= instant(completed_at).date()
 
 
-def pending_events(events: list[dict], completed_at: str) -> list[dict]:
-    pending = [e for e in events if e['severity'] >= 2 and after_card(e, completed_at)
-               and e['action'] != 'covered' and not (e['run_status'] == 'done' and e['passed'] == 1)]
-    triggered = [e for e in events if e['run_id'] is not None]
-    if triggered:
-        latest = max(triggered, key=lambda e: e['run_id'])
-        if (latest['run_status'] == 'failed' and latest.get('judgment_completed_at')
-                and instant(latest['judgment_completed_at']) > instant(completed_at) and latest not in pending):
-            pending.append(latest)
-    return pending
+def event_context(event: dict) -> dict:
+    """Public identity frozen into a research request; no scan verdicts or account data."""
+    return {key: event[key] for key in ('id', 'code', 'title', 'announced', 'url', 'kind')}
+
+
+def _citing(body: dict, keys: set[str]) -> list[tuple[str, dict]]:
+    return [(f'{section}[{index}]', item) for section in CITED_SECTIONS
+            for index, item in enumerate(body.get(section) or [])
+            # Table cites carry `ref`; only quote cites point at a document (default D0).
+            if isinstance(item, dict) and any(isinstance(cite, dict) and 'ref' not in cite and cite.get('source', 'D0') in keys
+                                              for cite in item.get('cites') or [])]
+
+
+def _settled(body: dict, refs: list[tuple[str, dict]]) -> str:
+    # Review questions point at an item (`risks[2]`) or a whole section (`risks`).
+    open_where = {q.get('where') for q in body.get('open_questions') or [] if isinstance(q, dict)}
+    unsettled = {ref for ref, _ in refs if ref in open_where or ref.split('[')[0] in open_where}
+    if any(ref not in unsettled and item.get('status') != '无法判断' and '无法判断' not in str(item.get('text', ''))
+           for ref, item in refs):
+        return 'included'
+    return 'open' if unsettled else 'unable'
+
+
+def event_evidence(body: dict, event: dict) -> dict:
+    """How one published report used an announcement, judged only from its read sources and citations.
+
+    A newer report or a passed review alone proves nothing: the announcement must have been read
+    and cited by a settled item. A forecast also counts once a later periodic report covering its
+    period was read and cited, since the official statements replace the estimate.
+    """
+    documents = {'D0': body.get('document') or {}} | {
+        key: (source or {}).get('document') or {} for key, source in (body.get('sources') or {}).items()}
+    keys = {key for key, doc in documents.items() if doc.get('url') == event['url']}
+    refs = _citing(body, keys)
+    state = _settled(body, refs) if refs else 'read_uncited' if keys else 'not_read'
+    if state not in RESOLVED and event['kind'] == 'forecast' and (period := period_of(event['title'])):
+        later = {key for key, doc in documents.items() if key not in keys and doc.get('period')
+                 and doc['period'] >= period and (doc.get('announced') or '') >= event['announced']}
+        covered = _citing(body, later)
+        if covered and _settled(body, covered) == 'included':
+            keys, refs, state = later, covered, 'superseded'
+    return {'state': state, 'label': REVIEW_LABELS[state], 'sources': sorted(keys), 'items': [ref for ref, _ in refs]}
+
+
+def event_reviews(conn, code: str) -> list[dict]:
+    """Every dispatchable event of a company with its handling state; read-only."""
+    code = stock_codes.normalize_key(code)
+    items = [e for e in events(conn, code=code)
+             if e['severity'] >= 2 and e['action'] in ('deferred', 'queued_review', 'covered')]
+    if not items:
+        return []
+    first = min(instant(e['announced']).date() for e in items)
+    reports = [dict(r) for r in conn.execute(
+        'SELECT r.id, r.run_id, COALESCE(u.finished_at, r.created_at) AS completed_at, r.body FROM reports r '
+        f'JOIN runs u ON u.id=r.run_id WHERE r.company_key=? AND {db.FORMAL_REPORT} ORDER BY r.id DESC', (code,))
+        if instant(r['completed_at']).date() >= first]
+    bodies = {}
+
+    def evidence(report, event):
+        if report['id'] not in bodies:
+            bodies[report['id']] = report_body.load(report['body'])
+        return event_evidence(bodies[report['id']], event)
+
+    result = []
+    for event in items:
+        candidates = [r for r in reports if instant(r['completed_at']).date() >= instant(event['announced']).date()]
+        found = next(((r, ev) for r in candidates if (ev := evidence(r, event))['state'] in RESOLVED), None)
+        own = next((r for r in candidates if r['run_id'] == event['run_id']), None)
+        if found:
+            report, review = found
+        elif event['action'] == 'deferred':
+            report, review = None, {'state': 'awaiting_research'}
+        elif event['run_status'] in ('queued', 'running'):
+            report, review = None, {'state': 'researching'}
+        elif event['run_status'] == 'failed':
+            report, review = None, {'state': 'research_failed'}
+        elif report := own or (candidates[0] if candidates else None):
+            review = evidence(report, event)
+        else:
+            review = {'state': 'not_read'}
+        review = {'sources': [], 'items': []} | review | {
+            'label': REVIEW_LABELS[review['state']], 'report_id': report['id'] if report else None}
+        result.append(event | {'review': review})
+    return result
+
+
+def open_events(conn, code: str) -> list[dict]:
+    """Events not yet shown to be read and cited by a published report: they stay visible until then."""
+    return [e for e in event_reviews(conn, code) if e['review']['state'] not in RESOLVED]
 
 
 def review_order(events: list[dict], scan_id: int, priority: set[str] | None = None) -> list[str]:
@@ -274,6 +384,23 @@ def last_extreme_zones(history: list[dict]) -> dict[str, str]:
     return zones
 
 
+def last_success(history: list[dict], code: str) -> dict | None:
+    return next((s for s in reversed(history) if code in s['summary'].get('closes', {})
+                 and not any(f['code'] == code for f in s['summary'].get('failures', []))), None)
+
+
+def coverage(history: list[dict], code: str, at: str) -> dict:
+    """Last successful scan and the interval the 30-day lookback can no longer reach; no backfill."""
+    successful = last_success(history, code)
+    gap = None
+    if successful:
+        since, reach = instant(successful['started_at']).date(), instant(at).date() - timedelta(days=30)
+        if since < reach:
+            gap = {'last_success': successful['started_at'], 'uncovered_from': since.isoformat(),
+                   'uncovered_to': reach.isoformat()}
+    return {'code': code, 'last_success': successful['started_at'] if successful else None, 'gap': gap}
+
+
 class MarketSources:
     """All network access is confined to the worker's collection boundary."""
 
@@ -396,8 +523,8 @@ def check_detail(check: dict, item: dict, body: dict) -> str:
 def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int, at: str) -> list[dict]:
     if card is None:
         return []
-    pending = [e for e in pending_events(events(conn, code=code), card['completed_at'])
-               if e['kind'] in ('forecast', 'periodic')]
+    pending = [e for e in open_events(conn, code)
+               if e['kind'] in ('forecast', 'periodic') and after_card(e, card['completed_at'])]
     if not pending:
         return []
     body = report_body.load(conn.execute('SELECT body FROM reports WHERE id=?', (card['report_id'],)).fetchone()['body'])
@@ -437,13 +564,21 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
         pending = [e for e in events(conn) if e['action'] == 'deferred' and e['code'] in scope]
         eligible = []
         priority = set()
+        reviews = {}
         for event in pending:
             card = card_or_none(conn, event['code'])
             if card is None:
                 conn.execute("UPDATE scan_events SET action='no_card' WHERE id=?", (event['id'],))
-            elif not after_card(event, card['completed_at']):
-                # Already available when the current card was written; re-researching it adds nothing.
+                continue
+            if event['code'] not in reviews:
+                reviews[event['code']] = {e['id']: e['review'] for e in event_reviews(conn, event['code'])}
+            if reviews[event['code']][event['id']]['state'] in RESOLVED:
+                # A published report already read and cited it; a newer date alone is not enough.
                 conn.execute("UPDATE scan_events SET action='covered' WHERE id=?", (event['id'],))
+            elif conn.execute("SELECT 1 FROM runs WHERE company_key=? AND kind='research' AND batch_id IS NULL "
+                              "AND status IN ('queued','running')", (event['code'],)).fetchone():
+                # Stays deferred: that run picks up open events when it starts, or the next scan decides.
+                continue
             else:
                 eligible.append(event)
                 if any(c['outcome'] in ('deviated', 'missed') for c in
@@ -455,11 +590,12 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
         selected = review_order(eligible, scan_id, priority)[:max(0, 5 - used)]
         queued = []
         for code in selected:
-            run_id = service.submit(conn, code, f'scan-{scan_id}-{code}')
+            frozen = [event_context(e) for e in eligible if e['code'] == code]
+            run_id = service.submit(conn, code, f'scan-{scan_id}-{code}', events=frozen)
             # Explicit at makes offline replay and midnight boundary behavior deterministic.
             conn.execute('UPDATE runs SET created_at=? WHERE id=?', (at, run_id))
-            conn.execute("UPDATE scan_events SET action='queued_review',run_id=? WHERE company_key=? AND action='deferred'",
-                         (run_id, stock_codes.normalize_key(code)))
+            conn.executemany("UPDATE scan_events SET action='queued_review',run_id=? WHERE id=? AND action='deferred'",
+                             [(run_id, e['id']) for e in frozen])
             queued.append(run_id)
         return queued
 
@@ -472,7 +608,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                            (at, scan_id)).fetchone()
     if not claimed:
         return
-    summary = {'checks': {}, 'check_failures': [], 'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
+    summary = {'checks': {}, 'check_failures': [], 'coverage_gaps': [], 'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
                'announcements_succeeded': []}
     try:
         prefetch = source.report_rc_window((instant(at).date() - timedelta(days=1)).isoformat())
@@ -497,12 +633,13 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         summary['before'] = {s['code']: card_or_none(conn, s['code']) for s in scope}
         for subscription in scope:
             code = subscription['code']
-            successful = next((s for s in reversed(history) if code in s['summary'].get('closes', {})
-                               and not any(f['code'] == code for f in s['summary'].get('failures', []))), None)
+            successful = last_success(history, code)
             days = min(30, max(3, (instant(at).date() - instant(successful['started_at']).date()).days + 2)) if successful else 30
+            if gap := coverage(history, code, at)['gap']:
+                summary['coverage_gaps'].append({'code': code, **gap})
             try:
-                rows, coverage = source.announcements(code, days)
-                if coverage.get('truncated'):
+                rows, listing = source.announcements(code, days)
+                if listing.get('truncated'):
                     raise companies.SourceError('公告目录分页截断，不能确认扫描完整')
                 found = normalize_announcements(rows, code)
                 if rows:
@@ -534,7 +671,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                     conn, source, code, card_or_none(conn, code, scan_id=scan_id), scan_id, fixed_at or db.now())
             except Exception as exc:
                 log.exception('scan %s disclosure checks %s failed', scan_id, code)
-                summary['check_failures'].append({'code': code, 'reason': str(exc)})
+                summary['check_failures'].append({'code': code, 'stage': 'disclosure_checks', 'reason': str(exc)})
         summary['queued_runs'] = _dispatch(conn, scan_id, fixed_at or db.now(), {s['code'] for s in scope})
         completed = completed_reviews(conn, previous['started_at'] if previous else None, at)
         new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)]
@@ -606,12 +743,17 @@ def weekly(conn, *, at: str | None = None) -> dict:
     items = [s | {'card': card_or_none(conn, s['code'])} for s in subscriptions(conn)]
     all_events = events(conn)
     recent = [dict(e, **latency(e, at)) for e in all_events if instant(e['detected_at']) >= since]
-    failures = []
-    for row in conn.execute('SELECT * FROM scans ORDER BY id'):
+    failures, gaps = [], []
+    rows = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute('SELECT * FROM scans ORDER BY id')]
+    for row in rows:
         if instant(row['requested_at']) >= since:
-            failures.extend({'scan_id': row['id'], **f} for f in json.loads(row['summary'] or '{}').get('failures', []))
+            failures.extend({'scan_id': row['id'], **f} for key in ('failures', 'check_failures')
+                            for f in row['summary'].get(key, []))
+            # A gap stays reported for the week even after a later scan succeeds: it was never backfilled.
+            gaps.extend(row['summary'].get('coverage_gaps', []))
             if row['status'] == 'failed':
                 failures.append({'scan_id': row['id'], 'reason': row['error']})
+    done = [r for r in rows if r['status'] == 'done']
     checkpoints = [{'code': item['code'], 'report_id': item['card']['report_id'], **checkpoint}
                    for item in items if item['card'] for checkpoint in item['card']['checkpoints']]
     return {'version': service.VERSION, 'since': since.isoformat(), 'as_of': at, 'subscriptions': items,
@@ -621,5 +763,10 @@ def weekly(conn, *, at: str | None = None) -> dict:
             'forecast_count': sum(bool(c.get('forecast')) for c in checkpoints),
             'backlog': [dict(e, **latency(e, at)) for e in all_events if e['action'] == 'deferred'],
             'failures': failures,
+            'last_scan': {k: done[-1][k] for k in ('id', 'started_at', 'finished_at')} if done else None,
+            'coverage': (current := [coverage(done, s['code'], at) for s in items]),
+            'coverage_gaps': list({(g['code'], g['uncovered_from']): g for g in
+                                   gaps + [c | c['gap'] for c in current if c['gap']]}.values()),
+            'open_events': [dict(e, **latency(e, at)) for s in items for e in open_events(conn, s['code'])],
             'review_failures': [dict(e, **latency(e, at)) for e in all_events if e['run_status'] == 'failed'
                                 and e['judgment_completed_at'] and instant(e['judgment_completed_at']) >= since]}

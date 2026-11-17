@@ -60,9 +60,53 @@ def test_brief_lists_stop_distance_triggers_due_l3_and_extras():
     assert "- 000963 疑似漏记分红" in brief
 
 
-def test_calm_day_says_no_triggers():
+def test_calm_day_limits_no_trigger_to_program_checks():
     brief = format_daily_brief(_snapshot([_holding("000963", 26.21)]), [], "2026-10-22")
-    assert "需关注：无触发项" in brief
+    assert "需关注：本轮程序检查未触发" in brief
+    assert "不覆盖未自动计算的基本面条件" in brief
+    assert "无触发项" not in brief and "尚未关闭" not in brief
+
+
+def test_unresolved_alerts_stay_listed_before_their_review_date():
+    holding = _holding(
+        "000963",
+        26.21,
+        l3=[
+            {
+                "id": 9,
+                "status": "not_triggered",
+                "next_review": None,
+                "as_of": "2026-08-30",
+                "evidence_cadence": "semiannual",
+            }
+        ],
+    )
+    holding["alerts"] = [
+        {
+            "level": "yellow",
+            "reason_code": "valuation_high",
+            "reason": "估值偏高",
+            "status": "active",
+            "opened_at": "2026-10-01T15:00:00+08:00",
+            "review_due": "2026-12-31",
+            "review_due_now": False,
+        },
+        {
+            "level": "red",
+            "reason_code": "fund_occupation",
+            "reason": "控股股东资金占用待核实",
+            "status": "pending",
+            "opened_at": "2026-10-20T15:00:00+08:00",
+            "review_due": "2026-11-30",
+            "review_due_now": False,
+        },
+    ]
+    brief = format_daily_brief(_snapshot([holding]), [], "2026-10-22")
+    red = "000963 红色预警 fund_occupation：控股股东资金占用待核实（pending，开立 2026-10-20，复核日 2026-11-30）"
+    yellow = "000963 黄色预警 valuation_high"
+    assert brief.index("尚未关闭：") < brief.index(red) < brief.index(yellow)
+    # A condition without a review date is surfaced with its evidence date and cadence.
+    assert "L3#9 未触发（证据日期 2026-08-30，证据频率 半年），下次复核 未设" in brief
 
 
 def test_brief_uses_saved_denominator_without_repeated_screenshot_requests():
@@ -166,5 +210,5 @@ def test_routine_l3_groups_by_date_without_hiding_due_or_unverified_items():
         assert f"L3#{condition_id}" in brief
     for condition_id in (1, 2, 6, 8):
         assert f"L3#{condition_id} " not in brief
-    assert "L3#5 待核实，下次复核 未设" in brief
+    assert "L3#5 待核实（证据日期 未记录，证据频率 未分类，季报不能改变状态），下次复核 未设" in brief
     assert "L3#7 已触发" in brief

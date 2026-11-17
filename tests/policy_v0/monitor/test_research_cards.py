@@ -162,7 +162,14 @@ def test_pending_card_escalates_only_review_and_keeps_returns(run_snapshot, card
     holding = card(cards, "600900")
     holding.update(
         status="待复核",
-        pending_events=[{"title": "测试待复核公告", "kind": "major_risk"}],
+        pending_events=[
+            {"title": "测试待复核公告", "kind": "major_risk"},
+            {
+                "title": "测试定期报告",
+                "kind": "periodic",
+                "review": {"state": "research_failed", "label": "研究失败，可重试"},
+            },
+        ],
     )
     holding["current"]["note"] = "待复核，区间暂停解读"
     _, actual = run_snapshot()
@@ -176,6 +183,8 @@ def test_pending_card_escalates_only_review_and_keeps_returns(run_snapshot, card
         and escalation["candidate"] == "review"
     )
     assert "测试待复核公告（major_risk）" in escalation["detail"]
+    # The handling state travels with the event; it never changes the gate.
+    assert "测试定期报告（periodic；研究失败，可重试）" in escalation["detail"]
     row = actual["research"]["holdings"][0]
     assert row["zone"] == "测算透支区" and row["neutral_return"] is not None
     assert row["note"] == holding["current"]["note"]

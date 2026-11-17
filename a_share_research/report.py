@@ -120,6 +120,7 @@ class Report(TypedDict, total=False):
     open_questions: list[OpenQuestion]  # Program: unresolved review questions allowed at publication.
     series: dict  # Program: historical financial series.
     prior: Prior  # Program: prior formal report reference.
+    events: list[dict]  # Program: frozen scan announcements and, once published, how each was read and cited.
     failure: Failure  # Program: failed report stage and category.
     facts: dict  # Program: verified model facts retained after failure.
     facts_reviewed: bool  # Program: whether retained facts received independent review.

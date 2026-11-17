@@ -59,6 +59,14 @@ PRIOR = ('\n上下文中的 prior 是同一公司此前一份报告当时列出�
          '旧报告文字不是证据。answer 只概括核心变化或明确“无新增经营披露，主结论延续”，不逐条重复 prior_status，也不因无新财报而在 summary、answer、risks 反复重申“风险未解除/检查点未到期”。')
 
 
+EVENTS = ('\n上下文中的 events 是公告扫描按标题发现、尚待核查的公告：标题命中只说明需要调查，不是违规、业绩或风险结论。'
+          '每条已列入原文证据目录，source 是其编号；先用 read_disclosure 读原文，再在 answer 中说明它对判断、风险或检查点的影响并引用该公告原文，'
+          '多条可合并论述但每条都要引用。读不到、资料不足或影响无法确定时，answer 写明“无法判断”及缺什么，不用标题或旧报告代替原文。\n'
+          'financial_checks 给出报告期、上年同期与各指标在财务表中的可用情况：加权 ROE 与扣非归母净利润按同口径累计值与上年同期比较，'
+          '加权 ROE 是期间累计口径，不得用两期累计 ROE 相减推算单季 ROE；经营现金流、购建长期资产现金及二者之差（FCF）用于解释现金流质量，解释须有出处。'
+          '财务表缺的期间按所列原因读原文补齐，仍缺则写明无法判断。')
+
+
 def output_schema(material: "Material") -> str:
     schema = SCHEMA
     if not material.extra.get("feedback"):
@@ -76,6 +84,8 @@ def output_schema(material: "Material") -> str:
                    '这不改变投资政策、代码或原报告。')
     if material.extra.get("prior"):
         schema += PRIOR
+    if material.extra.get("events"):
+        schema += EVENTS
     return schema
 
 RULES = """规则：

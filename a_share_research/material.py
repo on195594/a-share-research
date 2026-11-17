@@ -103,8 +103,9 @@ class Material:
         )
         if self.extra:
             pending = {k: self.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}
-            if self.extra.get("prior"):
-                pending["prior"] = self.extra["prior"]
+            for key in ("prior", "events"):
+                if self.extra.get(key):
+                    pending[key] = self.extra[key]
             block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(pending, ensure_ascii=False)
         block += "\n\n# 程序计算依据\n" + json.dumps(
             [r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False)

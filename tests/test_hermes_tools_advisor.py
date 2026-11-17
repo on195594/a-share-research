@@ -12,6 +12,7 @@ import pytest
 from a_share_research.policy.v0 import monitor_research
 from a_share_research import disclosure_checks
 from test_ops_hermes import ROOT, load
+from test_scans import conn, disclosure_replay  # noqa: F401  (fixtures)
 
 
 @pytest.fixture
@@ -264,3 +265,32 @@ def test_real_holdings_failure_never_blocks_web_scan_or_claims_empty_account(adv
     assert '当前未持仓' not in output and '你仍持仓' not in output
     assert advisor.read_scan_state()['pending'] is None
     assert advisor.read_opportunity_state() == dict(schema_version=1, seen=['keep-seen'], pending=original)
+
+
+
+def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn, disclosure_replay):  # noqa: F811
+    from a_share_research import db, scans, service
+    from test_scans import AT, CapturedSources, run_scan
+    code, _, source = disclosure_replay
+
+    class Failure(CapturedSources):
+        def valuation(self, requested):
+            return super().valuation('603606') | {'ts_code': requested}  # Identity variant, as in test_scans.
+
+        def disclosures(self, code, periods):
+            raise RuntimeError('披露取数暂不可用')
+    first = run_scan(conn, Failure(source.items))
+    run_id, = first['summary']['queued_runs']
+    conn.execute("UPDATE scans SET started_at='2026-09-20T18:00:00+08:00' WHERE id=?", (first['id'],))  # Outage variant.
+    db.update_run(conn, run_id, status='failed', error='变体：研究失败', finished_at='2026-10-30T19:00:00+08:00')
+    late = run_scan(conn, Failure(source.items))
+    text = advisor.render_scan(late, set())
+    assert '披露核对未完成' in text and f'{code} disclosure_checks：披露取数暂不可用' in text
+    assert f'{code} 2026-09-20 至 2026-09-30' in text and '不能视为连续覆盖' in text
+    weekly = advisor.render_weekly(json.loads(json.dumps(scans.weekly(conn, at=AT), default=str)))
+    assert f'最后成功扫描：{late["started_at"][:16]}' in weekly
+    assert '未覆盖区间' in weekly and f'其中披露核对失败 2 次（{code}）' in weekly
+    assert '已纳入研究不等于风险排除' in weekly
+    assert f'研究失败，可重试；重试任务 #{run_id}' in weekly
+    service.retry_run(conn, run_id)
+    assert '研究进行中' in advisor.render_weekly(json.loads(json.dumps(scans.weekly(conn, at=AT), default=str)))

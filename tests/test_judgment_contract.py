@@ -8,11 +8,12 @@ from a_share_research import forecasts, prompts, research, research_tools, revie
 
 # Runtime call/round/time limits are deliberately absent: they do not define judgment semantics.
 SURFACE = {
-    **{f'prompts.{n}': getattr(prompts, n) for n in ('SCHEMA', 'CHECKPOINTS', 'VALUATION', 'STANCE', 'PRIOR', 'RULES')},
+    **{f'prompts.{n}': getattr(prompts, n) for n in ('SCHEMA', 'CHECKPOINTS', 'VALUATION', 'STANCE', 'PRIOR', 'EVENTS', 'RULES')},
     'prompts.output_schema': inspect.getsource(prompts.output_schema),
     **{f'research.{n}': inspect.getsource(getattr(research, n))
        for n in ('compose', 'review', 'repair_prompt', 'repair', 'program_valuation')},
     'research.PATCH_SCHEMA': research.PATCH_SCHEMA,
+    'research.EVENT_QUESTION': research.EVENT_QUESTION,
     **{f'research_tools.{n}': inspect.getsource(getattr(research_tools, n))
        for n in ('explore', 'research_methods')},
     **{f'research_tools.{n}': getattr(research_tools, n) for n in ('TOOLS', 'REPAIR_TOOLS', 'STOPPED_CALL')},

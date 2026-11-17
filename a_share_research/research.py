@@ -371,6 +371,49 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
     return _agenda(row) if row else None
 
 
+EVENT_QUESTION = "公告扫描发现的 events 对研究判断、风险与检查点有什么影响？"
+FINANCIAL_CHECKS = ("T.roe", "T.core_profit", "T.op_cash", "T.capex", "T.fcf")
+
+
+def financial_checks(table: list[dict], period: str) -> dict:
+    """Same-basis cumulative comparison inputs a financial disclosure calls for, with missing reasons."""
+    compare = f"{int(period[:4]) - 1}{period[4:]}"
+    rows = {r["id"]: r for r in table}
+    return {"period": period, "compare": compare, "metrics": [
+        {"metric": metric, "label": rows.get(metric, {}).get("label", metric), "periods": {
+            p: "available" if p in rows.get(metric, {}).get("values", {})
+            else rows.get(metric, {}).get("unavailable", {}).get(p, "财务表无该期数值，须读原文核对或写明无法判断")
+            for p in (period, compare)}}
+        for metric in FINANCIAL_CHECKS]}
+
+
+def scan_events(conn, material: Material, frozen: list[dict]) -> list[dict]:
+    """Request-frozen events plus the company's still-open ones, listed in the evidence catalog.
+
+    Only public announcement identities travel: no scan judgment, holdings or account data.
+    """
+    from a_share_research import scans
+    merged = {e["id"]: e for e in frozen}
+    for event in scans.open_events(conn, material.code):
+        merged.setdefault(event["id"], scans.event_context(event))
+    if not merged:
+        return []
+    catalog = material.extra["catalog"]
+    result = []
+    for event in sorted(merged.values(), key=lambda e: (e["announced"], e["id"])):
+        key = next((k for k, v in catalog.items() if v.get("url") == event["url"]), None)
+        if key is None:
+            key = f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
+            catalog[key] = sources.Document(
+                code=material.code, name=material.name, title=event["title"], period=sources.title_period(event["title"]),
+                announced=event["announced"], url=event["url"]).info()
+        item = dict(event, source=key)
+        if event["kind"] in ("periodic", "forecast") and (period := scans.period_of(event["title"])):
+            item["financial_checks"] = financial_checks(material.table, period)
+        result.append(item)
+    return result
+
+
 def prior_question(prior: dict) -> str:
     """The question a continuation asks when the user brought none."""
     return f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
@@ -508,6 +551,10 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                     material.extra["prior"] = prior
                     if not material.extra["question"]:
                         material.extra["question"] = prior_question(prior)
+                if events := scan_events(conn, material, request.get("events") or []):
+                    material.extra["events"] = events
+                    if not material.extra["question"]:
+                        material.extra["question"] = EVENT_QUESTION
             cutoff = run["started_at"] or conn.execute("SELECT started_at FROM runs WHERE id=?", (run_id,)).fetchone()[0]
             if batch := re.fullmatch(r"batch-(\d+)-.+", run["request_id"] or ""):
                 frozen = conn.execute("SELECT created_at FROM batches WHERE id=?", (int(batch[1]),)).fetchone()
@@ -556,6 +603,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             # Derived from the frozen question so replays, including of older snapshots, keep the label.
             body["prior"] = {"report_id": prior["report_id"], "period": prior["period"],
                              "question_added": material.extra.get("question") == prior_question(prior)}
+        if events := material.extra.get("events"):
+            body["events"] = events
         if (unanswered := open_questions(problems, reviewed)) is not None:
             # Shipped with the incomplete parts named; the ledger keeps them unresolved for audit.
             body["open_questions"] = [{"id": p["id"], "where": p["where"], "problem": p["problem"]} for p in unanswered]
@@ -575,6 +624,10 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             if material.extra.get("feedback"):
                 body["methods"] = report["methods"]
             body["answer"] = report.get("answer", [])
+            if events:
+                from a_share_research import scans
+                # The per-event outcome and the sources actually read, judged from the final body.
+                body["events"] = [e | {"evidence": scans.event_evidence(body, e)} for e in events]
             if "valuation" in report:
                 body["valuation_calc"] = calculate_valuation(report["valuation"], material, replay=replay_of is not None)
             if "stance" in report:

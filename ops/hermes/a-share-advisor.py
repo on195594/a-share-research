@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections import Counter
 from datetime import datetime
 from contextlib import contextmanager
 import urllib.error
@@ -40,7 +41,7 @@ REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息�
 ZONES = {"测算支持区": "模型认为估值较有吸引力", "中性区": "模型认为估值居中",
          "测算透支区": "模型认为价格偏贵"}
 VALUATION_NOTE = "注：估值参考不是技术支撑位或买卖指令，也不预测股价一定涨跌。"
-ACTIONS = {"covered": "已纳入研究", "queued_review": "已安排研究复核", "deferred": "等待研究复核",
+ACTIONS = {"covered": "已有报告", "queued_review": "已安排研究复核", "deferred": "等待研究复核",
            "no_card": "暂无研究记录", "skipped": "跳过"}
 OPPORTUNITY_STATE = Path(os.environ.get("A_SHARE_ADVISOR_STATE", Path.home() / ".local/state/a-share-advisor")) / "opportunities.json"
 SCAN_STATE = OPPORTUNITY_STATE.with_name('scan.json')
@@ -190,6 +191,14 @@ def render_scan(result: dict, held_codes: set[str] | None, public_base: str = ""
     if failures:
         lines.append("【研究扫描】部分代码未扫描成功（不等于无事件）：" + "；".join(
             f"{f['code']} {f.get('stage')}：{f.get('reason')}" for f in failures))
+    checks = result["summary"].get("check_failures", [])
+    if checks:
+        lines.append("【研究扫描】披露核对未完成（不等于披露符合预期；下次扫描自动重试）：" + "；".join(
+            f"{f['code']} {f.get('stage', 'disclosure_checks')}：{f.get('reason')}" for f in checks))
+    gaps = result["summary"].get("coverage_gaps", [])
+    if gaps:
+        lines.append("【研究扫描】距上次成功扫描超过 30 日，以下区间的公告未覆盖，不能视为连续覆盖：" + "；".join(
+            f"{g['code']} {g['uncovered_from']} 至 {g['uncovered_to']}" for g in gaps))
     notices = result.get("notify", [])
     lines.extend(notice_text(item, held_codes, public_base) for item in notices)
     queued = result["summary"].get("queued_runs", [])
@@ -460,8 +469,26 @@ def render_weekly(data: dict) -> str:
             f"{e['code']} {e['title']}（{ACTIONS.get(e['action'], e['action'])}）" for e in data["events"][:10]))
     if data["backlog"]:
         lines.append(f"待复核积压 {len(data['backlog'])} 条")
+    last = data.get("last_scan")
+    lines.append(f"最后成功扫描：{last['started_at'][:16] if last else '无记录'}")
+    gaps = data.get("coverage_gaps", [])
+    if gaps:
+        lines.append("未覆盖区间（超过 30 日回看，不回补，不能视为连续覆盖）：" + "；".join(
+            f"{g['code']} {g['uncovered_from']} 至 {g['uncovered_to']}" for g in gaps))
+    open_events = data.get("open_events", [])
+    if open_events:
+        lines.append(f"待核对公告 {len(open_events)} 条（已纳入研究不等于风险排除）：")
+        for e in open_events[:10]:
+            review = e.get("review") or {}
+            exit_hint = (f"重试任务 #{e['run_id']}" if review.get("state") == "research_failed"
+                         else "在公司页发起接续研究或人工复核")
+            lines.append(f"- {e['code']} {e['announced']} {e['title']}：{review.get('label', '待核对')}；{exit_hint}")
     if data["failures"] or data["review_failures"]:
         lines.append(f"扫描失败 {len(data['failures'])} 次，复核失败 {len(data['review_failures'])} 次")
+        stages = Counter(f.get("stage", "scan") for f in data["failures"])
+        if stages.get("disclosure_checks"):
+            codes = "、".join(dict.fromkeys(f["code"] for f in data["failures"] if f.get("stage") == "disclosure_checks"))
+            lines.append(f"其中披露核对失败 {stages['disclosure_checks']} 次（{codes}），下次扫描自动重试")
     lines.append(f"后续观察项 {data['checkpoint_count']} 条（含预测 {data['forecast_count']} 条）")
     lines.append(VALUATION_NOTE)
     return "\n".join(lines)
