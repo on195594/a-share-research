@@ -261,102 +261,75 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 ## 部署
 
-`db.connect()` 以 `PRAGMA user_version` 按版本逐事务迁移（现行 v23，新增只追加披露判定表 `disclosure_checks`，各版本内容见 `db.py`）。迁移须另获授权并备份；日常发布的准入条件是旧镜像能跑在新结构上，须用最终结构和实际回退镜像的读写实测，做不到的不能使用日常参数，须单独设计回退。设计与门禁见[数据层治理方案](docs/data-foundation.md)。
+`db.connect()` 以 `PRAGMA user_version` 逐版本迁移（各版本内容见 `db.py`，当前版本见[实施计划](docs/implementation-plan.md#当前部署)）。迁移须另获授权并备份；日常发布要求旧镜像能跑在新结构上，须用最终结构和实际回退镜像读写实测，做不到就单独设计回退（见[数据层治理方案](docs/data-foundation.md)）。
 
-Web/worker 由本仓库 `compose.yaml` 编排，共用 SQLite 数据目录，默认 `/home/lin/a-share-research-data`（可由 `DATA_DIR` 指定）：
+Web/worker 由 `compose.yaml` 编排，共用 SQLite 数据目录（默认 `/home/lin/a-share-research-data`，可由 `DATA_DIR` 指定）：
 
-- web：`.env.web` 配置，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外服务；无模型和行情凭据。
-- tools（开关状态见[当前部署](docs/implementation-plan.md#当前部署)）：复用 worker 镜像，Compose `tools` profile；独立 `.env.tools`（模板 `.env.tools.example`，0600），只含行情凭据；宿主仅 127.0.0.1:8621，0.4 CPU，无 Pi 挂载。
-- worker：`.env` 配置，挂载 `~/.pi`；`PI_RUNTIME` 留空时使用 pi 托管安装的 `current-version`，无外部端口；每次推理单独启动 Node（冷启动约 1.2 秒），不常驻进程。
+- web：`.env.web`，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外；无模型和行情凭据。
+- tools（Compose `tools` profile，开关见[当前部署](docs/implementation-plan.md#当前部署)）：复用 worker 镜像，独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据；仅 `127.0.0.1:8621`，0.4 CPU，无 Pi 挂载。
+- worker：`.env`，挂载 `~/.pi`；`PI_RUNTIME` 留空时用 pi 托管安装的 `current-version`；无外部端口，每次推理单独启动 Node。
 
-主模型使用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；独立复核可同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID`，仅 `review` 阶段使用该模型，其他阶段仍用主模型。`MODEL_REVIEW_REASONING` 未设置时继承主模型思考强度；未配置独立复核时沿用主模型。当前生产选择只在[实施记录](docs/implementation-plan.md#当前部署)维护。
+主模型用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID` 时仅 `review` 阶段改用该模型，`MODEL_REVIEW_REASONING` 缺省继承主模型。当前选择只在[实施计划](docs/implementation-plan.md#当前部署)维护。
 
-worker 启动时先离线预检 Node、Pi 安装目录、模型存储、主模型及可选复核模型的本地凭据配置，成功后才连接数据库和领取任务。可在既有 worker 环境单独运行 `python -c 'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'`；预检使用内存中的凭据与目录副本，不调用模型、不改写宿主存储。扩展注册后等待本地目录恢复完成，再选择模型；目录刷新失败同样阻断。兼容缺省存储（使用内置模型或环境凭据）与带 BOM 的 JSON；文件损坏、模型不存在或没有可用凭据配置仍会阻断。失败时按日志修复 `PI_RUNTIME` / `install/current-version` 指向的安装、存储或凭据环境，再重启 worker；不自动切换模型或安装其他运行时。预检不验证远端凭据有效性与供应商连通性。
+worker 启动先离线预检 Node、Pi 安装、模型存储与主/复核模型的本地凭据配置，通过后才连库领任务；单独运行：`python -c 'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'`。预检不调用模型、不改宿主存储、不验证远端凭据。失败时价格任务与批次也暂停，遗留 `running` 任务保留原状；按日志修复 `PI_RUNTIME`/安装/存储/凭据后重启 worker，不自动换模型，不改任务状态绕过发布空闲检查。
 
-预检失败期间，价格任务与批次处理也会暂停，遗留的 `running` 任务保留原状。应先修复运行环境再恢复 worker；这些任务仍受发布空闲检查约束，不能改状态绕过检查。
+### 发布、批准与暂停完成
 
-发布复用以下固定入口。先按改动范围完成一次必要验证；同一应用源码与依赖已有通过结果时直接沿用，不因进入发布阶段再跑全集。纯文档更新只提交推送。当前版本、证据和回退只更新[实施计划](docs/implementation-plan.md#当前部署)，产品与能力文档不重复维护上线状态。
-
-从已提交、已推送的 main 构建两份版本化镜像。Git 归档直接作为 Docker 上下文，无临时解压或权限修补脚本；源码可读权限在 Dockerfile 中固定：
-
-发布工具要求目标提交同时等于 `HEAD` 与 `origin/main`。测试后若又提交了纯文档，以当前 HEAD 构建并发布；确认应用源码与依赖未变即可沿用原测试，不拿较早的应用提交号直接调用发布工具。构建和切换之间不再提交新版本。
+先按改动范围完成一次必要验证，同一应用源码与依赖已通过的结果直接沿用；纯文档只提交推送。目标提交必须同时等于 `HEAD` 与 `origin/main`（测试后只追加了文档时以当前 HEAD 发布），构建到切换之间不再提交：
 
 ```bash
 set -o pipefail
 release_code=$(git rev-parse --short HEAD)
 git archive "$release_code" | docker build --target web -t "a-share-research-web:$release_code" -
 git archive "$release_code" | docker build --target worker -t "a-share-research-worker:$release_code" -
-```
-
-按 [AGENTS.md 例行发布授权](AGENTS.md#授权)调用仓库内的发布工具（经当次授权有配置变更时追加 `--allow-config`，此时容器挂载按已提交 `compose.yaml` 的声明核对，其余项仍须与发布前一致）；不再从历史证据目录复制脚本，也不重新编写临时 SQL：
-
-```bash
 uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-### 发布、批准与暂停完成
+经当次授权有配置变更时追加 `--allow-config`（挂载按已提交 `compose.yaml` 核对）。发布与 `--complete-held` 共用 `.git/ashare-deploy.lock`，并发调用直接拒绝。政策门禁默认 required：缺表、缺激活、未知状态或异常都失败；只有从未启用政策的纯研究实例可用 `--policy-not-applicable`。
 
-发布与 `--complete-held` 共用宿主标准库 `flock`（`.git/ashare-deploy.lock`），并发调用直接拒绝。先核对 main/HEAD、镜像源码、运行服务、Compose 配置与空闲；已有 tools 自动纳入，未知暂停不接管。**默认 required**：缺表、缺激活、未知状态、坏输出、异常或超时都失败；仅明确从未启用政策的纯研究实例可指定 `--policy-not-applicable`，实际出现政策时仍拒绝。旧镜像不能调用既有政策 API 时明确失败，不将探针缺失当“不适用”。
-
-切换前冻结前驱 activation、全部原参数和目标镜像 ID；候选 identity 在目标镜像内构建，摘要记录代码/uv.lock、rules、guides 差异及参数是否相等。参数逐项原样复用（包括 account_scope、source、field_sources、confirmed_at、confirmation_ref、有效期），不因“参数没变”或持有 Token 推断批准。身份范围没有缩减，历史指南、政策与评估不重写。
-
-若需要新 identity，先用同一固定入口生成**只读计划**（证据目录须新建）：
+政策身份包含应用源码、`uv.lock`、规则与指南，改了这些就需要新 identity。先生成只读计划（新建目录），核对 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数：
 
 ```bash
 uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目录>" --plan-policy
 ```
 
-核对 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数后，由所有者用私有编辑器准备**本次**批准 JSON：属主常规文件、0600、不经过 shell Token 变量或 argv、不提交仓库。字段示例（占位符不是实际值）：
+再由所有者准备本次批准文件（属主常规文件、0600、不进仓库、不经 shell 变量或 argv），发布命令追加 `--approval "<文件>"`：
 
 ```json
 {
   "identity": "policy:<本次精确目标>",
   "expected_id": 10,
-  "request_id": "<本次稳定且唯一的请求键>",
-  "reason": "<本次批准原因>",
+  "request_id": "<本次唯一请求键>",
+  "reason": "<批准原因>",
   "owner_token": "<临时 owner 凭据>",
-  "rollback": {
-    "identity": "policy:<冻结前驱的完整 identity>",
-    "request_id": "<本次稳定的恢复请求键>",
-    "reason": "<本次明确批准恢复冻结前驱的原因>"
-  }
+  "rollback": {"identity": "policy:<冻结前驱>", "request_id": "<恢复请求键>", "reason": "<恢复原因>"}
 }
 ```
 
-`rollback` 整项可不提供；不提供表示**未批准新激活提交后的恢复激活**。恢复镜像必须实际实现冻结的旧 identity，不能从当前宿主源码推断。批准文件不能从历史授权复制，凭据只经子进程 stdin 临时传递，不写日志、发布证据、镜像或 `.env.tools`。计划不暂停/切换/激活，也不是 held 证据。实际调用在原固定命令后追加 `--approval "<0600 批准文件>"`；无批准而切前可知 identity 不匹配时直接拒绝，不制造停服。已匹配、有效且适用账户时不追加激活，不需要 owner 凭据。
+`rollback` 可省略，省略即未批准新激活后的恢复激活。批准不能从历史授权复制；参数逐项原样复用，不因“参数没变”推断批准。已匹配且有效时不追加激活，也不需要 owner 凭据。
 
-正常顺序：**pause 并排空 → 停服务、备份及停服表指纹核对 → 切换/启动且保持 pause → 网页、worker 离线预检、容器配置、数据库与完整性检查 → 必要时在实际 worker 容器内调用既有 register/activate → 回读 latest → 政策门禁 → resume → tools ready**。绝不先 resume 再从 HTTP 查询 current。门禁要求实际镜像正确，当前 activation/identity 等于本次预期、installed 严格为 true、参数仍有效、已应用且账户范围匹配。activate 回执丢失只重试同一 request_id/expected_id；历史幂等成功不代表 latest，不改 expected_id 绕过 CAS。
-
-证据沿用私有发布目录：`manifest.json`、`release-state.json`（阶段、held/recovered/succeeded、实际服务/image、政策、时间与安全原因）、`policy-observed.json`、`policy-gate.json`、`policy-committed.json`、预检/完整性与回退报告。held 收尾重新只读观察实际政策，记录 `actual_policy.observation=observed` 与观察时间；探针失败则为 `unknown`，activation/identity/installed 等清为 null，不用旧观察冒充最终状态，也不作为门禁通过。进程被杀仍保留最后的 held 检查点和持久暂停；marker **没有 release_id，不证明归属**。无关文档未提交不阻断，应用/部署文件未提交仍拒绝。
+顺序固定为：**pause 并排空 → 停服务、备份并核对表指纹 → 切换/启动且保持 pause → 网页、worker 预检、容器配置、数据库与完整性检查 → 必要时在 worker 容器内 register/activate → 回读 latest → 政策门禁 → resume → tools ready**。门禁要求镜像正确、activation/identity 等于本次预期、`installed=true`、参数有效且账户范围匹配；回执丢失只用同一 `request_id`/`expected_id` 重试。证据写在私有发布目录（`manifest.json`、`release-state.json`、`policy-*.json`、预检/完整性与回退报告）。
 
 ### 回退前置条件与 held 恢复
 
-任何未通过门禁的路径都不得恢复 tools 受理或报发布成功；包括普通回退、首次迁移兼容恢复、同镜像与显式完成。回退成功记录 recovered，但原发布仍以失败退出码结束。恢复受理后发生异常（含回执丢失、ready 或最终证据 I/O 失败）时，先再次 pause/drain，再尝试写 held 证据；证据故障不能挡住安全动作。排空失败不替换或移除进程。证据持续不可写时仅报告安全错误，原文件可能过时，须先修复存储并核对实时状态，不凭旧 succeeded/held 字段恢复受理或宣称成功。
+未通过门禁的任何路径都不恢复 tools 受理、不报成功；回退成功记 recovered，原发布仍以失败退出。恢复受理后出现异常先再次 pause/drain，再写 held 证据。
 
-完整回退前置条件：
+1. 冻结并核对实际旧镜像与配置，worker 空闲、tools 暂停且 in_flight=0；停服后备份数据库、PDF、账户证据与资产侧文件。
+2. 原 web、worker 镜像禁网只读运行 `rollback.assess`（报告在 `rollback-compatibility.json` 与 `rollback-probe/`）；页面可读不等于全栈可回退，还须 tools 严格就绪、完整性检查与政策门禁。哪个版本是可用回退基线只看[实施计划](docs/implementation-plan.md#当前部署)。
+3. 新激活前失败，只在旧镜像读兼容且政策门禁通过后恢复；新激活已提交后，只有本次批准了冻结前驱且 latest 仍为本次激活才追加 CAS 恢复激活，否则保持暂停。禁止 UPDATE/DELETE 激活、降库版本或恢复旧 DB。
+4. 配置/迁移须另获授权；首次 v9→当前版用 `--with-tools --allow-config --initial-recovery <兼容构建>`。
 
-1. 冻结并核对实际旧镜像/配置，worker 空闲、tools 暂停且 in_flight=0；停所有本次服务后保存当前数据库、PDF、账户证据和资产侧文件的私有副本。
-2. 原 web、worker 镜像分别禁网、只读运行 `rollback.assess`；须理解实际来源、全部政策回执/采集上下文与现行 schema。**页面可读不等于全栈可回退**；还须实际 tools 的严格版本就绪、原运行/完整性检查和政策门禁。报告在 `rollback-compatibility.json` 与 `rollback-probe/`。
-3. 新激活前失败，仅在旧镜像读兼容及实际政策门禁均通过后恢复。新激活已提交后，只有本次明确批准冻结旧 identity、且 latest 仍为本次激活，才追加 CAS 恢复激活；其他所有者已切换、无批准或任何核验失败均保持暂停。禁止 UPDATE/DELETE 激活或恢复旧 DB。
-4. v23 下 `f480507`（v22）不是可用全栈回退基线：隔离空白库实测其 rollback_probe 拒绝、tools /ready 为 503。优先准备 `cb9a035` 等 v23 候选；本轮只验证空白 v23 副本，**未验证当前生产数据或生产回退**。不得关闭 schema 检查或降库版本。
-5. 配置/迁移须另获授权。首次 v9→当前版仍用 `--with-tools --allow-config --initial-recovery <兼容构建>`，保留迁移守恒与专用兼容恢复；迁移未验证则停服，不把恢复旧数据库作为回退。
-
-若工具失败留在 paused，操作者核对证据后可明确选择这一份 held 目标：
+工具失败留在 paused 时，核对证据后可完成这一份 held 目标（已精确匹配可省略 approval）；它只重新核对并完成原目标，不切镜像、不接管未知暂停、不接受新 expected_id：
 
 ```bash
-uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>" \
-  --approval "<原本次批准文件，如仍需完成追加激活>"
+uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>" --approval "<原本次批准文件>"
 ```
 
-已精确匹配时可省略 approval。此入口只接受本工具的 held 证据与冻结目标，重新核对实际服务、Compose/环境配置、完整性、空闲、持久 marker、paused=true/in_flight=0 和同一政策门禁；**不重新切镜像、不启动已停服务、不接管未知暂停、不接受新目标/新 expected_id**。证据或状态偏离就拒绝；没有可匹配的 held 检查点须另行人工核对并作新的明确决定，不直接复制 resume 命令。
-
-只有完整就绪成功后才清理旧备份/镜像：保留最近 3 份 `backup-pre-*.db` 和独立同名 `.bundle/`，成对核对归属后清理；镜像保留当前与最近两级回退。失败保留备份、镜像及全部后续业务写入；首次迁移与显式完成保留证据，不自动清理。暂停只覆盖 tools 受理；独立 Web/worker 披露扫描仍按原合同运行。顾问读取账户失败时保留现有 Web 订阅继续扫描；发送前持仓无法刷新则明确显示“持仓状态未知”，不当空仓、不沿用旧持仓事实，机会检查失败另行明确输出。不能据此声称全站停写或自动补发错过的定时任务。
+只有完整就绪成功后才清理：保留最近 3 份 `backup-pre-*.db` 与同名 `.bundle/`，镜像保留当前与两级回退。暂停只覆盖 tools 受理，独立的 Web/worker 披露扫描照常运行；错过的定时任务不自动补发。
 
 ### 服务端与宿主客户端同步顺序
 
-先合并修复并按影响范围验证 → 构建并准备 v23 兼容回退镜像 → 只读计划/本次精确批准 → 另行获准后发布服务端 → 核对同一修复版本的 CLI（退出码协议）→ 同步 helper 与三个调用方脚本（保持原状态）→ 再按原调度观察。新服务端 + 旧 CLI/客户端只会安全保留 pending；新 helper/调用方 + 旧服务端或 CLI 不支持专用码时也保留 pending，不猜中文错误或清空状态。CLI 的原成功 JSON 协议不变。应用发布**不会自动安装** `ops/hermes/`；宿主安装、配置/凭据处理及恢复定时任务须作为独立步骤，详见[客户端说明](ops/hermes/README.md)。本轮代码修复与隔离测试不代表生产已上线，不执行上述生产步骤。
+应用发布**不会安装** `ops/hermes/`。顺序：合并并验证 → 发布服务端 → 核对同版本 CLI → 同步 helper 与调用方脚本（`python3 ops/hermes/install.py --check` 只读核对，`--apply` 从已提交版本同步）→ 按原调度观察。新旧版本错配时客户端只保留 pending，不猜错误文案、不清状态。任务与宿主路径见[脚本说明](ops/hermes/README.md)。
 
-最后用真实浏览器验证受影响的页面和一个正常案例；沿用上文的私有浏览器会话，公共入口不重复用 urllib 探测（Cloudflare 曾返回 1010）。通过后记录版本、结果、备份与回退，结束发布；未通过就定位具体失败，不增加无依据的重试、检查矩阵或多轮审查。
-
-定时脚本的唯一来源是 `ops/hermes/`，用 `python3 ops/hermes/install.py --check` 只读核对。统一脚本已安装；后续从已提交版本用 `python3 ops/hermes/install.py --apply` 同步宿主。发布工具不负责这一步，任务、宿主路径与切换核对见[脚本说明](ops/hermes/README.md)。
+页面改动在发布后用真实浏览器验证受影响页面和一个正常案例（沿用私有浏览器会话，公共入口不用 urllib 探测，Cloudflare 曾返回 1010）；通过后在实施计划记录版本、备份与回退。
