@@ -224,7 +224,8 @@ def summarize(
         if holding["card_status"] == "待复核":
             events = (
                 "；".join(
-                    f"{event.get('title') or '待复核事件'}（{event.get('kind') or event.get('type') or '未分类'}）"
+                    f"{event.get('title') or '待复核事件'}（{event.get('kind') or event.get('type') or '未分类'}"
+                    f"{'；' + event['review']['label'] if isinstance(event.get('review'), dict) else ''}）"
                     for event in card["pending_events"]
                 )
                 or "Research 论点卡待复核"

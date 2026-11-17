@@ -8,7 +8,7 @@ import pytest
 from a_share_research import db, scans, service, stance, valuation
 from support.continuation import load
 from support.valuation import BODY, RECORD, ROWS, STORED, assumptions
-from test_scans import AT, CATALOG, CapturedSources, complete_cards_at, priced, run_scan
+from test_scans import AT, CATALOG, CapturedSources, captured_events, cite_in_card, citing, complete_cards_at, priced, run_scan
 from test_advisor_sources import CALENDAR
 
 
@@ -169,12 +169,14 @@ def test_card_close_without_valuation_returns_reason(tmp_path):
     conn.close()
 
 
-@pytest.mark.parametrize(('failed_at', 'pending'), [
-    ('2026-11-01T01:59:59+00:00', False),
-    ('2026-11-01T02:00:00+00:00', False),
-    ('2026-11-01T02:00:01+00:00', True),
+@pytest.mark.parametrize(('failed_at', 'cites', 'pending'), [
+    ('2026-11-01T01:59:59+00:00', True, False),
+    # A manual report that read and cited the events settles them whenever the scan run failed.
+    ('2026-11-01T02:00:01+00:00', True, False),
+    # One that never read them leaves the failed scan review visible with its retry exit.
+    ('2026-11-01T01:59:59+00:00', False, True),
 ])
-def test_manual_passed_card_supersedes_old_failed_scan_review(tmp_path, failed_at, pending):
+def test_manual_passed_card_supersedes_old_failed_scan_review(tmp_path, failed_at, cites, pending):
     conn = db.connect(tmp_path / 'manual-card.db')
     load(conn)
     complete_cards_at(conn)
@@ -186,7 +188,7 @@ def test_manual_passed_card_supersedes_old_failed_scan_review(tmp_path, failed_a
     assert service.company_card(conn, '603606')['status'] == '待复核'
     manual = service.submit(conn, '603606', 'manual-after-failure')
     db.save_report(conn, manual, RECORD['code'], RECORD['name'], RECORD['period'],
-                   True, RECORD['verdict'], deepcopy(BODY))
+                   True, RECORD['verdict'], citing(BODY, first['events']) if cites else deepcopy(BODY))
     report = conn.execute('SELECT id FROM reports WHERE run_id=?', (manual,)).fetchone()[0]
     completed_at = '2026-11-01T10:00:00+08:00'
     conn.execute('UPDATE reports SET created_at=? WHERE id=?', (completed_at, report))
@@ -200,7 +202,8 @@ def test_manual_passed_card_supersedes_old_failed_scan_review(tmp_path, failed_a
     assert bool(card['pending_events']) == pending
     assert ('note' in card['current']) == pending
     if pending:
-        assert card['pending_events'][0]['run_id'] == failed_run
+        assert {e['run_id'] for e in card['pending_events']} == {failed_run}
+        assert {e['review']['state'] for e in card['pending_events']} == {'research_failed'}
     conn.close()
 
 
@@ -240,6 +243,7 @@ def test_announcement_failure_pauses_card_until_same_code_recovers(tmp_path, val
             return super().valuation(code) | {'trade_date': None}
 
     scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    cite_in_card(conn, '603606', captured_events(CapturedSources(), '603606'))
     recovered = run_scan(conn, InvalidCloseCapture() if valuation_fails else CapturedSources())
     assert recovered['status'] == 'done'
     assert [f['stage'] for f in recovered['summary']['failures']] == (['valuation'] if valuation_fails else [])

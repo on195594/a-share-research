@@ -124,6 +124,31 @@ def priced(conn):
     return body
 
 
+def citing(body, events):
+    """Explicit read/cite variant of a captured report body.
+
+    Only the report-to-announcement relationship is mutated (the report is recorded as having
+    read each announcement and quoting its title); no financial fact is added.
+    """
+    body = deepcopy(body)
+    for i, event in enumerate(events):
+        key = f'DV{i}'
+        body['sources'][key] = {'document': {'code': event['code'], 'title': event['title'], 'period': None,
+                                             'announced': event['announced'], 'url': event['url']}, 'pages': [1]}
+        body['risks'][0]['cites'].append({'source': key, 'page': 1, 'quote': event['title']})
+    return body
+
+
+def captured_events(source, code):
+    return scans.normalize_announcements([i['raw'] for i in source.items if i['code'] == code], code)
+
+
+def cite_in_card(conn, code, events):
+    report_id = service.company_card(conn, code)['report_id']
+    body = json.loads(conn.execute('SELECT body FROM reports WHERE id=?', (report_id,)).fetchone()[0])
+    conn.execute('UPDATE reports SET body=? WHERE id=?', (json.dumps(citing(body, events), ensure_ascii=False), report_id))
+
+
 def complete_cards_at(conn, codes=('603606',), at='2026-01-01T18:00:00+08:00'):
     # Explicitly shift captured card timestamps before disclosures for new-event replays.
     # Equal report dates retain the latest captured card by report id.
@@ -179,15 +204,19 @@ def test_disclosure_title_style_mutations(title, expected):
     assert scans.classify(title) == expected
 
 
-@pytest.mark.parametrize(('completed_at', 'action', 'status', 'count'), [
-    ('2026-10-30T00:00:00+08:00', 'covered', '有效', 0),
-    ('2026-10-29T23:59:59+08:00', 'queued_review', '待复核', 1),
+@pytest.mark.parametrize(('completed_at', 'cites', 'action', 'status', 'count'), [
+    ('2026-10-30T00:00:00+08:00', True, 'covered', '有效', 0),
+    # A newer report that never read the announcement does not cover it.
+    ('2026-10-30T00:00:00+08:00', False, 'queued_review', '待复核', 1),
+    ('2026-10-29T23:59:59+08:00', False, 'queued_review', '待复核', 1),
 ])
-def test_disclosure_before_card_is_covered_but_same_day_triggers_review(conn, completed_at, action, status, count):
+def test_disclosure_is_covered_only_when_newer_card_cites_it(conn, completed_at, cites, action, status, count):
     complete_cards_at(conn, at=completed_at)
     scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
     source = CapturedSources([i for i in ANNOUNCEMENTS
                               if i['code'] == '603606' and i.get('period') == '2026-09-30'])
+    if cites:
+        cite_in_card(conn, '603606', captured_events(source, '603606'))
     before = service.company_card(conn, '603606')
     runs_before = conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0]
     result = run_scan(conn, source)
@@ -204,6 +233,8 @@ def test_disclosure_before_card_is_covered_but_same_day_triggers_review(conn, co
     assert card['completed_at'] == completed_at
     assert card['status'] == status
     assert [e['id'] for e in card['pending_events']] == ([event['id']] if count else [])
+    if count:
+        assert card['pending_events'][0]['review']['state'] == 'researching'
     assert any(n['reason'] == 'pending_review' for n in result['notify']) == bool(count)
 
 
@@ -270,7 +301,7 @@ def test_subscriptions_replace_atomic_validation_and_l5(conn):
     assert conn.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0] == 1
 
 
-def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
+def test_duplicate_scan_is_idempotent_and_request_freezes_public_events(conn):
     complete_cards_at(conn)
     priced(conn)
     scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
@@ -284,7 +315,12 @@ def test_duplicate_scan_is_idempotent_and_k2_request_is_empty(conn):
     run_id = first['summary']['queued_runs'][0]
     request = conn.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
     assert request['request_id'] == f'scan-{scan_id}-603606'
-    assert json.loads(request['request']) == {'question': '', 'feedback': None, 'parent_report_id': None}
+    frozen = json.loads(request['request'])
+    assert frozen == {'question': '', 'feedback': None, 'parent_report_id': None,
+                      'events': [scans.event_context(e) for e in sorted(first['events'], key=lambda e: e['id'])]}
+    # Only public announcement identity is frozen: no severity, action, A4b outcome or account data.
+    assert all(set(e) == {'id', 'code', 'title', 'announced', 'url', 'kind'} for e in frozen['events'])
+    assert {e['run_id'] for e in scans.events(conn)} == {run_id}
     card = service.company_card(conn, '603606')
     assert card['status'] == '待复核' and len(card['pending_events']) == 4
     assert card['current']['current_zone'] == valuation.at(priced(conn)['valuation_calc'], 36.03, '2026-10-26')['zone']
@@ -358,10 +394,20 @@ def test_pending_state_and_failed_review_completion(conn):
     body = deepcopy(BODY)
     db.save_report(conn, run, RECORD['code'], RECORD['name'], RECORD['period'], True, RECORD['verdict'], body)
     db.update_run(conn, run, status='done', finished_at='2026-10-31T19:00:00+08:00')
+    # The captured report quotes its own annual (D0) and half-year (D1) reports, so those two
+    # announcements are included; the two it never read stay visible.
+    card = service.company_card(conn, '603606')
+    read = {body['document']['url'], body['sources']['D1']['document']['url']}
+    assert card['status'] == '待复核'
+    assert {e['url'] for e in card['pending_events']} == {e['url'] for e in first['events']} - read
+    assert {e['review']['state'] for e in card['pending_events']} == {'not_read'}
+    conn.execute('UPDATE reports SET body=? WHERE run_id=?',
+                 (json.dumps(citing(body, first['events']), ensure_ascii=False), run))
     assert service.company_card(conn, '603606')['status'] == '有效'
     assert service.company_card(conn, '603606')['pending_events'] == []
     third = run_scan(conn, at='2026-11-01T18:00:00+08:00')
     assert not any(n['reason'] == 'review_failed' for n in third['notify'])
+    assert third['summary']['queued_runs'] == []
 
 
 @pytest.mark.parametrize('deviated_first', [False, True])
@@ -383,7 +429,8 @@ def test_severity_order_daily_budget_backlog_and_shanghai_date(conn, deviated_fi
     original = scans.events(conn)[0]
     for i in range(4):
         run = service.submit(conn, original['code'], f'scan-budget-{i}')
-        db.update_run(conn, run, created_at='2026-10-30T00:00:01+08:00')
+        # Finished runs still count toward the day; an active run would defer the company instead.
+        db.update_run(conn, run, created_at='2026-10-30T00:00:01+08:00', status='failed')
         conn.execute('INSERT INTO scan_events(scan_id,code,doc_key,title,announced,url,kind,severity,detected_at,action,run_id) '
                      "VALUES (?,?,?,?,?,?,?,?,?,'queued_review',?)", (scan_id, original['code'], original['doc_key'] + str(i),
                        original['title'], original['announced'], original['url'], original['kind'], 2, AT, run))
@@ -551,6 +598,7 @@ def test_judgment_change_is_notified_once_and_weekly_counts_current_agenda(conn)
     body = deepcopy(BODY)
     body['checkpoints'] = deepcopy(CAPTURED_BODIES[39]['checkpoints'])
     body['valuation_calc'] = valuation.compute(assumptions(), body['table'], body['market_date'])
+    body = citing(body, first['events'])
     db.save_report(conn, run_id, RECORD['code'], RECORD['name'], RECORD['period'], True, RECORD['verdict'], body)
     db.update_run(conn, run_id, status='done', finished_at='2026-10-31T10:00:00+08:00')
     second = run_scan(conn, at='2026-10-31T18:00:00+08:00')
@@ -701,7 +749,7 @@ def test_disclosure_failure_does_not_change_announcement_window(conn, disclosure
     failing = Failure(source.items)
     first = run_scan(conn, failing)
     assert first['status'] == 'done' and first['summary']['failures'] == []
-    assert first['summary']['check_failures'] == [{'code': code, 'reason': '披露取数暂不可用'}]
+    assert first['summary']['check_failures'] == [{'code': code, 'stage': 'disclosure_checks', 'reason': '披露取数暂不可用'}]
     assert scans.announcement_failure(conn, code) is None
     card = service.company_card(conn, code)
     second = run_scan(conn, failing, '2026-10-31T18:00:00+08:00')

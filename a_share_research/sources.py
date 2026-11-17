@@ -137,15 +137,20 @@ def reports(code: str, days: int = 550) -> list[Document]:
     return sorted(chosen, key=lambda d: d.period, reverse=True)
 
 
+def title_period(title: str) -> str:
+    """Report period named by a periodic report title; other announcements have none."""
+    match = TITLE_RE.search(title)
+    return f"{match[1]}-{KINDS[match[2].removeprefix('第')]}" if match else ""
+
+
 def announcement_document(raw: dict, code: str) -> Document | None:
     """Keep official company PDFs; an event date is never a financial period."""
     if raw.get("secCode") != stock_codes.normalize_key(code) or not PDF_PATH.fullmatch(raw.get("adjunctUrl", "")):
         return None
     title = re.sub(r"<[^>]+>", "", raw.get("announcementTitle", ""))
-    match = TITLE_RE.search(title)
     return Document(
         code=to_tushare_stock_code(code), name=raw.get("secName", ""), title=title,
-        period=f"{match[1]}-{KINDS[match[2].removeprefix('第')]}" if match else "",
+        period=title_period(title),
         announced=datetime.fromtimestamp(raw["announcementTime"] / 1000, SHANGHAI).date().isoformat(),
         url="https://static.cninfo.com.cn/" + raw["adjunctUrl"],
     )

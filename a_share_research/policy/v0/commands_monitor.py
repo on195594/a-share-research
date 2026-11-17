@@ -1035,15 +1035,25 @@ def format_daily_brief(snapshot: dict, extra: list[str], today: str) -> str:
         "watch": "观察中",
         "triggered": "已触发",
     }
+    cadences = {
+        "quarterly": "季度",
+        "semiannual": "半年",
+        "annual": "年度",
+        "event": "事件",
+    }
     for item in holdings:
         for condition in (item.get("l3") or {}).get("conditions", []):
             due = condition.get("next_review")
             status = condition.get("status")
             if status == "not_triggered" and due and today < due <= horizon:
                 upcoming.setdefault(due, []).append(item["code"])
-            elif status != "not_triggered" or due and due <= today:
+            elif status != "not_triggered" or not due or due <= today:
+                cadence = cadences.get(
+                    condition.get("evidence_cadence"), "未分类，季报不能改变状态"
+                )
                 attention.append(
-                    f"{item['code']} L3#{condition['id']} {l3_labels.get(status, status)}，"
+                    f"{item['code']} L3#{condition['id']} {l3_labels.get(status, status)}"
+                    f"（证据日期 {condition.get('as_of') or '未记录'}，证据频率 {cadence}），"
                     f"下次复核 {due or '未设'}"
                 )
     for due, codes in sorted(upcoming.items()):
@@ -1052,8 +1062,30 @@ def format_daily_brief(snapshot: dict, extra: list[str], today: str) -> str:
             f"（{'、'.join(dict.fromkeys(codes))}）"
         )
     attention += extra
-    lines.append("需关注：" + ("" if attention else "无触发项"))
+    # review_due only schedules a re-check; an unresolved alert stays listed until resolved.
+    unresolved = [
+        f"{item['code']} {'红色' if alert.get('level') == 'red' else '黄色'}预警 "
+        f"{alert.get('reason_code')}：{alert.get('reason') or '无说明'}"
+        f"（{alert.get('status')}，开立 {(alert.get('opened_at') or '未记录')[:10]}，"
+        f"复核日 {alert.get('review_due') or '未设'}）"
+        for level in ("red", "yellow")
+        for item in holdings
+        for alert in item.get("alerts") or []
+        if (alert.get("level") == "red") == (level == "red")
+    ]
+    lines.append(
+        "需关注："
+        + (
+            ""
+            if attention
+            else "本轮程序检查未触发（止损、跌幅、行业偏离、Tier、到期预警与L3、"
+            "研究论点、风险预算）；不覆盖未自动计算的基本面条件"
+        )
+    )
     lines += [f"- {text}" for text in attention]
+    if unresolved:
+        lines.append("尚未关闭：")
+        lines += [f"- {text}" for text in unresolved]
     account = snapshot.get("account") or {}
     value = account.get("portfolio_value")
     if value is None:
