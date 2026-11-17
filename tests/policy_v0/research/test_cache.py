@@ -37,28 +37,6 @@ def test_wal_mode_enabled():
     assert mode == "wal"
 
 
-# ── 行业 TTL 推断 ──────────────────────────────────────────────────────────────
-
-
-# ── 缓存过期逻辑 ───────────────────────────────────────────────────────────────
-
-
-def test_is_expired_fresh():
-    updated = (datetime.now() - timedelta(hours=1)).isoformat()
-    assert not domain.is_expired(updated, 24)
-
-
-def test_is_expired_stale():
-    updated = (datetime.now() - timedelta(hours=25)).isoformat()
-    assert domain.is_expired(updated, 24)
-
-
-def test_is_expired_boundary():
-    # 恰好等于 TTL 已过期
-    updated = (datetime.now() - timedelta(hours=24, minutes=1)).isoformat()
-    assert domain.is_expired(updated, 24)
-
-
 # ── CLI 分派 ───────────────────────────────────────────────────────────────
 
 
@@ -781,7 +759,7 @@ def test_trade_commands_reject_non_finite_prices_and_backdated_events():
 
 
 def test_bse_920_uses_incremental_share_rule_and_quote_prefix():
-    assert market_quotes.sina_query_prefix("920189") == "bj"
+    assert [market_quotes.sina_query_prefix(c) for c in ("920189", "430570", "872925", "600036", "000001", "300750")] == ["bj", "bj", "bj", "sh", "sz", "sz"]
     assert commands_holdings._validate_buy_quantity("920189", 101) is None
     assert commands_holdings._validate_sell_quantity("920189", 500, 150) is None
     assert "北交所" in (commands_holdings._validate_buy_quantity("920189", 99) or "")

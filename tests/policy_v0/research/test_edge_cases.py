@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import commands_holdings, commands_monitor, db, domain, market_quotes
+from a_share_research.policy.v0 import commands_holdings, commands_monitor, db, domain
 
 
 @pytest.fixture(autouse=True)
@@ -256,69 +256,6 @@ class TestCloseHoldingDefense:
         with pytest.raises(SystemExit) as exc:
             commands_holdings.cmd_close_holding(["000001", "-5.0"])
         assert exc.value.code == 1
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestFetchCurrentPriceMarketPrefix:
-    def _mock_get(self, monkeypatch, captured: dict, name: str, fields: str):
-        from unittest.mock import MagicMock
-
-        def mock_get(url, **kwargs):
-            captured["url"] = url
-            r = MagicMock()
-            r.encoding = "gbk"
-            r.text = f'var x="{fields}"'
-            return r
-
-        monkeypatch.setattr(market_quotes.requests, "get", mock_get)
-
-    def test_sz_prefix_for_3xx_chinext_codes(self, monkeypatch):
-        """ChiNext (创业板) 300xxx → 'sz' prefix, not 'bj'."""
-        captured = {}
-        self._mock_get(
-            monkeypatch, captured, "宁德时代", "宁德时代,200.0,200.1,205.50,210.0,199.0"
-        )
-        market_quotes.fetch_current_price("300750")
-        assert "sz300750" in captured["url"]
-
-    def test_field_index_3_is_current_price_not_open(self, monkeypatch):
-        """Sina format: field[3]=current price, field[2]=open. Guard against index error."""
-        captured = {}
-        # name, yesterday_close, open, CURRENT, high, low
-        self._mock_get(
-            monkeypatch, captured, "招商银行", "招商银行,40.00,40.10,41.50,42.00,39.80"
-        )
-        price = market_quotes.fetch_current_price("600036")
-        assert price == 41.50, "field[3] must be current price, not open (40.10)"
-
-    def test_response_with_exactly_4_fields_is_valid(self, monkeypatch):
-        """Exactly 4 fields is the boundary minimum — must succeed."""
-        from unittest.mock import MagicMock
-
-        def mock_get(url, **kwargs):
-            r = MagicMock()
-            r.encoding = "gbk"
-            r.text = 'var x="name,10.0,10.1,10.5"'
-            return r
-
-        monkeypatch.setattr(market_quotes.requests, "get", mock_get)
-        price = market_quotes.fetch_current_price("000001")
-        assert price == 10.5
-
-    def test_response_with_3_fields_returns_none(self, monkeypatch):
-        """Fewer than 4 fields → None (boundary: < 4 condition)."""
-        from unittest.mock import MagicMock
-
-        def mock_get(url, **kwargs):
-            r = MagicMock()
-            r.encoding = "gbk"
-            r.text = 'var x="name,10.0,10.1"'
-            return r
-
-        monkeypatch.setattr(market_quotes.requests, "get", mock_get)
-        assert market_quotes.fetch_current_price("000001") is None
 
 
 # ═══════════════════════════════════════════════════════════════════

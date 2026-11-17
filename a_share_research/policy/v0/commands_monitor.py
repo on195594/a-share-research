@@ -818,7 +818,7 @@ def build_monitor_snapshot(
             "denominator_source": denominator_source,
             "owners": {
                 "holdings_alerts_l3_tier_gates": "read_only_db_session",
-                "quotes": "fetch_current_price_quotes",
+                "quotes": "fetch_monitor_price_quotes",
                 "portfolio_risk": "calculate_position_risk",
             },
             "fallback_reason": None,
@@ -886,7 +886,7 @@ def unavailable_monitor_snapshot(
             "denominator_source": _denominator_source(portfolio_value, denominator_evidence),
             "owners": {
                 "holdings_alerts_l3_tier_gates": "read_only_db_session",
-                "quotes": "fetch_current_price_quotes",
+                "quotes": "fetch_monitor_price_quotes",
                 "portfolio_risk": "calculate_position_risk",
             },
             "fallback_reason": None,

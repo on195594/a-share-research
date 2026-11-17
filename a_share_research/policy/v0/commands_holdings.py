@@ -119,10 +119,6 @@ def _validate_event_date_not_before(
 _MONITOR_BATCH_LIMIT = 800
 
 
-def _fresh_industry_map() -> MarketDataResult[dict[str, str]]:
-    return TushareFundamentalsProvider().read_cached_industry_map()
-
-
 def fetch_monitor_price_quotes(
     codes: list[str],
 ) -> tuple[
@@ -136,7 +132,7 @@ def fetch_monitor_price_quotes(
     if len(codes) > _MONITOR_BATCH_LIMIT:
         return dict.fromkeys(codes), None
 
-    industry_result = _fresh_industry_map()
+    industry_result = TushareFundamentalsProvider().read_cached_industry_map()
     industry_map = (
         industry_result.value
         if industry_result.status == "ok" and industry_result.value is not None
@@ -1939,7 +1935,8 @@ def cmd_position_return(args: list[str]) -> None:
         sys.exit(1)
     remaining_shares = open_shares if exit_date is None else 0
     if remaining_shares and current_price is None:
-        current_price = market_quotes.fetch_current_price(code)
+        quote = market_quotes.fetch_current_price_quotes([code])[code]
+        current_price = quote.price if quote else None
     last_day = domain.cst_today() if remaining_shares else (exit_date or events[-1][1])
     try:
         lifecycle_return = calculate_lifecycle_return(

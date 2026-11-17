@@ -122,25 +122,6 @@ def fetch_market_limit_down_snapshot() -> dict | None:
     return None
 
 
-def fetch_current_price(code: str) -> float | None:
-    """Fetch one current price for compatibility with existing callers."""
-    try:
-        response = requests.get(
-            f"https://hq.sinajs.cn/list={sina_query_prefix(code)}{code}",
-            headers={"Referer": "https://finance.sina.com.cn"},
-            timeout=8,
-        )
-        response.encoding = "gbk"
-        start = response.text.find('"') + 1
-        end = response.text.rfind('"')
-        if start <= 0 or end <= start:
-            return None
-        fields = response.text[start:end].split(",")
-        return float(fields[3]) if len(fields) >= 4 else None
-    except (requests.RequestException, ValueError, IndexError):
-        return None
-
-
 def fetch_current_price_quotes(codes: list[str]) -> dict[str, PriceQuote | None]:
     """Fetch a batch of quotes with source timestamps and previous closes."""
     return {

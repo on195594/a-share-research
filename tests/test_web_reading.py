@@ -196,12 +196,26 @@ def test_candidate_matrix_shades_percentiles_and_links_flags_to_details():
     assert 'id="cand-{{ r.code }}"' in template
 
 
-def test_home_verdict_filter_binds_each_card_group_bucket():
-    home_tpl = (TEMPLATES / 'home.html').read_text()
-    # The verdict filter hides whole groups; each group is one verdict bucket.
-    assert 'class="card-group" data-verdict="{{ label }}"' in home_tpl
-    assert 'selectattr("bucket", "equalto", label)' in home_tpl
-    assert 'role="status" aria-live="polite" data-filter-status' in home_tpl
+def test_home_verdict_filter_binds_each_card_group_bucket(tmp_path):
+    from a_share_research import charts, db, reading
+    from support.continuation import load
+    from support.templates import render
+    conn = db.connect(tmp_path / 'home.db')
+    try:
+        load(conn)
+        reports = reading.latest_reports(conn, include_checkpoint=False)
+        cards = reading.report_cards(conn, reports, {})
+    finally:
+        conn.close()
+    assert len(cards) > 1
+    cards[-1] = cards[-1] | {'bucket': '暂不值得'}  # marked variant: the captured set shares one bucket
+    html = render('home.html', companies=cards, verdict_summary=charts.verdict_summary(reports),
+                  pending=[], pending_more=False, active=[], batch=None)
+    # The verdict filter hides whole groups; each group holds exactly its bucket's cards.
+    groups = re.findall(r'<section class="card-group" data-verdict="([^"]+)"(.*?)</section>', html, re.S)
+    shown = {label: re.findall(r'id="card-([^"]+)"', body) for label, body in groups}
+    assert shown == {c['bucket']: [d['code'] for d in cards if d['bucket'] == c['bucket']] for c in cards}
+    assert 'role="status" aria-live="polite" data-filter-status' in html
 
 
 def test_failure_explanation_precedes_source_catalog():

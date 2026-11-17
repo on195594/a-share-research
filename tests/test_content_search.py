@@ -1,6 +1,5 @@
 """K6 content search over real saved reports: scope, latest-report rule, literal matching and paging."""
 import json
-from pathlib import Path
 
 import pytest
 
@@ -195,10 +194,11 @@ def test_item_link_points_at_the_claim_or_the_stance():
     assert reading.item_link(7, "stance") == "/reports/7#stance"
 
 
-def test_library_results_link_the_full_company_code_the_stock_route_expects():
+def test_library_results_link_the_full_company_code_the_stock_route_expects(conn):
     # /stock/{code} looks reports up by their stored code, suffix included; a bare six digits is a 404.
-    template = (Path(__file__).parents[1] / "a_share_research/templates/research_library.html").read_text()
-    assert 'href="/stock/{{ hit.code }}"' in template
+    hits = reading.library_results(conn, "现金流")["hits"]
+    html = _library_page(q="现金流", companies=[], hits=hits, history=False)
+    assert hits and all("." in hit["code"] and f'href="/stock/{hit["code"]}"' in html for hit in hits)
 
 
 def test_scope_needs_one_named_company_and_ignores_fragments(conn):

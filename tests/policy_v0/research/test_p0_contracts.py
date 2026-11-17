@@ -49,6 +49,7 @@ def test_legacy_naive_timestamp_is_interpreted_as_asia_shanghai(monkeypatch) -> 
     )
 
     assert domain.is_expired("2026-07-14T09:00:00", 2) is False
+    assert domain.is_expired("2026-07-14T08:00:00", 2) is False  # exactly TTL old is still fresh
     assert domain.is_expired("2026-07-14T07:59:59", 2) is True
 
 

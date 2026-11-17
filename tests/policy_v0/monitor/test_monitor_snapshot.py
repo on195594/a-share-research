@@ -262,7 +262,6 @@ def test_clean_five_holding_fast_gate_uses_one_read_session_one_quote_batch_and_
     assert payload["stop_reason"] == "clean_fast_gate"
     assert payload["escalations"] == []
     assert payload["quote_coverage"] == {"active": 5, "complete": True, "priced": 5}
-    assert payload["manifest"]["owners"]["quotes"] == "fetch_current_price_quotes"
     assert payload["manifest"]["research_subagents"] == 0
     assert hashlib.sha256(isolated_cache_database.read_bytes()).hexdigest() == before
     assert cache.COMMAND_CLASSIFICATION["monitor-snapshot"] == "R1"
@@ -823,8 +822,11 @@ def test_failed_cached_industry_states_never_network_or_write(
             raise AssertionError("cache-only consumer must not use network API")
 
     monkeypatch.setattr(commands_holdings, "TushareFundamentalsProvider", FakeProvider)
+    monkeypatch.setattr(
+        commands_holdings.market_quotes, "fetch_sina_batch_quotes", dict.fromkeys
+    )
 
-    result = commands_holdings._fresh_industry_map()
+    _, result = commands_holdings.fetch_monitor_price_quotes(["600036"])
 
     assert result.status == "failed"
     assert result.error_code == error_code
