@@ -325,7 +325,7 @@ def test_v21_migration_preserves_existing_identities_and_review_foreign_keys(tmp
     conn.close()
     migrated = db.connect(path)
     try:
-        assert migrated.execute('PRAGMA user_version').fetchone()[0] == 22
+        assert migrated.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
         for table in tables:
             current = [dict(row) for row in migrated.execute(f'SELECT * FROM {table} ORDER BY 1')]
             assert [{key: row[key] for key in originals[table][0]} for row in current] == originals[table]

@@ -530,10 +530,13 @@ def report_bodies(conn, ids: list[int]) -> dict:
 
 def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
     """Compact home-page cards; a failed report also links the company's last passed one."""
+    from a_share_research import scans
     bodies = report_bodies(conn, [report['id'] for report in reports])
     return [card(r, bodies[r['id']], None if r['passed'] else
                  (passed_before.get(r['code']) or passed_before.get(stock_codes.normalize_key(r['code']))))
-            | {'from_batch': r['from_batch']} for r in reports]
+            | {'from_batch': r['from_batch'],
+               'check_failure': scans.mechanical_failure(conn, stock_codes.normalize_key(r['code']), r['id'])}
+            for r in reports]
 
 
 def comparison(conn, report) -> dict:

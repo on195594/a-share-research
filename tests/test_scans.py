@@ -731,9 +731,18 @@ def test_disclosure_scan_append_only_pending_retry_and_cooldown(conn, disclosure
             raw = super().disclosures(code, periods)
             raw['forecast'][0]['ann_date'] = '20260124'  # Announcement-date-only revision variant.
             return raw
-    third = run_scan(conn, Revision(source.items), '2026-11-01T18:00:00+08:00')
+    revision = Revision(source.items)
+    third = run_scan(conn, revision, '2026-11-01T18:00:00+08:00')
     assert len(third['summary']['checks'][code]) == 2
     assert not [n for n in third['notify'] if n['kind'] == 'disclosure_check']
+    # Explicit calendar-continuation variant (capture ends 10-23), only for retry timing.
+    revision.trade_days = lambda start, end: [d for d in DAYS + [
+        '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'] if start <= d <= end]
+    ready = run_scan(conn, revision, '2026-11-06T18:00:00+08:00')
+    assert ready['summary']['checks'][code] == []
+    assert len([n for n in ready['notify'] if n['kind'] == 'disclosure_check']) == 2
+    repeated = run_scan(conn, revision, '2026-11-09T18:00:00+08:00')
+    assert not [n for n in repeated['notify'] if n['kind'] == 'disclosure_check']
 
 
 def test_disclosure_failure_does_not_change_announcement_window(conn, disclosure_replay):
@@ -749,7 +758,8 @@ def test_disclosure_failure_does_not_change_announcement_window(conn, disclosure
     failing = Failure(source.items)
     first = run_scan(conn, failing)
     assert first['status'] == 'done' and first['summary']['failures'] == []
-    assert first['summary']['check_failures'] == [{'code': code, 'stage': 'disclosure_checks', 'reason': '披露取数暂不可用'}]
+    assert first['summary']['check_failures'] == [{'code': code, 'report_id': service.company_card(conn, code)['report_id'],
+                                                  'stage': 'disclosure_checks', 'reason': '披露取数暂不可用'}]
     assert scans.announcement_failure(conn, code) is None
     card = service.company_card(conn, code)
     second = run_scan(conn, failing, '2026-10-31T18:00:00+08:00')
@@ -771,7 +781,7 @@ def test_disclosure_effective_only_and_old_card_date(conn, disclosure_replay):
     assert first['summary']['checks'][code]
     # Card-day-only variant excludes all disclosures before the new completion day.
     complete_cards_at(conn, [code], at='2026-02-01T18:00:00+08:00')
-    assert scans._check_disclosures(conn, source, code, service.company_card(conn, code), first['id'], AT) == []
+    assert scans._check_disclosures(conn, source, code, service.company_card(conn, code), first['id'], AT) is None
 
 
 def test_disclosures_network_boundary_and_periodic_versions(monkeypatch):

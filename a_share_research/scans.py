@@ -2,6 +2,7 @@
 
 from collections import Counter
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 import json
 import logging
 import math
@@ -367,6 +368,22 @@ def announcement_failure(conn, code: str, *, scan_id: int | None = None) -> dict
     return None
 
 
+def mechanical_failure(conn, code: str, report_id: int, *, scan_id: int | None = None) -> dict | None:
+    """Only an explicit successful check clears the current report's failure."""
+    for row in conn.execute("SELECT id,summary FROM scans WHERE summary IS NOT NULL "
+                            "AND (status IN ('done','failed') OR id=?) ORDER BY id DESC", (scan_id,)):
+        summary = json.loads(row['summary'])
+        failure = next((f for f in summary.get('check_failures', [])
+                        if f['code'] == code and (f.get('report_id') or
+                            (summary.get('before', {}).get(code) or {}).get('report_id') or
+                            (summary.get('cards', {}).get(code) or {}).get('report_id')) == report_id), None)
+        if failure:
+            return {'kind': 'check_failure', **failure, 'report_id': report_id, 'scan_id': row['id']}
+        if {'code': code, 'report_id': report_id} in summary.get('checks_succeeded', []):
+            return None
+    return None
+
+
 def last_extreme_zones(history: list[dict]) -> dict[str, str]:
     zones = {}
     for scan in history:
@@ -506,7 +523,8 @@ def stored_checks(conn, report_id: int) -> list[dict]:
     """Read append-only evidence in the pure judge's field vocabulary."""
     rows = conn.execute('SELECT * FROM disclosure_checks WHERE report_id=? ORDER BY id', (report_id,))
     return [dict(r) | {'ref': r['item_ref'], 'identity': r['source_identity'],
-                      'observed': json.loads(r['observed'])} for r in rows]
+                      'observed': json.loads(r['observed']),
+                      'evidence': json.loads(r['evidence']) if r['evidence'] else None} for r in rows]
 
 
 def check_detail(check: dict, item: dict, body: dict) -> str:
@@ -520,17 +538,17 @@ def check_detail(check: dict, item: dict, body: dict) -> str:
             f"原条件 {expected} {unit}，{direction}；{check['source']} {check['announced']}")
 
 
-def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int, at: str) -> list[dict]:
+def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int, at: str) -> list[dict] | None:
     if card is None:
-        return []
+        return None
     pending = [e for e in open_events(conn, code)
                if e['kind'] in ('forecast', 'periodic') and after_card(e, card['completed_at'])]
     if not pending:
-        return []
+        return None
     body = report_body.load(conn.execute('SELECT body FROM reports WHERE id=?', (card['report_id'],)).fetchone()['body'])
     items = disclosure_checks.items(body)
     if not items:
-        return []
+        return None
     raw = source.disclosures(code, sorted({i['period'] for i in items}))
     observations = (disclosure_checks.normalize_forecast(raw['forecast'], code)
                     + disclosure_checks.normalize_express(raw['express'], code,
@@ -546,15 +564,31 @@ def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int,
                 check = disclosure_checks.judge(item, observation)
                 if check is None:
                     continue
+                evidence = {'value': observation['values'][item['metric']]}
+                if 'variants' in observation:
+                    evidence['variants'] = observation['variants']
+                evidence = json.loads(json.dumps(evidence, default=str))
+                history = [c for c in stored_checks(conn, card['report_id'])
+                           if c['ref'] == check['ref'] and c['identity'] == check['identity']]
+                if history:
+                    previous = history[-1]
+                    if previous['evidence'] == evidence or (previous['evidence'] is None
+                            and all(previous[k] == check[k] for k in ('observed', 'outcome', 'direction', 'reason'))):
+                        continue
+                    if any(c['reason'] == disclosure_checks.IDENTITY_CONFLICT_REASON or any(
+                            c['observed'][k] is not None and check['observed'][k] is not None
+                            and Decimal(c['observed'][k]) != Decimal(check['observed'][k])
+                            for k in ('low', 'high')) for c in history):
+                        check.update(outcome='undetermined', direction=None, reason=disclosure_checks.IDENTITY_CONFLICT_REASON)
+                version = history[-1]['version'] + 1 if history else 1
                 row = conn.execute(
                     'INSERT INTO disclosure_checks(code,report_id,scan_id,scan_event_id,item_ref,kind,metric,period,'
-                    'source,source_identity,announced,outcome,direction,reason,checked_at,observed) '
-                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING id',
+                    'source,source_identity,announced,outcome,direction,reason,checked_at,observed,version,evidence) '
+                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
                     (code, card['report_id'], scan_id, event['id'], *[check[k] for k in
                      ('ref', 'kind', 'metric', 'period', 'source', 'identity', 'announced', 'outcome', 'direction', 'reason')],
-                     at, json.dumps(check['observed']))).fetchone()
-                if row:
-                    inserted.append(check | {'id': row['id'], 'report_id': card['report_id']})
+                     at, json.dumps(check['observed']), version, json.dumps(evidence, ensure_ascii=False))).fetchone()
+                inserted.append(check | {'id': row['id'], 'version': version, 'report_id': card['report_id']})
     return inserted
 
 
@@ -608,7 +642,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                            (at, scan_id)).fetchone()
     if not claimed:
         return
-    summary = {'checks': {}, 'check_failures': [], 'coverage_gaps': [], 'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
+    summary = {'checks': {}, 'checks_succeeded': [], 'check_failures': [], 'coverage_gaps': [], 'failures': [], 'closes': {}, 'cards': {}, 'notify': [], 'queued_runs': [], 'names': {},
                'announcements_succeeded': []}
     try:
         prefetch = source.report_rc_window((instant(at).date() - timedelta(days=1)).isoformat())
@@ -627,7 +661,9 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         history = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute(
             "SELECT * FROM scans WHERE id<? AND status='done' ORDER BY id", (scan_id,))]
         previous = history[-1] if history else None
-        notices = [n for scan in history for n in scan['summary'].get('notify', [])]
+        notices = [n for row in conn.execute(
+            "SELECT summary FROM scans WHERE id<? AND status IN ('done','failed') ORDER BY id", (scan_id,))
+            for n in json.loads(row['summary'] or '{}').get('notify', [])]
         summary['last_extreme_zones'] = last_extreme_zones(history)
         summary['scope'] = scope
         summary['before'] = {s['code']: card_or_none(conn, s['code']) for s in scope}
@@ -666,12 +702,19 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary, ensure_ascii=False), scan_id))
         for subscription in scope:
             code = subscription['code']
+            check_card = None
             try:
-                summary['checks'][code] = _check_disclosures(
-                    conn, source, code, card_or_none(conn, code, scan_id=scan_id), scan_id, fixed_at or db.now())
+                check_card = card_or_none(conn, code, scan_id=scan_id)
+                checked = _check_disclosures(conn, source, code, check_card, scan_id, fixed_at or db.now())
+                summary['checks'][code] = checked or []
+                if checked is not None:
+                    summary['checks_succeeded'].append({'code': code, 'report_id': check_card['report_id']})
             except Exception as exc:
                 log.exception('scan %s disclosure checks %s failed', scan_id, code)
-                summary['check_failures'].append({'code': code, 'stage': 'disclosure_checks', 'reason': str(exc)})
+                summary['check_failures'].append({'code': code, 'report_id': check_card['report_id'] if check_card else None,
+                                                'stage': 'disclosure_checks', 'reason': str(exc)})
+        conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary, ensure_ascii=False), scan_id))
+        notified_checks = {c['id'] for n in notices for c in n.get('checks', [])}
         summary['queued_runs'] = _dispatch(conn, scan_id, fixed_at or db.now(), {s['code'] for s in scope})
         completed = completed_reviews(conn, previous['started_at'] if previous else None, at)
         new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)]
@@ -693,7 +736,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                 checks = [c | {'detail': check_detail(c, items[c['ref']], body)} for c in checks if c['ref'] in items]
             for reason in notification_reasons(before, card, [e for e in new_events if e['code'] == code],
                                                [r for r in completed if stock_codes.normalize_key(r['code']) == code],
-                                               checks=checks, new_checks=summary['checks'].get(code, []),
+                                               checks=checks, new_checks=[c for c in checks if c['id'] not in notified_checks],
                                                last_extreme_zone=summary['last_extreme_zones'].get(code)):
                 candidates.append({'code': code, 'name': (card or {}).get('name') or summary['names'].get(code), **reason,
                                    'card': card, 'path': f'/stock/{code}', 'card_path': f'/api/companies/{code}/card',
@@ -747,7 +790,8 @@ def weekly(conn, *, at: str | None = None) -> dict:
     rows = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute('SELECT * FROM scans ORDER BY id')]
     for row in rows:
         if instant(row['requested_at']) >= since:
-            failures.extend({'scan_id': row['id'], **f} for key in ('failures', 'check_failures')
+            failures.extend({'scan_id': row['id'], 'kind': 'check_failure' if key == 'check_failures' else 'scan_failure', **f}
+                            for key in ('failures', 'check_failures')
                             for f in row['summary'].get(key, []))
             # A gap stays reported for the week even after a later scan succeeds: it was never backfilled.
             gaps.extend(row['summary'].get('coverage_gaps', []))

@@ -44,12 +44,15 @@ print(json.dumps(result))
 '''
 
 
-def test_real_v23_readers_and_full_tools_readiness(tmp_path):
+def test_real_v23_readers_and_full_tools_readiness(tmp_path, monkeypatch):
     data = tmp_path/'data'
     data.mkdir()
     database = data/'app.db'
-    with closing(db.connect(database)) as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 23
+    # This historical image pair probes v23, not the current development schema.
+    with monkeypatch.context() as legacy:
+        legacy.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:23])
+        with closing(db.connect(database)) as conn:
+            assert conn.execute('PRAGMA user_version').fetchone()[0] == 23
     reports = {}
     for code, expected in (('f480507', False), ('cb9a035', True)):
         images = {}

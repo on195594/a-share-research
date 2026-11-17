@@ -834,7 +834,9 @@ def stock_page(request: Request, code: str, report: int | None = None):
                 break
     latest = latest or (None, None)
     before = next((r for r in ordered if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
+    from a_share_research import scans
     card = reading.card(head, full(head)[1], before, checks=service.card_checks(conn, head["id"])) | {
+        "check_failure": scans.mechanical_failure(conn, code, head["id"]),
         "coverage": head["coverage"],
         "created_at": head["created_at"]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex, card=card,

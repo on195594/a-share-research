@@ -315,3 +315,16 @@ def test_stock_page_checks_stay_with_checkpoint_and_trigger(server, monkeypatch)
     card = reading.card(report, body, checks=service.card_checks(conn, report['id']))
     compact = str(ENV.get_template('_card.html').module.summary_card(card))
     assert 'data-disclosure-check="checkpoints[0]"' in compact and '偏离（低于）' in compact
+    class Failure(type(source)):
+        def disclosures(self, code, periods):
+            raise RuntimeError('变体：取数失败 <script>')
+    failed = run_scan(conn, Failure(source.items))
+    page = client.get(url + f'/stock/{code}')
+    assert page.status_code == 200 and '披露机械核对未完成' in page.text
+    assert '变体：取数失败 &lt;script&gt;' in page.text
+    assert f'报告 #{report["id"]}' in page.text and f'扫描 #{failed["id"]}' in page.text
+    summary = reading.report_cards(conn, [dict(report) | {'from_batch': False}], {})[0]
+    compact = str(ENV.get_template('_card.html').module.summary_card(summary))
+    assert '披露机械核对未完成' in compact and compact.index('机械核对') < compact.index('card-fold')
+    run_scan(conn, source)
+    assert '披露机械核对未完成' not in client.get(url + f'/stock/{code}').text

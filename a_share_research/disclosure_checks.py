@@ -3,6 +3,7 @@
 Observation values use Decimal bounds and an optional metric-local reason. Missing
 bounds are unbounded; a reason prevents judgment even when numbers are present.
 """
+import json
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import TypedDict, NotRequired
@@ -17,6 +18,8 @@ class _Interval(TypedDict):
     # Half-width of the source's rounding, in 亿元; comparisons closer than this are undetermined.
     tolerance: NotRequired[Decimal]
 
+
+IDENTITY_CONFLICT_REASON = "同一披露版本内容冲突"
 
 _BASIS_REASON = "口径不符：快报营业收入不等于营业总收入口径"
 # TuShare rounds forecast bounds to whole 万元 (603960.SH 2026-01-23: 2,691.29 万元 in the 巨潮 PDF → 2691.0).
@@ -74,15 +77,28 @@ def _scaled(value: object, divisor: int) -> Decimal | None:
 def _unique(observations: list[dict]) -> list[dict]:
     versions = {}
     for observation in observations:
-        key = observation["identity"]
-        if key in versions and versions[key] != observation:
-            raise companies.SourceError(f"同一披露版本数值冲突：{key}")
-        versions[key] = observation
-    return list(versions.values())
+        group = versions.setdefault(observation["identity"], [])
+        if observation not in group:
+            group.append(observation)
+    result = []
+    for group in versions.values():
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+        # Sorting canonicalizes an unordered provider response for deduplication
+        # only. It never establishes a "newer" disclosure or a numeric verdict.
+        variants = sorted(group, key=lambda o: json.dumps(o, sort_keys=True, default=str))
+        values = {}
+        for metric in dict.fromkeys(m for o in group for m in o["values"]):
+            bounds = [o["values"].get(metric) for o in group]
+            values[metric] = bounds[0] if all(b == bounds[0] for b in bounds) else {
+                "low": None, "high": None, "reason": IDENTITY_CONFLICT_REASON}
+        result.append(group[0] | {"values": values, "variants": variants})
+    return result
 
 
 def normalize_forecast(rows: list[dict], code: str) -> list[dict]:
-    """Normalize TuShare forecasts; reject wrong companies or conflicting versions."""
+    """Normalize TuShare forecasts; retain conflicting variants as undetermined."""
     observations = []
     for row in rows:
         observation = _base(row, code, "forecast")
@@ -212,9 +228,12 @@ def judge(item: dict, observation: dict) -> dict | None:
             "outcome": outcome, "direction": direction, "reason": reason}
 
 
-def periodic_observation(table: list[dict], period: str, *, identity: str, announced: str) -> dict:
+def periodic_observation(table: list[dict], period: str, *, identity: str, announced: str,
+                         acquired: bool = False) -> dict:
     """Adapt the V1 financial table, preserving exact values and unavailable reasons."""
     values: dict[str, _Interval] = {}
+    acquired = acquired or any(period in (row.get(key) or {}) for row in table
+                               for key in ("values", "exact_values", "unavailable"))
     for row in table:
         if not row["id"].startswith("T."):
             continue
@@ -222,23 +241,45 @@ def periodic_observation(table: list[dict], period: str, *, identity: str, annou
             values[row["id"]] = {"low": None, "high": None, "reason": reason}
         else:
             points = row.get("exact_values") or row.get("values") or {}
-            if period in points:
-                value = _number(points[period])
+            if period in points or acquired:
+                value = _number(points.get(period))
                 values[row["id"]] = {"low": value, "high": value}
+                if value is None:
+                    values[row["id"]]["reason"] = "已取得该期报表，但目标字段缺失"
     return {"source": "periodic", "period": period, "identity": identity, "announced": announced, "values": values}
 
 
 def latest(checks: list[dict]) -> list[dict]:
-    """Select effective checks by announcement, source priority, then identity; retain ref order."""
+    """Use disclosure dates/source priority and persisted per-identity revisions.
+
+    Different identities tied on date/priority have no reliable order. A content
+    hash (or provider row order) is not evidence of a correction.
+    """
     priority = {"forecast": 0, "express": 1, "periodic": 2}
-    def rank(check: dict) -> tuple[str, int, str]:
-        return check["announced"], priority[check["source"]], check["identity"]
-    selected = {}
+    def rank(check: dict) -> tuple[str, int]:
+        return check["announced"], priority[check["source"]]
+    grouped = {}
     for check in checks:
-        ref = check["ref"]
-        if ref not in selected or rank(check) > rank(selected[ref]):
-            selected[ref] = check
-    return list(selected.values())
+        grouped.setdefault(check["ref"], []).append(check)
+    selected = []
+    for group in grouped.values():
+        best = max(map(rank, group))
+        versions = {}
+        for check in group:
+            if rank(check) != best:
+                continue
+            old = versions.get(check["identity"])
+            if old is None or check.get("version", 1) > old.get("version", 1):
+                versions[check["identity"]] = check
+        candidates = list(versions.values())
+        current = candidates[-1]
+        if any(any(c.get(k) != current.get(k) for k in ("observed", "outcome", "direction", "reason"))
+               for c in candidates):
+            current = current | {"outcome": "undetermined", "direction": None,
+                                 "observed": {"low": None, "high": None},
+                                 "reason": "同日披露版本顺序不明，内容冲突"}
+        selected.append(current)
+    return selected
 
 
 def normalize_periodic(groups: list[dict], code: str) -> list[dict]:
@@ -249,5 +290,5 @@ def normalize_periodic(groups: list[dict], code: str) -> list[dict]:
         base = _base(row, code, 'periodic')
         announced = max(base['announced'], _day(row['f_ann_date']) if row.get('f_ann_date') else base['announced'])
         identity = f"{base['identity']}:{group['statement']}:{announced}:{row.get('update_flag') or ''}"
-        observations.append(periodic_observation(group['table'], base['period'], identity=identity, announced=announced))
+        observations.append(periodic_observation(group['table'], base['period'], identity=identity, announced=announced, acquired=True))
     return _unique(observations)

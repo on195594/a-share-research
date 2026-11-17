@@ -42,6 +42,9 @@
 
 {# Report limitations stay visible in both card shapes, not inside the ordinary risk fold. #}
 {% macro cautions(c) %}
+{% if c.check_failure %}
+<p class="card-note"><strong class="flag">披露机械核对未完成</strong>：{{ c.check_failure.reason }}。既有判定不代表本次取数成功；下次扫描重试。公司 {{ c.code }} · <a href="/reports/{{ c.check_failure.report_id }}">报告 #{{ c.check_failure.report_id }}</a> · 扫描 #{{ c.check_failure.scan_id }}。</p>
+{% endif %}
 {% if c.boundary %}<p class="card-note"><strong class="flag">边界立场（报告时点）</strong>：报告收盘价接近期望回报门槛，同样材料重跑可能得出相反立场。</p>{% endif %}
 {{ flip_sensitivity(c.stance, 'card-note') }}
 {% if c.open_questions %}

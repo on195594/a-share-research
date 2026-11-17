@@ -263,7 +263,7 @@ def test_legacy_sql_inserts_and_updates_maintain_derived_columns(tmp_path):
     conn.close()
 
 
-def test_disclosure_checks_v23_is_additive_reentrant_and_rollback_compatible(tmp_path, monkeypatch):
+def test_disclosure_checks_migrations_preserve_evidence_and_rollback_compatibility(tmp_path, monkeypatch):
     from pathlib import Path
     from a_share_research import disclosure_checks
 
@@ -275,8 +275,10 @@ def test_disclosure_checks_v23_is_additive_reentrant_and_rollback_compatible(tmp
         before = list(conn.iterdump())
         assert conn.execute('PRAGMA user_version').fetchone()[0] == 22
         conn.close()
-    conn = db.connect(path)
-    assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS) == 23
+    with monkeypatch.context() as v23:
+        v23.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:23])
+        conn = db.connect(path)
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == 23
     assert all(line in list(conn.iterdump()) for line in before)
     assert conn.execute('PRAGMA foreign_key_list(disclosure_checks)').fetchall() == []
     assert [r['name'] for r in conn.execute('PRAGMA index_info(disclosure_checks_by_company_report)')] == [
@@ -301,6 +303,13 @@ def test_disclosure_checks_v23_is_additive_reentrant_and_rollback_compatible(tmp
         db._migrate_v23(conn)
         db._migrate_v23(conn)
     assert list(conn.iterdump()) == after
+    legacy = dict(conn.execute('SELECT * FROM disclosure_checks').fetchone())
+    conn.close()
+    conn = db.connect(path)
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
+    upgraded = dict(conn.execute('SELECT * FROM disclosure_checks').fetchone())
+    assert upgraded == legacy | {'version': 1, 'evidence': None}
+    after = list(conn.iterdump())
     conn.close()
     conn = db.connect(path)
     assert conn.total_changes == 0 and list(conn.iterdump()) == after

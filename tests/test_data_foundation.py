@@ -52,7 +52,7 @@ def test_rebuilt_tables_keep_payload_last_and_ids_are_never_reused(conn):
     for table in COMPANY_TABLES:
         assert "company_key" in {row["name"] for row in conn.execute(f"PRAGMA table_xinfo({table})")}
     for table, payload in (("runs", "material"), ("reports", "body"), ("calls", "prompt"),
-                           ("disclosure_checks", "observed")):
+                           ("disclosure_checks", "evidence")):
         assert list(conn.execute(f"PRAGMA table_xinfo({table})"))[-1]["name"] == payload
     report = conn.execute("SELECT * FROM reports ORDER BY id DESC LIMIT 1").fetchone()
     first = conn.execute("SELECT MAX(id) FROM runs").fetchone()[0]

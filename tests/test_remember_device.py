@@ -129,7 +129,7 @@ def test_additive_tables_reopen_without_changing_legacy_sessions(server):
     path = conn.execute('PRAGMA database_list').fetchone()['file']
     from pathlib import Path
     reopened = db.connect(Path(path))
-    assert reopened.execute('PRAGMA user_version').fetchone()[0] == 22
+    assert reopened.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
     assert len(reopened.execute('PRAGMA table_info(sessions)').fetchall()) == 2
     reopened.execute('INSERT INTO sessions VALUES (?, ?)', ('legacy-token-hash', time.time() + 600))
     assert reopened.execute('SELECT COUNT(*) FROM remembered_devices').fetchone()[0] == 1

@@ -42,8 +42,11 @@ def test_forecast_units_identity_and_duplicates():
     }
     # Conflicting same-version numeric variant must not silently overwrite evidence.
     changed = rows[0] | {"net_profit_min": 2692}
-    with pytest.raises(companies.SourceError, match="冲突"):
-        checks.normalize_forecast(rows + [changed], "603960")
+    conflicted, = checks.normalize_forecast(rows + [changed], "603960")
+    result = checks.judge(shifted_item(), conflicted)
+    assert result["outcome"] == "undetermined" and "冲突" in result["reason"]
+    assert len(conflicted["variants"]) == 2
+    assert checks.normalize_forecast([changed] + rows, "603960")[0]["variants"] == conflicted["variants"]
 
 
 @pytest.mark.parametrize("source,code", [("forecast", "603960.SH"), ("express", "605016.SH")])
@@ -267,8 +270,11 @@ def test_latest_source_identity_ties_and_ref_order():
     assert checks.latest([result, second, express, periodic]) == [periodic, second]
     assert checks.latest([periodic, express, result]) == [periodic]
     assert checks.latest([result, express]) == [express]
-    newer_identity = periodic | {"identity": "periodic:b"}
-    assert checks.latest([newer_identity, periodic]) == [newer_identity]
+    unordered = periodic | {"identity": "periodic:b", "outcome": "inside"}
+    for candidates in ([unordered, periodic], [periodic, unordered]):
+        ambiguous, = checks.latest(candidates)
+        assert ambiguous["outcome"] == "undetermined" and "顺序不明" in ambiguous["reason"]
+        assert ambiguous["observed"] == {"low": None, "high": None}
     revision = result | {"announced": "2026-01-24"}
     assert checks.latest([periodic, revision]) == [revision]
     assert checks.latest([]) == []

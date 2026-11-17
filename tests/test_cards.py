@@ -110,7 +110,8 @@ def test_report_cards_match_cards_and_link_last_passed_report(tmp_path):
         assert len(cards) == len(reports) > 0
         for item, report in zip(cards, reports):
             previous = None if report['passed'] else passed.get(report['code'])
-            assert item == reading.card(report, BODY[report['id']], previous) | {'from_batch': report['from_batch']}
+            assert item == reading.card(report, BODY[report['id']], previous) | {
+                'from_batch': report['from_batch'], 'check_failure': None}
             assert item['last_passed'] == (dict(previous) if previous else None)
         assert reading.report_cards(conn, [], {}) == []
     finally:

@@ -265,6 +265,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
             "status": "待复核" if pending else "有效",
             "checks": card_checks(conn, row["id"]),
+            "check_failure": scans.mechanical_failure(conn, code, row["id"], scan_id=scan_id),
             **{key: body.get(key) for key in report_body.CARD_FIELDS},
             # Four card fields are reshaped rather than copied from the stored body.
             "risks": [item["text"] for item in body.get("risks", [])[:3]],
