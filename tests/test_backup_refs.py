@@ -16,10 +16,9 @@ def put(conn, table, column, value, *, raw=False):
     conn.execute(f'INSERT INTO {table} VALUES (?)', (value if raw else json.dumps(value),))
 
 
-@pytest.fixture(params=[None, sqlite3.Row])
-def conn(request):
+@pytest.fixture
+def conn():
     conn=sqlite3.connect(':memory:')
-    conn.row_factory=request.param
     yield conn
     conn.close()
 
@@ -28,7 +27,9 @@ def test_missing_legacy_tables_and_empty_database(conn):
     assert backup_refs.required(conn)=={'account_evidence': [], 'pdf': []}
 
 
-def test_all_committed_account_reference_locations_and_failed_batch_exclusion(conn):
+@pytest.mark.parametrize('row_factory', [None, sqlite3.Row], ids=['tuple', 'Row'])
+def test_all_committed_account_reference_locations_and_failed_batch_exclusion(conn, row_factory):
+    conn.row_factory = row_factory
     for index,(table,column,is_list) in enumerate((
         ('account_books','opening_evidence',False),
         ('account_observations','evidence',False),

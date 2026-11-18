@@ -38,7 +38,7 @@ def test_ready_checks_schema_without_writing_or_migrating(database, options, mod
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize('damage', ['missing', 'version', 'api_keys', 'account_schema', 'scan_requests'])
+@pytest.mark.parametrize('damage', ['missing', 'version', 'api_keys', 'account_journal', 'account_analysis_history', 'scan_requests'])
 def test_not_ready_never_creates_or_repairs_database(database, damage):
     path, _ = database
     if damage == 'missing':
@@ -47,12 +47,8 @@ def test_not_ready_never_creates_or_repairs_database(database, damage):
         with sqlite3.connect(path) as conn:
             if damage == 'version':
                 conn.execute(f'PRAGMA user_version={len(db.MIGRATIONS)-1}')
-            elif damage == 'api_keys':
-                conn.execute('DROP TABLE api_keys')
-            elif damage == 'scan_requests':
-                conn.execute('DROP TABLE scan_requests')
             else:
-                conn.execute('DROP TABLE account_journal')
+                conn.execute(f'DROP TABLE {damage}')
     before = path.read_bytes() if path.exists() else None
     with TestClient(server.create_app(path, account_shadow_enabled=True)) as client:
         response = client.get('/ready')
@@ -148,26 +144,11 @@ def test_unhandled_tool_failure_also_releases_gate(database, monkeypatch):
         assert client.get('/ready').status_code == 200
 
 
-@pytest.mark.parametrize('table,options', [
-    ('account_analysis_history', dict(account_shadow_enabled=True)),
-])
-def test_ready_requires_schema_for_each_enabled_tool_family(database, table, options):
-    path, _ = database
-    with sqlite3.connect(path) as conn:
-        conn.execute(f'DROP TABLE {table}')
-    before = path.read_bytes()
-    with TestClient(server.create_app(path, **options)) as client:
-        response = client.get('/ready')
-        assert response.status_code == 503
-        assert response.json()['status'] == 'not-ready'
-    assert path.read_bytes() == before
-
-
-@pytest.mark.parametrize('flag', ['ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'])
-def test_main_rejects_invalid_runtime_flags_before_opening_control_socket(tmp_path, flag):
+def test_main_rejects_invalid_account_flag_before_opening_control_socket(tmp_path):
     import os
     import subprocess
     import sys
+    flag = 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'
     environment = {k: v for k, v in os.environ.items() if not k.startswith('ASHARE_TOOLS_')}
     environment.update(DATA_DIR=str(tmp_path), **{flag: 'true'})
     socket_path = tmp_path / 'control.sock'
