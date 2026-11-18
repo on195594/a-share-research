@@ -19,7 +19,6 @@ def operations(monkeypatch,tmp_path):
         data.mkdir(exist_ok=True)
         state=SimpleNamespace(events=[], existing=existing, failure=failure, paused=paused,
             in_flight=0, data=data, env={'DATA_DIR':'/data','TUSHARE_TOKEN':'private-test-value',
-                'ASHARE_TOOLS_EXTERNAL_ENABLED':'0','ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED':'0',
                 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED':'0'},
             tags={'web':'old-web','worker':'old-worker'},
             containers={'web':'old-web','worker':'old-worker'},

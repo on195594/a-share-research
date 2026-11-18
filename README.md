@@ -126,33 +126,13 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 
-统一 `a-share` Skill 与受控客户端通过 `ashare` / MCP 接入本 API 与工具服务，先复用旧报告，再按缺口发起追问或受控取证；配置与使用见[客户端安装说明](ops/clients/README.md)与[工具目录](a_share_research/tools/README.md)，开关状态见[当前部署](docs/implementation-plan.md#当前部署)。
+统一 `a-share` Skill 与受控客户端通过 `ashare` / MCP 接入本 API 与工具服务，先复用旧报告，再按缺口发起追问；配置与使用见[客户端安装说明](ops/clients/README.md)与[工具目录](a_share_research/tools/README.md)，开关状态见[当前部署](docs/implementation-plan.md#当前部署)。
 
 纠错报告的 `methods` 是已核查的方法线索；`evidence.methods_used` 记录检索召回，不证明实际采用或收益贡献。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
 
-### 外部 Agent 受控取证与提交
+### 外部 Agent 受控取证与提交（2026-11-18 退役）
 
-工具服务显式启用 `ASHARE_TOOLS_EXTERNAL_ENABLED=1` 后，research 与 assistant Key 可通过 `POST /tools/{name}` 调用下表；成功结果位于 `result.data`。入口复用同一服务端材料和核验工具，客户端不上传材料快照、PDF 原文或任意 URL。research Key 无账户权限；assistant 创建的研究始终保留 `account_aware=true`。owner Key 用于所有者操作，不能调用这些外部研究工具；操作和材料只属于创建它的 Key。
-
-| 工具 | 参数与结果 |
-|---|---|
-| `external.open` | `{request_id,code}`，六位公司代码；首次公司无需历史报告即可排队取证，立即返回操作 `id` |
-| `external.operation` | `{operation_id}`，读取 `queued/running/done/failed`、期限、错误类别、可用的 `error_detail` 和结果；成功返回 `external_id`、`material_revision` |
-| `external.start` | `{request_id,source_run_id}`，复用已完成 worker 研究的服务端材料，直接创建材料版本 0 |
-| `external.tools` | `{}`，读取允许的取证工具及参数 Schema；工具参数严格校验，最多 64 KiB |
-| `external.acquire` | `{request_id,external_id,base_revision,tool,arguments}`，在指定材料版本上排队执行一次工具；成功追加材料版本 |
-| `external.status` | `{external_id}`，读取当前材料版本、提交版本、未完成操作及历史提交回执 |
-| `external.material` | `{external_id,material_revision}`，读取指定不可变材料；省略版本读取最新材料 |
-| `external.submit` | `{external_id,expected_version,material_revision,draft}`，机械检查并冻结草稿与指定材料；`expected_version` 是提交版本，不是材料版本 |
-| `external.review` | `{submission_id}`，实例另外启用 `ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED=1` 且不在月批保护期时，将通过机械检查的提交交独立复核 |
-
-`open` 由默认 worker 调用现有 `material.gather`，`acquire` 调用目录中的披露检索、原文阅读、财务及程序计算等工具，两者不调用模型、不伪造研究任务。每次操作在受监督的独立子进程中运行，整次上限 1200 秒；HTTP 只入队和轮询，不等待采集完成。已持有的财务数据和披露目录可复用，原采集时间保留；检索新临时公告用 `announcements`，列出目录不等于读过原文。
-
-同一 Key 的 `start/open/acquire` 共用 `request_id` 命名空间：相同操作与参数重试复用原研究或操作，相同编号改动作或参数返回 409。`start` 返回同一研究 ID 及其当前状态；`open/acquire` 返回同一操作记录，终态回执保持不变。超时、中断、撤销凭据等失败是终态，重试原编号不会重跑；明确决定再次采集时使用新编号。每个外部研究同时只能有一个未完成取证操作，期间新的取证或提交返回 409。取证前和材料入账前均复查 Key；撤销后不发布取证结果。
-
-材料版本只追加，原文页、来源编号和计算行不会被后续取证改写。提交按“草稿哈希＋材料哈希”去重：同草稿绑定新证据产生新提交，指定原材料重试仍返回原回执。为兼容旧调用，省略 `material_revision` 的提交绑定版本 0；新调用应始终显式填写。独立复核只读该提交绑定的材料，后续取证不改变旧复核；`accepted=true` 仅表示机械检查通过，不代表独立复核通过或报告发布。
-
-旧材料与提交为材料版本 0。发布空闲检查包括取证操作，备份收录所有历史材料版本的 PDF。两个开关的生产状态见[当前部署](docs/implementation-plan.md#当前部署)。
+`external.*` 工具、外部复核与 `external_scoring` 自上线起开关一直为 0、生产无一行数据，已按[实施计划里程碑](docs/implementation-plan.md#固定里程碑)整条删除。迁移 v12/v13/v22 建的五张 `external_*` 空表保留，使库结构版本不变、回退镜像仍可读；没有任何代码写入。外部 Agent 继续经只读研究工具和追问入口使用本系统。
 
 ## 账户净值工具
 

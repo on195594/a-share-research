@@ -48,10 +48,8 @@ def idle(database: Path) -> None:
         busy = conn.execute("SELECT id FROM batches WHERE status NOT IN ('failed','done','closed')"
                             " AND (status != 'tracking' OR step IS NOT NULL)").fetchall()
         scans = conn.execute("SELECT id FROM scans WHERE status IN ('queued','running')").fetchall()
-        operations = (conn.execute("SELECT id FROM external_operations WHERE status IN ('queued','running')").fetchall()
-                      if conn.execute("SELECT 1 FROM sqlite_master WHERE name='external_operations'").fetchone() else [])
-    if active or busy or scans or operations:
-        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy}、扫描 {scans} 或取证 {operations} 尚未空闲")
+    if active or busy or scans:
+        raise RuntimeError(f"发布中止：研究任务 {active}、批次 {busy} 或扫描 {scans} 尚未空闲")
 
 
 KEEP_BACKUPS = 3
@@ -584,8 +582,7 @@ def wait_tools_ready(*, paused=False) -> dict:
 
 def _tools_config():
     configured = json.loads(run('docker','compose','--profile','tools','config','--format','json'))['services']['tools']
-    allowed = {'DATA_DIR','TUSHARE_TOKEN','ASHARE_TOOLS_EXTERNAL_ENABLED',
-               'ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED','ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'}
+    allowed = {'DATA_DIR','TUSHARE_TOKEN','ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'}
     if set(configured.get('environment',{})) - allowed:
         raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录和显式功能开关')
     return configured

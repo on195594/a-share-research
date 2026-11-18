@@ -13,18 +13,13 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from a_share_research import api_keys, service, external_research, external_review, external_operations
+from a_share_research import api_keys, service
 from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store, cycle_analysis
 from a_share_research.account import nav
 from a_share_research.policy import registry as policies
 from a_share_research.policy.stop_state import StopState
 from a_share_research.policy.position_request import Proposal
 from a_share_research.policy.scenario_request import Proposal as ScenarioProposal
-
-
-def _acquisition_catalog():
-    from a_share_research.research_tools import TOOLS as research_tools
-    return Payload(data={'tools': research_tools})
 
 
 class ToolError(Exception):
@@ -85,44 +80,6 @@ class PolicyPositionSize(PolicyMonitor):
 class PolicyPortfolioScenario(PolicyMonitor):
     monitor_evaluation_id: int = Field(gt=0)
     proposal: ScenarioProposal
-
-
-class ExternalStart(Arguments):
-    request_id: str = Field(min_length=1, max_length=128)
-    source_run_id: int = Field(gt=0)
-
-
-class ExternalId(Arguments):
-    external_id: int = Field(gt=0)
-
-
-class ExternalOpen(Company):
-    request_id: str = Field(min_length=1, max_length=128)
-
-
-class ExternalOperation(Arguments):
-    operation_id: int = Field(gt=0)
-
-
-class ExternalAcquire(ExternalId):
-    request_id: str = Field(min_length=1, max_length=128)
-    base_revision: int = Field(ge=0)
-    tool: str
-    arguments: dict
-
-
-class ExternalMaterial(ExternalId):
-    material_revision: int | None = Field(default=None, ge=0)
-
-
-class ExternalReview(Arguments):
-    submission_id: int = Field(gt=0)
-
-
-class ExternalSubmit(ExternalId):
-    expected_version: int = Field(ge=0)
-    material_revision: int = Field(default=0, ge=0)
-    draft: dict
 
 
 class Account(Arguments):
@@ -212,8 +169,6 @@ class Context:
     connection: sqlite3.Connection
     database: Path
     principal: api_keys.Principal
-    external_enabled: bool = False
-    external_review_enabled: bool = False
     account_shadow_enabled: bool = False
 
 
@@ -227,7 +182,6 @@ class Tool:
     handler: Callable[[Context, Arguments], BaseModel]
 
     access: str = 'read'
-    external: bool = False
     account: bool = False
 
     def describe(self) -> dict:
@@ -402,31 +356,6 @@ TOOLS = {tool.name: tool for tool in (
     Tool('account.observe', '仅记录资产观察，不推断或补写成交', frozenset({'assistant'}), AccountObserve, Payload,
          lambda c,a: Payload(data=ledger.observe(c.connection,c.principal,a.account_id,a.observation,
                                                 _evidence_directory(c),a.evidence_hash)), access='write', account=True),
-    Tool('external.review', '将通过机械检查的本人提交交独立复核', _READERS, ExternalReview, Payload,
-         lambda c, a: Payload(data=external_review.enqueue(c.connection, c.principal, a.submission_id,
-                                                           allow=c.external_review_enabled)),
-         access='write', external=True),
-    Tool('external.start', '复用服务端材料开启外部研究；不排队、不发布', _READERS, ExternalStart, Payload,
-         lambda c, a: Payload(data=external_research.start(c.connection, c.principal, a.request_id, a.source_run_id)),
-         access='write', external=True),
-    Tool('external.open', '首次公司取证：持久排队，无模型；用 operation 查询结果', _READERS, ExternalOpen, Payload,
-         lambda c, a: Payload(data=external_operations.open_research(c.connection, c.principal, a.request_id, a.code)),
-         access='write', external=True),
-    Tool('external.tools', '列出补充取证允许的工具及严格参数合同', _READERS, Arguments, Payload,
-         lambda c, a: _acquisition_catalog(), external=True),
-    Tool('external.acquire', '按指定材料版本执行受控研究工具并生成新版本', _READERS, ExternalAcquire, Payload,
-         lambda c, a: Payload(data=external_operations.acquire(c.connection, c.principal, a.request_id,
-                          a.external_id, a.base_revision, a.tool, a.arguments)), access='write', external=True),
-    Tool('external.operation', '查询本人取证操作；失败操作不自动重跑', _READERS, ExternalOperation, Payload,
-         lambda c, a: Payload(data=external_operations.operation(c.connection, c.principal, a.operation_id)), external=True),
-    Tool('external.status', '查询本人研究及不可变提交回执', _READERS, ExternalId, Payload,
-         lambda c, a: Payload(data=external_research.status(c.connection, c.principal, a.external_id)), external=True),
-    Tool('external.material', '读取本人研究的指定材料版本；省略版本读取最新', _READERS, ExternalMaterial, Payload,
-         lambda c, a: Payload(data=external_research.material_snapshot(c.connection, c.principal, a.external_id,
-                                                                     a.material_revision)), external=True),
-    Tool('external.submit', '机械检查并冻结草稿；通过不代表独立复核通过', _READERS, ExternalSubmit, Payload,
-         lambda c, a: Payload(data=external_research.submit(c.connection, c.principal, a.external_id,
-                                                          a.expected_version, a.draft, a.material_revision)), access='write', external=True),
     Tool('research.cards', '读取论点卡', _READERS, Arguments, Payload,
          lambda c, a: Payload(data=service.company_cards(c.connection))),
     Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,
@@ -441,17 +370,15 @@ TOOLS = {tool.name: tool for tool in (
 )}
 
 
-def discover(principal: api_keys.Principal, *, external_enabled: bool = False,
-             account_shadow_enabled: bool = False) -> list[dict]:
+def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = False) -> list[dict]:
     return [tool.describe() for tool in TOOLS.values()
-            if principal.role in tool.roles and (not tool.external or external_enabled)
-            and (not tool.account or account_shadow_enabled)]
+            if principal.role in tool.roles and (not tool.account or account_shadow_enabled)]
 
 
 def invoke(ctx: Context, name: str, arguments: dict) -> dict:
     """Reject scope/shape errors before invoking a handler; never upgrades caller privileges."""
     tool = TOOLS.get(name)
-    if tool is None or (tool.external and not ctx.external_enabled) or (tool.account and not ctx.account_shadow_enabled):
+    if tool is None or (tool.account and not ctx.account_shadow_enabled):
         raise ToolError('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
@@ -472,8 +399,5 @@ def invoke(ctx: Context, name: str, arguments: dict) -> dict:
         raise ToolError(code, str(exc), exc.status) from None
     except evidence.EvidenceError as exc:
         raise ToolError('invalid_arguments', str(exc), 422) from None
-    except external_research.SubmissionError as exc:
-        code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments'}[exc.status]
-        raise ToolError(code, str(exc), exc.status) from None
     except service.RequestError as exc:
         raise ToolError('not_found' if exc.status == 404 else 'invalid_arguments', str(exc), exc.status) from None

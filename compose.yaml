@@ -54,8 +54,6 @@ services:
         required: false
     environment:
       DATA_DIR: /data
-      ASHARE_TOOLS_EXTERNAL_ENABLED: ${ASHARE_TOOLS_EXTERNAL_ENABLED:-0}
-      ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED: ${ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED:-0}
       ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED: ${ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED:-0}
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data

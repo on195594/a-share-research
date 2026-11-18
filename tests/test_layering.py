@@ -17,16 +17,13 @@ FORBIDDEN = {"db", "sources", "market", "model", "service", "research", "screeni
 LAYER_FORBIDDEN = {
     "core": {
         "account", "policy", "tools", "research", "research_tools", "material",
-        "evidence", "db", "web", "worker", "screening", "external_operations",
-        "external_acquisition", "acquisition_process", "external_research", "external_review",
+        "evidence", "db", "web", "worker", "screening",
     },
     "account": {
         "policy", "tools", "research", "research_tools", "screening", "web", "worker",
-        "external_operations", "external_acquisition", "acquisition_process",
     },
     "policy": {
-        "tools", "web", "worker", "screening", "external_operations",
-        "external_acquisition", "acquisition_process", "external_research", "external_review",
+        "tools", "web", "worker", "screening",
     },
 }
 

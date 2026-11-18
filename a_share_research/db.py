@@ -396,14 +396,45 @@ def _migrate_v11(conn: sqlite3.Connection) -> None:
     migrate_roles(conn)
 
 
+# v12/v13/v22 belong to the external research line retired on 2026-11-18. Its tables stay so existing
+# databases keep their schema version and rollback images can still read them; nothing writes them now.
 def _migrate_v12(conn: sqlite3.Connection) -> None:
-    from a_share_research.external_research import migrate
-    migrate(conn)
+    conn.execute("""CREATE TABLE IF NOT EXISTS external_research (
+        id INTEGER PRIMARY KEY, owner_key_id INTEGER NOT NULL, request_id TEXT NOT NULL,
+        company_key TEXT NOT NULL, source_run_id INTEGER NOT NULL REFERENCES runs(id),
+        account_aware INTEGER NOT NULL CHECK(account_aware IN (0,1)),
+        status TEXT NOT NULL CHECK(status IN ('collecting','submitted')),
+        version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+        material_sha256 TEXT NOT NULL, material TEXT NOT NULL,
+        UNIQUE(owner_key_id, request_id))""")
+    conn.execute("CREATE INDEX IF NOT EXISTS external_research_by_company ON external_research(company_key, id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS external_submissions (
+        id INTEGER PRIMARY KEY, external_id INTEGER NOT NULL REFERENCES external_research(id),
+        version INTEGER NOT NULL, created_at TEXT NOT NULL,
+        accepted INTEGER NOT NULL CHECK(accepted IN (0,1)),
+        draft_sha256 TEXT NOT NULL, material_sha256 TEXT NOT NULL,
+        draft TEXT NOT NULL, problems TEXT NOT NULL,
+        UNIQUE(external_id, version), UNIQUE(external_id, draft_sha256))""")
+    for event in ('UPDATE', 'DELETE'):
+        conn.execute(f"CREATE TRIGGER IF NOT EXISTS external_submissions_no_{event.lower()} BEFORE {event}"
+                     " ON external_submissions BEGIN SELECT RAISE(ABORT, 'submission is immutable'); END")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS external_material_immutable
+        BEFORE UPDATE OF owner_key_id, request_id, company_key, source_run_id, account_aware, material_sha256, material
+        ON external_research BEGIN SELECT RAISE(ABORT, 'submission identity is immutable'); END""")
 
 
 def _migrate_v13(conn: sqlite3.Connection) -> None:
-    from a_share_research.external_review import migrate
-    migrate(conn)
+    conn.execute("""CREATE TABLE IF NOT EXISTS external_reviews (
+        submission_id INTEGER PRIMARY KEY REFERENCES external_submissions(id),
+        run_id INTEGER NOT NULL UNIQUE REFERENCES runs(id),
+        status TEXT NOT NULL CHECK(status IN ('submitted','reviewing','done','failed')),
+        attempt INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        report_id INTEGER REFERENCES reports(id), error TEXT)""")
+    conn.execute('CREATE INDEX IF NOT EXISTS external_reviews_by_status ON external_reviews(status, run_id)')
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS external_review_identity_immutable
+        BEFORE UPDATE OF submission_id, run_id ON external_reviews
+        BEGIN SELECT RAISE(ABORT, 'review identity is immutable'); END""")
 
 
 def _migrate_v14(conn: sqlite3.Connection) -> None:
@@ -474,8 +505,78 @@ def _migrate_v21(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_v22(conn: sqlite3.Connection) -> None:
-    from a_share_research.external_operations import migrate
-    migrate(conn)
+    """Rebuild with enforcement off (db.connect migration convention), preserving old identities."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_materials'").fetchone():
+        expected = {'external_materials': {'external_id','revision','parent_revision','operation_id','material'},
+                    'external_operations': {'parameters_sha256','parameters','base_revision','deadline'},
+                    'external_research': {'material_revision'}, 'external_submissions': {'material_revision'}}
+        if all(columns <= {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}
+               for table, columns in expected.items()):
+            return
+        raise ValueError('incomplete external acquisition schema')
+    conn.execute('DROP TRIGGER IF EXISTS external_material_immutable')
+    for event in ('update', 'delete'):
+        conn.execute(f'DROP TRIGGER IF EXISTS external_submissions_no_{event}')
+    conn.execute("""CREATE TABLE external_research_new (
+        id INTEGER PRIMARY KEY, owner_key_id INTEGER NOT NULL, request_id TEXT NOT NULL,
+        company_key TEXT NOT NULL, source_run_id INTEGER REFERENCES runs(id),
+        account_aware INTEGER NOT NULL CHECK(account_aware IN (0,1)),
+        status TEXT NOT NULL CHECK(status IN ('collecting','submitted')),
+        version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+        material_revision INTEGER NOT NULL DEFAULT 0 CHECK(material_revision>=0),
+        material_sha256 TEXT NOT NULL, material TEXT NOT NULL,
+        UNIQUE(owner_key_id,request_id))""")
+    columns = 'id,owner_key_id,request_id,company_key,source_run_id,account_aware,status,version,created_at,material_sha256,material'
+    conn.execute(f'INSERT INTO external_research_new({columns}) SELECT {columns} FROM external_research')
+    conn.execute('DROP TABLE external_research')
+    conn.execute('ALTER TABLE external_research_new RENAME TO external_research')
+    conn.execute('CREATE INDEX external_research_by_company ON external_research(company_key,id)')
+    conn.execute("""CREATE TABLE external_operations (
+        id INTEGER PRIMARY KEY, owner_key_id INTEGER NOT NULL, request_id TEXT NOT NULL,
+        company_key TEXT NOT NULL, account_aware INTEGER NOT NULL CHECK(account_aware IN (0,1)),
+        action TEXT NOT NULL CHECK(action IN ('open','acquire')),
+        external_id INTEGER REFERENCES external_research(id), base_revision INTEGER,
+        status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')),
+        created_at TEXT NOT NULL, started_at TEXT, deadline TEXT, finished_at TEXT,
+        material_revision INTEGER, parameters_sha256 TEXT NOT NULL,
+        parameters TEXT NOT NULL, result TEXT, error TEXT,
+        UNIQUE(owner_key_id,request_id))""")
+    conn.execute('CREATE INDEX external_operations_by_status ON external_operations(status,id)')
+    conn.execute("CREATE UNIQUE INDEX external_operations_serial ON external_operations(external_id)"
+                 " WHERE status IN ('queued','running') AND external_id IS NOT NULL")
+    conn.execute("""CREATE TABLE external_materials (
+        external_id INTEGER NOT NULL REFERENCES external_research(id), revision INTEGER NOT NULL CHECK(revision>=0),
+        parent_revision INTEGER, operation_id INTEGER UNIQUE REFERENCES external_operations(id),
+        created_at TEXT NOT NULL, material_sha256 TEXT NOT NULL, material TEXT NOT NULL,
+        PRIMARY KEY(external_id,revision),
+        FOREIGN KEY(external_id,parent_revision) REFERENCES external_materials(external_id,revision))""")
+    conn.execute('INSERT INTO external_materials(external_id,revision,created_at,material_sha256,material)'
+                 ' SELECT id,0,created_at,material_sha256,material FROM external_research')
+    conn.execute("""CREATE TABLE external_submissions_new (
+        id INTEGER PRIMARY KEY, external_id INTEGER NOT NULL REFERENCES external_research(id),
+        version INTEGER NOT NULL, created_at TEXT NOT NULL,
+        accepted INTEGER NOT NULL CHECK(accepted IN (0,1)), material_revision INTEGER NOT NULL DEFAULT 0,
+        draft_sha256 TEXT NOT NULL, material_sha256 TEXT NOT NULL, draft TEXT NOT NULL, problems TEXT NOT NULL,
+        UNIQUE(external_id,version), UNIQUE(external_id,draft_sha256,material_sha256),
+        FOREIGN KEY(external_id,material_revision) REFERENCES external_materials(external_id,revision))""")
+    columns = 'id,external_id,version,created_at,accepted,draft_sha256,material_sha256,draft,problems'
+    conn.execute(f'INSERT INTO external_submissions_new({columns}) SELECT {columns} FROM external_submissions')
+    conn.execute('DROP TABLE external_submissions')
+    conn.execute('ALTER TABLE external_submissions_new RENAME TO external_submissions')
+    for table in ('external_submissions', 'external_materials'):
+        for event in ('UPDATE', 'DELETE'):
+            conn.execute(f'CREATE TRIGGER {table}_no_{event.lower()} BEFORE {event} ON {table}'
+                         " BEGIN SELECT RAISE(ABORT, 'submission material is immutable'); END")
+    conn.execute("""CREATE TRIGGER external_material_immutable
+        BEFORE UPDATE OF owner_key_id,request_id,company_key,source_run_id,account_aware,material_sha256,material
+        ON external_research BEGIN SELECT RAISE(ABORT, 'submission identity is immutable'); END""")
+    conn.execute("""CREATE TRIGGER external_operation_identity_immutable
+        BEFORE UPDATE OF owner_key_id,request_id,company_key,account_aware,action,base_revision,parameters_sha256,parameters
+        ON external_operations BEGIN SELECT RAISE(ABORT, 'operation identity is immutable'); END""")
+    conn.execute("""CREATE TRIGGER external_operation_terminal BEFORE UPDATE ON external_operations
+        WHEN OLD.status IN ('done','failed') BEGIN SELECT RAISE(ABORT, 'operation is terminal'); END""")
+    conn.execute("""CREATE TRIGGER external_operation_no_delete BEFORE DELETE ON external_operations
+        BEGIN SELECT RAISE(ABORT, 'operation is durable'); END""")
 
 
 def _migrate_v23(conn: sqlite3.Connection) -> None:

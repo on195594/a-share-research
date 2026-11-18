@@ -25,7 +25,6 @@ def header(token):
 
 
 @pytest.mark.parametrize('options,mode', [({}, 'read-only'),
-    ({'external_enabled': True}, 'external-staging'),
     ({'account_shadow_enabled': True}, 'account-shadow')])
 def test_ready_checks_schema_without_writing_or_migrating(database, options, mode):
     path, _ = database
@@ -150,8 +149,6 @@ def test_unhandled_tool_failure_also_releases_gate(database, monkeypatch):
 
 
 @pytest.mark.parametrize('table,options', [
-    ('external_submissions', dict(external_enabled=True)),
-    ('external_reviews', dict(external_enabled=True, external_review_enabled=True)),
     ('account_analysis_history', dict(account_shadow_enabled=True)),
 ])
 def test_ready_requires_schema_for_each_enabled_tool_family(database, table, options):
@@ -166,8 +163,7 @@ def test_ready_requires_schema_for_each_enabled_tool_family(database, table, opt
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize('flag', ['ASHARE_TOOLS_EXTERNAL_ENABLED', 'ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED',
-                                  'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'])
+@pytest.mark.parametrize('flag', ['ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'])
 def test_main_rejects_invalid_runtime_flags_before_opening_control_socket(tmp_path, flag):
     import os
     import subprocess
@@ -178,17 +174,4 @@ def test_main_rejects_invalid_runtime_flags_before_opening_control_socket(tmp_pa
     result = subprocess.run([sys.executable, '-m', 'a_share_research.tools.server',
         '--control-socket', str(socket_path)], env=environment, capture_output=True, text=True, timeout=10)
     assert result.returncode != 0 and flag in result.stderr
-    assert not socket_path.exists() and not (tmp_path / 'app.db').exists()
-
-
-def test_main_rejects_review_without_external_mode_before_serving(tmp_path):
-    import os
-    import subprocess
-    import sys
-    environment = {k: v for k, v in os.environ.items() if not k.startswith('ASHARE_TOOLS_')}
-    environment.update(DATA_DIR=str(tmp_path), ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED='1')
-    socket_path = tmp_path / 'control.sock'
-    result = subprocess.run([sys.executable, '-m', 'a_share_research.tools.server',
-        '--control-socket', str(socket_path)], env=environment, capture_output=True, text=True, timeout=10)
-    assert result.returncode != 0 and '外部复核' in result.stderr
     assert not socket_path.exists() and not (tmp_path / 'app.db').exists()

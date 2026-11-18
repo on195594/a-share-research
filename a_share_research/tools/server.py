@@ -18,14 +18,12 @@ from a_share_research.tools import control
 logger = logging.getLogger(__name__)
 
 
-def create_app(database: Path, *, external_enabled: bool = False, external_review_enabled: bool = False,
-               account_shadow_enabled: bool = False, gate: control.Gate | None = None) -> FastAPI:
-    if external_review_enabled and not external_enabled:
-        raise ValueError('外部复核必须同时启用外部研究入口')
+def create_app(database: Path, *, account_shadow_enabled: bool = False,
+               gate: control.Gate | None = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     gate = gate or control.Gate()
     app.state.gate = gate
-    mode = 'account-shadow' if account_shadow_enabled else 'external-staging' if external_enabled else 'read-only'
+    mode = 'account-shadow' if account_shadow_enabled else 'read-only'
 
     @app.exception_handler(control.ControlError)
     async def control_error(request, exc):
@@ -54,8 +52,7 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
         conn = None
         try:
             tool = TOOLS.get(name)
-            writable = tool is not None and tool.access == 'write' and (
-                external_enabled and tool.external or account_shadow_enabled and tool.account)
+            writable = tool is not None and tool.access == 'write' and account_shadow_enabled and tool.account
             mode = 'rw' if writable else 'ro'
             conn = sqlite3.connect(database.resolve().as_uri() + '?mode=' + mode, uri=True,
                                    timeout=5, isolation_level=None)
@@ -64,7 +61,7 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
             principal = api_keys.authenticate(conn, header[7:])
             if principal is None:
                 raise ToolError('unauthorized', '凭据无效或已撤销', 401)
-            yield Context(conn, database, principal, external_enabled, external_review_enabled, account_shadow_enabled)
+            yield Context(conn, database, principal, account_shadow_enabled)
         except sqlite3.Error:
             logger.exception('Tool database unavailable')
             raise ToolError('service_failure' if name and name.startswith('account.') else 'unavailable',
@@ -88,9 +85,6 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
                 if result['schema_version'] != len(db.MIGRATIONS):
                     return JSONResponse(result,status_code=503)
                 expected = {'api_keys','runs','reports','prices','batches','scan_requests',*db.ACCOUNT_TABLES}
-                if external_enabled:
-                    expected.update(('external_research','external_submissions','external_reviews',
-                                     'external_operations','external_materials'))
                 if account_shadow_enabled:
                     expected.update(('account_books','account_batches','account_journal','account_voids','account_observations',
                                      'account_analysis_history','account_position_books','account_projection_ids',
@@ -112,7 +106,7 @@ def create_app(database: Path, *, external_enabled: bool = False, external_revie
     @app.get('/tools')
     def tools(request: Request):
         with context(request) as ctx:
-            return {'tools': discover(ctx.principal, external_enabled=external_enabled, account_shadow_enabled=account_shadow_enabled)}
+            return {'tools': discover(ctx.principal, account_shadow_enabled=account_shadow_enabled)}
 
     async def arguments_json(request: Request):
         def unique(pairs):
@@ -154,9 +148,7 @@ def main():
         return value == '1'
     database = Path(os.environ.get('DATA_DIR',str(db.DATA))).absolute()/'app.db'
     gate = control.Gate(marker=database.parent/'.tools-paused')
-    app = create_app(database,gate=gate,external_enabled=enabled('ASHARE_TOOLS_EXTERNAL_ENABLED'),
-                     external_review_enabled=enabled('ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED'),
-                     account_shadow_enabled=enabled('ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'))
+    app = create_app(database,gate=gate,account_shadow_enabled=enabled('ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'))
     with control.ControlServer(gate,args.control_socket):
         uvicorn.run(app,host=args.host,port=args.port,workers=1,timeout_graceful_shutdown=60)
 

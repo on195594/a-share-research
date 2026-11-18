@@ -1,6 +1,6 @@
 # 工具入口
 
-HTTP 与进程内入口默认只读，单文件 CLI/MCP 客户端在 `scripts/ashare.py`；开发实例可显式开启外部研究和账户影子账本。生产账户工具已启用，绑定后的账户来源为新账本；外部研究与外部复核排队仍关闭。开关、切换与收尾状态以[实施计划](../../docs/implementation-plan.md)为准。
+HTTP 与进程内入口默认只读，单文件 CLI/MCP 客户端在 `scripts/ashare.py`；开发实例可显式开启账户影子账本。生产账户工具已启用，绑定后的账户来源为新账本。开关、切换与收尾状态以[实施计划](../../docs/implementation-plan.md)为准。
 
 开发验证使用已迁移至当前 schema 的数据库副本；版本由 `db.MIGRATIONS` 确定。服务启动不会创建库或执行迁移，固定监听回环地址 8621，最多并发两个调用：
 
@@ -47,27 +47,11 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 发布的受理恢复还必须经过 [deploy 政策门禁](../../README.md#发布批准与暂停完成)：实际镜像内读取当前政策、installed=true、参数有效且账户适用，required 的缺失/异常一律保持暂停。register/activate 仍只有 owner 本地入口，允许在 tools pause 内执行；不新增 HTTP 激活工具、授权数据库或编排服务。凭据经临时 0600 批准输入和 stdin 传递，不能写入 `.env.tools`。暂停 marker 没有 release_id；未知暂停不接管，工具留下的 held 才能由操作者明确选择 `--complete-held` 重核。异常后的 pause/drain 优先于证据写入；held 的最终政策观察失败会明确记为 unknown，不能把旧 activation/installed 当作当前状态或授权。证据 I/O 持续失败时旧文件可能过时，仍须核对实时状态。
 
-Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。三个功能开关 `ASHARE_TOOLS_EXTERNAL_ENABLED`、`ASHARE_TOOLS_EXTERNAL_REVIEW_ENABLED`、`ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认均为 0，仅接受 0/1，复核须同时启用外部研究。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产启用仍需整段验收。
+Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。功能开关 `ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认为 0，仅接受 0/1。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产启用仍需整段验收。
 
-## 外部研究提交暂存（开发入口，默认关闭）
+## 外部研究（2026-11-18 退役）
 
-数据库迁移 v12 新增独立的 `external_research` / `external_submissions`，默认不把草稿送入 worker 队列。测试或开发实例须显式调用 `create_app(database, external_enabled=True)`；命令行服务仍默认关闭，未提供生产启用开关。
-
-开放 `external.start`、`external.material`、`external.status`、`external.submit` 与 `external.review`（后者还需独立队列开关）。start 用 `source_run_id` 引用已完成 worker 研究的服务端材料，不接收客户端上传的材料或账户知情标记。当前只支持复用已有材料，新增受控取证尚待接入。材料以原始 JSON 保存（字段/页面顺序属于既有哈希合同）。
-
-研究归创建 Key 所有；research 标盲研究、assistant 标账户知情；撤销凭据后不能再访问。提交带 `expected_version` 和 `draft`，机械检查逐项返回问题。草稿和材料哈希、检查结果及回执一起原子保存，每个提交版本不可修改或删除。同内容重提返回原回执（即使携带旧版本）；不同内容须匹配当前版本并生成新版本，旧版不覆盖。草稿幂等哈希使用规范 JSON，不冒充后续独立复核的绑定哈希。
-
-`accepted=true` 仅表示通过机械检查，`review_status=not_queued` 明确尚未独立复核，不可当成正式报告或交易依据。暂存阶段不写 `runs`、`reports` 或冻结批次；显式开启独立复核后按下述流程处理。
-
-## 独立复核与发布（尚未生产启用）
-
-开发实例须同时显式设 `create_app(database, external_enabled=True, external_review_enabled=True)`，才能调用 `external.review`，参数为已通过机械检查的本人 `submission_id`。同一提交只生成一个 `kind=external` 任务。worker 需 `EXTERNAL_REVIEW_ENABLED=1` 才领取；2026-11-29 至 12-04 月批保护期内即使配置开启，也不接受新排队或领取外部任务。
-
-复核只复用固定草稿和材料，不重新取证、成文或自动修稿；格式错误沿用现行协议最多修正一次。每版独立复核与发布，旧版不可覆盖。所有者任务优先，其次外部复核，最后批次研究；复核中断恢复为已提交，已记录调用数继续计入上限。报告和终态在同一事务提交，失败保留可核查问题，不展示未通过的正文。`external.status` 返回最新版本状态及各版复核任务/报告编号；报告仍可通过 `research.report` 读取。
-
-发布正文带 `producer`（外部凭据编号、提交编号、账户知情身份）；作者明确为 external，不伪装成 worker 模型，复核模型另行记录。旧研究实验与论点卡默认池保持只选 `kind=research`。`external_scoring.load_forecasts/load_agenda` 要求生产者编号和账户知情身份，先过滤身份与判断契约再去重，复用既有 V1/V5 记分函数，不混合不同生产者。
-
-完整性巡检检查外部材料/草稿哈希、复核任务与报告关联、生产者身份；发布停服指纹包含新表及已有账户表。第三服务暂停/排空和 Compose 配置已接入固定发布入口；真实生产发布、宿主与切换后回退仍待验收，不据模块测试提前启用生产。
+外部研究暂存、受控取证、独立复核与发布从未在生产启用，已整条删除；五张 `external_*` 空表随迁移保留，不再有读写代码。退役说明见 [README](../../README.md#外部-agent-受控取证与提交2026-11-18-退役)。
 
 ## 账户影子账本（开发入口，默认关闭）
 

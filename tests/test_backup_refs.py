@@ -49,7 +49,6 @@ def test_all_committed_account_reference_locations_and_failed_batch_exclusion(co
 
 def test_captured_material_and_report_without_pdf_hash_do_not_guess(conn):
     put(conn,'runs','material',MATERIAL.snapshot())
-    put(conn,'external_research','material',MATERIAL.snapshot())
     put(conn,'reports','body',report(document=MATERIAL.doc.info()))
     assert backup_refs.required(conn)['pdf']==[]
 
@@ -71,14 +70,10 @@ def test_explicit_pdf_hash_variants_cover_all_actual_document_paths(conn):
     snapshot['data']['doc']['sha256']='a'*64
     snapshot['data']['extra']={'sources':{'D1':{'document':dict(MATERIAL.doc.info(),sha256='b'*64),'pages':{'9':'excerpt'}}}}
     put(conn,'runs','material',snapshot)
-    external=deepcopy(snapshot)
-    external['data']['doc']['sha256']='c'*64
-    external['data']['extra']['sources']['D1']['document']['sha256']='d'*64
-    put(conn,'external_research','material',external)
     put(conn,'reports','body',report(document=dict(MATERIAL.doc.info(),sha256='e'*64),
         sources={'D2':{'document':dict(MATERIAL.doc.info(),sha256='f'*64),'pages':[9]}},
         sha256='0'*64))
-    assert backup_refs.required(conn)=={'account_evidence':[],'pdf':[c*64 for c in 'abcdef']}
+    assert backup_refs.required(conn)=={'account_evidence':[],'pdf':[c*64 for c in 'abef']}
 
 
 @pytest.mark.parametrize('value',['not a hash','../outside','A'*64,None,123])
@@ -94,8 +89,6 @@ def test_nonempty_illegal_pdf_hash_fails_closed(conn,value):
     ('account_analysis_history','evidence_hashes','{}'),
     ('policy_v0_account_openings','evidence_hashes','["not a hash"]'),
     ('runs','material','{broken'),
-    ('external_research','material','{}'),
-    ('external_research','material','{"data":{}}'),
     ('reports','body','null'),
     ('reports','body','{"unused":NaN}'),
     ('reports','body','{"sources":{"D1":[]}}'),
