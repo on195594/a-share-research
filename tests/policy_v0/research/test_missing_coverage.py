@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes
+from a_share_research.policy.v0 import commands_admin, commands_holdings, db, domain, market_quotes
 from policy_v0.helpers import (
     mock_price_quotes,
     record_valid_quote,
@@ -37,93 +37,6 @@ def _insert_analysis(code: str, result: str = "结论", score: int | None = None
     )
     conn.commit()
     conn.close()
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestSetAndClearFlag:
-    def test_set_red_flag_stored(self, capsys):
-        _insert_analysis("000001")
-        commands_monitor.cmd_set_flag(["000001", "red", "大股东减持超5%"])
-        out = capsys.readouterr().out
-        assert "🔴" in out
-        assert "大股东减持超5%" in out
-
-    def test_set_yellow_flag_stored(self, capsys):
-        _insert_analysis("000001")
-        commands_monitor.cmd_set_flag(["000001", "yellow", "短期涨幅过大"])
-        out = capsys.readouterr().out
-        assert "⚠️" in out
-
-    def test_invalid_level_exits(self):
-        _insert_analysis("000001")
-        with pytest.raises(SystemExit) as exc:
-            commands_monitor.cmd_set_flag(["000001", "green", "理由"])
-        assert exc.value.code == 1
-
-    def test_no_analysis_record_exits(self):
-        with pytest.raises(SystemExit) as exc:
-            commands_monitor.cmd_set_flag(["999999", "red", "理由"])
-        assert exc.value.code == 1
-
-    def test_multiple_flags_accumulate(self, capsys):
-        """set-flag must append, not overwrite — two calls yield two entries."""
-        _insert_analysis("600036")
-        commands_monitor.cmd_set_flag(["600036", "yellow", "第一条"])
-        commands_monitor.cmd_set_flag(["600036", "red", "第二条"])
-        capsys.readouterr()
-
-        today = domain.cst_today()
-        conn = db.get_db()
-        row = conn.execute(
-            "SELECT flags FROM analysis_results WHERE code=? AND date=?",
-            ("600036", today),
-        ).fetchone()
-        conn.close()
-        flags = json.loads(row[0])
-        assert len(flags) == 2
-        assert flags[0]["level"] == "yellow"
-        assert flags[1]["level"] == "red"
-
-    def test_clear_flag_removes_all(self, capsys):
-        _insert_analysis("600036")
-        commands_monitor.cmd_set_flag(["600036", "red", "某原因"])
-        capsys.readouterr()
-
-        commands_monitor.cmd_clear_flag(["600036"])
-        today = domain.cst_today()
-        conn = db.get_db()
-        row = conn.execute(
-            "SELECT flags FROM analysis_results WHERE code=? AND date=?",
-            ("600036", today),
-        ).fetchone()
-        conn.close()
-        assert row[0] is None
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestRemoveHolding:
-    def test_removes_existing_holding(self, capsys):
-        commands_holdings.cmd_add_holding(["600519", "1800"])
-        capsys.readouterr()
-        commands_holdings.cmd_remove_holding(["600519"])
-        out = capsys.readouterr().out
-        assert "600519" in out
-
-        conn = db.get_db()
-        cnt = conn.execute(
-            "SELECT COUNT(*) FROM holdings WHERE code='600519'"
-        ).fetchone()[0]
-        conn.close()
-        assert cnt == 0
-
-    def test_nonexistent_holding_exits(self):
-        with pytest.raises(SystemExit) as exc:
-            commands_holdings.cmd_remove_holding(["999888"])
-        assert exc.value.code == 1
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -336,8 +249,12 @@ class TestWatchlistRows:
     def test_watchlist_flags_shown_in_json(self, capsys):
         set_valid_fundamentals("600036", "招商银行", "银行", {})
         _insert_analysis("600036")
-        commands_monitor.cmd_set_flag(["600036", "red", "大股东减持"])
-        capsys.readouterr()
+        conn = db.get_db()
+        conn.execute("UPDATE analysis_results SET flags=? WHERE code='600036'",
+                     (json.dumps([{"level": "red", "reason": "大股东减持", "date": domain.cst_today()}],
+                                 ensure_ascii=False),))
+        conn.commit()
+        conn.close()
         commands_admin.cmd_watchlist(["--json"])
         rows = json.loads(capsys.readouterr().out)
         assert rows[0]["flags"][0]["level"] == "red"

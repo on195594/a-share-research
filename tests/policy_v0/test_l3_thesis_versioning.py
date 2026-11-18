@@ -376,23 +376,7 @@ def test_rewritten_holding_filters_active_legacy_unclassified(capsys) -> None:
     assert "冻结交易" in output
 
 
-def test_remove_holding_and_cleanup_cover_thesis_versions(capsys) -> None:
-    _add_holding_with_l3("000963")
-    with db.db_session() as conn:
-        holding_id = conn.execute("SELECT id FROM holdings").fetchone()[0]
-        conn.execute(
-            """INSERT INTO holding_thesis_versions
-               (holding_id, version, l1, l2, rewrite_reason, status, created_at)
-               VALUES (?, 1, 'L1', 'L2', 'reason', 'active', 'now')""",
-            (holding_id,),
-        )
-        conn.commit()
-    commands_holdings.cmd_remove_holding(["000963"])
-    with db.db_session() as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM holding_thesis_versions"
-        ).fetchone() == (0,)
-
+def test_cleanup_covers_thesis_versions(capsys) -> None:
     orphan_ids = _add_holding_with_l3("600036")
     with db.db_session() as conn:
         holding_id = conn.execute(

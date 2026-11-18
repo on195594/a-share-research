@@ -678,29 +678,6 @@ def test_retro_uses_full_event_lifecycle_not_last_exit_price():
     assert actual_return == pytest.approx(18.0)
 
 
-def test_remove_holding_cascades_all_lifecycle_children():
-    commands_holdings.cmd_add_holding(["600036", "10.0", "100"])
-    commands_monitor.cmd_l3_add(["600036", "original", "测试条件"])
-    commands_monitor.cmd_alert_open(
-        ["600036", "yellow", "unverified", "test", "none", "测试预警"]
-    )
-    commands_holdings.cmd_remove_holding(["600036"])
-    conn = db.get_db()
-    counts = {
-        table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        for table in (
-            "holdings",
-            "holding_events",
-            "holding_l3_conditions",
-            "holding_tier_state",
-            "holding_alerts",
-            "retro_notes",
-        )
-    }
-    conn.close()
-    assert counts == {table: 0 for table in counts}
-
-
 def test_cleanup_removes_preexisting_orphan_lifecycle_records(capsys):
     """cleanup also governs orphans created before cascade deletion was available."""
     commands_holdings.cmd_add_holding(["600036", "10.0", "100"])

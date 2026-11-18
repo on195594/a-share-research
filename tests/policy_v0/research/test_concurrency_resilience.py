@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from contextlib import closing, contextmanager
 from datetime import timedelta
@@ -12,7 +11,6 @@ import pytest
 from a_share_research.policy.v0 import (
     commands_admin,
     commands_holdings,
-    commands_monitor,
     db,
     domain,
     store,
@@ -195,48 +193,6 @@ def test_close_holding_rejects_invalid_date_without_mutation() -> None:
             "SELECT exit_price, exit_date FROM holdings WHERE code='600519'"
         ).fetchone()
     assert row == (None, None)
-
-
-def test_concurrent_flag_appends_are_lossless_under_contention() -> None:
-    now = domain.utc_now_iso()
-    with db.db_session() as conn:
-        conn.execute(
-            """INSERT INTO analysis_results (code, date, result, created_at)
-               VALUES ('600036',?,'report',?)""",
-            (domain.cst_today(), now),
-        )
-        conn.commit()
-    worker_count = 8
-    barrier = threading.Barrier(worker_count)
-    errors: list[BaseException] = []
-
-    def append_flag(index: int) -> None:
-        try:
-            barrier.wait(timeout=5)
-            commands_monitor.cmd_set_flag(["600036", "yellow", f"flag-{index}"])
-        except BaseException as exc:
-            errors.append(exc)
-
-    threads = [
-        threading.Thread(target=append_flag, args=(index,))
-        for index in range(worker_count)
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=10)
-
-    assert not errors
-    assert all(not thread.is_alive() for thread in threads)
-    with db.db_session() as conn:
-        raw = conn.execute(
-            "SELECT flags FROM analysis_results WHERE code='600036'"
-        ).fetchone()[0]
-    flags = json.loads(raw)
-    assert len(flags) == worker_count
-    assert {flag["reason"] for flag in flags} == {
-        f"flag-{index}" for index in range(worker_count)
-    }
 
 
 def test_many_concurrent_close_requests_consume_distinct_lots() -> None:

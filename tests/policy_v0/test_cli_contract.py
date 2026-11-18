@@ -9,8 +9,6 @@ CLI_ARGUMENT_CASES = {
         ["reports", "600519"],
         ["report", "9", "--compact"],
     ),
-    "set-flag": (["600000", "yellow", "原因"], ["600000", "yellow", "原因"]),
-    "clear-flag": (["600000"], ["600000"]),
     "alert-open": (
         ["600000", "yellow", "unverified", "code", "none", "原因"],
         ["600000", "yellow", "unverified", "code", "none", "原因", "证据"],
@@ -89,7 +87,6 @@ CLI_ARGUMENT_CASES = {
     "retro-stats": ([], ["A通用"]),
     "retro-outliers": ([], ["--loss", "10"]),
     "holdings": ([], ["600000", "--compact", "--json", "--active-only"]),
-    "remove-holding": (["600000"], ["600000"]),
     "update-return": (["600000", "10"], ["600000", "10"]),
     "position-return": (["600000"], ["600000", "10"]),
     "dividend-check": ([], ["600000"]),
@@ -241,12 +238,12 @@ def test_every_w1_command_requires_prefix_confirmation(monkeypatch, capsys) -> N
 
 def test_confirmation_position_and_unknown_global_option(monkeypatch) -> None:
     called: list[list[str]] = []
-    monkeypatch.setitem(cache.COMMANDS, "set-flag", called.append)
-    args = ["600000", "yellow", "原因"]
+    monkeypatch.setitem(cache.COMMANDS, "update-return", called.append)
+    args = ["600000", "5.0"]
 
-    assert cache.main(["set-flag", "--confirm-write", *args]) == 3
-    assert cache.main(["--bogus", "set-flag", *args]) == 2
-    assert cache.main(["--confirm-write", "set-flag", *args]) == 0
+    assert cache.main(["update-return", "--confirm-write", *args]) == 3
+    assert cache.main(["--bogus", "update-return", *args]) == 2
+    assert cache.main(["--confirm-write", "update-return", *args]) == 0
     assert called == [args]
 
 

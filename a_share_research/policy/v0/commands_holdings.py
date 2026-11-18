@@ -1787,44 +1787,6 @@ def cmd_retro_outliers(args: list[str]) -> None:
         )
 
 
-def cmd_remove_holding(args: list[str]) -> None:
-    """Permanently delete a holding and every lifecycle-owned child record."""
-    if len(args) < 1:
-        print("错误：需要参数 <代码>", file=sys.stderr)
-        sys.exit(1)
-    code = args[0]
-    with db.db_session() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        holding_ids = [
-            row[0]
-            for row in conn.execute(
-                "SELECT id FROM holdings WHERE code=?",
-                (code,),
-            ).fetchall()
-        ]
-        if not holding_ids:
-            conn.rollback()
-            print(f"未找到持仓记录：{code}", file=sys.stderr)
-            sys.exit(1)
-        placeholders = ",".join("?" for _ in holding_ids)
-        for table in (
-            "holding_events",
-            "holding_l3_conditions",
-            "holding_thesis_versions",
-            "holding_tier_state",
-            "holding_alerts",
-            "retro_notes",
-        ):
-            conn.execute(
-                f"DELETE FROM {table} WHERE holding_id IN ({placeholders})",
-                holding_ids,
-            )
-        deleted = conn.execute("DELETE FROM holdings WHERE code=?", (code,)).rowcount
-        conn.commit()
-    if deleted:
-        print(f"已移除持仓：{code}")
-
-
 def cmd_update_return(args: list[str]) -> None:
     """卖出后记录实际回报。用法：update-return <代码> <实际回报%>"""
     if len(args) < 2:

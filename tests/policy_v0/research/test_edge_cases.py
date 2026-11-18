@@ -7,14 +7,13 @@ Coverage gaps addressed:
 """
 
 import hashlib
-import json
 import threading
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import commands_holdings, commands_monitor, db, domain
+from a_share_research.policy.v0 import commands_holdings, db, domain
 
 
 @pytest.fixture(autouse=True)
@@ -261,23 +260,6 @@ class TestCloseHoldingDefense:
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestClearFlagEdgeCases:
-    def test_no_args_exits(self):
-        """No arguments → sys.exit(1)."""
-        with pytest.raises(SystemExit) as exc:
-            commands_monitor.cmd_clear_flag([])
-        assert exc.value.code == 1
-
-    def test_nonexistent_code_succeeds_silently(self, capsys):
-        """clear_flag on a code with no analysis record succeeds silently (UPDATE 0 rows)."""
-        commands_monitor.cmd_clear_flag(["999999"])
-        out = capsys.readouterr().out
-        assert "999999" in out
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-
 class TestRaceConditions:
     def test_concurrent_add_holding_allows_exactly_one_open_position(self, capsys):
         """Concurrent initial entries serialize; the loser is told to use buy-holding."""
@@ -347,47 +329,6 @@ class TestRaceConditions:
 
         assert rows[0][1] == 120.0, "first lot (cost 100.0) should close first"
         assert rows[1][1] == 125.0, "second lot (cost 110.0) should close second"
-
-    def test_concurrent_set_flag_both_flags_persisted(self, capsys):
-        """Two concurrent set_flag calls should both persist — known race condition.
-
-        Current implementation is not atomic: a concurrent race can drop one flag.
-        """
-        _insert_analysis("600036")
-        capsys.readouterr()
-
-        barrier = threading.Barrier(2)
-        errors: list[Exception] = []
-
-        def set_flag(level: str, reason: str):
-            try:
-                barrier.wait()
-                commands_monitor.cmd_set_flag(["600036", level, reason])
-            except Exception as e:
-                errors.append(e)
-
-        threads = [
-            threading.Thread(target=set_flag, args=("yellow", "first flag")),
-            threading.Thread(target=set_flag, args=("red", "second flag")),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
-
-        assert not errors, f"thread exceptions: {errors}"
-
-        today = domain.cst_today()
-        conn = db.get_db()
-        row = conn.execute(
-            "SELECT flags FROM analysis_results WHERE code=? AND date=?",
-            ("600036", today),
-        ).fetchone()
-        conn.close()
-        flags = json.loads(row[0]) if row[0] else []
-        assert len(flags) == 2, (
-            f"both flags should be stored but only {len(flags)} found — dropped by race"
-        )
 
     def test_concurrent_close_same_stock_closes_each_lot_once(self, capsys):
         """Two concurrent close requests must consume two distinct FIFO lots."""
