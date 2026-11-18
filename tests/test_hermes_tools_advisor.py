@@ -354,7 +354,7 @@ def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, con
 
 
 @pytest.mark.wide_scan_scope
-def test_weekly_counts_scan_only_companies_without_listing_them(advisor, conn):
+def test_weekly_counts_scan_only_companies_without_listing_them(advisor, conn):  # noqa: F811
     from a_share_research import scans
     scans.replace_subscriptions(conn, ['603606'], catalog={'603606': {}})
     week = json.loads(json.dumps(scans.weekly(conn, at='2026-10-30T18:00:00+08:00'), default=str))
