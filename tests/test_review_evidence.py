@@ -518,3 +518,57 @@ def test_gap_positions_are_valid_targets_and_invalid_ones_are_named():
     with pytest.raises(ReviewFormatError, match=r"gaps\[3\]"):
         accept(ledger, payload(ledger, draft, resolutions=[decision | {"targets": ["risks[0]", "gaps[3]"]}]), draft)
     assert accept(ledger, payload(ledger, draft, resolutions=[decision]), draft) == []
+
+
+# TuShare's gateway body as captured from api.waditu.com on 2026-11-18 during its outage.
+TUSHARE_502 = ("<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n"
+               "<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx/1.26.1</center>\r\n</body>\r\n</html>\r\n")
+
+
+def _tushare_response(status, text):
+    import requests
+    res = requests.Response()
+    res.status_code, res._content = status, text.encode()
+    return res
+
+
+def test_tushare_http_error_names_the_status_instead_of_an_empty_frame(tmp_path, monkeypatch):
+    import requests
+    from a_share_research import research
+    from tushare.pro.client import DataApi
+    monkeypatch.setenv("TUSHARE_TOKEN", "captured-response-only")
+    monkeypatch.setenv("TUSHARE_CACHE", "0")
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _tushare_response(502, TUSHARE_502))
+    # The unchecked SDK client is why the failure used to read as "返回数据缺少必要列".
+    assert DataApi("captured-response-only").fina_indicator(ts_code="601600.SH").shape == (0, 0)
+
+    conn = db.connect(tmp_path / "isolated.db")
+    run = db.create_run(conn, "601600")
+    research.execute(conn, run)
+    row = conn.execute("SELECT error, identity FROM runs WHERE id=?", (run,)).fetchone()
+    assert row["error"] == "TuShare fina_indicator 返回 HTTP 502，上游暂不可用，请稍后重试"
+    assert json.loads(row["identity"])["failure"] | {} == {
+        "stage": "gather", "category": "source_input", "message": row["error"]}
+    conn.close()
+
+
+def test_checked_tushare_client_keeps_sdk_decoding(monkeypatch):
+    import requests
+    from a_share_research.core.providers.tushare_common import checked_client
+    calls = []
+
+    def post(url, json, timeout):
+        calls.append((url, json, timeout))
+        body = '{"code": 0, "msg": "", "data": {"fields": ["ts_code", "end_date"], "items": [["601600.SH", "20250930"]]}}'
+        return _tushare_response(200, body)
+    pro = checked_client("captured-response-only")
+    monkeypatch.setattr(requests, "post", post)
+    frame = pro.fina_indicator(ts_code="601600.SH", fields="ts_code,end_date")
+    assert frame.to_dict("records") == [{"ts_code": "601600.SH", "end_date": "20250930"}]
+    url, payload, timeout = calls[0]
+    assert url == "http://api.waditu.com/dataapi/fina_indicator" and timeout == 30
+    assert payload["token"] == "captured-response-only" and payload["params"]["ts_code"] == "601600.SH"
+    rate_limited = '{"code": 40203, "msg": "抱歉，您每分钟最多访问该接口200次", "data": null}'
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _tushare_response(200, rate_limited))
+    with pytest.raises(Exception, match="每分钟最多访问"):
+        pro.fina_indicator(ts_code="601600.SH")

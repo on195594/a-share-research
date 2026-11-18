@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 
 import pandas as pd
-import tushare as ts
+from a_share_research.core.providers.tushare_common import checked_client
 from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
 
 from a_share_research import db
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 
 def client():
-    return ts.pro_api(os.environ["TUSHARE_TOKEN"])
+    return checked_client(os.environ["TUSHARE_TOKEN"])
 
 
 def redact_error(exc: Exception) -> str:

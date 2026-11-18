@@ -10,7 +10,8 @@ from copy import deepcopy
 from datetime import date
 
 from a_share_research import report as report_body
-from a_share_research import db, model, sources, evidence, stance as stances, valuation, stock_codes
+from a_share_research import db, market, model, sources, evidence, stance as stances, valuation, stock_codes
+from a_share_research.core.providers.tushare_common import TushareHTTPError
 from a_share_research.limits import CALL_TIMEOUT_SECONDS, DRAFT_CALLS, MAX_CALLS, RUN_SECONDS
 from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
@@ -543,6 +544,12 @@ def stance_calc(stance: dict, calc: dict | None, market_date: str) -> dict:
     return out
 
 
+def _causes(exc: BaseException | None):
+    while exc is not None:
+        yield exc
+        exc = exc.__cause__ or exc.__context__
+
+
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, company_key, request, request_id, started_at, batch_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
@@ -650,7 +657,9 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                 body["stance_calc"] = stance_calc(report["stance"], body.get("valuation_calc"), material.market_date)
             publish(conn, run_id, material, period, True, report["verdict"], body)
     except Exception as exc:
-        if not isinstance(exc, ScopeError | ResearchError | ModelStageError | sources.SourceError | evidence.EvidenceError):
+        if isinstance(exc, sources.SourceError | evidence.EvidenceError):
+            log.warning("run %s source input failed at %s: %s", run_id, runner.stage, market.redact_error(exc))
+        elif not isinstance(exc, ScopeError | ResearchError | ModelStageError):
             log.exception("run %s failed", run_id)
         category = ("out_of_scope" if isinstance(exc, ScopeError)
                     else "source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or runner.stage == "gather"
@@ -659,8 +668,10 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         # Errors whose text this code writes itself are actionable and kept. SourceError can wrap provider
         # text, and model/transport exceptions can contain internal details; those get the generic notice.
         own = isinstance(exc, ScopeError | ResearchError | evidence.EvidenceError) and str(exc)
+        upstream = next((e for e in _causes(exc) if isinstance(e, TushareHTTPError)), None)
         failure = {"stage": runner.stage, "category": category,
-                   "message": str(exc) if own else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
+                   "message": str(exc) if own else str(upstream) if upstream
+                   else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
                    else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
         db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=failure["message"])
         identity["failure"] = failure

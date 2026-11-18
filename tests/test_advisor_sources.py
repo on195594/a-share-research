@@ -114,7 +114,7 @@ def daily_reports(monkeypatch):
     monkeypatch.setattr(market, "REPORT_RC_MIN_INTERVAL", 0)
     monkeypatch.setenv("TUSHARE_TOKEN", "captured-response-only")
     pro = DailyReports()
-    monkeypatch.setattr(market.ts, "pro_api", lambda token: pro)
+    monkeypatch.setattr(market, "client", lambda: pro)
     return pro
 
 

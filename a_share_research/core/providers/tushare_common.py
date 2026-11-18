@@ -79,6 +79,40 @@ _GLOBAL_RATE_LIMITER = TushareRateLimiter()
 
 
 
+class TushareHTTPError(ConnectionError):
+    """TuShare answered with an HTTP error status (e.g. its gateway's 502)."""
+
+    def __init__(self, api: str, status: int) -> None:
+        self.api, self.status = api, status
+        super().__init__(f"TuShare {api} 返回 HTTP {status}，上游暂不可用，请稍后重试")
+
+
+def checked_client(token: str, timeout: int = 30) -> Any:
+    """A TuShare client that raises on HTTP error statuses.
+
+    tushare 1.4.29's DataApi.query returns an empty DataFrame for any non-2xx response, which
+    downstream reads as missing columns or no data, and report_rc would cache as a real empty day.
+    """
+    import requests
+    from tushare.pro.client import DataApi
+
+    class CheckedDataApi(DataApi):
+        # Same request and decoding as DataApi.query; only the HTTP status check differs.
+        def query(self, api_name, fields="", **kwargs):
+            url = getattr(self, "_DataApi__http_url")
+            kwargs.setdefault("ts_type_name", url)
+            payload = {"api_name": api_name, "token": token, "params": kwargs, "fields": fields}
+            res = requests.post(f"{url}/{api_name}", json=payload, timeout=timeout)
+            if not res.ok:
+                raise TushareHTTPError(api_name, res.status_code)
+            result = json.loads(res.text)
+            if result["code"] != 0:
+                raise Exception(result["msg"])
+            return pd.DataFrame(result["data"]["items"], columns=result["data"]["fields"])
+
+    return CheckedDataApi(token=token, timeout=timeout)
+
+
 def _exception_class_names(exc: Exception) -> set[str]:
     return {cls.__name__ for cls in type(exc).mro()}
 
@@ -255,9 +289,7 @@ class TushareProviderBase:
     def _build_client(self) -> Any:
         if self._client_factory is not None:
             return self._client_factory(cast(str, self.token))
-        import tushare as ts
-
-        return ts.pro_api(cast(str, self.token))
+        return checked_client(cast(str, self.token))
 
     @staticmethod
     def _validate_frame(
