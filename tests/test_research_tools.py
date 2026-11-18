@@ -28,7 +28,7 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     assert row["values"] == {"result": str(expected)}
     assert row["calculation"]["inputs"][1]["value"] == values["2024-12-31"]
     assert row["label"] == "相对变动率" and row["calculation"]["requested_label"] == "经营现金流同比"
-    with pytest.raises(ValueError, match="同月日"):
+    with pytest.raises(ValueError, match=r"left\.period=2026-06-30，right\.period=2024-12-31.*上年同月日.*2025-06-30.*change_pct"):
         calculate(table, "不可比", "growth_pct", left | {"period": "2026-06-30"}, right)
     # Cross-period / sequential relative change and chained C.n references without explicit period.
     seq = calculate(table, "半年较上年全年相对变动", "change_pct", left | {"period": "2026-06-30"}, right)
@@ -39,6 +39,8 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
         calculate(table, "不同单位", "ratio", left, {"ref": "T.roe", "period": "2025-12-31"})
     with pytest.raises(ValueError, match="可用期间：.*2024-12-31"):
         calculate(table, "缺失", "ratio", left, right | {"period": "1900-06-30"})
+    with pytest.raises(ValueError, match=r"T\.op_cash.*须指定 period.*可用期间：.*2024-12-31"):
+        calculate(table, "缺失基期", "growth_pct", left, {"ref": "T.op_cash"})
     with pytest.raises(ValueError, match="表中没有 T.nope"):
         calculate(table, "缺失", "ratio", left, {"ref": "T.nope", "period": "2025-12-31"})
 

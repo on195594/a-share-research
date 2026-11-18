@@ -26,6 +26,8 @@ def test_prior_report_skips_real_feedback_and_replays_and_carries_only_the_agend
     # 茅台: report 12 is a correction and 143 a replay, so 11 (a follow-up) is the latest judgment.
     prior = _prior_report(conn, "600519.SH", 999)
     assert prior is not None and prior["report_id"] == 11
+    assert prior["announcement_searches"] == []  # No recorded cutoff on this older report.
+    assert "公告检索截止日未记录" in prior_question(prior)
     assert prior["risks"] == [item["text"] for item in BODY[11]["risks"]]
     assert "verdict" not in prior and "summary" not in prior
     # 东方电缆: the continuation 39 is the latest; from 39's own run only 37 is earlier.
@@ -42,6 +44,24 @@ def test_followups_on_a_report_see_its_checkpoints_with_citations(tmp_path):
     load(conn)
     claims = _research_context(conn, "603606.SH", 39)[0]["claims_to_recheck"]
     assert claims["checkpoints"] == BODY[39]["checkpoints"] and all(c["cites"] for c in claims["checkpoints"])
+    conn.close()
+
+
+def test_continuation_window_preserves_scoped_search_dates_for_the_subject(tmp_path):
+    conn = db.connect(tmp_path / "window.db")
+    load(conn)
+    searches = BODY[39]["announcement_searches"]
+    # Marked variant: the keyword search was truncated and a peer had a later cutoff.
+    scoped = [searches[0], searches[1] | {"truncated": True}]
+    peer = searches[0] | {"code": "600519", "until": "2026-10-29"}
+    body = BODY[39] | {"announcement_searches": [*scoped, peer]}
+    conn.execute("UPDATE reports SET body=? WHERE id=39", (json.dumps(body),))
+    for baseline in (_prior_report(conn, "603606", 999), _research_context(conn, "603606", 39)[0]):
+        assert baseline["period"] == "2026-06-30"
+        assert [(s["query"], s["until"], s["truncated"]) for s in baseline["announcement_searches"]] == [
+            ("", "2026-10-27", False), ("中标", "2026-10-27", True)]
+        question = prior_question(baseline)
+        assert "财报期为 2026-06-30" in question and "公告检索最晚至 2026-10-27" in question
     conn.close()
 
 

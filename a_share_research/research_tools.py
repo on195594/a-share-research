@@ -190,13 +190,12 @@ def _operand(side: dict, rows: dict, material) -> dict:
         row = rows[clean["ref"]]
         value_field = "exact_values" if "exact_values" in row else "values"
         period = clean.get("period") or ("result" if set(row.get(value_field, {})) == {"result"} else None)
-        if not period:
-            raise ValueError("表格输入须指定 period")
         if reason := row.get("unavailable", {}).get(period):
             raise ValueError(f"{period} 更正版本待核对：{reason}")
         if period not in row.get(value_field, {}):
             # Tell the model what exists so it can retry instead of guessing.
-            raise ValueError(f"{clean['ref']} 没有期间 {period}；可用期间：{'、'.join(sorted(row.get(value_field, {}))) or '无'}")
+            problem = f"没有期间 {period}" if period else "须指定 period"
+            raise ValueError(f"{clean['ref']} {problem}；可用期间：{'、'.join(sorted(row.get(value_field, {}))) or '无'}")
         result = {"ref": clean["ref"], "period": period, "label": row["label"],
                   "value": row[value_field][period], "unit": row["unit"], "value_field": value_field}
         if assumptions := row.get("calculation", {}).get("assumptions"):
@@ -294,15 +293,21 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
             inputs[0]["ref"] == inputs[1]["ref"] if ("ref" in inputs[0] and "ref" in inputs[1])
             else (bool(left.get("label") or right.get("label")) and inputs[0]["label"].split("·")[-1] == inputs[1]["label"].split("·")[-1])
         )
-        if (not same_metric or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", lp) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", rp)
+        if not same_metric:
+            raise ValueError("growth_pct 同比须为同一指标：表格两侧取同一 ref，PDF 原数用与披露科目一致的 label。"
+                             "异源相对变动用 change_pct，计算两项占比用 ratio_pct")
+        dated = re.fullmatch(r"\d{4}-\d{2}-\d{2}", lp)
+        if (not dated or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", rp)
                 or lp[4:] != rp[4:] or int(lp[:4]) != int(rp[:4]) + 1):
-            raise ValueError("同比须为同一指标、同月日口径且本期晚于基期；跨期、环比或异源变动请用 change_pct")
+            hint = f"；核对基期是否有 {int(lp[:4]) - 1:04d}{lp[4:]} 的同指标原数" if dated else ""
+            raise ValueError(f"growth_pct 收到 left.period={lp}，right.period={rp}；同比取本期与上年同月日（YYYY-MM-DD）{hint}。"
+                             "若要比较所选期间的相对变动且基期为正，改用 change_pct；若求差额，用 difference")
         if b <= 0:
-            raise ValueError("基期非正数，增速不适用；请用差额并解释")
+            raise ValueError("right 基期非正数，增速不适用；改用 difference 计算差额并解释")
         result, formula, unit = (a / b - 1) * 100, "(left / right - 1) * 100", "%"
     elif operation == "change_pct":
         if b <= 0:
-            raise ValueError("基数非正数，相对变动率不适用；请用差额并解释")
+            raise ValueError("right 基期非正数，相对变动率不适用；改用 difference 计算差额并解释")
         result, formula, unit = (a / b - 1) * 100, "(left / right - 1) * 100", "%"
     elif operation in ("ratio", "ratio_pct"):
         if b == 0:
@@ -663,6 +668,8 @@ class Acquisition:
         return result, failed
 
     def write(self, prompt, stage):
+        prompt += ("\n\n使用工具时可同轮提交互不依赖的调用，例如同时检索公告和计算已有表值。"
+                   "同一 PDF 的连续页可用 read_disclosure 的 page、count 一次读至多 5 页；需要前一项返回的出处或数值时再分轮。")
         messages = [{"role": "user", "content": prompt, "timestamp": int(time.time() * 1000)}]
         declined = False
         while True:

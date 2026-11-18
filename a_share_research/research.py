@@ -318,7 +318,7 @@ def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool
 def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     code = stock_codes.normalize_key(code)
     parents = conn.execute(
-        "SELECT r.id, r.body, r.passed, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
+        "SELECT r.id, r.body, r.passed, r.coverage, r.company_key, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.company_key = ? AND u.kind = 'research' AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
         " AND json_type(u.request, '$.feedback') = 'object')) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
         (code, parent_id, parent_id),
@@ -334,6 +334,8 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
         entry = {"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
                  "basis": "report" if parent["passed"] else "facts",
                  "claims_to_recheck": claims}
+        if parent["id"] == parent_id:
+            entry.update(_baseline_window(parent, body))
         if agenda := _corrected_agenda(conn, body):
             entry["prior_agenda"] = agenda
         context.append(entry)
@@ -342,16 +344,23 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
 
 def _corrected_agenda(conn, body: dict) -> dict | None:
     """The old items a corrected report's prior_status refs point into, unavailable in its own risks and checkpoints."""
-    row = conn.execute("SELECT id, body, created_at, coverage FROM reports WHERE id = ?",
+    row = conn.execute("SELECT id, body, created_at, coverage, company_key FROM reports WHERE id = ?",
                        ((body.get("prior") or {}).get("report_id"),)).fetchone()
     if row is None:
         return None
     return {"note": "prior_status 的 ref 指这里的旧条目（上一份报告），不是 claims_to_recheck 里的 risks 或 checkpoints", **_agenda(row)}
 
 
+def _baseline_window(row, body: dict) -> dict:
+    # Each search has its own until, keyword and truncation status. A peer's search cannot cover this company.
+    return {"period": row["coverage"], "announcement_searches": [
+        search for search in body.get("announcement_searches", []) if search.get("code") == row["company_key"]
+    ]}
+
+
 def _agenda(row) -> dict:
     body = report_body.load(row["body"])
-    return {"report_id": row["id"], "researched": row["created_at"][:10], "period": row["coverage"],
+    return {"report_id": row["id"], "researched": row["created_at"][:10], **_baseline_window(row, body),
             "market_date": body.get("market_date"),
             "risks": [item["text"] for item in body.get("risks", [])],
             "checkpoints": [item["text"] for item in body.get("checkpoints", [])]}
@@ -360,11 +369,11 @@ def _agenda(row) -> dict:
 def _prior_report(conn, code: str, run_id: int) -> dict | None:
     """The company's latest reviewed, non-replay, non-feedback report before this run, as an agenda to recheck.
 
-    Only its risks and checkpoints travel: no verdict or summary, so the new judgment starts from evidence.
+    Carry its risks, checkpoints and coverage so the new judgment starts from evidence.
     """
     code = stock_codes.normalize_key(code)
     row = conn.execute(
-        "SELECT r.id, r.body, r.created_at, r.coverage FROM reports r JOIN runs u ON u.id = r.run_id"
+        "SELECT r.id, r.body, r.created_at, r.coverage, r.company_key FROM reports r JOIN runs u ON u.id = r.run_id"
         f" WHERE r.company_key = ? AND r.run_id < ? AND {db.FORMAL_REPORT}"
         " ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
@@ -416,7 +425,14 @@ def scan_events(conn, material: Material, frozen: list[dict]) -> list[dict]:
 
 def prior_question(prior: dict) -> str:
     """The question a continuation asks when the user brought none."""
-    return f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
+    if "announcement_searches" not in prior:  # Recognize the original question on frozen replays.
+        return f"相对上次研究（资料至 {prior['period']}），哪些风险与检查点发生了变化？"
+    searches = prior["announcement_searches"]
+    cutoff = max((s["until"] for s in searches if s.get("until")), default=None)
+    scope = (f"本公司公告检索最晚至 {cutoff}，覆盖范围以各次查询的关键词和实际返回目录为准"
+             if cutoff else "本公司公告检索截止日未记录")
+    return (f"上次研究的财报期为 {prior['period']}，{scope}。优先核查新增或更正披露，"
+            "沿用本次材料已有的原文与表值，按缺口补读历史原文。哪些风险与检查点发生了变化？")
 
 
 def publish(conn, run_id: int, material: Material, period: str, passed: bool,

@@ -70,6 +70,20 @@ def bound(material, draft, **fields):
             'issues': [], 'resolutions': [], 'risk_resolutions': []} | fields
 
 
+def test_explore_can_read_multiple_pages_and_compute_in_one_round(session):
+    runner, material, acquisition = session
+    calculation = {'type': 'toolCall', 'id': 'cash', 'name': 'calculate', 'arguments': {
+        'label': '经营现金流同比', 'operation': 'growth_pct',
+        'left': {'ref': 'T.op_cash', 'period': '2025-12-31'}, 'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}}
+    runner.responses = [[read(9, count=2), calculation], report()]
+    assert research.explore(runner, material, acquisition=acquisition) == report()
+    prompt = runner.conn.execute("SELECT prompt FROM calls ORDER BY id LIMIT 1").fetchone()[0]
+    assert '同轮提交互不依赖的调用' in json.loads(prompt)['messages'][0]['content']
+    pages, calc = acquisition.traces
+    assert pages['result']['pages'] == MATERIAL.pages
+    assert calc['result']['id'] == 'C.1' and acquisition.rounds == 1
+
+
 def test_review_missing_previous_page_can_acquire_repair_and_close_with_new_binding(session):
     runner, material, acquisition = session
     material.pages.pop(9)
