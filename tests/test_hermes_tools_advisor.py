@@ -351,3 +351,14 @@ def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, con
     degraded = advisor.weekly()
     assert '【研究周报】' in degraded and '【换仓复核】检查未完成：工具服务已暂停' in degraded
     assert json.loads(weekly_state.read_text())['pending'] is not None
+
+
+@pytest.mark.wide_scan_scope
+def test_weekly_counts_scan_only_companies_without_listing_them(advisor, conn):
+    from a_share_research import scans
+    scans.replace_subscriptions(conn, ['603606'], catalog={'603606': {}})
+    week = json.loads(json.dumps(scans.weekly(conn, at='2026-10-30T18:00:00+08:00'), default=str))
+    text = advisor.render_weekly(week)
+    # Captured reports give 600519 and 000651 cards: scanned, counted, not listed card by card.
+    assert '披露扫描另覆盖 2 家' in text and '(600519)' not in text and '(603606)' in text
+    assert '披露扫描另覆盖' not in advisor.render_weekly({k: v for k, v in week.items() if k != 'scan_scope'})

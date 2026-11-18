@@ -250,6 +250,25 @@ def subscriptions(conn) -> list[dict]:
     return list(items.values())
 
 
+def scan_scope(conn) -> list[dict]:
+    """Subscriptions plus every tracking batch's L5 and every company with a formal card.
+
+    The extra codes are scanned, checked and queued for review only; /api/cards and the policy
+    candidate set stay on subscriptions().
+    """
+    items = {s['code']: s for s in subscriptions(conn)}
+    extra = [(code, 'l5') for batch in conn.execute(
+        "SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL AND status='tracking' ORDER BY frozen_at DESC, id DESC")
+        for code in json.loads(batch['l5'])['codes']]
+    extra += [(row['company_key'], 'card') for row in conn.execute(
+        f"SELECT DISTINCT r.company_key FROM reports r JOIN runs u ON u.id = r.run_id WHERE {db.FORMAL_REPORT} ORDER BY r.company_key")]
+    for code, origin in extra:
+        code = stock_codes.normalize_key(code)
+        if code not in items:
+            items[code] = {'code': code, 'origin': origin, **latest_close(conn, code)}
+    return list(items.values())
+
+
 def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None) -> list[dict]:
     if not isinstance(codes, list) or any(not isinstance(c, str) or not stock_codes.KEY_RE.fullmatch(c) for c in codes):
         raise service.RequestError('订阅代码必须为六位 A 股代码')
@@ -659,9 +678,12 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         log.exception('scan %s consensus prefetch failed', scan_id)
         summary['consensus_prefetch'] = {'covered': 0, 'missing': [], 'reason': str(exc)}
     try:
-        scope = subscriptions(conn)
+        scope = scan_scope(conn)
         history = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute(
             "SELECT * FROM scans WHERE id<? AND status='done' ORDER BY id", (scan_id,))]
+        # A code joining an existing scan history looks back 30 days on its first pass; those
+        # old filings are recorded and reviewed, but do not each push a pending-review notice.
+        entering = {s['code'] for s in scope if history and last_success(history, s['code']) is None}
         previous = history[-1] if history else None
         notices = [n for row in conn.execute(
             "SELECT summary FROM scans WHERE id<? AND status IN ('done','failed') ORDER BY id", (scan_id,))
@@ -740,6 +762,8 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                                                [r for r in completed if stock_codes.normalize_key(r['code']) == code],
                                                checks=checks, new_checks=[c for c in checks if c['id'] not in notified_checks],
                                                last_extreme_zone=summary['last_extreme_zones'].get(code)):
+                if code in entering and reason['reason'] == 'pending_review':
+                    continue
                 candidates.append({'code': code, 'name': (card or {}).get('name') or summary['names'].get(code), **reason,
                                    'card': card, 'path': f'/stock/{code}', 'card_path': f'/api/companies/{code}/card',
                                    'latencies': [latency(e, at) for e in related], 'notified_at': at})
@@ -803,6 +827,7 @@ def weekly(conn, *, at: str | None = None) -> dict:
     checkpoints = [{'code': item['code'], 'report_id': item['card']['report_id'], **checkpoint}
                    for item in items if item['card'] for checkpoint in item['card']['checkpoints']]
     return {'version': service.VERSION, 'since': since.isoformat(), 'as_of': at, 'subscriptions': items,
+            'scan_scope': [{'code': s['code'], 'origin': s['origin']} for s in scan_scope(conn)],
             'status_distribution': dict(Counter((s['card'] or {}).get('status', '无论点卡') for s in items)),
             'zone_distribution': dict(Counter(((s['card'] or {}).get('current') or {}).get('current_zone') or '未测算' for s in items)),
             'events': recent, 'checkpoints': checkpoints, 'checkpoint_count': len(checkpoints),

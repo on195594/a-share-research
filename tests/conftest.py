@@ -3,6 +3,19 @@ import os
 import pytest
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "wide_scan_scope: scan beyond subscriptions (tracking L5 and card companies)")
+
+
+@pytest.fixture(autouse=True)
+def narrow_scan_scope(request, monkeypatch):
+    # Captured reports give several fixture companies a card; scan replays written against
+    # subscriptions keep that scope unless a test opts into the wide production scope.
+    if request.node.get_closest_marker("wide_scan_scope") is None:
+        from a_share_research import scans
+        monkeypatch.setattr(scans, "scan_scope", scans.subscriptions)
+
+
 @pytest.fixture
 def configured():
     """Installed Pi environment shared by offline runtime and opt-in live tests."""

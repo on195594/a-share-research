@@ -830,3 +830,42 @@ def test_disclosures_network_boundary_and_periodic_versions(monkeypatch):
     changed = disclosure_checks.normalize_periodic(revised[:1], '000858')[0]
     assert changed['identity'] != original['identity'] and changed['announced'] == '2026-11-16'
     assert changed['values'] == original['values']
+
+
+@pytest.mark.wide_scan_scope
+def test_wide_scope_adds_tracking_l5_and_card_companies_but_cards_api_keeps_policy_origins(conn):
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    # Batch rows are minimal variants; codes are captured fixture companies.
+    for status, frozen, codes in (('tracking', '2026-10-23T20:00:00+08:00', ['000963.SZ']),
+                                  ('closed', '2026-09-01T20:00:00+08:00', ['600900.SH']),
+                                  ('tracking', AT, ['603606.SH'])):
+        conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES (?,?,'{}',?,?)",
+                     (status, frozen, json.dumps({'codes': codes}), frozen))
+    assert {s['code']: s['origin'] for s in scans.scan_scope(conn)} == {
+        '603606': 'external', '000963': 'l5', '000651': 'card', '600519': 'card'}
+    assert {s['code']: s['origin'] for s in scans.subscriptions(conn)} == {'603606': 'external'}
+    cards = service.company_cards(conn)
+    assert [(c['code'], c['origin']) for c in cards['cards']] == [('603606', 'external')] and not cards['missing']
+    result = run_scan(conn, CapturedSources([]))
+    assert {s['code'] for s in result['summary']['scope']} == {'603606', '000963', '000651', '600519'}
+    # 000963/000651 have no captured close: the gap is a recorded failure, not silence.
+    assert {(f['code'], f['stage']) for f in result['summary']['failures']} == {('000963', 'valuation'), ('000651', 'valuation')}
+    assert {s['origin'] for s in scans.weekly(conn)['scan_scope']} == {'external', 'l5', 'card'}
+
+
+@pytest.mark.wide_scan_scope
+@pytest.mark.parametrize('scanned_before', [False, True])
+def test_code_entering_scan_history_reviews_old_filing_without_pending_notice(conn, monkeypatch, scanned_before):
+    scans.replace_subscriptions(conn, ['603606' if scanned_before else '600519'], catalog=CATALOG)
+    with monkeypatch.context() as narrow:
+        narrow.setattr(scans, 'scan_scope', scans.subscriptions)
+        run_scan(conn, CapturedSources([]))
+    source = CapturedSources([i for i in ANNOUNCEMENTS if i['code'] == '603606' and i.get('period') == '2026-09-30'])
+    result = run_scan(conn, source, '2026-10-31T18:00:00+08:00')
+    origin = {s['code']: s['origin'] for s in result['summary']['scope']}['603606']
+    assert origin == ('external' if scanned_before else 'card')
+    [event] = [e for e in result['events'] if e['code'] == '603606']
+    assert event['action'] == 'queued_review' and event['run_id'] in result['summary']['queued_runs']
+    assert service.company_card(conn, '603606')['status'] == '待复核'
+    pending = [n for n in result['notify'] if n['code'] == '603606' and n['reason'] == 'pending_review']
+    assert bool(pending) == scanned_before

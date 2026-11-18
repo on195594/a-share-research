@@ -503,6 +503,10 @@ def render_weekly(data: dict, opportunity_costs: list[dict] | None = None, oppor
              "估值分布：" + "、".join(f"{ZONES.get(k, k)} {v}家" for k, v in data["zone_distribution"].items())]
     for item in data["subscriptions"]:
         lines.append(f"- {(item.get('card') or {}).get('name') or ''}({item['code']})：{card_line(item.get('card'))}")
+    # Older services have no scan_scope; the line is simply absent then.
+    extra = {s["code"] for s in data.get("scan_scope", [])} - {i["code"] for i in data["subscriptions"]}
+    if extra:
+        lines.append(f"披露扫描另覆盖 {len(extra)} 家（已研究公司与仍在跟踪批次的入选，只扫描、不逐家列出）")
     if data["events"]:
         lines.append(f"本周发现披露 {len(data['events'])} 条：" + "；".join(
             f"{e['code']} {e['title']}（{ACTIONS.get(e['action'], e['action'])}）" for e in data["events"][:10]))
