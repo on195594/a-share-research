@@ -89,7 +89,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编号>
 ```
 
-`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_SHARE_RESEARCH_URL` 指向服务，`A_SHARE_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存哈希，`list` 只显示编号、名称与创建时间。管理命令仅由 owner 本地执行；Key 只授予研究 API 权限。
+`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_SHARE_RESEARCH_URL` 指向服务，`A_SHARE_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存令牌哈希，`list` 显示编号、名称、创建时间和角色。所有者在本地管理 Key。上例默认创建 `research` 凭据，可调用研究 API 和只读研究工具。其他角色的权限见[工具手册](a_share_research/tools/README.md)。
 
 轮换：创建新 Key → 更新配置并验证读取 → 按编号撤销旧 Key。同名 Key 可并存；环境变量优先于文件，须排除旧值覆盖。Key 不受服务重启或浏览器登录/退出影响。401 后先修复凭据，再沿用原 `request_id` 重试。
 

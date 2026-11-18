@@ -32,10 +32,10 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
 
 - `research`：读取研究卡片及报告；看不到也不能调用账户和政策工具。
-- `assistant`：研究读取，加成交时可用研究诊断、v0 五项 R0 读取命令。
+- `assistant`：可读取研究、查询成交时可用研究并调用 v0 只读命令。账户开关启用后，还可按注册表调用账户入账和政策评估工具。
 - `owner`：本地政策登记与切换；影子开关启用时可读取政策身份、指南和保存的评估；没有 HTTP 切换工具，也不允许调用旧研究 API。
 
-旧 Key 迁移后仍为 research。角色不可原地更改；更换角色须创建新 Key 并撤销旧 Key。assistant 发起的旧研究 API 请求仍交由隔离 worker 研究；外部草稿提交和独立记分使用下述单独开启的入口。
+旧 Key 迁移后仍为 research。角色不可原地更改；更换角色须创建新 Key 并撤销旧 Key。assistant 可通过研究 API 发起请求，由隔离的 worker 执行研究。
 
 `GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 
@@ -47,11 +47,11 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 发布的受理恢复还必须经过 [deploy 政策门禁](../../README.md#发布批准与暂停完成)：实际镜像内读取当前政策、installed=true、参数有效且账户适用，required 的缺失/异常一律保持暂停。register/activate 仍只有 owner 本地入口，允许在 tools pause 内执行；不新增 HTTP 激活工具、授权数据库或编排服务。凭据经临时 0600 批准输入和 stdin 传递，不能写入 `.env.tools`。暂停 marker 没有 release_id；未知暂停不接管，工具留下的 held 才能由操作者明确选择 `--complete-held` 重核。异常后的 pause/drain 优先于证据写入；held 的最终政策观察失败会明确记为 unknown，不能把旧 activation/installed 当作当前状态或授权。证据 I/O 持续失败时旧文件可能过时，仍须核对实时状态。
 
-Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。功能开关 `ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认为 0，仅接受 0/1。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产启用仍需整段验收。
+Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TUSHARE_TOKEN，没有 Pi 挂载或模型凭据；端口只映射宿主 127.0.0.1:8621，限制 0.4 CPU。功能开关 `ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED` 默认为 0，仅接受 0/1。首次发布使用固定部署入口的 `--with-tools --allow-config`；已有 tools 容器会自动纳入后续发布，不得遗漏。生产开关与割接记录见[实施计划](../../docs/implementation-plan.md#当前部署)。
 
 ## 外部研究（2026-11-18 退役）
 
-外部研究暂存、受控取证、独立复核与发布从未在生产启用，已整条删除；五张 `external_*` 空表随迁移保留，不再有读写代码。退役说明见 [README](../../README.md#外部-agent-受控取证与提交2026-11-18-退役)。
+外部研究暂存、受控取证、独立复核与发布从未在生产启用，已整条删除；五张 `external_*` 空表随迁移保留，供旧镜像读取。退役说明见 [README](../../README.md#外部-agent-受控取证与提交2026-11-18-退役)。
 
 ## 账户影子账本（开发入口，默认关闭）
 
