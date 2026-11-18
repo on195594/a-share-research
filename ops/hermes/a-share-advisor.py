@@ -44,6 +44,7 @@ VALUATION_NOTE = "注：估值参考不是技术支撑位或买卖指令，也�
 ACTIONS = {"covered": "已有报告", "queued_review": "已安排研究复核", "deferred": "等待研究复核",
            "no_card": "暂无研究记录", "skipped": "跳过"}
 OPPORTUNITY_STATE = Path(os.environ.get("A_SHARE_ADVISOR_STATE", Path.home() / ".local/state/a-share-advisor")) / "opportunities.json"
+WEEKLY_OPPORTUNITY_STATE = OPPORTUNITY_STATE.with_name('weekly-opportunities.json')
 SCAN_STATE = OPPORTUNITY_STATE.with_name('scan.json')
 OPPORTUNITY_NOTE = ("注：机会来自研究立场与按情景概率加权的期望回报，情景尚未记分；"
                     "建仓前通过 a-share 读取生效政策，按风险预算核对仓位，再由所有者决定是否下单。")
@@ -391,13 +392,14 @@ def render_opportunities(prompts: list[dict], seen: set[str], public_base: str =
     return "\n\n".join([*lines, OPPORTUNITY_NOTE])
 
 
-def save_opportunity_state(state: dict) -> None:
+def save_opportunity_state(state: dict, path: Path | None = None) -> None:
     """Atomically retain the original request before a potentially ambiguous HTTP call."""
-    save_json(OPPORTUNITY_STATE, state)
+    save_json(path or OPPORTUNITY_STATE, state)
 
 
-def read_opportunity_state() -> dict:
-    value = json.loads(OPPORTUNITY_STATE.read_text()) if OPPORTUNITY_STATE.exists() else []
+def read_opportunity_state(path: Path | None = None) -> dict:
+    target = path or OPPORTUNITY_STATE
+    value = json.loads(target.read_text()) if target.exists() else []
     # Preserve the existing notification keys when installing the replacement.
     if isinstance(value, list):
         value = dict(schema_version=1, seen=value, pending=None)
@@ -414,8 +416,8 @@ def read_opportunity_state() -> dict:
     return value
 
 
-def _opportunities(public_base: str) -> str:
-    state = read_opportunity_state()
+def _collect_monitor_prompts(state_path: Path, stale_message: str) -> tuple[dict | None, list[dict] | None, str]:
+    state = read_opportunity_state(state_path)
     if state['pending'] is None:
         current = tool('policy.current', {})
         activation = current.get('activation') or {}
@@ -423,8 +425,8 @@ def _opportunities(public_base: str) -> str:
             raise AdvisorError('尚无与实装一致的生效政策，未采集建仓机会')
         state['pending'] = dict(request_id='hermes-advisor-' + uuid.uuid4().hex,
                                 expected_activation_id=activation['id'])
-        save_opportunity_state(state)
-    saved = policy_receipt('policy.monitor', state, OPPORTUNITY_STATE, call=tool)
+        save_opportunity_state(state, state_path)
+    saved = policy_receipt('policy.monitor', state, state_path, call=tool)
     try:
         if (saved['mode'] != 'service_monitor_capture' or saved['request_id'] != state['pending']['request_id']
                 or saved['activation_id'] != state['pending']['expected_activation_id']):
@@ -434,18 +436,26 @@ def _opportunities(public_base: str) -> str:
         if captured.tzinfo is None or captured > now:
             raise ValueError
         if captured.astimezone(now.tzinfo).date() != now.date():
-            save_opportunity_state(dict(schema_version=1, seen=state['seen'], pending=None))
-            return '【建仓机会】已查回前日评估回执，未作为今日机会推送；下次检查重新采集。'
+            save_opportunity_state(dict(schema_version=1, seen=state['seen'], pending=None), state_path)
+            return None, None, stale_message
         prompts = saved['result']['review_prompts']
         if not isinstance(prompts, list):
             raise ValueError
-        prompts = [p for p in prompts if p['kind'] == 'research_opportunity']
-        text = render_opportunities(prompts, set(state['seen']), public_base)
-        keys = sorted(opportunity_key(p) for p in prompts)
     except (ValueError, KeyError, TypeError, AttributeError):
         raise AdvisorError('政策回执不兼容；保留原请求供核对，不清空去重记录') from None
+    return state, prompts, ''
+
+
+def _opportunities(public_base: str) -> str:
+    state, prompts, stale = _collect_monitor_prompts(
+        OPPORTUNITY_STATE, '【建仓机会】已查回前日评估回执，未作为今日机会推送；下次检查重新采集。')
+    if prompts is None:
+        return stale
+    prompts = [p for p in prompts if p['kind'] == 'research_opportunity']
+    text = render_opportunities(prompts, set(state['seen']), public_base)
+    keys = sorted(opportunity_key(p) for p in prompts)
     # Keep only current keys so a lapsed opportunity can be notified again.
-    save_opportunity_state(dict(schema_version=1, seen=keys, pending=None))
+    save_opportunity_state(dict(schema_version=1, seen=keys, pending=None), OPPORTUNITY_STATE)
     return text
 
 
@@ -463,7 +473,30 @@ def opportunities(public_base: str = "") -> str:
             return f'【建仓机会】检查未完成：{message}'
 
 
-def render_weekly(data: dict) -> str:
+def weekly_opportunity_costs(deadline=None) -> tuple[list[dict], str]:
+    if deadline is not None and deadline - time.monotonic() <= 1:
+        return [], '【换仓复核】本轮等待时限已到；未采集换仓复核。'
+    state_path = OPPORTUNITY_STATE.with_name(WEEKLY_OPPORTUNITY_STATE.name)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    with state_path.with_suffix('.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return [], '【换仓复核】已有检查在运行，本次未重复采集。'
+        try:
+            _, prompts, stale = _collect_monitor_prompts(
+                state_path, '【换仓复核】已查回前日评估回执，未作为本周结果展示；下次检查重新采集。')
+            if prompts is None:
+                return [], stale
+            costs = [p for p in prompts if p.get('kind') == 'opportunity_cost' and isinstance(p.get('detail'), str)]
+            save_opportunity_state(dict(schema_version=1, seen=[], pending=None), state_path)
+            return costs, ''
+        except (AdvisorError, OSError, ValueError) as exc:
+            message = str(exc) if isinstance(exc, AdvisorError) else '状态读写失败；保留原记录，请核对后重试'
+            return [], f'【换仓复核】检查未完成：{message}'
+
+
+def render_weekly(data: dict, opportunity_costs: list[dict] | None = None, opportunity_note: str = "") -> str:
     states = {"有效": "可参考", "待复核": "有新信息待核实"}
     lines = [f"【研究周报】截至 {data['as_of'][:16]}",
              "研究状态：" + "、".join(f"{states.get(k, k)} {v}家" for k, v in data["status_distribution"].items()),
@@ -498,12 +531,20 @@ def render_weekly(data: dict) -> str:
             lines.extend(f"机械检查：{f['code']} · 报告 #{f.get('report_id') or 'pending'} · 扫描 #{f['scan_id']}：{f['reason']}"
                          for f in data["failures"] if f.get("stage") == "disclosure_checks")
     lines.append(f"后续观察项 {data['checkpoint_count']} 条（含预测 {data['forecast_count']} 条）")
+    if opportunity_costs:
+        lines.append(f"换仓机会成本复核 {len(opportunity_costs)} 项：")
+        for prompt in opportunity_costs:
+            lines.append(f"- {prompt['detail']}")
+    if opportunity_note:
+        lines.append(opportunity_note)
     lines.append(VALUATION_NOTE)
     return "\n".join(lines)
 
 
 def weekly(deadline=None) -> str:
-    return render_weekly(call("GET", "/api/scans/weekly", deadline=deadline))
+    data = call("GET", "/api/scans/weekly", deadline=deadline)
+    costs, note = weekly_opportunity_costs(deadline=deadline)
+    return render_weekly(data, costs, note)
 
 
 def main() -> None:

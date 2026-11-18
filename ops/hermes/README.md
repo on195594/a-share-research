@@ -29,7 +29,7 @@
 | 持仓日报 | 新脚本 `policy.current` → `policy.daily_brief`；监控、逐持仓完整事件与 Provider 分红响应/失败共同留存 | `~/.local/state/ashare-daily-brief/state.json` 仅记录待查请求，无新增每日通知去重 | ashare 子进程 40 秒、HTTP 30 秒、服务整体采集 25 秒；真实账户日报脚本已成功运行；正式定时送达待观察 |
 | 账本月度对比 | 新脚本 `policy.current` → `policy.benchmark`；完整历史、双全收益指数及估值报价或失败留存 | `~/.local/state/ashare-benchmark/state.json` 仅记录待查请求，无新增月度通知去重 | ashare 子进程 40 秒、HTTP 30 秒、采集 25 秒；公开双基准完整响应已验证，真实账户完整采集、预算与正式送达仍待验收 |
 | 顾问扫描 | `account.current` 同步及通知前刷新持仓；新持久扫描 API；`policy.current` + `policy.monitor` 取已留存评估 | 独立 `scan.json` 保存待查扫描；原 `opportunities.json` 保留机会键及待查政策请求 | 整轮 540 秒，共享持仓、HTTP、轮询、机会检查预算；超时保留待查请求，回退服务须支持 v21 协议 |
-| 顾问周报 | 原研究 weekly API，无账户命令 | 无独立通知去重，独立运行锁 | 同一 advisor 进程监督与 540 秒总预算 |
+| 顾问周报 | 原研究 weekly API，另汇总 `policy.current` + `policy.monitor` 的 `opportunity_cost` 换仓机会成本复核提示（不更改 `policy.daily_brief`） | 独立 `weekly-opportunities.json` 保存待查政策请求、独立运行锁，不混用每日 `opportunities.json` | 同一 advisor 进程监督与 540 秒总预算；工具不可用时周报主体照常输出并附失败说明 |
 | 月批发起 | 原 monthly submit API | `<月>.receipt`，flock 与落盘回执 | 保持原入口；48 小时只用于卡住提示，不是执行超时 |
 | 月批状态 | 原 monthly status API | 共用 `<月>.receipt` 事件去重 | 同上 |
 | 记分 | 新 scoring 执行器，原四组记分算法与通知格式 | 原 `~/.local/state/a-share-scoring/state.json`，增加同目录任务锁 | 四组共用 540 秒截止、最多两路；容器内回收子进程，宿主命令最多再留 10 秒清理 |

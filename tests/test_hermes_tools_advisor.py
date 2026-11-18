@@ -304,3 +304,50 @@ def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn,
         if failure.get('stage') == 'disclosure_checks':
             failure['report_id'] = None
     assert '报告 #pending' in advisor.render_weekly(unlinked_week)
+
+
+def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, conn, monkeypatch):  # noqa: F811
+    from a_share_research import scans
+    from test_scans import AT
+
+    cards_payload = json.loads((ROOT / 'tests/policy_v0/fixtures/monitor/research-cards.json').read_text())['response']
+    for item in cards_payload['cards']:
+        if value := item['current']['valuation']:
+            value['neutral_return_without_dividends'] = value['annual_returns']['中性']
+    _, prompts, _ = monitor_research.summarize(
+        {'status': 'ok', 'cards': cards_payload['cards'], 'missing': []}, ['600900'], date(2026, 11, 2))
+    opportunity_prompts = [p for p in prompts if p['kind'] == 'opportunity_cost']
+    assert len(opportunity_prompts) == 1
+
+    weekly_payload = json.loads(json.dumps(scans.weekly(conn, at=AT), default=str))
+    monkeypatch.setattr(advisor, 'call', lambda method, path, body=None, **kw: deepcopy(weekly_payload))
+    calls = []
+
+    def ok_tool(name, args):
+        calls.append((name, deepcopy(args)))
+        if name == 'policy.current':
+            return dict(installed=True, activation={'id': 7})
+        assert name == 'policy.monitor'
+        return dict(mode='service_monitor_capture', request_id=args['request_id'],
+                    activation_id=args['expected_activation_id'],
+                    capture_context={'capture_finished_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()},
+                    result={'review_prompts': deepcopy(prompts)})
+
+    monkeypatch.setattr(advisor, 'tool', ok_tool)
+    output = advisor.weekly()
+    assert '换仓机会成本复核 1 项：' in output
+    assert opportunity_prompts[0]['detail'] in output
+    assert '测算透支区' not in output.split('换仓机会成本复核')[1]
+    assert not advisor.OPPORTUNITY_STATE.exists()
+    weekly_state = advisor.OPPORTUNITY_STATE.with_name(advisor.WEEKLY_OPPORTUNITY_STATE.name)
+    assert json.loads(weekly_state.read_text())['pending'] is None
+
+    def paused_tool(name, args):
+        if name == 'policy.current':
+            return dict(installed=True, activation={'id': 7})
+        raise advisor.AdvisorError('工具服务已暂停')
+
+    monkeypatch.setattr(advisor, 'tool', paused_tool)
+    degraded = advisor.weekly()
+    assert '【研究周报】' in degraded and '【换仓复核】检查未完成：工具服务已暂停' in degraded
+    assert json.loads(weekly_state.read_text())['pending'] is not None

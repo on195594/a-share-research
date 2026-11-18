@@ -405,8 +405,8 @@ def score_forecasts(items: list[dict], today: date | None = None) -> list[dict]:
     return items
 
 
-def load_reports(database: str, contract: int | None = None) -> list[dict]:
-    """Passed, non-replay, non-feedback research reports from a read-only connection."""
+def _load_eligible_reports(database: str, contract: int | None = None) -> list[dict]:
+    """Passed, non-replay, non-feedback research reports from a read-only connection, before monthly dedup."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, "
@@ -426,7 +426,17 @@ def load_reports(database: str, contract: int | None = None) -> list[dict]:
                         "trigger": calc.get("trigger", (body.get("stance") or {}).get("trigger")) if calc else None,
                         "add_trigger": calc.get("add_trigger") if calc else None,
                         "boundary": stances.on_boundary(body.get("valuation_calc"))})
-    return first_per_month(filter_contract(reports, contract))
+    return filter_contract(reports, contract)
+
+
+def load_reports(database: str, contract: int | None = None) -> list[dict]:
+    """Passed, non-replay, non-feedback research reports from a read-only connection."""
+    return first_per_month(_load_eligible_reports(database, contract))
+
+
+def load_stance_reports(database: str, contract: int | None = None) -> list[dict]:
+    """First report with a recorded stance per (source, code, natural month); unrecorded reports do not take slots."""
+    return first_per_month([r for r in _load_eligible_reports(database, contract) if r["stance"] != "未记录"])
 
 
 def load_agenda(database: str, contract: int | None = None) -> list[dict]:
@@ -652,9 +662,8 @@ def main() -> None:
                 json.dump(result, fh, ensure_ascii=False, indent=1, default=str)
         return
     pro, today = market.client(), datetime.now(SHANGHAI).date()
-    rows = score(pro, load_reports(args.database, args.contract), today)
     if args.stances:
-        rows = score_stances(pro, [r for r in rows if r["stance"] != "未记录"], today)
+        rows = score_stances(pro, score(pro, load_stance_reports(args.database, args.contract), today), today)
         summary = summarize_stances(rows)
         lines = [f"V4 研究立场记分（{len(rows)} 份带立场报告；超额为入场至今相对 {BENCHMARK}）"]
         lines.append(contract_line(rows))
@@ -677,7 +686,13 @@ def main() -> None:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
         return
-    summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size"), "stance": summarize(rows, "stance")}
+    rows = score(pro, load_reports(args.database, args.contract), today)
+    stance_reports = load_stance_reports(args.database, args.contract)
+    by_id = {row["id"]: row for row in rows}
+    extra = [r for r in stance_reports if r["id"] not in by_id]
+    scored_extra = {row["id"]: row for row in score(pro, extra, today)} if extra else {}
+    stance_rows = [by_id[r["id"]] if r["id"] in by_id else scored_extra[r["id"]] for r in stance_reports]
+    summary = {"verdict": summarize(rows, "verdict"), "size": summarize(rows, "size"), "stance": summarize(stance_rows, "stance")}
     lines = [f"V0 事后超额（基准 {BENCHMARK}，起点为报告完成后首个完整交易日收盘）", contract_line(rows), ""]
     for row in rows:
         latest = row["returns"].get("latest")
@@ -685,14 +700,18 @@ def main() -> None:
                      f"市值 {row['mv'] and round(row['mv'])}亿 至今超额 {_pct(latest['excess']) if latest else '—'}")
     for key in ("verdict", "size", "stance"):
         groups = summary[key]
-        lines += ["", f"按{ {'verdict': '结论', 'size': '市值三分位', 'stance': '研究立场'}[key] }汇总"]
+        heading = (f"按研究立场汇总（同月首份有效立场 n={len(stance_rows)}，未记录不占名额；{contract_line(stance_rows)}）"
+                   if key == "stance" else f"按{ {'verdict': '结论', 'size': '市值三分位'}[key] }汇总")
+        lines += ["", heading]
         for g in groups:
             lines.append(f"{g['source']} {g[key]} {g['horizon']} n={g['n']} 均值 {_pct(g['mean'])} 中位 {_pct(g['median'])} "
                          f"跑赢 {g['beat']:.0%} 左尾≤{LEFT_TAIL:.0%} {g['left_tail']:.0%}")
     log.info("\n%s", "\n".join(lines))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
-            json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
+            json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows),
+                       "stance_rows": stance_rows, "stance_contracts": contract_counts(stance_rows)},
+                      fh, ensure_ascii=False, indent=1, default=str)
 
 
 if __name__ == "__main__":

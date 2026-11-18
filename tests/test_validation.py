@@ -313,3 +313,49 @@ def test_future_checkpoint_is_pending_without_fetching_financials():
         row = {'stance': action, 'stance_calc': {field: captured['body']['stance']['trigger']},
                'trigger': captured['body']['stance']['trigger'], 'returns': {}, 'code': captured['code']}
         assert validation.score_stances(None, [row], datetime(2026, 11, 4).date())[0]['stance_outcome'] == {'status': 'pending'}
+
+
+def test_stance_dedup_ignores_earlier_same_month_unrecorded_report(tmp_path, monkeypatch):
+    import sys
+    from a_share_research import db
+    captured = json.loads(Path(__file__).with_name('data').joinpath('legacy-stance-20261104.json').read_text())
+    recorded_body = captured['body']
+    unrecorded_body = {k: v for k, v in recorded_body.items() if k not in ('stance', 'stance_calc')}
+    request = json.dumps({'question': '现金流变化', 'feedback': None})
+    path = tmp_path / 'stance-dedup.db'
+    with db.connect(path) as conn:
+        for report_id, created, body in (
+            (1, '2026-11-01T10:00:00+08:00', unrecorded_body),
+            (2, '2026-11-05T10:00:00+08:00', recorded_body),
+        ):
+            run_id = db.create_run(conn, captured['code'], status='done')
+            conn.execute('UPDATE runs SET created_at=?, request=? WHERE id=?', (created, request, run_id))
+            db.save_report(conn, run_id, captured['code'], captured['name'],
+                           recorded_body['document']['period'], True, captured['verdict'], body)
+            conn.execute('UPDATE reports SET id=?, created_at=? WHERE run_id=?', (report_id, created, run_id))
+        conn.commit()
+    assert [r['id'] for r in validation.load_reports(str(path))] == [1]
+    assert [r['id'] for r in validation.load_stance_reports(str(path))] == [2]
+
+    monkeypatch.setattr(validation.market, 'client', lambda: None)
+    monkeypatch.setattr(validation, 'score', lambda pro, rows, today: [
+        row | {'entry': '20261106', 'mv': 500.0, 'size': '中', 'returns': {'latest': {'excess': 0.02}}}
+        for row in rows
+    ])
+    v0_out = tmp_path / 'v0.json'
+    monkeypatch.setattr(sys, 'argv', ['validation', '--database', str(path), '--json', str(v0_out)])
+    validation.main()
+    v0_data = json.loads(v0_out.read_text())
+    assert [r['id'] for r in v0_data['rows']] == [1]
+    assert [r['id'] for r in v0_data['stance_rows']] == [2]
+    assert v0_data['summary']['stance'][0]['stance'] == '等证据'
+
+    stance_out = tmp_path / 'stances.json'
+    monkeypatch.setattr(validation, 'score_stances', lambda pro, rows, today: [
+        row | {'stance_outcome': {'status': 'pending'}} for row in rows
+    ])
+    monkeypatch.setattr(sys, 'argv', ['validation', '--database', str(path), '--stances', '--json', str(stance_out)])
+    validation.main()
+    stance_data = json.loads(stance_out.read_text())
+    assert [r['id'] for r in stance_data['rows']] == [2]
+    assert '等证据·pending' in stance_data['summary']
