@@ -76,7 +76,7 @@ Codex 只读审查 `a5cee3f..c642481` 发现并确认 3 项（1 P1、2 P2）：�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。**当前应用 `7db29e6`，数据库 v24，判断契约 7**。11-18 16:42–16:46 固定发布入口完成发布（无配置或迁移变更，不带 `--allow-config`）：优化 `calculate` 报错与可用期间引导、鼓励 `explore` 同轮并发读页与计算，以及接续研究仅按本公司范围展示基线财报期与公告检索截止日。只读计划 `plan-7db29e6-20261118/`（`policy.diff.code` 仅 `a_share_research/research.py`、`a_share_research/research_tools.py`）参数未变、规则哈希相同、指南无差异；以本次批准在 pause 状态下激活 `policy:641d89b6...0a37`（激活记录 17，`expected_id` 16），门禁读回 `installed=true`、`valid=true` 后 resume；临时 0600 批准文件用后已删除；宿主只读 `policy.current` 核对 `id=17`、`installed=true`。上一版 `ef66a32` 记录见 `git show 7db29e6:docs/implementation-plan.md`。
+入口 [stock.keyi.win](https://stock.keyi.win)。**当前应用 `8b0d3ec`，数据库 v24，判断契约 7**。11-19 00:25–00:29 固定发布入口完成发布（无配置或迁移变更）：A4 披露扫描范围扩为外部订阅 ∪ 所有 `tracking` 批次 L5 ∪ 有论点卡的公司（发布时 41 家：external 5、l5 6、card 30），`/api/cards` 与政策候选仍为原 8 家；首次进入扫描历史的公司旧公告照常入账排队但不推“待复核”；周报数据加 `scan_scope`，宿主 `a-share-advisor.py` 周报加“披露扫描另覆盖 N 家”（`install.py --apply` 已同步，20 项一致）。同时带上 `f29fa70`（TuShare 非 2xx 显式报错）。只读计划 `plan-8b0d3ec-20261118-231435/`（`policy.diff.code` 为 `tushare_common.py`、`market.py`、`research.py`、`scans.py`）参数未变、规则哈希相同、指南无差异；以所有者当次批准（Telegram msg 4489）激活 `policy:d34526a6...b9c1`（激活记录 18，`expected_id` 17），读回 `installed=true`；临时 0600 批准文件用后已删除。发布证据 `deploy-8b0d3ec-20261119-002545/`，备份 `backup-pre-8b0d3ec-20261119-002553.db`。扩大后的首次真实扫描（11-19 16:37）及之后约 7 个工作日的三季报接续复核积压为非阻塞观察。上一版 `7db29e6` 记录见 `git show 8b0d3ec:docs/implementation-plan.md`。
 
 生产 `tools` 仍仅监听 `127.0.0.1:8621`，独立 `.env.tools` 仅有行情凭据；账户开关为 1，外部研究开关已随代码删除。11-12 16:41:39 新账本成为唯一账户写入来源，旧库已持久封锁且只读保留。五宿主统一入口与 Hermes 替代脚本已安装，原账户定时任务已恢复。研究主模型于 11-18 切换为 `openai-codex / gpt-6.2-sol / medium`，`review` 阶段独立使用 `openai-codex / gpt-6.1-sol / high`。
 
