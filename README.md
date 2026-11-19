@@ -220,6 +220,7 @@ uv run python -m a_share_research.validation --database /path/to/app.db --foreca
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --hypotheses [--json OUT] # V3 H1 避坑 / H3 读得快
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --agenda [--json OUT]     # V5 议程状态与各状态组后续表现（没有入样报告时不访问行情）
 DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.validation --database /path/to/app.db --stances [--json OUT]    # V4 研究立场兑现与等待代价
+uv run python scripts/stability.py [--since 2026-11-01] [--code 601600] [--db PATH]                                            # 同材料立场与门槛价稳定性测量（只读，不调模型）
 ```
 
 V1 可加 `--html review.html` 导出可直接打开的手机友好静态快照，`--json` 保留原字段并追加描述性宽度、误差和模型分组。`--frozen` 不访问行情/模型接口：未结束目标期待披露，已结束但未查询的明确列“未查询兑现”，不冒充已记分。正常 `--forecasts` 仍沿用原兑现查询和评分，基线冻结、不重复记分。快照不是线上实时复盘页，也不计算模拟组合或真实账户收益。
@@ -312,4 +313,4 @@ uv run python -m a_share_research.deploy --complete-held "<该发布证据目录
 
 应用发布**不会安装** `ops/hermes/`。顺序：合并并验证 → 发布服务端 → 核对同版本 CLI → 同步 helper 与调用方脚本（`python3 ops/hermes/install.py --check` 只读核对，`--apply` 从已提交版本同步）→ 按原调度观察。新旧版本错配时客户端只保留 pending，不猜错误文案、不清状态。任务与宿主路径见[脚本说明](ops/hermes/README.md)。
 
-页面改动在发布后用真实浏览器验证受影响页面和一个正常案例（沿用私有浏览器会话，公共入口不用 urllib 探测，Cloudflare 曾返回 1010）；通过后在实施计划记录版本、备份与回退。
+页面改动在发布后用真实浏览器验证受影响页面和一个正常案例（沿用私有浏览器会话，公共入口不用 urllib 探测，Cloudflare 曾返回 1010）；例行发布明细由部署工具写入证据目录，仅数据库版本、判断契约、政策激活、模型、配置或宿主任务变化时更新[实施计划](docs/implementation-plan.md#当前部署)。
