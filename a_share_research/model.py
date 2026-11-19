@@ -38,9 +38,15 @@ def _complete_once(request: dict) -> dict:
     return out
 
 
+FAILURES = {"timeout": "模型调用超时", "provider_error": "模型服务返回错误", "pi_runtime": "模型运行时异常",
+            "incomplete:length": "模型输出达到长度上限", "incomplete": "模型输出未完成", "empty_output": "模型未返回内容",
+            "invalid_output": "模型输出不符合调用约定"}
+
+
 class ModelError(Exception):
-    def __init__(self, message: str, identity: dict, seconds: float, kind: str = "unknown"):
-        super().__init__(message)
+    """Carries only the closed failure kind; provider or runtime text never leaves complete()."""
+    def __init__(self, kind: str, identity: dict, seconds: float):
+        super().__init__(f"模型调用失败（{FAILURES.get(kind, kind)}）")
         self.identity, self.seconds, self.kind = identity, seconds, kind
 
 
@@ -188,6 +194,7 @@ def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None 
         if (out["provider"], out["model"]) != (request["provider"], request["model"]):
             raise ValueError("model identity mismatch")
     except Exception as exc:
-        raise ModelError(str(exc), identity, time.monotonic() - started, failure_kind(exc, out)) from exc
+        # No chain: a logged traceback would otherwise print the provider's text.
+        raise ModelError(failure_kind(exc, out), identity, time.monotonic() - started) from None
     return Completion(out["text"], out["usage"],
                       time.monotonic() - started, identity, out["message"])

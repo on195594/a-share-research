@@ -34,7 +34,7 @@ def test_request_error_is_returned_with_runtime_identity(payload):
 
 
 def test_model_error_retains_request_identity(payload):
-    with pytest.raises(model.ModelError, match="RangeError") as caught:
+    with pytest.raises(model.ModelError, match="模型运行时异常") as caught:
         model.complete(payload["prompt"], timeout=-1,
                        messages=payload["messages"], tools=payload["tools"])
     error = caught.value
@@ -49,7 +49,7 @@ def test_model_error_retains_request_identity(payload):
 def test_environment_configures_reasoning_and_max_tokens(payload, monkeypatch, call_max_tokens, env_max_tokens):
     monkeypatch.setenv("MODEL_REASONING", "medium")
     monkeypatch.setenv("MODEL_MAX_TOKENS", str(env_max_tokens))
-    with pytest.raises(model.ModelError, match="RangeError") as caught:
+    with pytest.raises(model.ModelError, match="模型运行时异常") as caught:
         model.complete(payload["prompt"], timeout=-1, max_tokens=call_max_tokens,
                        messages=payload["messages"], tools=payload["tools"])
     error = caught.value
@@ -66,7 +66,7 @@ from a_share_research.model import complete, ModelError
 try:
     complete('启动检查')
 except ModelError as error:
-    assert 'PI_RUNTIME' in str(error)
+    assert error.kind == 'pi_runtime'
     assert error.seconds > 0
     assert error.identity['node_version'] and error.identity['pi_infer_sha256']
     print(json.dumps(error.identity['requested']))
@@ -107,7 +107,7 @@ def test_review_role_uses_the_configured_review_model(payload, monkeypatch):
             ("review", {"provider": "openai-codex", "model": "gpt-6.1-sol"}, "medium"),
             ("compose", {"provider": payload["provider"], "model": payload["model"]},
              os.environ.get("MODEL_REASONING", "high"))):
-        with pytest.raises(model.ModelError, match="RangeError") as caught:
+        with pytest.raises(model.ModelError, match="模型运行时异常") as caught:
             model.complete(payload["prompt"], timeout=-1, role=role)
         assert caught.value.identity["requested"] == requested
         assert caught.value.identity["request_parameters"]["reasoning"] == reasoning
@@ -116,9 +116,22 @@ def test_review_role_uses_the_configured_review_model(payload, monkeypatch):
 def test_review_role_without_review_model_keeps_the_main_model(payload, monkeypatch):
     monkeypatch.delenv("MODEL_REVIEW_PROVIDER", raising=False)
     monkeypatch.delenv("MODEL_REVIEW_ID", raising=False)
-    with pytest.raises(model.ModelError, match="RangeError") as caught:
+    with pytest.raises(model.ModelError, match="模型运行时异常") as caught:
         model.complete(payload["prompt"], timeout=-1, role="review")
     assert caught.value.identity["requested"] == {"provider": payload["provider"], "model": payload["model"]}
+
+
+def test_model_error_carries_no_provider_text_or_chain(monkeypatch):
+    monkeypatch.setenv("MODEL_PROVIDER", "openai-codex")
+    monkeypatch.setenv("MODEL_ID", "gpt-6.2-sol")
+    monkeypatch.setattr(model, "_complete_once", lambda request: {
+        "error": "429 upstream secret detail", "stop_reason": "error", "text": "", "tool_calls": 0,
+        "provider": "openai-codex", "model": "gpt-6.2-sol"})
+    with pytest.raises(model.ModelError) as caught:
+        model.complete("prompt")
+    error = caught.value
+    assert error.kind == "provider_error" and str(error) == "模型调用失败（模型服务返回错误）"
+    assert error.__cause__ is None and error.__suppress_context__
 
 
 @pytest.mark.parametrize(("out", "kind"), [
@@ -141,11 +154,11 @@ def test_runner_records_the_failure_kind_but_not_provider_text(tmp_path, monkeyp
     run = db.create_run(conn, "600519")
 
     def fail(*args, **kwargs):
-        raise model.ModelError("upstream secret detail", {}, 1.0, "incomplete:length")
+        raise model.ModelError("incomplete:length", {}, 1.0)
     monkeypatch.setattr(model, "complete", fail)
     with pytest.raises(research.ModelStageError, match="incomplete:length"):
         research.Runner(conn, run).call("explore", "prompt")
     error = conn.execute("SELECT error FROM calls WHERE run_id=?", (run,)).fetchone()[0]
     assert "incomplete:length" in error and "secret" not in error
-    assert research.MODEL_FAILURES["incomplete:length"] == "模型输出达到长度上限"
+    assert model.FAILURES["incomplete:length"] == "模型输出达到长度上限"
     conn.close()

@@ -25,11 +25,6 @@ log = logging.getLogger(__name__)
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 
 
-MODEL_FAILURES = {"timeout": "模型调用超时", "provider_error": "模型服务返回错误", "pi_runtime": "模型运行时异常",
-                  "incomplete:length": "模型输出达到长度上限", "empty_output": "模型未返回内容",
-                  "invalid_output": "模型输出不符合调用约定"}
-
-
 class ModelStageError(Exception):
     """Public exception deliberately excludes provider payloads and credentials."""
 
@@ -680,7 +675,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         failure = {"stage": runner.stage, "category": category,
                    "message": str(exc) if own else str(upstream) if upstream
                    else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
-                   else f"研究阶段未能完成（{MODEL_FAILURES.get(str(exc), str(exc))}）；请核对阶段记录，不自动重试。"
+                   else f"研究阶段未能完成（{model.FAILURES.get(str(exc), str(exc))}）；请核对阶段记录，不自动重试。"
                    if category == "model_error"
                    else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
         if category == "model_error":
