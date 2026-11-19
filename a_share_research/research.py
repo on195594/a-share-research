@@ -25,6 +25,11 @@ log = logging.getLogger(__name__)
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 
 
+MODEL_FAILURES = {"timeout": "模型调用超时", "provider_error": "模型服务返回错误", "pi_runtime": "模型运行时异常",
+                  "incomplete:length": "模型输出达到长度上限", "empty_output": "模型未返回内容",
+                  "invalid_output": "模型输出不符合调用约定"}
+
+
 class ModelStageError(Exception):
     """Public exception deliberately excludes provider payloads and credentials."""
 
@@ -50,10 +55,13 @@ class Runner:
         try:
             result = model.complete(prompt, timeout=timeout, messages=messages, tools=tools, role=step)
         except Exception as exc:
-            db.log_call(self.conn, self.run_id, step, prompt, error=f"{type(exc).__name__}: 模型阶段未完成（未保存供应商异常原文）",
+            kind = getattr(exc, "kind", "unknown")
+            db.log_call(self.conn, self.run_id, step, prompt,
+                        error=f"{type(exc).__name__}: 模型阶段未完成（{kind}；未保存供应商异常原文）",
                         identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None),
                         base=self.chain if messages is not None else None, block=self.block())
-            raise ModelStageError("模型阶段未完成") from exc
+            log.warning("run %s %s model call failed: %s", self.run_id, step, kind)
+            raise ModelStageError(kind) from exc
         call_id = db.log_call(self.conn, self.run_id, step, prompt,
                               response=json.dumps(result.message, ensure_ascii=False) if messages is not None else result.text,
                               usage=result.usage, seconds=result.seconds, identity=result.identity,
@@ -672,7 +680,11 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         failure = {"stage": runner.stage, "category": category,
                    "message": str(exc) if own else str(upstream) if upstream
                    else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
+                   else f"研究阶段未能完成（{MODEL_FAILURES.get(str(exc), str(exc))}）；请核对阶段记录，不自动重试。"
+                   if category == "model_error"
                    else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
+        if category == "model_error":
+            failure["kind"] = str(exc)
         db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=failure["message"])
         identity["failure"] = failure
         if "ledger" in locals():

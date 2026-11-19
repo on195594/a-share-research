@@ -38,7 +38,7 @@ def test_model_error_retains_request_identity(payload):
         model.complete(payload["prompt"], timeout=-1,
                        messages=payload["messages"], tools=payload["tools"])
     error = caught.value
-    assert error.seconds > 0 and error.identity["pi_version"]
+    assert error.seconds > 0 and error.identity["pi_version"] and error.kind == "pi_runtime"
     assert error.identity["prompt_sha256"] == hashlib.sha256(payload["prompt"].encode()).hexdigest()
     assert error.identity["request_parameters"] == {
         key: payload[key] for key in ("timeout", "max_tokens", "reasoning", "session_id")}
@@ -119,3 +119,32 @@ def test_review_role_without_review_model_keeps_the_main_model(payload, monkeypa
     with pytest.raises(model.ModelError, match="RangeError") as caught:
         model.complete(payload["prompt"], timeout=-1, role="review")
     assert caught.value.identity["requested"] == {"provider": payload["provider"], "model": payload["model"]}
+
+
+@pytest.mark.parametrize(("out", "kind"), [
+    ({"stop_reason": "aborted", "error": "Request was aborted"}, "timeout"),
+    ({"stop_reason": "error", "error": "429 upstream detail"}, "provider_error"),
+    ({"stop_reason": "length", "text": "{\"summary\": \"截断"}, "incomplete:length"),
+    ({"stop_reason": "len gth!", "text": ""}, "incomplete"),
+    ({"stop_reason": "stop", "text": "  ", "tool_calls": 0}, "empty_output"),
+    ({"stop_reason": "toolUse", "text": "", "tool_calls": 1}, "invalid_output"),
+], ids=["timeout", "provider", "length", "unsafe-stop-reason", "empty", "tools-outside-loop"])
+def test_failure_kind_is_a_closed_vocabulary_without_provider_text(out, kind):
+    assert model.failure_kind(ValueError(out.get("error", "")), out) == kind
+    assert model.failure_kind(subprocess.TimeoutExpired("node", 1), None) == "timeout"
+
+
+def test_runner_records_the_failure_kind_but_not_provider_text(tmp_path, monkeypatch):
+    from a_share_research import db, research
+    conn = db.connect(tmp_path / "isolated.db")
+    run = db.create_run(conn, "600519")
+
+    def fail(*args, **kwargs):
+        raise model.ModelError("upstream secret detail", {}, 1.0, "incomplete:length")
+    monkeypatch.setattr(model, "complete", fail)
+    with pytest.raises(research.ModelStageError, match="incomplete:length"):
+        research.Runner(conn, run).call("explore", "prompt")
+    error = conn.execute("SELECT error FROM calls WHERE run_id=?", (run,)).fetchone()[0]
+    assert "incomplete:length" in error and "secret" not in error
+    assert research.MODEL_FAILURES["incomplete:length"] == "模型输出达到长度上限"
+    conn.close()

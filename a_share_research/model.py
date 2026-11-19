@@ -39,9 +39,27 @@ def _complete_once(request: dict) -> dict:
 
 
 class ModelError(Exception):
-    def __init__(self, message: str, identity: dict, seconds: float):
+    def __init__(self, message: str, identity: dict, seconds: float, kind: str = "unknown"):
         super().__init__(message)
-        self.identity, self.seconds = identity, seconds
+        self.identity, self.seconds, self.kind = identity, seconds, kind
+
+
+def failure_kind(exc: Exception, out: dict | None) -> str:
+    """A closed-vocabulary cause of a failed completion, safe to store; provider text never enters it."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "timeout"
+    if out is None:
+        return "pi_runtime"
+    stop = out.get("stop_reason")
+    if stop == "aborted":  # The only abort signal pi_infer.mjs sets is the request timeout.
+        return "timeout"
+    if out.get("error"):
+        return "provider_error" if stop == "error" else "pi_runtime"
+    if stop not in ("stop", "toolUse"):
+        return f"incomplete:{stop}" if isinstance(stop, str) and stop.isidentifier() and len(stop) <= 32 else "incomplete"
+    if not str(out.get("text") or "").strip() and not out.get("tool_calls"):
+        return "empty_output"
+    return "invalid_output"
 
 
 @dataclass
@@ -150,6 +168,7 @@ def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None 
         "request_parameters": {k: request[k] for k in ("timeout", "max_tokens", "reasoning", "session_id")},
     }
     started = time.monotonic()
+    out = None
     try:
         identity["pi_infer_sha256"] = hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
         if not request["provider"] or not request["model"]:
@@ -169,6 +188,6 @@ def complete(prompt: str, *, timeout: int | None = None, max_tokens: int | None 
         if (out["provider"], out["model"]) != (request["provider"], request["model"]):
             raise ValueError("model identity mismatch")
     except Exception as exc:
-        raise ModelError(str(exc), identity, time.monotonic() - started) from exc
+        raise ModelError(str(exc), identity, time.monotonic() - started, failure_kind(exc, out)) from exc
     return Completion(out["text"], out["usage"],
                       time.monotonic() - started, identity, out["message"])
