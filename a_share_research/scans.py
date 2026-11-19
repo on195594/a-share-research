@@ -434,6 +434,11 @@ def last_extreme_zones(history: list[dict]) -> dict[str, str]:
     return zones
 
 
+def _done_scans(conn, scan_id: int) -> list[dict]:
+    return [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute(
+        "SELECT * FROM scans WHERE id<? AND status='done' ORDER BY id", (scan_id,))]
+
+
 def last_success(history: list[dict], code: str) -> dict | None:
     return next((s for s in reversed(history) if code in s['summary'].get('closes', {})
                  and not any(f['code'] == code for f in s['summary'].get('failures', []))), None)
@@ -626,7 +631,7 @@ def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int,
     return inserted
 
 
-def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
+def _dispatch(conn, scan_id: int, at: str, scope: set[str], *, history: list[dict] | None = None) -> list[int]:
     scope = {stock_codes.normalize_key(code) for code in scope}
     with db.transaction(conn):
         pending = [e for e in events(conn) if e['action'] == 'deferred' and e['code'] in scope]
@@ -655,7 +660,23 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str]) -> list[int]:
         # Runs, rather than events, count toward the Shanghai calendar-day budget.
         used = sum(instant(r['created_at']).date() == instant(at).date() for r in conn.execute(
             'SELECT DISTINCT u.id,u.created_at FROM runs u JOIN scan_events e ON e.run_id=u.id'))
-        selected = review_order(eligible, scan_id, priority)[:max(0, 5 - used)]
+        ordered = review_order(eligible, scan_id, priority)
+        selected = ordered[:max(0, 5 - used)]
+        risks = [e for e in eligible if e['scan_id'] == scan_id and e['kind'] == 'major_risk' and e['severity'] == 3]
+        if selected and risks:
+            # Use the scan's as-of day for freshness, even if dispatch crosses midnight.
+            started = conn.execute('SELECT started_at FROM scans WHERE id=?', (scan_id,)).fetchone()['started_at']
+            day = instant(started or at).date()
+            history = _done_scans(conn, scan_id) if history is None else history
+            fresh = set()
+            for event in risks:
+                successful = last_success(history, event['code'])
+                since = instant(successful['started_at']).date() if successful else day
+                first_day = min(day, since + timedelta(days=1))
+                if first_day <= instant(event['announced']).date() <= day:
+                    fresh.add(event['code'])
+            if fresh and fresh.isdisjoint(selected):
+                selected[-1] = next(code for code in ordered if code in fresh)
         queued = []
         for code in selected:
             frozen = [event_context(e) for e in eligible if e['code'] == code]
@@ -692,8 +713,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         summary['consensus_prefetch'] = {'covered': 0, 'missing': [], 'reason': str(exc)}
     try:
         scope = scan_scope(conn)
-        history = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute(
-            "SELECT * FROM scans WHERE id<? AND status='done' ORDER BY id", (scan_id,))]
+        history = _done_scans(conn, scan_id)
         # A code joining an existing scan history looks back 30 days on its first pass; those
         # old filings are recorded and reviewed, but do not each push a pending-review notice.
         entering = {s['code'] for s in scope if history and last_success(history, s['code']) is None}
@@ -752,9 +772,12 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                                                 'stage': 'disclosure_checks', 'reason': str(exc)})
         conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary, ensure_ascii=False), scan_id))
         notified_checks = {c['id'] for n in notices for c in n.get('checks', [])}
-        summary['queued_runs'] = _dispatch(conn, scan_id, fixed_at or db.now(), {s['code'] for s in scope})
+        notified_risks = {n['event_id'] for n in notices if n.get('reason') == 'major_risk' and 'event_id' in n}
+        summary['queued_runs'] = _dispatch(conn, scan_id, fixed_at or db.now(), {s['code'] for s in scope}, history=history)
         completed = completed_reviews(conn, previous['started_at'] if previous else None, at)
-        new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)]
+        # Replay discoveries from failed scans, but not risk notices already saved with them.
+        new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)
+                      and not (e['kind'] == 'major_risk' and e['id'] in notified_risks)]
         candidates = []
         for code in {s['code'] for s in scope} | {stock_codes.normalize_key(r['code']) for r in completed}:
             card = card_or_none(conn, code, scan_id=scan_id)

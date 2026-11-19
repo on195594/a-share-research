@@ -4,7 +4,7 @@ Severity/correction/failure mutations below are explicitly adversarial changes t
 captures, not newly fabricated financial evidence or claims of live coverage.
 """
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
 import json
 from pathlib import Path
 import sqlite3
@@ -462,6 +462,75 @@ def test_severity_order_daily_budget_backlog_and_shanghai_date(conn, deviated_fi
     assert scans.review_order([fresh, old], scan_id)[0] == old['code']
 
 
+@pytest.mark.parametrize(('slots', 'case'), [
+    (5, 'today'), (1, 'today'), (0, 'today'), (5, 'old-lookback'),
+    (5, 'weekend'), (1, 'same-day-rescan'), (1, 'seen-before'), (5, 'two-risks'), (1, 'two-risks'),
+])
+def test_dispatch_reserves_a_slot_for_a_new_major_risk(conn, slots, case):
+    ordinary = ['000651', '000963', '002050', '600519', '600900']
+    risk_code = '603606'
+    records = json.loads((DATA / 'hypotheses_v3.json').read_text())['reports']
+    for code in ('000963', '002050', '600900'):
+        report = next(r for r in reversed(records) if r['code'][:6] == code and r['passed'])
+        run = service.submit(conn, code, f'backlog-card-{code}')
+        db.save_report(conn, run, report['code'], report['name'], report['period'], True, report['verdict'],
+                       json.loads(report['body']))
+        db.update_run(conn, run, status='done')
+    complete_cards_at(conn, [*ordinary, risk_code])
+    scans.replace_subscriptions(conn, [*ordinary, risk_code], catalog=dict.fromkeys([*ordinary, risk_code]))
+    # Seed an older deferred queue, as if the day's budget had been used. The
+    # captured announcement is reused only as a queue row, not as company evidence.
+    at = '2026-11-02T08:30:00+00:00'  # Monday in Shanghai
+    prior_at = '2026-11-02T00:30:00+08:00' if case == 'same-day-rescan' else AT  # Friday
+    source = CapturedSources([])
+    prior_close = {risk_code: scans.normalize_close(source.valuation(risk_code), risk_code, prior_at)}
+    prior = scans.submit(conn)
+    summary = {'closes': prior_close if case in ('weekend', 'same-day-rescan', 'seen-before') else {}}
+    conn.execute("UPDATE scans SET status='done',started_at=?,summary=? WHERE id=?", (prior_at, json.dumps(summary), prior))
+    base = scans.normalize_announcements([ANNOUNCEMENTS[0]['raw']], '600900')[0]
+
+    def seed(code, key, event, run=None, *, scan=prior, detected_at=prior_at):
+        conn.execute('INSERT INTO scan_events(scan_id,code,doc_key,title,announced,url,kind,severity,detected_at,action,run_id) '
+                     'VALUES (?,?,?,?,?,?,?,?,?,?,?)', (scan, code, key, event['title'], event['announced'], event['url'],
+                         event['kind'], event['severity'], detected_at, 'queued_review' if run else 'deferred', run))
+
+    for code in ordinary:
+        detected_at = prior_at if code == ordinary[0] else prior_at.replace(':00+08:00', ':01+08:00')
+        seed(code, base['doc_key'], base, detected_at=detected_at)
+    # These five-or-fewer finished runs count on Monday in Shanghai, Sunday UTC.
+    for i in range(5 - slots):
+        run = service.submit(conn, ordinary[0], f'used-slot-{i}')
+        db.update_run(conn, run, status='failed', created_at='2026-11-01T16:00:01+00:00')
+        seed(ordinary[0], f'used-slot-{i}', base, run)
+
+    risks = [risk_code, ordinary[1]] if case == 'two-risks' else [risk_code]
+    disclosed = {'weekend': '2026-11-01', 'old-lookback': '2026-10-29', 'seen-before': '2026-10-31'}
+    published = datetime.fromisoformat(disclosed.get(case, '2026-11-02') + 'T00:15:00+08:00')
+    for code in risks:
+        item = deepcopy(next(i for i in ANNOUNCEMENTS if i['code'] == code))
+        raw = item['raw']
+        raw['announcementTitle'] += '（问询函）'  # Test-only severity and release date mutations.
+        raw['announcementTime'] = int(published.timestamp() * 1000)
+        source.items.append(item)
+    if case == 'seen-before':
+        [event] = captured_events(source, risk_code)
+        failed = scans.submit(conn)
+        conn.execute("UPDATE scans SET status='failed' WHERE id=?", (failed,))
+        seed(risk_code, event['doc_key'], event, scan=failed, detected_at=published.isoformat())
+
+    result = run_scan(conn, source, at)
+    assert result['status'] == 'done', result['error']
+    assert {e['code'] for e in result['events'] if (e['kind'], e['severity']) == ('major_risk', 3)} == (
+        set() if case == 'seen-before' else set(risks))
+    queued = [conn.execute('SELECT code FROM runs WHERE id=?', (run,)).fetchone()['code']
+              for run in result['summary']['queued_runs']]
+    expected = ordinary[:slots]
+    if slots and case not in ('old-lookback', 'seen-before') and not set(expected).intersection(risks):
+        expected[-1] = ordinary[1] if case == 'two-risks' else risk_code
+    assert queued == expected
+    assert {e['code'] for e in result['summary']['backlog']} == set([*ordinary, risk_code]) - set(expected)
+
+
 def test_notify_rules_cooldown_holidays_and_major_risk_exemption(conn):
     card = service.company_card(conn, '603606')
     before = card | {'current': {'current_zone': '中性区'}}
@@ -630,6 +699,59 @@ def test_major_risk_bypasses_scan_cooldown_and_has_no_card_name(conn):
     assert second['status'] == 'done'
     assert len(second['notify']) == 1 and second['notify'][0]['reason'] == 'major_risk'
     assert not run_scan(conn, source)['notify']
+
+
+@pytest.mark.parametrize('case', ['saved', 'not-saved', 'correction'])
+def test_major_risk_notice_replayed_after_failed_scan(conn, monkeypatch, case):
+    complete_cards_at(conn)
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    previous = run_scan(conn, CapturedSources([]))
+    # A prior ordinary notice makes this scan consult the calendar when the card
+    # next becomes pending. No major-risk notice has been recorded yet.
+    summary = previous['summary']
+    summary['notify'] = [{'code': '603606', 'reason': 'pending_review', 'notified_at': AT}]
+    conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary), previous['id']))
+
+    class CalendarFailure(CapturedSources):
+        def trade_days(self, start, end):
+            super().trade_days(start, end)
+            raise RuntimeError('交易日历暂不可用')
+
+    source = CalendarFailure([next(i for i in ANNOUNCEMENTS if i['code'] == '603606')])
+    raw = source.items[0]['raw']
+    raw['announcementTitle'] += '（问询函）'  # Test-only risk mutation.
+
+    def abort_before_notification(*args):
+        raise RuntimeError('通知生成前失败')
+
+    with monkeypatch.context() as fail:
+        if case == 'not-saved':
+            fail.setattr(scans, 'completed_reviews', abort_before_notification)
+        first = run_scan(conn, source)
+    assert first['status'] == 'failed'
+    [event] = first['events']
+    if case == 'not-saved':
+        assert first['error'] == '通知生成前失败' and first['notify'] == []
+    else:
+        assert first['error'] == '交易日历暂不可用' and source.calendar_windows == [(AT[:10], AT[:10])]
+        assert [(n['reason'], n['event_id']) for n in first['notify']] == [('major_risk', event['id'])]
+
+    if case == 'correction':
+        correction = deepcopy(source.items[0])
+        correction['raw']['announcementId'] += '-correction'
+        correction['raw']['announcementTitle'] += '（更正公告）'
+        source.items.append(correction)
+    second = run_scan(conn, CapturedSources(source.items))
+    assert second['status'] == 'done', second['error']
+    all_notices = [(n['reason'], n['event_id']) for scan in (first, second) for n in scan['notify']]
+    expected = [('major_risk', event['id'])]
+    if case == 'correction':
+        [corrected] = second['events']
+        assert corrected['id'] != event['id']
+        expected.append(('major_risk', corrected['id']))
+    else:
+        assert second['events'] == []  # Replay stored event, not a new discovery.
+    assert all_notices == expected
 
 
 def test_truncated_directory_does_not_silently_succeed(conn):
