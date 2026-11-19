@@ -194,6 +194,47 @@ def test_append_only_rollback_requires_this_release_approval(local_policy, resto
         assert local.count() == 3
 
 
+def standing(local, tmp_path, monkeypatch, token=None):
+    credential = tmp_path / 'owner.json'
+    credential.write_text(json.dumps({'owner_token': token or local.token}))
+    credential.chmod(0o600)
+    monkeypatch.setattr(deploy, 'OWNER_CREDENTIAL', credential)
+    return deploy.standing_approval('abc1234')
+
+
+def test_standing_owner_credential_activates_and_can_restore_without_an_approval_file(local_policy, tmp_path, monkeypatch):
+    local = local_policy()
+    approval = standing(local, tmp_path, monkeypatch)
+    frozen = deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'},
+                                  approval=approval, not_applicable=False)
+    assert frozen['intent']['identity'] == local.target['identity']
+    assert frozen['intent']['request_id'] == f"release-abc1234-after-{local.activation['id']}"
+    local.current = 'new-worker'
+    assert deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=approval)['installed'] is True
+    local.current = 'old-worker'
+    current = deploy.policy_gate({'worker': 'old-worker'}, frozen, approval=approval, restoring=True)
+    assert current['identity'] == local.old['identity'] and local.count() == 3
+
+
+@pytest.mark.parametrize('case', ['missing', 'bad-owner', 'shared-mode'])
+def test_standing_approval_still_needs_the_private_owner_credential(local_policy, tmp_path, monkeypatch, case):
+    local = local_policy()
+    if case == 'missing':
+        with pytest.raises(RuntimeError, match='常设 owner 凭据'):
+            deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'}, approval=None, not_applicable=False)
+        assert local.count() == 1
+        return
+    if case == 'shared-mode':
+        standing(local, tmp_path, monkeypatch)
+        deploy.OWNER_CREDENTIAL.chmod(0o644)
+        with pytest.raises(RuntimeError, match='0600'): deploy.standing_approval('abc1234')
+        return
+    approval = standing(local, tmp_path, monkeypatch, token='invalid-fixture-token')
+    with pytest.raises(RuntimeError):
+        deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'}, approval=approval, not_applicable=False)
+    assert local.count() == 1
+
+
 def test_rollback_before_activation_preserves_original_pointer(local_policy):
     local = local_policy()
     frozen = freeze(local)

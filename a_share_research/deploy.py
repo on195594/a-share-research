@@ -269,6 +269,16 @@ def private_json(path, *, limit=65536):
         raise RuntimeError('批准输入无效') from None
 
 
+# Owner's standing rule (11-19, personal use): releases activate the new policy identity without a
+# per-release approval file; the tool signs with this 0600 owner credential ({"owner_token": "..."}).
+OWNER_CREDENTIAL = Path.home() / '.config/a-share-research/owner.json'
+
+
+def standing_approval(code):
+    """The owner credential plus the release it authorizes; identity and CAS come from the frozen plan."""
+    return dict(owner_token=private_json(OWNER_CREDENTIAL).get('owner_token'), standing=code)
+
+
 def policy_command(script, payload, *, image=None):
     args = (['docker', 'run', '--rm', '-i', '--network', 'none', '--entrypoint', 'python', image]
             if image else ['docker', 'exec', '-i', 'a-share-research-worker', 'python'])
@@ -379,7 +389,16 @@ def freeze_policy(images, fallback, *, approval, not_applicable, preview=False):
         raise RuntimeError('候选政策更改了原参数')
     intent = None
     if candidate['identity'] != current['identity']:
+        if approval and 'standing' in approval:
+            code, pred = approval.pop('standing'), current['activation']['id']
+            approval.update(identity=candidate['identity'], expected_id=pred, request_id=f'release-{code}-after-{pred}',
+                            reason=f'所有者常设授权（2026-11-19）：发布 {code} 时激活新政策身份，原参数不变',
+                            rollback=dict(identity=old['identity'], request_id=f'restore-{pred}-after-{code}',
+                                          reason=f'发布 {code} 失败时恢复激活记录 {pred} 的前驱身份'))
         if not preview:
+            if approval is None:
+                raise RuntimeError(f'需要激活新政策身份，但缺少常设 owner 凭据 {OWNER_CREDENTIAL}'
+                                   '（0600 JSON，含 owner_token）；或用 --approval 指定')
             intent = approval_for(approval, candidate, current['activation']['id'])
     restore = None
     # Rollback approval freezes the actual fallback implementation, not host sources.
@@ -625,7 +644,9 @@ def _verify_release(images, before, services, *, allow_config, save, tools_pause
 def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bool = False,
            initial_recovery: str | None = None, approval_path: Path | None = None,
            policy_not_applicable: bool = False, plan_policy: bool = False) -> None:
-    approval = private_json(approval_path) if approval_path else None
+    approval = (private_json(approval_path) if approval_path
+                else standing_approval(code) if not (plan_policy or policy_not_applicable) and OWNER_CREDENTIAL.exists()
+                else None)
     revision = run("git", "rev-parse", f"{code}^{{commit}}")
     if revision != run("git", "rev-parse", "HEAD") or revision != run("git", "rev-parse", "origin/main"):
         raise RuntimeError("只能发布已提交并已推送到 origin/main 的 HEAD")
@@ -927,7 +948,16 @@ def complete_held(evidence: Path, *, approval_path: Path | None = None):
             state['actual_policy'] = value
         if name in ('policy-committed.json', 'policy-observed.json', 'policy-gate.json'):
             save_evidence(evidence, 'release-state.json', state)
-    approval = private_json(approval_path) if approval_path else None
+    if approval_path:
+        approval = private_json(approval_path)
+    elif (frozen := state['policy']).get('required') and frozen.get('intent') and OWNER_CREDENTIAL.exists():
+        # Rebuild the standing approval of the frozen intent; a held target accepts nothing new.
+        # Without the credential, an already matched target still completes; an append is refused.
+        approval = standing_approval(None) | frozen['intent']
+        approval.pop('standing')
+        if frozen.get('restore'): approval['rollback'] = frozen['restore']
+    else:
+        approval = None
     idle(data / 'app.db')
     _verify_release(images, before, services, allow_config=state['allow_config'], save=save)
     resume_attempted = False
@@ -960,7 +990,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('code', nargs='?', help='short commit used as the prebuilt image tag')
     parser.add_argument('evidence', nargs='?', type=Path, help='new private directory for release evidence')
-    parser.add_argument('--approval', type=Path, help='0600 one-release explicit approval and temporary owner credential')
+    parser.add_argument('--approval', type=Path, help='override: 0600 one-release approval instead of the standing owner credential')
     parser.add_argument('--policy-not-applicable', action='store_true', help='explicit policy-free research instance only')
     parser.add_argument('--plan-policy', action='store_true', help='read-only exact candidate and diff; no pause/switch/activation')
     parser.add_argument('--complete-held', type=Path, help='explicitly finish this recorded held target without switching images')

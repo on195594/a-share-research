@@ -269,26 +269,13 @@ uv run python -m a_share_research.deploy "$release_code" \
 
 经当次授权有配置变更时追加 `--allow-config`（挂载按已提交 `compose.yaml` 核对）。发布与 `--complete-held` 共用 `.git/ashare-deploy.lock`，并发调用直接拒绝。政策门禁默认 required：缺表、缺激活、未知状态或异常都失败；只有从未启用政策的纯研究实例可用 `--policy-not-applicable`。
 
-政策身份包含 `a_share_research/policy/` 的静态导入闭包、`uv.lock` 中的运行时依赖子图、规则与指南，改了这些就需要新 identity；只改研究侧代码（不在闭包内）或开发依赖时身份不变，按例行发布。先生成只读计划（新建目录），核对 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数：
+政策身份包含 `a_share_research/policy/` 的静态导入闭包、`uv.lock` 中的运行时依赖子图、规则与指南，改了这些就需要新 identity；只改研究侧代码（不在闭包内）或开发依赖时身份不变，按例行发布。想先预览时可生成只读计划（新建目录，不需要凭据），查看 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数：
 
 ```bash
 uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目录>" --plan-policy
 ```
 
-再由所有者准备本次批准文件（属主常规文件、0600、不进仓库、不经 shell 变量或 argv），发布命令追加 `--approval "<文件>"`：
-
-```json
-{
-  "identity": "policy:<本次精确目标>",
-  "expected_id": 10,
-  "request_id": "<本次唯一请求键>",
-  "reason": "<批准原因>",
-  "owner_token": "<临时 owner 凭据>",
-  "rollback": {"identity": "policy:<冻结前驱>", "request_id": "<恢复请求键>", "reason": "<恢复原因>"}
-}
-```
-
-`rollback` 可省略，省略即未批准新激活后的恢复激活。批准不能从历史授权复制；参数逐项原样复用，不因“参数没变”推断批准。已匹配且有效时不追加激活，也不需要 owner 凭据。
+发布命令不需要批准文件：身份变化时，工具用常设 owner 凭据 `~/.config/a-share-research/owner.json`（属主 0600 JSON `{"owner_token": "..."}`，不进仓库）按冻结计划的目标身份、当前激活编号（CAS）和原参数自动激活，并同时批准失败时恢复冻结前驱（所有者 11-19 常设授权）。凭据缺失、权限不对或无效时在暂停前拒绝。需要指定其他请求键或原因时可用 `--approval "<0600 文件>"` 覆盖，字段为 `identity`、`expected_id`（当前激活编号）、`request_id`、`reason`、`owner_token`，可选 `rollback`。已匹配且有效时不追加激活，也不需要 owner 凭据。
 
 顺序固定为：**pause 并排空 → 停服务、备份并核对表指纹 → 切换/启动且保持 pause → 网页、worker 预检、容器配置、数据库与完整性检查 → 必要时在 worker 容器内 register/activate → 回读 latest → 政策门禁 → resume → tools ready**。门禁要求镜像正确、activation/identity 等于本次预期、`installed=true`、参数有效且账户范围匹配；回执丢失只用同一 `request_id`/`expected_id` 重试。证据写在私有发布目录（`manifest.json`、`release-state.json`、`policy-*.json`、预检/完整性与回退报告）。
 
@@ -301,10 +288,10 @@ uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目
 3. 新激活前失败，只在旧镜像读兼容且政策门禁通过后恢复；新激活已提交后，只有本次批准了冻结前驱且 latest 仍为本次激活才追加 CAS 恢复激活，否则保持暂停。禁止 UPDATE/DELETE 激活、降库版本或恢复旧 DB。
 4. 配置/迁移须另获授权；首次 v9→当前版用 `--with-tools --allow-config --initial-recovery <兼容构建>`。
 
-工具失败留在 paused 时，核对证据后可完成这一份 held 目标（已精确匹配可省略 approval）；它只重新核对并完成原目标，不切镜像、不接管未知暂停、不接受新 expected_id：
+工具失败留在 paused 时，核对证据后可完成这一份 held 目标（默认用常设凭据重建冻结批准）；它只重新核对并完成原目标，不切镜像、不接管未知暂停、不接受新 expected_id：
 
 ```bash
-uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>" --approval "<原本次批准文件>"
+uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>"
 ```
 
 只有完整就绪成功后才清理：保留最近 3 份 `backup-pre-*.db` 与同名 `.bundle/`，镜像保留当前与两级回退。暂停只覆盖 tools 受理，独立的 Web/worker 披露扫描照常运行；错过的定时任务不自动补发。

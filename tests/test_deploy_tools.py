@@ -415,17 +415,22 @@ def test_release_rejects_non_writable_or_non_tmpfs_control_mount(operations, mon
     assert ('rollback_probe',) in state.events
 
 
-@pytest.mark.parametrize('approved', [False, True])
-def test_real_policy_release_approval_precedes_pause_and_gate_precedes_resume(operations, local_policy, approved):
+@pytest.mark.parametrize('approved', [False, 'standing', True])
+def test_real_policy_release_approval_precedes_pause_and_gate_precedes_resume(operations, local_policy, approved, tmp_path, monkeypatch):
     state = operations()
     local = local_policy(state)
     if not approved:
-        with pytest.raises(RuntimeError, match='明确批准'):
+        with pytest.raises(RuntimeError, match='常设 owner 凭据'):
             deploy.deploy('revision', state.evidence)
         assert not commands(state, 'stop') and ('control', 'pause') not in state.events
         assert local.count() == 1
         return
-    deploy.deploy('revision', state.evidence, approval_path=local.approve())
+    if approved == 'standing':
+        credential = tmp_path / 'owner.json'
+        credential.write_text(json.dumps({'owner_token': local.token}))
+        credential.chmod(0o600)
+        monkeypatch.setattr(deploy, 'OWNER_CREDENTIAL', credential)
+    deploy.deploy('revision', state.evidence, approval_path=local.approve() if approved is True else None)
     assert local.count() == 2 and not state.paused
     checkpoint = json.loads((state.evidence/'release-state.json').read_text())
     assert checkpoint['status'] == 'succeeded' and checkpoint['actual_policy']['installed'] is True

@@ -30,6 +30,9 @@ def isolate_tushare_cache(monkeypatch, tmp_path):
     from a_share_research import db
     monkeypatch.setattr(db, "DATA", tmp_path / "data")
     monkeypatch.setenv("TUSHARE_CACHE", "0")
+    # Releases sign with the owner's standing credential; tests never read the real one.
+    from a_share_research import deploy
+    monkeypatch.setattr(deploy, "OWNER_CREDENTIAL", tmp_path / "absent-owner.json")
 
 
 @pytest.fixture
