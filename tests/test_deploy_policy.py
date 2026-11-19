@@ -199,16 +199,22 @@ def standing(local, tmp_path, monkeypatch, token=None):
     credential.write_text(json.dumps({'owner_token': token or local.token}))
     credential.chmod(0o600)
     monkeypatch.setattr(deploy, 'OWNER_CREDENTIAL', credential)
-    return deploy.standing_approval('abc1234')
+    return credential
+
+
+def freeze_standing(approval):
+    return deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'},
+                                approval=approval, not_applicable=False, standing='abc1234')
 
 
 def test_standing_owner_credential_activates_and_can_restore_without_an_approval_file(local_policy, tmp_path, monkeypatch):
     local = local_policy()
-    approval = standing(local, tmp_path, monkeypatch)
-    frozen = deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'},
-                                  approval=approval, not_applicable=False)
+    standing(local, tmp_path, monkeypatch)
+    approval = {}
+    frozen = freeze_standing(approval)
     assert frozen['intent']['identity'] == local.target['identity']
     assert frozen['intent']['request_id'] == f"release-abc1234-after-{local.activation['id']}"
+    assert local.token not in json.dumps(frozen)
     local.current = 'new-worker'
     assert deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=approval)['installed'] is True
     local.current = 'old-worker'
@@ -216,22 +222,37 @@ def test_standing_owner_credential_activates_and_can_restore_without_an_approval
     assert current['identity'] == local.old['identity'] and local.count() == 3
 
 
+def test_release_without_activation_never_reads_the_standing_credential(local_policy, tmp_path, monkeypatch):
+    local = local_policy()
+    frozen = freeze(local)
+    local.current = 'new-worker'
+    deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=local.approval)
+    standing(local, tmp_path, monkeypatch).write_text('not json')  # a broken credential must not matter
+    approval = {}
+    frozen = deploy.freeze_policy({'worker': 'new-worker'}, {}, approval=approval, not_applicable=False, standing='abc1234')
+    assert frozen['intent'] is None and approval == {}
+    deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=approval)
+    assert local.count() == 2
+
+
+def test_explicit_approval_is_checked_as_written_even_with_a_standing_credential(local_policy, tmp_path, monkeypatch):
+    local = local_policy()
+    standing(local, tmp_path, monkeypatch)
+    local.approval |= dict(expected_id=99, standing='abc1234')
+    with pytest.raises(RuntimeError, match='明确批准'):
+        deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'}, approval=local.approval, not_applicable=False)
+    assert local.count() == 1
+
+
 @pytest.mark.parametrize('case', ['missing', 'bad-owner', 'shared-mode'])
 def test_standing_approval_still_needs_the_private_owner_credential(local_policy, tmp_path, monkeypatch, case):
     local = local_policy()
-    if case == 'missing':
-        with pytest.raises(RuntimeError, match='常设 owner 凭据'):
-            deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'}, approval=None, not_applicable=False)
-        assert local.count() == 1
-        return
     if case == 'shared-mode':
-        standing(local, tmp_path, monkeypatch)
-        deploy.OWNER_CREDENTIAL.chmod(0o644)
-        with pytest.raises(RuntimeError, match='0600'): deploy.standing_approval('abc1234')
-        return
-    approval = standing(local, tmp_path, monkeypatch, token='invalid-fixture-token')
-    with pytest.raises(RuntimeError):
-        deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'}, approval=approval, not_applicable=False)
+        standing(local, tmp_path, monkeypatch).chmod(0o644)
+    elif case == 'bad-owner':
+        standing(local, tmp_path, monkeypatch, token='invalid-fixture-token')
+    with pytest.raises(RuntimeError, match={'missing': '常设 owner 凭据', 'shared-mode': '0600', 'bad-owner': ''}[case]):
+        freeze_standing({})
     assert local.count() == 1
 
 

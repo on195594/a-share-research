@@ -126,9 +126,10 @@ def test_review_role_without_review_model_keeps_the_main_model(payload, monkeypa
     ({"stop_reason": "error", "error": "429 upstream detail"}, "provider_error"),
     ({"stop_reason": "length", "text": "{\"summary\": \"截断"}, "incomplete:length"),
     ({"stop_reason": "len gth!", "text": ""}, "incomplete"),
+    ({"stop_reason": "TenantAlpha", "text": "x"}, "incomplete"),
     ({"stop_reason": "stop", "text": "  ", "tool_calls": 0}, "empty_output"),
     ({"stop_reason": "toolUse", "text": "", "tool_calls": 1}, "invalid_output"),
-], ids=["timeout", "provider", "length", "unsafe-stop-reason", "empty", "tools-outside-loop"])
+], ids=["timeout", "provider", "length", "unsafe-stop-reason", "unknown-stop-reason", "empty", "tools-outside-loop"])
 def test_failure_kind_is_a_closed_vocabulary_without_provider_text(out, kind):
     assert model.failure_kind(ValueError(out.get("error", "")), out) == kind
     assert model.failure_kind(subprocess.TimeoutExpired("node", 1), None) == "timeout"

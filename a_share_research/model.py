@@ -56,7 +56,7 @@ def failure_kind(exc: Exception, out: dict | None) -> str:
     if out.get("error"):
         return "provider_error" if stop == "error" else "pi_runtime"
     if stop not in ("stop", "toolUse"):
-        return f"incomplete:{stop}" if isinstance(stop, str) and stop.isidentifier() and len(stop) <= 32 else "incomplete"
+        return "incomplete:length" if stop == "length" else "incomplete"  # never echo upstream values
     if not str(out.get("text") or "").strip() and not out.get("tool_calls"):
         return "empty_output"
     return "invalid_output"
