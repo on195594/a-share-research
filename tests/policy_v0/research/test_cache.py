@@ -1,19 +1,25 @@
 """
 cache.py 单元测试
-覆盖本次修复的核心场景：持仓生命周期、FIFO平仓、WAL模式、TTL推断。
+覆盖只读持仓视图、止损检查、WAL模式与框架推断。
 """
 
 import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import commands_admin, commands_holdings, commands_monitor, db, domain, market_quotes
-from policy_v0.helpers import mock_price_quotes, record_valid_quote, set_valid_fundamentals
+from a_share_research.policy.v0 import commands_admin, commands_holdings, db, domain, market_quotes
+from policy_v0.helpers import (
+    mock_price_quotes,
+    record_valid_quote,
+    seed_event,
+    seed_position,
+    set_valid_fundamentals,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CACHE_PY = PROJECT_ROOT / "a_share_research" / "policy" / "v0" / "cache.py"
@@ -100,131 +106,7 @@ def test_cli_invalid_command_fails(isolated_db):
 # ── 建仓入口：同代码单一在仓生命周期 ──────────────────────────────────────
 
 
-def test_add_holding_rejects_second_open_position(capsys):
-    """同一股票已在仓时必须改用 buy-holding，不能制造重复在仓记录。"""
-    commands_holdings.cmd_add_holding(["600519", "50"])
-    capsys.readouterr()
-    with pytest.raises(SystemExit) as exc:
-        commands_holdings.cmd_add_holding(["600519", "52"])
-    err = capsys.readouterr().err
-
-    conn = db.get_db()
-    rows = conn.execute(
-        "SELECT cost_price FROM holdings WHERE code='600519' AND exit_date IS NULL"
-    ).fetchall()
-    conn.close()
-
-    assert exc.value.code == 1
-    assert "已存在在仓持仓" in err
-    assert "buy-holding" in err
-    assert rows == [(50.0,)]
-
-
-def test_add_holding_different_stocks(capsys):
-    """不同股票各建仓一次，各有一条记录"""
-    commands_holdings.cmd_add_holding(["000001", "10.5"])
-    commands_holdings.cmd_add_holding(["000002", "8.2"])
-
-    conn = db.get_db()
-    cnt = conn.execute(
-        "SELECT COUNT(*) FROM holdings WHERE exit_date IS NULL"
-    ).fetchone()[0]
-    conn.close()
-    assert cnt == 2
-
-
-@pytest.mark.parametrize("cost", ["0", "-1"])
-def test_add_holding_rejects_nonpositive_cost_price(cost, capsys):
-    """成本价必须为正数，避免后续盈亏计算除以零或失真。"""
-    with pytest.raises(SystemExit) as exc:
-        commands_holdings.cmd_add_holding(["600519", cost])
-    err = capsys.readouterr().err
-    assert exc.value.code == 1
-    assert "成本价必须大于0" in err
-
-
-def test_add_holding_prefers_persisted_framework_over_inference(capsys):
-    """add-holding 应优先用 set-analysis 时持久化的 framework，而不是重新
-    用 industry 关键词反推——用一个跟 industry 推断结果不一致的 framework
-    验证确实读的是持久化值，不是巧合一致。"""
-    conn = db.get_db()
-    today = domain.cst_today()
-    # industry='银行' 若被反推会得到 B银行，这里持久化的是故意不同的 F科技
-    conn.execute(
-        "INSERT INTO stock_fundamentals (code, name, industry, data, updated_at) "
-        "VALUES ('601899', '紫金矿业', '银行', '{}', ?)",
-        (datetime.now().isoformat(),),
-    )
-    conn.execute(
-        "INSERT INTO analysis_results (code, date, framework) VALUES ('601899', ?, 'F科技')",
-        (today,),
-    )
-    conn.commit()
-    conn.close()
-
-    commands_holdings.cmd_add_holding(["601899", "10"])
-    out = capsys.readouterr().out
-
-    assert "框架:F科技" in out
-    assert "框架:F科技?" not in out  # 持久化值=confident，不应带"?"兜底标记
-
-    sl15_pct, sl20_pct = domain.get_stop_loss_pct("F科技")
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT stop_loss_15, stop_loss_20 FROM holdings WHERE code='601899'"
-    ).fetchone()
-    conn.close()
-    assert row[0] == round(10 * sl15_pct, 3)
-    assert row[1] == round(10 * sl20_pct, 3)
-
-
-def test_add_holding_falls_back_to_inference_with_marker(capsys):
-    """没有持久化framework时，应退化到industry反推，且在输出里用"?"标记
-    这是兜底值非真实判断"""
-    commands_holdings.cmd_add_holding(
-        ["000333", "20"]
-    )  # 无 analysis_results 记录、无 stock_fundamentals 记录
-    out = capsys.readouterr().out
-    assert "框架:A通用?(数据缺失，建议核实)" in out
-
-
 # ── FIFO 平仓 ────────────────────────────────────────────────────────────────
-
-
-def test_close_holding_fifo(capsys):
-    """先买的批次先被平仓（FIFO）"""
-    # 建仓两笔，手动指定不同 buy_date
-    conn = db.get_db()
-    conn.execute(
-        "INSERT INTO holdings (code, cost_price, buy_date) VALUES ('300750', 100.0, '2024-01-01')"
-    )
-    conn.execute(
-        "INSERT INTO holdings (code, cost_price, buy_date) VALUES ('300750', 120.0, '2024-06-01')"
-    )
-    conn.commit()
-    conn.close()
-
-    commands_holdings.cmd_close_holding(["300750", "110.0"])
-
-    conn = db.get_db()
-    rows = conn.execute(
-        "SELECT cost_price, exit_price, exit_date FROM holdings WHERE code='300750' ORDER BY buy_date"
-    ).fetchall()
-    conn.close()
-
-    # 第一笔（buy_date 早）已平仓
-    assert rows[0][1] == 110.0, "最早买入的批次应被优先平仓"
-    assert rows[0][2] is not None
-    # 第二笔仍在仓
-    assert rows[1][1] is None
-    assert rows[1][2] is None
-
-
-def test_close_holding_no_open_position(capsys):
-    """平仓不存在的股票应报错退出"""
-    with pytest.raises(SystemExit) as exc:
-        commands_holdings.cmd_close_holding(["999888", "100.0"])
-    assert exc.value.code == 1
 
 
 # ── cmd_holdings 显示：只只/笔数 ──────────────────────────────────────────────
@@ -250,7 +132,7 @@ def test_holdings_display_multi_lot(capsys):
 
 def test_holdings_display_single_lot(capsys):
     """单笔在仓：只显示 '1 只'，不显示 '笔'"""
-    commands_holdings.cmd_add_holding(["000858", "100"])
+    seed_position("000858", 100)
 
     commands_holdings.cmd_holdings()
     out = capsys.readouterr().out
@@ -260,8 +142,8 @@ def test_holdings_display_single_lot(capsys):
 
 def test_holdings_display_two_stocks(capsys):
     """两只不同股票各一笔：显示 '2 只'，不显示 '笔'"""
-    commands_holdings.cmd_add_holding(["600519", "1800"])
-    commands_holdings.cmd_add_holding(["000858", "100"])
+    seed_position("600519", 1800)
+    seed_position("000858", 100)
 
     commands_holdings.cmd_holdings()
     out = capsys.readouterr().out
@@ -304,214 +186,13 @@ def test_product_and_platform_technology_still_route_to_f(industry):
 # ── 旧表迁移：无 id 列时触发 AUTOINCREMENT 迁移 ──────────────────────────────
 
 
-def test_update_return_writes_pct_and_days(capsys, monkeypatch):
-    """update-return 写入 return_pct 和 holding_days"""
-    with db.db_session() as conn:
-        conn.execute(
-            "INSERT INTO analysis_results (code, date, result, created_at) VALUES (?,?,?,?)",
-            ("600519", domain.cst_today(), "买入", domain.utc_now().isoformat()),
-        )
-        conn.commit()
-
-    import datetime as dt
-
-    class YesterdayLocalDate(dt.date):
-        @classmethod
-        def today(cls):
-            return cls.fromisoformat(domain.cst_today()) - timedelta(days=1)
-
-    # A UTC host can still be on yesterday while the A-share ledger is on today.
-    monkeypatch.setattr(dt, "date", YesterdayLocalDate)
-    commands_holdings.cmd_update_return(["600519", "18.5"])
-
-    today = domain.cst_today()
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT return_pct, holding_days FROM analysis_results WHERE code=? AND date=?",
-        ("600519", today),
-    ).fetchone()
-    conn.close()
-
-    assert row is not None
-    assert row[0] == 18.5
-    assert row[1] == 0  # 同日填写，持有0天
-
-
-def test_update_return_no_analysis_record():
-    """无分析记录时 update-return 应以错误码退出"""
-    with pytest.raises(SystemExit):
-        commands_holdings.cmd_update_return(["999999", "10.0"])
-
-
-@pytest.mark.parametrize("value", ["abc", "nan", "inf"])
-def test_update_return_invalid_value(value):
-    """非数字或非有限回报率应以错误码退出"""
-    with pytest.raises(SystemExit):
-        commands_holdings.cmd_update_return(["600519", value])
-
-
 # ── 结构化持仓账本与状态 ───────────────────────────────────────────────────────
 
 
-def test_add_holding_persists_framework_initial_shares_and_buy_event():
-    commands_holdings.cmd_add_holding(
-        [
-            "000001",
-            "10.0",
-            "500",
-            "--fee",
-            "5",
-            "--date",
-            "2026-07-01",
-        ]
-    )
-    conn = db.get_db()
-    holding = conn.execute(
-        """SELECT framework, framework_confident, initial_shares, cost_price, buy_date
-           FROM holdings WHERE code='000001'"""
-    ).fetchone()
-    event = conn.execute(
-        """SELECT event_type, shares, price, fees, event_date
-           FROM holding_events WHERE code='000001'"""
-    ).fetchone()
-    conn.close()
-    assert holding == ("A通用", 0, 500, 10.01, "2026-07-01")
-    assert event == ("buy", 500, 10.0, 5.0, "2026-07-01")
-
-
-def test_sell_holding_partial_updates_shares_and_realized_pnl():
-    commands_holdings.cmd_add_holding(["000001", "10.0", "500"])
-    commands_holdings.cmd_sell_holding(
-        [
-            "000001",
-            "12.0",
-            "200",
-            "--fee",
-            "1",
-            "--tax",
-            "2",
-        ]
-    )
-    conn = db.get_db()
-    holding = conn.execute(
-        "SELECT shares, exit_date FROM holdings WHERE code='000001'"
-    ).fetchone()
-    event = conn.execute(
-        """SELECT shares, fees, tax, realized_pnl FROM holding_events
-           WHERE code='000001' AND event_type='sell'"""
-    ).fetchone()
-    conn.close()
-    assert holding == (300, None)
-    assert event == pytest.approx((200, 1.0, 2.0, 397.0))
-
-
-def test_buy_holding_preserves_buy_date_and_updates_weighted_cost():
-    commands_holdings.cmd_add_holding(["000001", "10.0", "500"])
-    conn = db.get_db()
-    conn.execute(
-        "UPDATE holdings SET buy_date='2025-01-02', main_entry_date='2025-01-02'"
-    )
-    conn.execute(
-        "UPDATE holding_events SET event_date='2025-01-02' "
-        "WHERE code='000001' AND event_type='buy'"
-    )
-    conn.commit()
-    conn.close()
-    commands_holdings.cmd_buy_holding(
-        [
-            "000001",
-            "12.0",
-            "300",
-            "--fee",
-            "8",
-            "--date",
-            "2026-07-30",
-        ]
-    )
-    conn = db.get_db()
-    row = conn.execute(
-        """SELECT shares, cost_price, reference_cost, buy_date, main_entry_date
-           FROM holdings WHERE code='000001'"""
-    ).fetchone()
-    conn.close()
-    assert row[0] == 800
-    assert row[1] == pytest.approx((5000 + 3600 + 8) / 800)
-    assert row[2] == pytest.approx((5000 + 3600) / 800)
-    assert row[3] == "2025-01-02"
-    assert row[4] == "2026-07-30"
-
-
-def test_sell_holding_rejects_non_executable_odd_lot_split():
-    commands_holdings.cmd_add_holding(["600036", "10.0", "500"])
-    with pytest.raises(SystemExit):
-        commands_holdings.cmd_sell_holding(["600036", "12.0", "167"])
-    conn = db.get_db()
-    assert (
-        conn.execute("SELECT shares FROM holdings WHERE code='600036'").fetchone()[0]
-        == 500
-    )
-    conn.close()
-
-
-def test_sell_holding_all_closes_position():
-    commands_holdings.cmd_add_holding(["600036", "10.0", "500"])
-    commands_holdings.cmd_sell_holding(["600036", "12.0", "all"])
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT shares, exit_price, exit_date FROM holdings WHERE code='600036'"
-    ).fetchone()
-    conn.close()
-    assert row[0] == 0
-    assert row[1] == 12.0
-    assert row[2] == domain.cst_today()
-
-
-def test_record_dividend_creates_cash_flow_event():
-    commands_holdings.cmd_add_holding(["600036", "10.0", "500", "--date", "2026-06-01"])
-    commands_holdings.cmd_record_dividend(["600036", "123.45", "2026-07-01"])
-    conn = db.get_db()
-    row = conn.execute(
-        """SELECT event_type, event_date, cash_amount FROM holding_events
-           WHERE code='600036' AND event_type='dividend'"""
-    ).fetchone()
-    conn.close()
-    assert row == ("dividend", "2026-07-01", 123.45)
-
-
-def test_corporate_action_separates_economic_and_reference_cost():
-    commands_holdings.cmd_add_holding(["600036", "48.0", "500", "--date", "2026-06-01"])
-    commands_holdings.cmd_corporate_action(["600036", "0.56", "0.2", "2026-07-01"])
-    conn = db.get_db()
-    row = conn.execute(
-        """SELECT shares, initial_shares, cost_price, reference_cost
-           FROM holdings WHERE code='600036'"""
-    ).fetchone()
-    dividend = conn.execute(
-        """SELECT cash_amount FROM holding_events
-           WHERE code='600036' AND event_type='dividend'"""
-    ).fetchone()[0]
-    conn.close()
-    assert row[0] == 600
-    assert row[1] == 600
-    assert row[2] == pytest.approx(40.0)
-    assert row[3] == pytest.approx((48.0 - 0.56) / 1.2)
-    assert dividend == pytest.approx(280.0)
-
-
 def test_position_return_includes_fees_tax_dividend_and_open_value(capsys):
-    commands_holdings.cmd_add_holding(["600036", "10.0", "500"])
-    commands_holdings.cmd_sell_holding(
-        [
-            "600036",
-            "12.0",
-            "200",
-            "--fee",
-            "1",
-            "--tax",
-            "2",
-        ]
-    )
-    commands_holdings.cmd_record_dividend(["600036", "100"])
+    holding = seed_position("600036", 10.0, 500)
+    seed_event(holding, "sell", "2026-01-06", shares=200, price=12.0, fees=1, tax=2)
+    seed_event(holding, "dividend", "2026-01-07", cash=100)
     commands_holdings.cmd_position_return(["600036", "11"])
     out = capsys.readouterr().out
     # 2397 sale cash + 100 dividend + 3300 open value - 5000 invested = 797.
@@ -520,34 +201,9 @@ def test_position_return_includes_fees_tax_dividend_and_open_value(capsys):
 
 
 def test_position_return_isolates_reopened_position_lifecycle(capsys):
-    commands_holdings.cmd_add_holding(
-        [
-            "600036",
-            "10.0",
-            "100",
-            "--date",
-            "2025-01-01",
-        ]
-    )
-    commands_holdings.cmd_sell_holding(
-        [
-            "600036",
-            "12.0",
-            "all",
-            "--date",
-            "2025-02-01",
-        ]
-    )
-    capsys.readouterr()
-    commands_holdings.cmd_add_holding(
-        [
-            "600036",
-            "20.0",
-            "100",
-            "--date",
-            "2026-07-01",
-        ]
-    )
+    first = seed_position("600036", 10.0, 100, day="2025-01-01")
+    seed_event(first, "sell", "2025-02-01", shares=100, price=12.0, close=True)
+    seed_position("600036", 20.0, 100, day="2026-07-01")
     commands_holdings.cmd_position_return(["600036", "22.0"])
     out = capsys.readouterr().out
 
@@ -558,43 +214,10 @@ def test_position_return_isolates_reopened_position_lifecycle(capsys):
 
 
 def test_position_return_uses_latest_closed_lifecycle(capsys):
-    commands_holdings.cmd_add_holding(
-        [
-            "600036",
-            "10.0",
-            "100",
-            "--date",
-            "2025-01-01",
-        ]
-    )
-    commands_holdings.cmd_sell_holding(
-        [
-            "600036",
-            "12.0",
-            "all",
-            "--date",
-            "2025-02-01",
-        ]
-    )
-    commands_holdings.cmd_add_holding(
-        [
-            "600036",
-            "20.0",
-            "100",
-            "--date",
-            "2026-06-01",
-        ]
-    )
-    commands_holdings.cmd_sell_holding(
-        [
-            "600036",
-            "18.0",
-            "all",
-            "--date",
-            "2026-07-01",
-        ]
-    )
-    capsys.readouterr()
+    first = seed_position("600036", 10.0, 100, day="2025-01-01")
+    seed_event(first, "sell", "2025-02-01", shares=100, price=12.0, close=True)
+    second = seed_position("600036", 20.0, 100, day="2026-06-01")
+    seed_event(second, "sell", "2026-07-01", shares=100, price=18.0, close=True)
     commands_holdings.cmd_position_return(["600036"])
     out = capsys.readouterr().out
 
@@ -604,291 +227,8 @@ def test_position_return_uses_latest_closed_lifecycle(capsys):
     assert "总回报：-10.00%" in out
 
 
-def test_close_holding_delegates_to_event_ledger(capsys):
-    """The compatibility close command must create the same sell event as sell-holding all."""
-    commands_holdings.cmd_add_holding(["600036", "10.0", "100", "--date", "2026-01-01"])
-    commands_holdings.cmd_close_holding(["600036", "12.0", "2026-02-01"])
-    conn = db.get_db()
-    holding = conn.execute(
-        "SELECT shares, exit_price, exit_date FROM holdings WHERE code='600036'"
-    ).fetchone()
-    events = conn.execute(
-        "SELECT event_type, shares, price FROM holding_events WHERE code='600036' ORDER BY id"
-    ).fetchall()
-    conn.close()
-    assert holding == (0, 12.0, "2026-02-01")
-    assert events == [("buy", 100, 10.0), ("sell", 100, 12.0)]
-
-    commands_holdings.cmd_position_return(["600036"])
-    out = capsys.readouterr().out
-    assert "卖出回款:1200.00" in out
-    assert "在仓市值:0.00" in out
-
-
-def test_close_holding_closes_only_oldest_open_lot():
-    """Legacy close-holding keeps FIFO one-lot semantics even for imported duplicate lots."""
-    commands_holdings.cmd_add_holding(["600036", "10.0", "100", "--date", "2026-01-01"])
-    now = domain.utc_now_iso()
-    conn = db.get_db()
-    second_id = conn.execute(
-        """INSERT INTO holdings
-           (code, cost_price, shares, buy_date, updated_at, framework, initial_shares)
-           VALUES ('600036', 11.0, 100, '2026-01-02', ?, 'A通用', 100)""",
-        (now,),
-    ).lastrowid
-    conn.execute(
-        """INSERT INTO holding_events
-           (holding_id, code, event_type, event_date, shares, price, created_at)
-           VALUES (?, '600036', 'buy', '2026-01-02', 100, 11.0, ?)""",
-        (second_id, now),
-    )
-    conn.commit()
-    conn.close()
-
-    commands_holdings.cmd_close_holding(["600036", "12.0", "2026-02-01"])
-
-    conn = db.get_db()
-    rows = conn.execute(
-        """SELECT id, shares, exit_price, exit_date FROM holdings
-           WHERE code='600036' ORDER BY buy_date, id"""
-    ).fetchall()
-    sell_events = conn.execute(
-        """SELECT holding_id, shares FROM holding_events
-           WHERE code='600036' AND event_type='sell' ORDER BY id"""
-    ).fetchall()
-    conn.close()
-    assert rows[0][1:] == (0, 12.0, "2026-02-01")
-    assert rows[1][1:] == (100, None, None)
-    assert sell_events == [(rows[0][0], 100)]
-
-
-def test_retro_uses_full_event_lifecycle_not_last_exit_price():
-    commands_holdings.cmd_add_holding(["600036", "10.0", "500", "--date", "2026-01-01"])
-    commands_holdings.cmd_sell_holding(
-        ["600036", "15.0", "200", "--date", "2026-02-01"]
-    )
-    commands_holdings.cmd_record_dividend(["600036", "500", "2026-03-01"])
-    commands_holdings.cmd_sell_holding(["600036", "8.0", "all", "--date", "2026-04-01"])
-    commands_holdings.cmd_retro_add(["600036", "生命周期测试"])
-    conn = db.get_db()
-    actual_return = conn.execute(
-        "SELECT actual_return_pct FROM retro_notes WHERE code='600036'"
-    ).fetchone()[0]
-    conn.close()
-    assert actual_return == pytest.approx(18.0)
-
-
-def test_cleanup_removes_preexisting_orphan_lifecycle_records(capsys):
-    """cleanup also governs orphans created before cascade deletion was available."""
-    commands_holdings.cmd_add_holding(["600036", "10.0", "100"])
-    now = domain.utc_now_iso()
-    conn = db.get_db()
-    holding_id = conn.execute("SELECT id FROM holdings WHERE code='600036'").fetchone()[
-        0
-    ]
-    conn.execute(
-        """INSERT INTO holding_l3_conditions
-           (holding_id, condition_text, created_at, updated_at)
-           VALUES (?, '旧孤儿条件', ?, ?)""",
-        (holding_id, now, now),
-    )
-    conn.execute(
-        """INSERT INTO holding_alerts
-           (holding_id, code, level, category, reason_code, reason, opened_at, updated_at)
-           VALUES (?, '600036', 'yellow', 'unverified', 'legacy', '旧孤儿预警', ?, ?)""",
-        (holding_id, now, now),
-    )
-    conn.execute(
-        """INSERT INTO retro_notes (holding_id, code, error_tags, created_at)
-           VALUES (?, '600036', 'legacy', ?)""",
-        (holding_id, now),
-    )
-    conn.execute("DELETE FROM holdings WHERE id=?", (holding_id,))
-    conn.commit()
-    conn.close()
-
-    commands_admin.cmd_cleanup()
-    out = capsys.readouterr().out
-    conn = db.get_db()
-    counts = {
-        table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        for table in (
-            "holding_events",
-            "holding_l3_conditions",
-            "holding_tier_state",
-            "holding_alerts",
-            "retro_notes",
-        )
-    }
-    conn.close()
-    assert "孤儿持仓关联记录" in out
-    assert counts == {table: 0 for table in counts}
-
-
-def test_trade_commands_reject_non_finite_prices_and_backdated_events():
-    with pytest.raises(SystemExit):
-        commands_holdings.cmd_add_holding(["600036", "nan", "100"])
-    commands_holdings.cmd_add_holding(["600036", "10.0", "100", "--date", "2026-02-01"])
-    with pytest.raises(SystemExit):
-        commands_holdings.cmd_sell_holding(
-            ["600036", "12.0", "all", "--date", "2026-01-01"]
-        )
-
-
-def test_bse_920_uses_incremental_share_rule_and_quote_prefix():
+def test_bse_920_uses_the_beijing_quote_prefix():
     assert [market_quotes.sina_query_prefix(c) for c in ("920189", "430570", "872925", "600036", "000001", "300750")] == ["bj", "bj", "bj", "sh", "sz", "sz"]
-    assert commands_holdings._validate_buy_quantity("920189", 101) is None
-    assert commands_holdings._validate_sell_quantity("920189", 500, 150) is None
-    assert "北交所" in (commands_holdings._validate_buy_quantity("920189", 99) or "")
-
-
-def test_update_return_uses_holding_buy_date_not_latest_analysis_date(monkeypatch):
-    with db.db_session() as conn:
-        conn.execute(
-            "INSERT INTO analysis_results (code, date, result, created_at) VALUES (?,?,?,?)",
-            ("600519", domain.cst_today(), "买入", domain.utc_now().isoformat()),
-        )
-        conn.commit()
-    conn = db.get_db()
-    conn.execute(
-        """INSERT INTO holdings
-           (code, cost_price, shares, buy_date, framework)
-           VALUES ('600519', 100, 100, '2024-01-01', 'A通用')"""
-    )
-    conn.commit()
-    conn.close()
-    commands_holdings.cmd_update_return(["600519", "18.5"])
-    conn = db.get_db()
-    holding_days = conn.execute(
-        "SELECT holding_days FROM analysis_results WHERE code=?",
-        ("600519",),
-    ).fetchone()[0]
-    conn.close()
-    assert holding_days > 365
-
-
-def test_l3_condition_has_structured_status_and_evidence(capsys):
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100"])
-    commands_monitor.cmd_l3_add(
-        [
-            "600036",
-            "original",
-            "净息差低于1.8%",
-            "低于1.7%减半仓",
-        ]
-    )
-    conn = db.get_db()
-    condition_id = conn.execute("SELECT id FROM holding_l3_conditions").fetchone()[0]
-    conn.close()
-    commands_monitor.cmd_l3_update(
-        [
-            str(condition_id),
-            "watch",
-            "2026-07-30",
-            "2026Q2净息差1.82%",
-            "2026-10-31",
-        ]
-    )
-    commands_monitor.cmd_l3_list(["600036"])
-    out = capsys.readouterr().out
-    assert "watch" in out
-    assert "2026Q2净息差1.82%" in out
-    assert "低于1.7%减半仓" in out
-
-
-def test_tier_exemption_is_structured_and_entry_day_only():
-    conn = db.get_db()
-    conn.execute(
-        """INSERT INTO analysis_results (code, date, framework)
-           VALUES ('000333', ?, 'E消费')""",
-        (domain.cst_today(),),
-    )
-    conn.commit()
-    conn.close()
-    commands_holdings.cmd_add_holding(["000333", "50", "100"])
-    commands_monitor.cmd_tier_config(["000333", "none", "none", "E"])
-    conn = db.get_db()
-    row = conn.execute(
-        """SELECT exemption_framework, exemption_declared_at
-           FROM holding_tier_state"""
-    ).fetchone()
-    conn.close()
-    assert row == ("E", domain.cst_today())
-
-
-def test_tier_exemption_rejects_backdated_entry():
-    conn = db.get_db()
-    conn.execute(
-        """INSERT INTO analysis_results (code, date, framework)
-           VALUES ('000333', ?, 'E消费')""",
-        (domain.cst_today(),),
-    )
-    conn.commit()
-    conn.close()
-    commands_holdings.cmd_add_holding(
-        [
-            "000333",
-            "50",
-            "100",
-            "--date",
-            "2026-07-01",
-        ]
-    )
-
-    with pytest.raises(SystemExit) as exc:
-        commands_monitor.cmd_tier_config(["000333", "none", "none", "E"])
-
-    assert exc.value.code == 1
-    conn = db.get_db()
-    row = conn.execute(
-        """SELECT exemption_framework, exemption_declared_at
-           FROM holding_tier_state"""
-    ).fetchone()
-    conn.close()
-    assert row == (None, None)
-
-
-def test_holding_framework_migration_recomputes_stops_and_records_event():
-    commands_holdings.cmd_add_holding(["600036", "40", "100"])
-    commands_monitor.cmd_holding_framework(["600036", "B"])
-    conn = db.get_db()
-    row = conn.execute(
-        """SELECT framework, framework_confident, stop_loss_15, stop_loss_20
-           FROM holdings WHERE code='600036'"""
-    ).fetchone()
-    event = conn.execute(
-        """SELECT notes FROM holding_events
-           WHERE code='600036' AND event_type='adjustment'"""
-    ).fetchone()[0]
-    conn.close()
-    assert row == ("B银行", 1, 35.2, 32.8)
-    assert event == "framework:A通用->B银行"
-
-
-def test_structured_alert_deduplicates_and_resolves():
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100"])
-    first = [
-        "600036",
-        "yellow",
-        "holding_deterioration",
-        "nim_decline",
-        "2026-08-31",
-        "净息差下降",
-        "2026Q2同比下降",
-    ]
-    commands_monitor.cmd_alert_open(first)
-    commands_monitor.cmd_alert_open(first[:-1] + ["更新后的证据"])
-    conn = db.get_db()
-    assert conn.execute("SELECT COUNT(*) FROM holding_alerts").fetchone()[0] == 1
-    conn.close()
-    commands_monitor.cmd_alert_pending(["600036", "nim_decline", "等待下一季数据"])
-    commands_monitor.cmd_alert_resolve(["600036", "nim_decline", "净息差恢复"])
-    conn = db.get_db()
-    row = conn.execute(
-        "SELECT status, resolution_evidence FROM holding_alerts"
-    ).fetchone()
-    conn.close()
-    assert row == ("resolved", "净息差恢复")
 
 
 def test_portfolio_risk_no_holdings(capsys):
@@ -902,7 +242,7 @@ def test_portfolio_risk_no_holdings(capsys):
 
 def test_portfolio_risk_with_holdings(capsys, monkeypatch):
     """有持仓时正常输出持仓明细和框架分布"""
-    commands_holdings.cmd_add_holding(["600036", "45.0", "100", "--notes", "测试招行"])
+    seed_position("600036", 45.0, 100, notes="测试招行")
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -926,7 +266,7 @@ def test_portfolio_risk_with_holdings(capsys, monkeypatch):
 
 
 def test_portfolio_risk_labels_explicit_account_weight(capsys, monkeypatch):
-    commands_holdings.cmd_add_holding(["600036", "45.0", "100", "--notes", "测试招行"])
+    seed_position("600036", 45.0, 100, notes="测试招行")
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -947,8 +287,8 @@ def test_portfolio_risk_labels_explicit_account_weight(capsys, monkeypatch):
 
 
 def test_portfolio_risk_labels_partial_quote_weight_as_lower_bound(capsys, monkeypatch):
-    commands_holdings.cmd_add_holding(["600036", "45.0", "100", "--notes", "测试招行"])
-    commands_holdings.cmd_add_holding(["600900", "25.0", "100", "--notes", "测试长电"])
+    seed_position("600036", 45.0, 100, notes="测试招行")
+    seed_position("600900", 25.0, 100, notes="测试长电")
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -972,7 +312,7 @@ def test_portfolio_risk_labels_partial_quote_weight_as_lower_bound(capsys, monke
 
 
 def test_portfolio_risk_rejects_quote_without_date(capsys, monkeypatch):
-    commands_holdings.cmd_add_holding(["600036", "45.0", "100", "--notes", "测试招行"])
+    seed_position("600036", 45.0, 100, notes="测试招行")
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -997,7 +337,7 @@ def test_check_holdings_no_holdings(capsys):
 
 def test_check_holdings_price_fetch_fails(capsys, monkeypatch):
     """实时取价失败时显示'无实时价格'，不崩溃"""
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100", "--notes", "测试"])
+    seed_position("600036", 40.0, 100, notes="测试")
     mock_price_quotes(monkeypatch, lambda codes: {code: (None) for code in codes})
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
@@ -1006,9 +346,7 @@ def test_check_holdings_price_fetch_fails(capsys, monkeypatch):
 
 def test_check_holdings_normal(capsys, monkeypatch):
     """现价高于止损线时显示✅正常，不计入预警"""
-    commands_holdings.cmd_add_holding(
-        ["600036", "40.0", "100", "--notes", "测试"]
-    )  # 止损15%=34.0 20%=32.0
+    seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -1024,9 +362,7 @@ def test_check_holdings_normal(capsys, monkeypatch):
 
 def test_check_holdings_warns_below_15pct(capsys, monkeypatch):
     """现价跌破15%止损线但未到20%时触发⚠️黄色预警"""
-    commands_holdings.cmd_add_holding(
-        ["600036", "40.0", "100", "--notes", "测试"]
-    )  # 止损15%=34.0 20%=32.0
+    seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
     mock_price_quotes(
         monkeypatch,
@@ -1043,9 +379,7 @@ def test_check_holdings_warns_below_15pct(capsys, monkeypatch):
 
 def test_check_holdings_alerts_below_20pct(capsys, monkeypatch):
     """现价跌破20%止损线时触发🔴红色预警"""
-    commands_holdings.cmd_add_holding(
-        ["600036", "40.0", "100", "--notes", "测试"]
-    )  # 止损15%=34.0 20%=32.0
+    seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
     mock_price_quotes(
         monkeypatch,
@@ -1063,8 +397,8 @@ def test_check_holdings_alerts_below_20pct(capsys, monkeypatch):
 
 def test_check_holdings_skips_closed_positions(capsys, monkeypatch):
     """已平仓持仓不参与止损检查"""
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100", "--notes", "测试"])
-    commands_holdings.cmd_close_holding(["600036", "50.0"])
+    holding = seed_position("600036", 40.0, 100, notes="测试")
+    seed_event(holding, "sell", "2026-01-06", shares=100, price=50.0, close=True)
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -1092,9 +426,7 @@ class _FixedDatetime(datetime):
 
 def test_check_holdings_stale_quote_is_observation_only(capsys, monkeypatch):
     """非交易时段拿到上一交易日收盘价时，只输出观察提醒，不计入预警"""
-    commands_holdings.cmd_add_holding(
-        ["600036", "40.0", "100", "--notes", "测试"]
-    )  # 止损15%=34.0 20%=32.0
+    seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     _FixedDatetime._fixed = datetime(2026, 7, 2, 1, 30)  # 周四凌晨，非交易时段
     monkeypatch.setattr(domain, "datetime", _FixedDatetime)
     mock_price_quotes(
@@ -1117,7 +449,7 @@ def test_check_holdings_stale_quote_is_observation_only(capsys, monkeypatch):
 
 
 def test_check_holdings_unknown_quote_timestamp_is_not_actionable(capsys, monkeypatch):
-    commands_holdings.cmd_add_holding(["600036", "40.0", "100", "--notes", "测试"])
+    seed_position("600036", 40.0, 100, notes="测试")
     mock_price_quotes(
         monkeypatch,
         lambda codes: {
@@ -1136,9 +468,7 @@ def test_check_holdings_unknown_quote_timestamp_is_not_actionable(capsys, monkey
 
 def test_check_holdings_intraday_breach_uses_alarm_prefix(capsys, monkeypatch):
     """交易时段内跌破止损线，文案带 🚨 盘中已跌破 前缀，仍用"现价" """
-    commands_holdings.cmd_add_holding(
-        ["600036", "40.0", "100", "--notes", "测试"]
-    )  # 止损15%=34.0 20%=32.0
+    seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     _FixedDatetime._fixed = datetime(2026, 7, 2, 10, 0)  # 周四盘中
     monkeypatch.setattr(domain, "datetime", _FixedDatetime)
     mock_price_quotes(
@@ -1163,9 +493,7 @@ def test_check_holdings_after_hours_breach_uses_close_price_wording(
     capsys, monkeypatch
 ):
     """收盘后跌破止损线，文案用"收盘价"而不是"现价"，图标沿用历史 🔴/⚠️"""
-    commands_holdings.cmd_add_holding(
-        ["600036", "40.0", "100", "--notes", "测试"]
-    )  # 止损15%=34.0 20%=32.0
+    seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     _FixedDatetime._fixed = datetime(2026, 7, 2, 16, 0)  # 周四收盘后
     monkeypatch.setattr(domain, "datetime", _FixedDatetime)
     mock_price_quotes(

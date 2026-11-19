@@ -61,16 +61,7 @@ def test_dividend_check_prints_entry_command(isolated_cache_database, monkeypatc
     assert cache.main(["dividend-check"]) == 0
     out = capsys.readouterr().out
     assert "应收280.00元" in out
-    assert "corporate-action 000963 0.35 0 2026-09-17" in out
-
-
-def test_zero_tax_sale_warns_with_stamp_duty_estimate(isolated_cache_database, capsys):
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
-
-    _seed_holding(isolated_cache_database, "600036", shares=200)
-    argv = ["--confirm-write", "sell-holding", "600036", "42.88", "all"]
-    assert cache.main([*argv, "--date", "2026-10-13"]) == 0
-    assert "印花税（成交额×0.5‰≈4.29元）" in capsys.readouterr().out
+    assert "核对到账后经账本工具提交公司行动：每股现金0.35元 转增0 登记日2026-09-17" in out
 
 
 def test_recorded_bonus_split_is_matched_by_share_adjustment():
@@ -81,10 +72,9 @@ def test_recorded_bonus_split_is_matched_by_share_adjustment():
     assert commands_holdings.unrecorded_dividends(HUADONG_EVENTS, split, "2026-10-22")
 
 
-def test_changed_share_count_prompts_entitled_total_that_records_correctly(
+def test_changed_share_count_prompts_the_entitled_total(
     isolated_cache_database, monkeypatch, capsys
 ):
-    import sqlite3
 
     from policy_v0.monitor.test_monitor_snapshot import _seed_holding
 
@@ -101,15 +91,8 @@ def test_changed_share_count_prompts_entitled_total_that_records_correctly(
     monkeypatch.setattr(commands_holdings.domain, "cst_today", lambda: "2026-10-22")
     assert cache.main(["dividend-check"]) == 0
     out = capsys.readouterr().out
-    assert "corporate-action" not in out
-    command = out.split("用 a-stock-cache ", 1)[1].split("；", 1)[0].split()
-    # Keep monkeypatch active: undoing it would also drop the isolated database.
-    assert cache.main(command) == 0
-    with sqlite3.connect(isolated_cache_database) as conn:
-        cash = conn.execute(
-            "SELECT cash_amount FROM holding_events WHERE event_type='dividend'"
-        ).fetchone()[0]
-    assert cash == pytest.approx(350.0)
+    assert "提交公司行动" not in out
+    assert "核对到账后经账本工具提交分红 350.00元" in out
 
 
 def test_partially_recorded_cash_and_split_gives_no_auto_command(
@@ -129,4 +112,4 @@ def test_partially_recorded_cash_and_split_gives_no_auto_command(
     monkeypatch.setattr(commands_holdings.domain, "cst_today", lambda: "2026-10-22")
     assert cache.main(["dividend-check"]) == 0
     out = capsys.readouterr().out
-    assert "只记了一部分" in out and "a-stock-cache --confirm-write" not in out
+    assert "只记了一部分" in out and "经账本工具提交" not in out

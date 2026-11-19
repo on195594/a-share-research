@@ -1,9 +1,9 @@
 """
-补充测试覆盖：标记、持仓移除、缓存清理、行情前缀与持仓检查边界、观察名单排序。
+补充测试覆盖：持仓检查边界、观察名单排序与批量行情解析。
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,8 +12,7 @@ from a_share_research.policy.v0 import commands_admin, commands_holdings, db, do
 from policy_v0.helpers import (
     mock_price_quotes,
     record_valid_quote,
-    seed_indicator,
-    seed_qualitative_only,
+    seed_position,
     set_valid_fundamentals,
 )
 
@@ -42,122 +41,6 @@ def _insert_analysis(code: str, result: str = "结论", score: int | None = None
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestCleanupAndClear:
-    def test_cleanup_removes_expired_fundamentals(self, capsys, monkeypatch):
-        set_valid_fundamentals("600000", "浦发银行", "银行", {"pe": 5})
-        monkeypatch.setattr(domain, "is_expired", lambda *_: True)
-        commands_admin.cmd_cleanup()
-        out = capsys.readouterr().out
-        assert "浦发银行" in out
-
-        conn = db.get_db()
-        row = conn.execute(
-            "SELECT code FROM stock_fundamentals WHERE code='600000'"
-        ).fetchone()
-        conn.close()
-        assert row is None
-
-    def test_cleanup_retains_scheduler_window_and_removes_only_older_analysis(
-        self, capsys, monkeypatch
-    ):
-        now = domain.utc_now()
-        monkeypatch.setattr(domain, "utc_now", lambda: now)
-        conn = db.get_db()
-        conn.executemany(
-            "INSERT INTO analysis_results (code, date, result, created_at) VALUES (?,?,?,?)",
-            [
-                (
-                    "RECENT",
-                    (now - timedelta(days=1)).date().isoformat(),
-                    "调度窗口内",
-                    (now - timedelta(days=1)).isoformat(),
-                ),
-                (
-                    "BOUNDARY",
-                    (now - timedelta(days=14)).date().isoformat(),
-                    "调度窗口边界",
-                    (now - timedelta(days=14)).isoformat(),
-                ),
-                (
-                    "OLD",
-                    (now - timedelta(days=14, microseconds=1)).date().isoformat(),
-                    "调度窗口外",
-                    (now - timedelta(days=14, microseconds=1)).isoformat(),
-                ),
-            ],
-        )
-        conn.commit()
-        conn.close()
-
-        commands_admin.cmd_cleanup()
-        out = capsys.readouterr().out
-        assert "1 条历史分析结论" in out
-        conn = db.get_db()
-        remaining = {
-            row[0] for row in conn.execute("SELECT code FROM analysis_results")
-        }
-        conn.close()
-        assert remaining == {"RECENT", "BOUNDARY"}
-
-    def test_cleanup_no_expired_reports_clean(self, capsys):
-        set_valid_fundamentals("000001", "平安银行", "银行", {"pb": 0.7})
-        commands_admin.cmd_cleanup()
-        out = capsys.readouterr().out
-        assert "无过期" in out
-
-    def test_clear_all_removes_everything(self, capsys):
-        set_valid_fundamentals("600036", "招商银行", "银行", {"roe": 15})
-        _insert_analysis("600036")
-        record_valid_quote("600036")
-        seed_indicator("bond_yield_10y", 1.7, "2026-07-14")
-        seed_qualitative_only("601318", "中国平安", "保险")
-        commands_admin.cmd_clear([])
-        capsys.readouterr()
-
-        conn = db.get_db()
-        f = conn.execute("SELECT COUNT(*) FROM stock_fundamentals").fetchone()[0]
-        a = conn.execute("SELECT COUNT(*) FROM analysis_results").fetchone()[0]
-        q = conn.execute("SELECT COUNT(*) FROM quote_snapshots").fetchone()[0]
-        m = conn.execute("SELECT COUNT(*) FROM market_indicator_snapshots").fetchone()[
-            0
-        ]
-        qo = conn.execute(
-            "SELECT COUNT(*) FROM qualitative_only_securities"
-        ).fetchone()[0]
-        conn.close()
-        assert f == 0
-        assert a == 0
-        assert q == 0
-        assert m == 0
-        assert qo == 0
-
-    def test_clear_specific_code_leaves_others(self, capsys):
-        set_valid_fundamentals("600036", "招商银行", "银行", {"roe": 15})
-        set_valid_fundamentals("601318", "中国平安", "保险", {"pb": 1.2})
-        record_valid_quote("600036")
-        record_valid_quote("601318")
-        seed_qualitative_only("600036", "招商银行", "证券")
-        seed_qualitative_only("601318", "中国平安", "保险")
-        commands_admin.cmd_clear(["600036"])
-        capsys.readouterr()
-
-        conn = db.get_db()
-        cnt = conn.execute("SELECT COUNT(*) FROM stock_fundamentals").fetchone()[0]
-        row = conn.execute(
-            "SELECT code FROM stock_fundamentals WHERE code='601318'"
-        ).fetchone()
-        quotes = {item[0] for item in conn.execute("SELECT code FROM quote_snapshots")}
-        qualitative = {
-            item[0]
-            for item in conn.execute("SELECT code FROM qualitative_only_securities")
-        }
-        conn.close()
-        assert cnt == 1
-        assert row is not None
-        assert quotes == {"601318"}
-        assert qualitative == {"601318"}
-
-
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -166,7 +49,7 @@ class TestCheckHoldingsBoundary:
 
     def _add_holding_cost40(self):
         # cost=40 → sl15=34.000, sl20=32.000
-        commands_holdings.cmd_add_holding(["600036", "40.0", "100", "--notes", "测试"])
+        seed_position("600036", 40.0, 100, notes="测试")
 
     def test_price_exactly_at_15pct_stop_triggers_yellow(self, capsys, monkeypatch):
         self._add_holding_cost40()
@@ -360,18 +243,3 @@ class TestFetchCurrentPrice:
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestCloseHoldingCustomDate:
-    def test_custom_exit_date_stored(self, capsys):
-        commands_holdings.cmd_add_holding(
-            ["000001", "10.0", "100", "--date", "2025-12-01"]
-        )
-        capsys.readouterr()
-        commands_holdings.cmd_close_holding(["000001", "12.0", "2025-12-31"])
-        capsys.readouterr()
-
-        conn = db.get_db()
-        row = conn.execute(
-            "SELECT exit_date FROM holdings WHERE code='000001'"
-        ).fetchone()
-        conn.close()
-        assert row[0] == "2025-12-31"

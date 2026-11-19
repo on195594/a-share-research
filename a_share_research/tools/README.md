@@ -39,7 +39,7 @@ python scripts/ashare.py call policy.v0.read --json '{"command":"holdings"}'
 
 `GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 
-政策命令使用固定参数列表的子进程，不接收 shell、任意 argv 或环境参数；超时 30 秒，原 stdout、stderr 与退出码保留在结果中。HTTP 成功表示命令已执行，调用者还须检查 `exit_code`。当前不开放 R1 缓存刷新或任何 W1 写入。只读调用以 SQLite `mode=ro` 打开数据库；显式开启的写工具按请求使用 `mode=rw`。
+政策命令使用固定参数列表的子进程，不接收 shell、任意 argv 或环境参数；超时 30 秒，原 stdout、stderr 与退出码保留在结果中。HTTP 成功表示命令已执行，调用者还须检查 `exit_code`。当前不开放 R1 缓存刷新；v0 已无写命令（2026-11-19 删除），账户写入走 `account.submit`。只读调用以 SQLite `mode=ro` 打开数据库；显式开启的写工具按请求使用 `mode=rw`。
 
 `/health` 只表示进程存活。`/ready` 只读核对数据库版本、公共表及已启用工具需要的表，返回 database_ready/schema_version/paused/in_flight；暂停或数据库未就绪时为 503，不创建或迁移库。
 

@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from a_share_research.policy.v0 import cache
+from policy_v0.helpers import seed_event, seed_position
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0/guide"
@@ -13,21 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2] / "a_share_research/policy/v0
 def _add_holding(tmp_path, monkeypatch, capsys, *, notes: str = "long private note"):
     database = tmp_path / "cache.db"
     monkeypatch.setenv("POLICY_V0_DB", str(database))
-    assert (
-        cache.main(
-            [
-                "--confirm-write",
-                "add-holding",
-                "600036",
-                "10",
-                "100",
-                "--notes",
-                notes,
-            ]
-        )
-        == 0
-    )
-    capsys.readouterr()
+    seed_position("600036", 10, 100, notes=notes)
     return database
 
 
@@ -52,7 +39,7 @@ def test_holdings_json_is_compact_and_omits_notes(
             "buy_date": payload[0]["buy_date"],
             "buy_score": None,
             "framework": "A通用",
-            "framework_confident": False,
+            "framework_confident": True,
             "initial_shares": 100,
             "main_entry_date": payload[0]["main_entry_date"],
             "stop_loss_15": 8.5,
@@ -79,9 +66,8 @@ def test_holdings_active_only_excludes_closed_history(
     tmp_path, monkeypatch, capsys
 ) -> None:
     _add_holding(tmp_path, monkeypatch, capsys)
-    assert cache.main(["--confirm-write", "add-holding", "601088", "20", "200"]) == 0
-    assert cache.main(["--confirm-write", "sell-holding", "601088", "21", "all"]) == 0
-    capsys.readouterr()
+    closed = seed_position("601088", 20, 200)
+    seed_event(closed, "sell", "2026-01-06", shares=200, price=21, close=True)
 
     assert cache.main(["holdings", "--compact", "--json", "--active-only"]) == 0
 
@@ -95,9 +81,8 @@ def test_holdings_active_only_returns_reopened_lifecycle(
     tmp_path, monkeypatch, capsys
 ) -> None:
     _add_holding(tmp_path, monkeypatch, capsys)
-    assert cache.main(["--confirm-write", "sell-holding", "600036", "51", "all"]) == 0
-    assert cache.main(["--confirm-write", "add-holding", "600036", "52", "100"]) == 0
-    capsys.readouterr()
+    seed_event(1, "sell", "2026-01-06", shares=100, price=51, close=True)
+    seed_position("600036", 52, 100, day="2026-01-07")
 
     assert (
         cache.main(["holdings", "600036", "--compact", "--json", "--active-only"]) == 0
@@ -154,21 +139,13 @@ def test_alerts_active_json_excludes_resolved(tmp_path, monkeypatch, capsys) -> 
 def test_l3_active_json_preserves_legacy_boundary(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    _add_holding(tmp_path, monkeypatch, capsys)
-    assert (
-        cache.main(
-            [
-                "--confirm-write",
-                "l3-add",
-                "600036",
-                "original",
-                "capital ratio below threshold",
-                "review only",
-            ]
+    database = _add_holding(tmp_path, monkeypatch, capsys)
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            """INSERT INTO holding_l3_conditions
+               (holding_id, condition_text, temporary_exit_rule, created_at, updated_at)
+               VALUES (1, 'capital ratio below threshold', 'review only', 'now', 'now')"""
         )
-        == 0
-    )
-    capsys.readouterr()
 
     assert cache.main(["l3-list", "600036", "--active", "--json"]) == 0
 

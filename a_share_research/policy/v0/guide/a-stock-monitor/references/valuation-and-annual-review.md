@@ -1,6 +1,6 @@
 # 估值退出与年度复查
 
-用于 Research 提醒转述、框架估值退出、技术复查候选和满12个月复查。主 `SKILL.md` 的 W1、升级路由和安全边界始终优先；动作优先级以 runtime 输出与 [决策表](decision-table.json) 为准；本 reference 不形成第二套卖出授权。
+用于 Research 提醒转述、框架估值退出、技术复查候选和满12个月复查。主 `SKILL.md` 的写入边界、升级路由和安全边界始终优先；动作优先级以 runtime 输出与 [决策表](decision-table.json) 为准；本 reference 不形成第二套卖出授权。
 
 ## Research 研究提醒
 
@@ -47,8 +47,7 @@ Research 不可用、未配置或跳过时保留原动作状态；组合复盘/�
 - 收盘价较过去60个交易日最高收盘回落>20%。
 
 **卖出后必须记录回报**：
-卖出成交后使用 `sell-holding` 写入实际价格、股数、费用与税费；不得只调用
-`update-return` 留下未关闭的虚假持仓。
+卖出成交后经账本工具写入实际价格、股数、费用与税费。
 
 ---
 
@@ -59,7 +58,7 @@ Research 不可用、未配置或跳过时保留原动作状态；组合复盘/�
 不得选择结论A。
 
 **⚠️ 主力入场日期检查**：读取 `holdings.buy_date` 与结构化
-`holdings.main_entry_date`。`buy-holding` 会保留最初 buy_date，并在单次或累计新增
+`holdings.main_entry_date`。账本会保留最初 buy_date，并在单次或累计新增
 投入超过主力基准成本50%时自动重置 main_entry_date。若主力入场未满12个月，须分别
 评估原始部分和新增部分，不得把原始买入时点的结论套用于全部仓位。
 

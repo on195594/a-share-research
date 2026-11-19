@@ -27,7 +27,7 @@ a-stock-cache monitor-snapshot --json
 
 `monitor-snapshot --json` 输出是 `monitor-v1` machine contract；状态、动作、缺口和停止条件只从结构化字段读取，不从自然语言重建。
 
-本次覆盖总资产时附 `--portfolio-value <账户总资产>`，并使用同一份证据已确认的 `--account-scope <账户范围>` 与可选 `--portfolio-value-as-of`；显式金额不混用旧记录的范围或时点。政策要求范围但本次及存储均未确认时，仍取无范围的持仓层快照并请求补充，不从政策文件反推账户；该模式不应用政策，权重与风险预算为空，不授予新增或加仓权限。可附用户提供的 `--policy-file`，不得生成政策或确认引用。资产估值时点须用户或截图明确确认，格式 `YYYY-MM-DDTHH:MM:SS+08:00`；手机设备状态栏时间不能替代资产估值时间，缺失时标未知，不反复催问，不以记录时间补造。展示 `risk_policy` 逐字段来源及分母时点/范围；`denominator_requires_review=true` 时即使 clean 也不授予加仓权限。2%/8% 是兼容默认，不是个人回撤目标；非法政策不得静默回退，确认元数据不是 W1 令牌。
+本次覆盖总资产时附 `--portfolio-value <账户总资产>`，并使用同一份证据已确认的 `--account-scope <账户范围>` 与可选 `--portfolio-value-as-of`；显式金额不混用旧记录的范围或时点。政策要求范围但本次及存储均未确认时，仍取无范围的持仓层快照并请求补充，不从政策文件反推账户；该模式不应用政策，权重与风险预算为空，不授予新增或加仓权限。可附用户提供的 `--policy-file`，不得生成政策或确认引用。资产估值时点须用户或截图明确确认，格式 `YYYY-MM-DDTHH:MM:SS+08:00`；手机设备状态栏时间不能替代资产估值时间，缺失时标未知，不反复催问，不以记录时间补造。展示 `risk_policy` 逐字段来源及分母时点/范围；`denominator_requires_review=true` 时即使 clean 也不授予加仓权限。2%/8% 是兼容默认，不是个人回撤目标；非法政策不得静默回退，确认元数据不是写入授权。
 
 通过宿主的命令执行工具调用 runtime CLI，保留 stdout、stderr 和退出码；不要在有硬超时的临时代码内核中包裹整轮监控。
 
@@ -52,7 +52,7 @@ a-stock-cache monitor-snapshot --json
 | 账户差异、已成交补账或状态更新 | `references/data-operations.md` |
 | `risk_budget_exceeded`、组合复盘/换仓比较、任何加仓或用户指定数量的假设比较 | `references/portfolio-risk.md` |
 
-`risk_budget_exceeded` 的 `code=null` 表示组合级只读复核：仅用本轮汇总、持仓和 `data_gaps`，不重查价、不心算补全风险、不调用 W1。兼容默认/显式覆盖不等于个人预算，禁止改参数绕过超限；超预算不能 clean/no_action，已有合法交易候选不降级。超限原因只引用明细中的 principal/unrealized_gain 与 `denominator_components`；快照未给出的卖出标的或股数不得提出。
+`risk_budget_exceeded` 的 `code=null` 表示组合级只读复核：仅用本轮汇总、持仓和 `data_gaps`，不重查价、不心算补全风险、不调用写入工具。兼容默认/显式覆盖不等于个人预算，禁止改参数绕过超限；超预算不能 clean/no_action，已有合法交易候选不降级。超限原因只引用明细中的 principal/unrealized_gain 与 `denominator_components`；快照未给出的卖出标的或股数不得提出。
 
 `research_thesis_review` 不冻结、不产生交易候选、不自动修改 L3；它与其他升级项一样结束干净快速路径（`action_status=review_candidate`），按此升级项复核公开证据。`risk_budget_exceeded` 保持原规则，仍属于四类理由中的“风险超限”。
 
@@ -75,12 +75,12 @@ a-stock-cache monitor-snapshot --json
 - 持有逻辑、现价新增价值、账户风险贡献分开；不能新增不等于必须卖出，未确认退出也不等于可以加仓。不得仅因浮盈或“防御股”标签确定卖出顺序。
 - 账户、证据和用户目标未变时，追问不改变行动结论，不凭空增加价格或股数；发现前次错误应明确纠正并解释依据，不能为保持一致延续错误。
 - 缺口逐项说明缺什么、由系统还是用户补、影响哪项判断、补齐后复核什么及复核时点/事件；成本对账完成不自动解除财务门禁。能自行取得的公开证据不转嫁用户，已提供材料不重复索取；追问未重述本会话已有材料或已确认的成交事实，不等于缺失；不可恢复时说明具体缺项。
-- **待确认写入**：列出拟议 W1 的完整 `account.cycle_analysis.update` 变更，填入实际 ID、验证日期、结论/证据与复核日期：L3 用 `kind: "l3"`（status、as_of、evidence、next_review_date、evidence_cadence），预警解除用 `kind: "alert"`、`status: "resolved"`，续期以原 reason_code 用 `kind: "alert_open"`；先以 `account.cycle_analysis.current` 取 expected_version 与当前状态。仅列出，不执行，无拟议写入则写“无”。
+- **待确认写入**：列出拟议写入的完整 `account.cycle_analysis.update` 变更，填入实际 ID、验证日期、结论/证据与复核日期：L3 用 `kind: "l3"`（status、as_of、evidence、next_review_date、evidence_cadence），预警解除用 `kind: "alert"`、`status: "resolved"`，续期以原 reason_code 用 `kind: "alert_open"`；先以 `account.cycle_analysis.current` 取 expected_version 与当前状态。仅列出，不执行，无拟议写入则写“无”。
 
 ## 安全边界
 
 - 账户状态、alerts/L3/Tier、最终动作及交易授权始终由父级拥有；支持任务只提供公开证据。
 - 数据缺失、过期、冲突、不可交易或 runtime 失败时 fail-closed，不得补造触发、股数或成交。
-- 持仓、交易账本、预警、L3 与 Tier 写入均属 W1。仅在用户确认具体动作后追加全局 `--confirm-write`；建议、授权、申报与成交必须分开。用户请求的 W1 写入尚待具体确认时，整体任务为待确认（结构化状态 `blocked`），不能因快照 `data_status=complete` 标记任务完成；保留 runtime 的 `action_status`。
-- 冻结新增风险仅约束拟议决策与建议授权，不阻断用户确认的已成交事实记账；即使实际买入造成超预算，也按原 W1 门禁记录并报告异常，不拒记、不改写成交。预算只读复核的 `requires_user_confirmation=false` 不授予任何写权限。
+- 持仓、交易账本、预警、L3 与 Tier 写入只走账本工具（`account.submit`、`account.cycle_analysis.update`），仅在用户确认具体动作后提交；建议、授权、申报与成交必须分开。用户请求的写入尚待具体确认时，整体任务为待确认（结构化状态 `blocked`），不能因快照 `data_status=complete` 标记任务完成；保留 runtime 的 `action_status`。
+- 冻结新增风险仅约束拟议决策与建议授权，不阻断用户确认的已成交事实记账；即使实际买入造成超预算，也按用户确认记录并报告异常，不拒记、不改写成交。预算只读复核的 `requires_user_confirmation=false` 不授予任何写权限。
 - 本 Skill 基于公开信息和用户提供的账户状态，不构成投资建议。

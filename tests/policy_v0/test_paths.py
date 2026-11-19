@@ -73,5 +73,4 @@ def test_relative_data_directory_is_refused_instead_of_starting_a_second_ledger(
         paths.cache_db_path()
     assert cache.main(["holdings"]) == 1
     assert "运行配置不可用" in capsys.readouterr().err
-    assert cache.main(["--confirm-write", "add-holding", "600036", "40", "100"]) == 1
     assert list(tmp_path.iterdir()) == []

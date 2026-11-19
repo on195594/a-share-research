@@ -49,7 +49,7 @@ def _seed_holding(
                 code,
                 f"fixture-{code}",
                 shares,
-                domain.utc_now_iso(),
+                domain.utc_now().isoformat(),
                 110 if closed else None,
                 "2026-06-01" if closed else None,
                 shares,
@@ -60,13 +60,13 @@ def _seed_holding(
             conn.execute(
                 """INSERT INTO holding_tier_state (holding_id, updated_at)
                    VALUES (?, ?)""",
-                (row_id, domain.utc_now_iso()),
+                (row_id, domain.utc_now().isoformat()),
             )
             thesis_id = conn.execute(
                 """INSERT INTO holding_thesis_versions
                    (holding_id, version, l1, l2, rewrite_reason, status, created_at)
                    VALUES (?, 1, 'quality', 'timing', 'fixture', 'active', ?)""",
-                (row_id, domain.utc_now_iso()),
+                (row_id, domain.utc_now().isoformat()),
             ).lastrowid
             conn.execute(
                 """INSERT INTO holding_l3_conditions
@@ -84,8 +84,8 @@ def _seed_holding(
                     domain.cst_today(),
                     next_review,
                     l3_action,
-                    domain.utc_now_iso(),
-                    domain.utc_now_iso(),
+                    domain.utc_now().isoformat(),
+                    domain.utc_now().isoformat(),
                 ),
             )
         conn.commit()
@@ -133,7 +133,7 @@ def test_local_snapshot_keeps_one_wal_version(
                        VALUES (?, '600036', 'yellow', 'unverified',
                                'technical_review', 'new version', 'active',
                                'fixture', ?, ?)""",
-                    (holding_id, domain.utc_now_iso(), domain.utc_now_iso()),
+                    (holding_id, domain.utc_now().isoformat(), domain.utc_now().isoformat()),
                 )
                 writer.commit()
                 updated.append(True)
@@ -361,7 +361,7 @@ def test_escalation_paths_are_stable_and_fail_closed(
                     evidence, opened_at, review_due, updated_at)
                    VALUES (1, '600036', 'yellow', 'unverified', 'fixture-alert',
                            'fixture', 'active', 'fixture', ?, '2000-01-01', ?)""",
-                (domain.utc_now_iso(), domain.utc_now_iso()),
+                (domain.utc_now().isoformat(), domain.utc_now().isoformat()),
             )
 
     def fetch(codes: list[str]) -> dict:
@@ -601,8 +601,8 @@ def test_frozen_five_holding_replay_freezes_new_risk_without_trade_candidate(
                 (
                     holding_ids[item["code"]],
                     item["code"],
-                    domain.utc_now_iso(),
-                    domain.utc_now_iso(),
+                    domain.utc_now().isoformat(),
+                    domain.utc_now().isoformat(),
                 )
                 for item in due_items
             ],

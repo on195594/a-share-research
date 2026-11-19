@@ -38,7 +38,7 @@ def bundle(tmp_path, monkeypatch):
     monkeypatch.delenv('POLICY_V0_ANALYSIS_SHADOW', raising=False)
     monkeypatch.setattr(domain, 'cst_now', lambda: datetime.fromisoformat(NOW))
     monkeypatch.setattr(domain, 'cst_today', lambda: '2026-10-22')
-    monkeypatch.setattr(domain, 'utc_now_iso', lambda: '2026-10-22T07:30:05+00:00')
+    monkeypatch.setattr(domain, 'utc_now', lambda: datetime.fromisoformat('2026-10-22T07:30:05+00:00'))
     _seed_holding(path, '000963', shares=800)
     local = commands_monitor._load_monitor_local_snapshot()
     row = local['holdings'][0]

@@ -4,7 +4,7 @@
 
 只读论点卡命令：`a-stock-cache research cards` 读取扫描范围内的卡片与无卡代码，`a-stock-cache research card <六位代码>` 读取单家公司卡片；二者不会发起研究。持仓监控已在一次 `monitor-snapshot` 中读取卡片，直接复用 `research` 与 `review_prompts`，不重复调用；卡片待复核时按其 `report_id` 读取相关报告并核对 `pending_events`，区间与回报暂停解读。`--no-research` 可跳过快照内的卡片读取，服务不可用不替代或改变账户门禁。
 
-卡片与报告的 `open_questions` 是复核明确留下的未答部分（含 `prior_status[i]`）；有效或 `passed=true` 不代表问题已经全部回答。卡片 `valuation_calc.boundary` 是报告形成时的边界，`current.valuation.boundary` 是当前滚动边界，两者不得互相覆盖。原样保留提醒 `detail` 中带代码/报告 ID 的“Research 风险提示”及具体未答问题；组合复盘即使无新提醒，也从现有嵌套卡片保留这些限制。不在 Skill 重算边界。旧卡缺字段或 null 均不能当作无风险，false 不代表立场已证明稳定；空问题数组仅表示没有记录的未答问题。警示不改变机会条件、有效状态、首批上限、账户风险门或 W1 权限，不默认等待、不自动付费补研。
+卡片与报告的 `open_questions` 是复核明确留下的未答部分（含 `prior_status[i]`）；有效或 `passed=true` 不代表问题已经全部回答。卡片 `valuation_calc.boundary` 是报告形成时的边界，`current.valuation.boundary` 是当前滚动边界，两者不得互相覆盖。原样保留提醒 `detail` 中带代码/报告 ID 的“Research 风险提示”及具体未答问题；组合复盘即使无新提醒，也从现有嵌套卡片保留这些限制。不在 Skill 重算边界。旧卡缺字段或 null 均不能当作无风险，false 不代表立场已证明稳定；空问题数组仅表示没有记录的未答问题。警示不改变机会条件、有效状态、首批上限、账户风险门或写入权限，不默认等待、不自动付费补研。
 
 HTTP 401 时停止重试，交由 owner 修复凭据及环境覆盖；恢复后沿用原 request-id。日常研究不签发或轮换 Key，不取得网页登录或账户写权限；配置和轮换由项目运维文档维护。
 
@@ -21,6 +21,6 @@ HTTP 401 时停止重试，交由 owner 修复凭据及环境覆盖；恢复后�
 4. 发现具体错误时：`a-stock-cache research feedback <报告ID> --location 'risks[0]' --text '<可核查的纠错说明>' --request-id '<唯一编号>'`。位置用报告实际 `summary` 或 `answer/risks/business/financial/methods/checkpoints` 数组下标。反馈产生关联的新报告，不覆盖旧文；先查新结果，不能把反馈本身当成已验证结论。`methods` 是带出处和适用边界的方法线索，跨公司使用仍需核查；针对 `methods[i]` 的成功核查会替换该条历史方法，空列表可撤下失效方法，失败不生效。
 5. 聊天渠道在证据齐备后只交付一次合并答案；进度说明不得包含结论。回答保留报告 ID、源文档页码/引文或表格期间，说明哪些旧判断仍成立、哪些被新证据推翻、尚缺什么以及下一项取证的时间或触发条件。没有可比基线或没有增量就明确说明，不另建持仓状态、不自动更新 L3。不把旧报告当成原始证据，不因 `passed=true` 宣称投资结论正确。
 
-研究方法、提示词和 A—F 框架均可提出反证或替代假设；公开证据问题不以完成评分为前提。服务不授予投资政策变更、交易或 W1 权限，也不替代 monitor-v1。
+研究方法、提示词和 A—F 框架均可提出反证或替代假设；公开证据问题不以完成评分为前提。服务不授予投资政策变更、交易或写入权限，也不替代 monitor-v1。
 
 新 Research 立场只取现在分批/等价格/回避。`research` 行的 `stance_add_trigger` 投影新卡 `stance_calc.add_trigger` 或旧等证据卡 `stance_calc.trigger`，不迁移旧卡。两者均按“现在分批 + 参考加仓检查点”解读，不阻止首批，动作上限为 `position-size.tranches[0]`；不得反复以首批名义追加。目标期间披露达标且更新的有效研究确认后，才按立场加后续批次；未达到列复核项，复核是否减仓，未披露不当作未达到。不自行重算行业/宏观/商品数据。硬否决、incomplete 对应缺口、组合风险预算与账户板块权限照常适用。

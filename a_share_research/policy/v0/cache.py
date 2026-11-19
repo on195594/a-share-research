@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A股投研数据缓存 CLI；命令和参数以生成的 --help 为准。
 
-W1 命令必须在子命令前提供 --confirm-write，否则返回 3 且不打开写事务。
-R0 只读；R1 可读取外部数据并刷新缓存，但不授权投资状态写入。
+R0 只读；R1 可读取外部数据并刷新缓存，但不授权投资状态写入。账户写入只走账本工具，
+v0 的记账写命令已于 2026-11-19 删除。
 """
 
 import argparse
@@ -24,29 +24,12 @@ COMMANDS = {
     "research": research_client.cmd_research,
     "portfolio-scenario": portfolio_scenario.cmd_portfolio_scenario,
     "position-size": position_size.cmd_position_size,
-    "alert-open": commands_monitor.cmd_alert_open,
-    "alert-pending": commands_monitor.cmd_alert_pending,
-    "alert-resolve": commands_monitor.cmd_alert_resolve,
     "alerts": commands_monitor.cmd_alerts,
-    "l3-add": commands_monitor.cmd_l3_add,
-    "l3-update": commands_monitor.cmd_l3_update,
     "l3-list": commands_monitor.cmd_l3_list,
-    "thesis-rewrite": commands_monitor.cmd_thesis_rewrite,
-    "tier-config": commands_monitor.cmd_tier_config,
-    "tier-update": commands_monitor.cmd_tier_update,
-    "holding-framework": commands_monitor.cmd_holding_framework,
-    "add-holding": commands_holdings.cmd_add_holding,
-    "buy-holding": commands_holdings.cmd_buy_holding,
-    "sell-holding": commands_holdings.cmd_sell_holding,
-    "record-dividend": commands_holdings.cmd_record_dividend,
-    "corporate-action": commands_holdings.cmd_corporate_action,
-    "close-holding": commands_holdings.cmd_close_holding,
-    "retro-add": commands_holdings.cmd_retro_add,
     "retro-pending": commands_holdings.cmd_retro_pending,
     "retro-stats": commands_holdings.cmd_retro_stats,
     "retro-outliers": commands_holdings.cmd_retro_outliers,
     "holdings": commands_holdings.cmd_holdings,
-    "update-return": commands_holdings.cmd_update_return,
     "position-return": commands_holdings.cmd_position_return,
     "dividend-check": commands_holdings.cmd_dividend_check,
     "benchmark-report": commands_holdings.cmd_benchmark_report,
@@ -58,13 +41,10 @@ COMMANDS = {
     "daily-brief": commands_monitor.cmd_daily_brief,
     "watchlist": commands_admin.cmd_watchlist,
     "list": commands_admin.cmd_list,
-    "cleanup": commands_admin.cmd_cleanup,
-    "clear": commands_admin.cmd_clear,
 }
 
-# One source of truth for the side-effect boundary.  R0 is local read-only,
-# R1 may refresh/read external data or cache it, and W1 changes investment
-# state.  Unknown commands are rejected rather than silently treated as safe.
+# One source of truth for the side-effect boundary.  R0 is local read-only and
+# R1 may refresh/read external data or cache it.  Unknown commands are rejected.
 COMMAND_CLASSIFICATION = {
     **dict.fromkeys(
         (
@@ -96,30 +76,6 @@ COMMAND_CLASSIFICATION = {
         ),
         "R1",
     ),
-    **dict.fromkeys(
-        (
-            "alert-open",
-            "alert-pending",
-            "alert-resolve",
-            "l3-add",
-            "l3-update",
-            "thesis-rewrite",
-            "tier-config",
-            "tier-update",
-            "holding-framework",
-            "add-holding",
-            "buy-holding",
-            "sell-holding",
-            "record-dividend",
-            "corporate-action",
-            "close-holding",
-            "retro-add",
-            "update-return",
-            "cleanup",
-            "clear",
-        ),
-        "W1",
-    ),
 }
 
 
@@ -133,53 +89,12 @@ _CLI_POSITIONALS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "research": (),
     "portfolio-scenario": (),
     "position-size": (),
-    "alert-open": (
-        ("代码", None),
-        ("级别", None),
-        ("类别", None),
-        ("reason_code", None),
-        ("复核日期", None),
-        ("原因", None),
-        ("证据", "?"),
-    ),
-    "alert-pending": (("代码", None), ("reason_code", None), ("说明", None)),
-    "alert-resolve": (("代码", None), ("reason_code", None), ("证据", None)),
     "alerts": (("代码", None),),
-    "l3-add": (("代码", None), ("来源", None), ("条件", None), ("临时规则", "?")),
-    "l3-update": (
-        ("条件id", None),
-        ("状态", None),
-        ("as-of", None),
-        ("证据", None),
-        ("下次复核", "?"),
-    ),
     "l3-list": (("代码", None),),
-    "thesis-rewrite": (("代码", None),),
-    "tier-config": (
-        ("代码", None),
-        ("路径", None),
-        ("目标涨幅", "?"),
-        ("豁免框架", "?"),
-    ),
-    "tier-update": (("代码", None), ("Tier", None), ("状态", None)),
-    "holding-framework": (("代码", None), ("框架", None)),
-    "add-holding": (("代码", None), ("成交价", None), ("股数", "?")),
-    "buy-holding": (("代码", None), ("买入价", None), ("股数", None)),
-    "sell-holding": (("代码", None), ("卖出价", None), ("股数或all", None)),
-    "record-dividend": (("代码", None), ("现金总额", None), ("日期", "?")),
-    "corporate-action": (
-        ("代码", None),
-        ("每股现金分红", None),
-        ("转增比例", None),
-        ("日期", "?"),
-    ),
-    "close-holding": (("代码", None), ("卖出价", None), ("日期", "?")),
-    "retro-add": (("代码", None), ("error_tags", None)),
     "retro-pending": (),
     "retro-stats": (("框架", "?"),),
     "retro-outliers": (),
     "holdings": (("代码", "?"),),
-    "update-return": (("代码", None), ("回报率", None)),
     "position-return": (("代码", None), ("当前价", "?")),
     "dividend-check": (("代码", "?"),),
     "benchmark-report": (),
@@ -191,17 +106,9 @@ _CLI_POSITIONALS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "monitor-snapshot": (),
     "watchlist": (),
     "list": (),
-    "cleanup": (),
-    "clear": (("代码", "?"),),
 }
 
 _CLI_VALUE_OPTIONS = {
-    "l3-add": ("--evidence-cadence",),
-    "l3-update": ("--evidence-cadence",),
-    "add-holding": ("--notes", "--fee", "--date", "--report-id"),
-    "buy-holding": ("--fee", "--date", "--report-id"),
-    "sell-holding": ("--fee", "--tax", "--date", "--report-id"),
-    "retro-add": ("--note", "--thesis", "--gap"),
     "retro-outliers": ("--loss",),
     "portfolio-risk": (
         "--portfolio-value",
@@ -228,15 +135,6 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser = _CLIParser(
         prog="a-stock-cache",
         description="A股投研数据缓存管理器",
-        epilog="W1（需 --confirm-write）："
-        + ", ".join(
-            name for name, level in COMMAND_CLASSIFICATION.items() if level == "W1"
-        ),
-    )
-    parser.add_argument(
-        "--confirm-write",
-        action="store_true",
-        help="确认执行会修改本地投资状态的 W1 子命令（必须位于子命令前）",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<子命令>")
     for command, positionals in _CLI_POSITIONALS.items():
@@ -287,15 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args:
         parser.print_help()
         return 0
-    confirm_write = bool(args and args[0] == "--confirm-write")
-    if confirm_write:
-        args.pop(0)
-    if not confirm_write and args and args[0].startswith("--") and args != ["--help"]:
-        print("错误：仅支持位于子命令前的全局 --confirm-write", file=sys.stderr)
+    if args[0].startswith("--") and args != ["--help"]:
+        print("错误：不支持全局选项", file=sys.stderr)
         return 2
-    if not args:
-        parser.print_help()
-        return 0
     if args == ["--help"]:
         try:
             parser.parse_args(args)
@@ -312,13 +204,6 @@ def main(argv: list[str] | None = None) -> int:
             parser.parse_args(args)
         except SystemExit as exc:
             return int(exc.code or 0)
-    if classification == "W1" and not confirm_write:
-        print(
-            f"需要明确确认：{command} 将修改本地投资状态；"
-            "请在子命令前提供 --confirm-write。",
-            file=sys.stderr,
-        )
-        return 3
     try:
         parser.parse_args(args)
     except SystemExit as exc:

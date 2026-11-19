@@ -385,34 +385,6 @@ def test_risk_commands_do_not_write_migrate_or_network(
         assert list(conn.iterdump()) == before
 
 
-def test_confirmed_executed_buy_is_not_blocked_by_budget(
-    isolated_cache_database, monkeypatch, capsys
-):
-    _inputs(isolated_cache_database, shares=101)
-    mock_price_quotes(monkeypatch, _quotes)
-    assert (
-        _run(capsys, ["--portfolio-value", "100000"])[1]["account"][
-            "risk_budget_status"
-        ]
-        == "over_budget"
-    )
-    args = ["buy-holding", "600000", "100", "100", "--date", domain.cst_today()]
-    assert cache.main(args) == 3
-    assert cache.main(["--confirm-write", *args]) == 0
-    with sqlite3.connect(isolated_cache_database) as conn:
-        assert conn.execute("SELECT shares FROM holdings").fetchone() == (201,)
-        assert conn.execute(
-            "SELECT shares FROM holding_events WHERE event_type='buy'"
-        ).fetchone() == (100,)
-    capsys.readouterr()
-    assert (
-        _run(capsys, ["--portfolio-value", "100000"])[1]["account"][
-            "risk_budget_status"
-        ]
-        == "over_budget"
-    )
-
-
 @pytest.mark.parametrize(
     "field,value",
     [

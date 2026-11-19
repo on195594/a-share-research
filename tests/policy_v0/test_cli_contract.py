@@ -9,85 +9,12 @@ CLI_ARGUMENT_CASES = {
         ["reports", "600519"],
         ["report", "9", "--compact"],
     ),
-    "alert-open": (
-        ["600000", "yellow", "unverified", "code", "none", "原因"],
-        ["600000", "yellow", "unverified", "code", "none", "原因", "证据"],
-    ),
-    "alert-pending": (["600000", "code", "说明"], ["600000", "code", "说明"]),
-    "alert-resolve": (["600000", "code", "证据"], ["600000", "code", "证据"]),
     "alerts": (["600000"], ["600000", "--active", "--json"]),
-    "l3-add": (
-        ["600000", "original", "条件"],
-        ["600000", "original", "条件", "临时规则"],
-    ),
-    "l3-update": (
-        ["1", "pending", "2026-08-11", "证据"],
-        ["1", "pending", "2026-08-11", "证据", "2026-08-12"],
-    ),
     "l3-list": (["600000"], ["600000", "--active", "--json"]),
-    "thesis-rewrite": (["600000"], ["600000"]),
-    "tier-config": (["600000", "none"], ["600000", "none", "none", "none"]),
-    "tier-update": (
-        ["600000", "tier1", "pending"],
-        ["600000", "tier1", "pending"],
-    ),
-    "holding-framework": (["600000", "A"], ["600000", "A"]),
-    "add-holding": (
-        ["600000", "10"],
-        [
-            "600000",
-            "10",
-            "100",
-            "--notes",
-            "备注",
-            "--fee",
-            "1",
-            "--date",
-            "2026-08-11",
-        ],
-    ),
-    "buy-holding": (
-        ["600000", "10", "100"],
-        ["600000", "10", "100", "--fee", "1", "--date", "2026-08-11"],
-    ),
-    "sell-holding": (
-        ["600000", "10", "all"],
-        [
-            "600000",
-            "10",
-            "all",
-            "--fee",
-            "1",
-            "--tax",
-            "1",
-            "--date",
-            "2026-08-11",
-        ],
-    ),
-    "record-dividend": (["600000", "1"], ["600000", "1", "2026-08-11"]),
-    "corporate-action": (
-        ["600000", "1", "0"],
-        ["600000", "1", "0", "2026-08-11"],
-    ),
-    "close-holding": (["600000", "10"], ["600000", "10", "2026-08-11"]),
-    "retro-add": (
-        ["600000", "无错误"],
-        [
-            "600000",
-            "无错误",
-            "--note",
-            "备注",
-            "--thesis",
-            "理由",
-            "--gap",
-            "改进",
-        ],
-    ),
     "retro-pending": ([], []),
     "retro-stats": ([], ["A通用"]),
     "retro-outliers": ([], ["--loss", "10"]),
     "holdings": ([], ["600000", "--compact", "--json", "--active-only"]),
-    "update-return": (["600000", "10"], ["600000", "10"]),
     "position-return": (["600000"], ["600000", "10"]),
     "dividend-check": ([], ["600000"]),
     "benchmark-report": ([], ["--end", "2026-10-21"]),
@@ -128,31 +55,11 @@ CLI_ARGUMENT_CASES = {
     ),
     "watchlist": ([], ["--json", "--breakdown"]),
     "list": ([], []),
-    "cleanup": ([], []),
-    "clear": ([], ["600000"]),
 }
 
 
 def test_public_mains_return_int() -> None:
     assert isinstance(cache.main(["--help"]), int)
-
-
-def test_w1_requires_prefix_confirmation_without_opening_database(
-    tmp_path, monkeypatch, capsys
-) -> None:
-    database = tmp_path / "cache.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(database))
-    assert cache.main(["add-holding", "000001", "10", "100"]) == 3
-    assert not database.exists()
-    assert "--confirm-write" in capsys.readouterr().err
-
-
-def test_confirmed_fixture_write_is_transactional(tmp_path, monkeypatch) -> None:
-    database = tmp_path / "cache.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(database))
-    assert cache.main(["--confirm-write", "add-holding", "000001", "10", "100"]) == 0
-    with sqlite3.connect(database) as conn:
-        assert conn.execute("SELECT shares FROM holdings").fetchone() == (100,)
 
 
 def test_cli_help_does_not_create_state(tmp_path, monkeypatch) -> None:
@@ -215,36 +122,20 @@ def test_cli_argument_matrix_covers_every_command(monkeypatch) -> None:
             command,
             lambda args, name=command: called.append((name, args)),
         )
-        prefix = (
-            ["--confirm-write"] if cache.COMMAND_CLASSIFICATION[command] == "W1" else []
-        )
         for case in cases:
             called.clear()
-            assert cache.main([*prefix, command, *case]) == 0, command
+            assert cache.main([command, *case]) == 0, command
             assert called == [(command, case)], command
 
 
-def test_every_w1_command_requires_prefix_confirmation(monkeypatch, capsys) -> None:
-    def fail_if_called(_args) -> None:
-        raise AssertionError("write command dispatched without confirmation")
-
-    for command, classification in cache.COMMAND_CLASSIFICATION.items():
-        if classification != "W1":
-            continue
-        monkeypatch.setitem(cache.COMMANDS, command, fail_if_called)
-        assert cache.main([command, *CLI_ARGUMENT_CASES[command][0]]) == 3, command
-        assert "--confirm-write" in capsys.readouterr().err
-
-
-def test_confirmation_position_and_unknown_global_option(monkeypatch) -> None:
+def test_global_options_and_removed_write_commands_never_dispatch(monkeypatch) -> None:
     called: list[list[str]] = []
-    monkeypatch.setitem(cache.COMMANDS, "update-return", called.append)
-    args = ["600000", "5.0"]
+    monkeypatch.setitem(cache.COMMANDS, "holdings", called.append)
 
-    assert cache.main(["update-return", "--confirm-write", *args]) == 3
-    assert cache.main(["--bogus", "update-return", *args]) == 2
-    assert cache.main(["--confirm-write", "update-return", *args]) == 0
-    assert called == [args]
+    assert cache.main(["--bogus", "holdings"]) == 2
+    assert cache.main(["--confirm-write", "holdings"]) == 2
+    assert cache.main(["sell-holding", "600000", "10", "100"]) == 1
+    assert called == []
 
 
 def test_argparse_rejects_extra_positionals_and_unknown_options(monkeypatch) -> None:
@@ -254,13 +145,8 @@ def test_argparse_rejects_extra_positionals_and_unknown_options(monkeypatch) -> 
     cache.paths.cache_db_path().touch()
     for command, (_, maximum) in CLI_ARGUMENT_CASES.items():
         monkeypatch.setitem(cache.COMMANDS, command, fail_if_called)
-        prefix = (
-            ["--confirm-write"] if cache.COMMAND_CLASSIFICATION[command] == "W1" else []
-        )
-        assert cache.main([*prefix, command, *maximum, "EXTRA_POSITIONAL"]) == 2, (
-            command
-        )
-        assert cache.main([*prefix, command, "--unknown-option"]) == 2, command
+        assert cache.main([command, *maximum, "EXTRA_POSITIONAL"]) == 2, command
+        assert cache.main([command, "--unknown-option"]) == 2, command
 
 
 def test_every_subcommand_has_help(capsys) -> None:

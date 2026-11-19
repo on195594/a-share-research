@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from a_share_research.policy.v0 import commands_holdings, db, domain, risk_gates
-from policy_v0.helpers import mock_price_quotes
+from policy_v0.helpers import mock_price_quotes, seed_position
 
 CST = timezone(timedelta(hours=8))
 
@@ -135,7 +135,7 @@ def test_untradeable_never_becomes_a_sell_quantity():
 
 def test_check_holdings_reuses_active_persisted_defer(capsys, monkeypatch):
     started = datetime(2026, 9, 7, 10, 0, tzinfo=CST)
-    commands_holdings.cmd_add_holding(["600036", "40", "100", "--notes", "P3测试"])
+    seed_position("600036", 40, 100, notes="P3测试")
     with db.db_session() as conn:
         holding_id = conn.execute(
             "SELECT id FROM holdings WHERE code='600036' AND exit_date IS NULL"

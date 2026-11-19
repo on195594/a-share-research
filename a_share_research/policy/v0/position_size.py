@@ -3,7 +3,7 @@
 Size comes from the account's own stop-risk budgets instead of an unstated weight cap:
 shares x (price - second-tier stop) must fit both the single-stock budget and what remains of the
 portfolio budget in an existing monitor-v1 snapshot. The stop is the framework's second-tier stop
-from the proposed buy price, the same rule `buy-holding` records after a fill.
+from the proposed buy price, the same rule the ledger applies to a recorded buy.
 See docs/specs/2026-11-04-proactive-decision-spec.md.
 """
 
