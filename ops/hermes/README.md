@@ -67,7 +67,7 @@
 
 ## 跨激活 pending 转接
 
-止损、日报、顾问机会检查共用 `ashare_tools.policy_receipt` 薄 helper。服务先查原回执；原 request_id 已成功时即使跨激活仍返回原回执，不会重采集。只有服务确认无回执、activation 确实变化且未写评估，才有 HTTP 409 `policy_activation_changed`；CLI 有界白名单映射为专用退出码 **20**，helper 只识别该码，不解析中文 stderr、不暴露原始错误体。成功协议保持不变。
+止损、日报、顾问机会检查共用 `ashare_tools.policy_receipt` 薄 helper。服务先查原回执；原 request_id 已成功时即使跨激活仍返回原回执，不会重采集。只有服务确认无回执、activation 确实变化且未写评估，才有 HTTP 409 `policy_activation_changed`；CLI 有界白名单映射为专用退出码 **20**，helper 只识别该码，不解析中文 stderr、不暴露原始错误体。成功协议保持不变。工具服务暂停或拒绝连接时 CLI 退出码 **21**，helper 映射为 `service_unavailable`；止损脚本保留 pending 静默跳过，首次不可用时刻记在 `state.json.unavailable-since`，持续超过 10 分钟才失败告警，恢复后删除该标记。日报与顾问仍按普通失败处理。
 
 收到这一个确定拒绝后，先将原请求和原因封存到状态文件同目录 `<文件名>.rejected-<原 request_id 的 SHA256>.json`（保留供核对），保持止损 state/previous_state 与机会 seen；再发现 installed=true 的新 activation，原子保存新 UUID 与新指针后才重采集。每轮最多转接一次，第二次变化保留新 pending 退出。发现失败、不适用的新指针、写状态失败也不擅自清理原请求。503 paused/busy、超时、坏响应、普通 409 一律保留原请求，旧 CLI/服务不支持专用码时同样安全失败。
 

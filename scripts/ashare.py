@@ -112,9 +112,10 @@ def http_error(error):
                                   object_pairs_hook=unique_object)
                 detail = body.get('error') if isinstance(body, dict) else None
                 code = detail.get('code') if isinstance(detail, dict) else None
-                if isinstance(code, str):
+                if code in ('paused', 'busy'):
                     message = {'paused': '工具服务已暂停受理，恢复后可用原请求重试',
-                               'busy': '工具服务繁忙，稍后可用原请求重试'}.get(code, message)
+                               'busy': '工具服务繁忙，稍后可用原请求重试'}[code]
+                    return ClientError(f'{message}（HTTP 503）；未自动重试', status=503, code='service_unavailable')
             except (ValueError, UnicodeError, RecursionError, OSError):
                 pass  # An unreadable error body keeps the safe HTTP-status guidance.
         return ClientError(f'{message}（HTTP {error.code}）；未自动重试', status=error.code)
@@ -143,7 +144,12 @@ def request(path, payload=None):
     except urllib.error.HTTPError as exc:
         # Never echo server bodies, URLs or request headers containing credentials.
         raise http_error(exc) from None
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except (urllib.error.URLError, ConnectionRefusedError) as exc:
+        # Refused means no handler received the request (e.g. a release restart), so resending it is safe.
+        if isinstance(exc, ConnectionRefusedError) or isinstance(getattr(exc, 'reason', None), ConnectionRefusedError):
+            raise ClientError('无法连接工具服务；原请求可原样重试', code='service_unavailable') from None
+        raise ClientError('无法连接工具服务或请求超时；未自动重试') from None
+    except (TimeoutError, OSError):
         raise ClientError('无法连接工具服务或请求超时；未自动重试') from None
     except (ValueError, UnicodeError, RecursionError):
         raise ClientError('服务返回无效 JSON') from None
@@ -339,8 +345,8 @@ def main(argv=None):
             return 0
     except ClientError as exc:
         print(str(exc), file=sys.stderr)
-        # Dedicated exit status; old CLI/service failures remain ambiguous (1).
-        return 20 if exc.code == 'policy_activation_changed' else 1
+        # Dedicated exit statuses; other CLI/service failures remain ambiguous (1).
+        return {'policy_activation_changed': 20, 'service_unavailable': 21}.get(exc.code, 1)
 
 
 if __name__ == '__main__':

@@ -159,3 +159,44 @@ def test_certain_activation_change_preserves_levels_and_uses_durable_replacement
     assert len(calls) == 3 and calls[-1][1]['expected_activation_id'] == 4
     assert client.load_state()['state'] == original['previous_state']
     assert len(list(client.STATE.parent.glob('*.rejected-*.json'))) == 1
+
+
+def test_release_pause_is_silent_within_grace_then_reuses_pending(client, monkeypatch):
+    call, calls = transport(client, monkeypatch)
+    def paused(name, args):
+        if name == 'policy.stop_alert':
+            raise client.ToolsError('paused', code='service_unavailable')
+        return call(name, args)
+    monkeypatch.setattr(client, 'tool', paused)
+    assert client.check() == ('', '', 0)
+    pending = client.load_state()['pending']
+    client.datetime.current += timedelta(minutes=5)
+    assert client.check() == ('', '', 0)
+    assert client.load_state()['pending'] == pending
+    def resumed(name, args):
+        assert name == 'policy.stop_alert' and args == pending
+        return call(name, args)
+    monkeypatch.setattr(client, 'tool', resumed)
+    client.datetime.current += timedelta(minutes=4)
+    assert '第一档' in client.check()[0]
+    assert not client.STATE.with_name('state.json.unavailable-since').exists()
+
+
+def test_unavailable_beyond_grace_is_reported_and_keeps_pending(client, monkeypatch):
+    call, _ = transport(client, monkeypatch)
+    def paused(name, args):
+        if name == 'policy.stop_alert':
+            raise client.ToolsError('paused', code='service_unavailable')
+        return call(name, args)
+    monkeypatch.setattr(client, 'tool', paused)
+    assert client.check() == ('', '', 0)
+    pending = client.load_state()['pending']
+    client.datetime.current += timedelta(minutes=10)
+    with pytest.raises(client.ToolsError):
+        client.check()
+    assert client.load_state()['pending'] == pending and client.load_state()['state'] == {}
+    def other(name, args):
+        raise client.ToolsError('policy missing')
+    monkeypatch.setattr(client, 'tool', other)
+    with pytest.raises(client.ToolsError):
+        client.check()

@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ashare_tools import ToolsError, policy_receipt, save_json, tool
 
+UNAVAILABLE_GRACE_SECONDS = 600
 STATE = Path(os.environ.get('ASHARE_STOP_ALERT_STATE', Path.home() / '.local/state/ashare-stop-alert/state.json'))
 
 
@@ -56,44 +57,65 @@ def check() -> tuple[str, str, int]:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return '', '', 0
-        saved = load_state()
-        if saved['pending'] is None:
-            current = tool('policy.current', {})
-            activation = current.get('activation') or {}
-            if (current.get('installed') is not True or not isinstance(activation, dict)
-                    or type(activation.get('id')) is not int or activation['id'] < 1):
-                raise ToolsError('尚无与实装一致的生效政策')
-            saved['pending'] = dict(request_id='hermes-stop-' + uuid.uuid4().hex,
-                expected_activation_id=activation['id'], previous_state=saved['state'])
-            save_json(STATE, saved)
-        receipt = policy_receipt('policy.stop_alert', saved, STATE, call=tool)
+        since = STATE.with_name(STATE.name + '.unavailable-since')
         try:
-            if (receipt['mode'] != 'service_stop_alert_capture'
-                    or receipt['request_id'] != saved['pending']['request_id']
-                    or receipt['activation_id'] != saved['pending']['expected_activation_id']
-                    or receipt['input']['previous_state'] != saved['state']):
-                raise ValueError
-            result = receipt['result']
-            if (set(result) != {'status', 'exit_code', 'stdout', 'stderr', 'state', 'alerts'}
-                    or type(result['exit_code']) is not int or result['exit_code'] not in (0, 1)
-                    or not isinstance(result['stdout'], str) or not isinstance(result['stderr'], str)
-                    or result['status'] not in ('outside_session', 'no_holdings', 'unavailable', 'no_alerts', 'alerts')
-                    or not isinstance(result['alerts'], list)):
-                raise ValueError
-            next_state = notification_state(result['state'])
-            captured = datetime.fromisoformat(receipt['input']['now'])
+            result = _check()
+        except ToolsError as exc:
+            if exc.code != 'service_unavailable':
+                raise
+            # A release pauses or restarts the service for a few minutes; any saved pending request
+            # stays for the next tick, and only an outage beyond the grace period is reported.
             now = datetime.now(ZoneInfo('Asia/Shanghai'))
-            if captured.tzinfo is None or captured > now:
-                raise ValueError
-        except (KeyError, TypeError, ValueError):
-            raise ToolsError('止损回执不兼容；保留原请求供核对') from None
-        if result['alerts'] and (now - captured).total_seconds() > 900:
-            # A recovered old alert never advances the notification levels without delivery.
-            save_json(STATE, dict(schema_version=1, state=saved['state'], pending=None))
-            return '', '止损预警：已查回过期评估，未作盘中提醒；下次检查重新采集。\n', 1
-        save_json(STATE, dict(schema_version=1, state=next_state, pending=None))
-        output = result['stdout'].replace('按 a-stock-monitor 复核止损与 L3；', '按 a-share 的生效政策复核止损与 L3；')
-        return output, result['stderr'], result['exit_code']
+            if not since.exists():
+                save_json(since, dict(since=now.isoformat()))
+                return '', '', 0
+            first = datetime.fromisoformat(json.loads(since.read_text())['since'])
+            if (now - first).total_seconds() < UNAVAILABLE_GRACE_SECONDS:
+                return '', '', 0
+            raise ToolsError(f'工具服务暂停或不可达已超过 {UNAVAILABLE_GRACE_SECONDS // 60} 分钟') from None
+        since.unlink(missing_ok=True)
+        return result
+
+
+def _check() -> tuple[str, str, int]:
+    saved = load_state()
+    if saved['pending'] is None:
+        current = tool('policy.current', {})
+        activation = current.get('activation') or {}
+        if (current.get('installed') is not True or not isinstance(activation, dict)
+                or type(activation.get('id')) is not int or activation['id'] < 1):
+            raise ToolsError('尚无与实装一致的生效政策')
+        saved['pending'] = dict(request_id='hermes-stop-' + uuid.uuid4().hex,
+            expected_activation_id=activation['id'], previous_state=saved['state'])
+        save_json(STATE, saved)
+    receipt = policy_receipt('policy.stop_alert', saved, STATE, call=tool)
+    try:
+        if (receipt['mode'] != 'service_stop_alert_capture'
+                or receipt['request_id'] != saved['pending']['request_id']
+                or receipt['activation_id'] != saved['pending']['expected_activation_id']
+                or receipt['input']['previous_state'] != saved['state']):
+            raise ValueError
+        result = receipt['result']
+        if (set(result) != {'status', 'exit_code', 'stdout', 'stderr', 'state', 'alerts'}
+                or type(result['exit_code']) is not int or result['exit_code'] not in (0, 1)
+                or not isinstance(result['stdout'], str) or not isinstance(result['stderr'], str)
+                or result['status'] not in ('outside_session', 'no_holdings', 'unavailable', 'no_alerts', 'alerts')
+                or not isinstance(result['alerts'], list)):
+            raise ValueError
+        next_state = notification_state(result['state'])
+        captured = datetime.fromisoformat(receipt['input']['now'])
+        now = datetime.now(ZoneInfo('Asia/Shanghai'))
+        if captured.tzinfo is None or captured > now:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise ToolsError('止损回执不兼容；保留原请求供核对') from None
+    if result['alerts'] and (now - captured).total_seconds() > 900:
+        # A recovered old alert never advances the notification levels without delivery.
+        save_json(STATE, dict(schema_version=1, state=saved['state'], pending=None))
+        return '', '止损预警：已查回过期评估，未作盘中提醒；下次检查重新采集。\n', 1
+    save_json(STATE, dict(schema_version=1, state=next_state, pending=None))
+    output = result['stdout'].replace('按 a-stock-monitor 复核止损与 L3；', '按 a-share 的生效政策复核止损与 L3；')
+    return output, result['stderr'], result['exit_code']
 
 
 def main() -> int:

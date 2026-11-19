@@ -25,6 +25,8 @@ def tool(name: str, arguments: dict) -> dict:
         raise ToolsError(f'{name} 客户端不可用或超时；未自动重试') from None
     if result.returncode == 20:
         raise ToolsError('生效政策已变化；原请求确定未写入评估', code='policy_activation_changed')
+    if result.returncode == 21:
+        raise ToolsError(f'{name} 工具服务暂停或未受理；原请求可原样重试', code='service_unavailable')
     if result.returncode:
         raise ToolsError(f'{name} 未完成；请检查工具服务、凭据、账户来源与生效政策')
     try:

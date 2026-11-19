@@ -188,6 +188,10 @@ def test_cli_rejects_overflow_and_duplicate_arguments(payload,monkeypatch):
     (409, b'{"ok":false,"error":{"code":"policy_activation_changed","code":"conflict"}}', 1),
     (409, b' ' * 4097 + b'{"ok":false,"error":{"code":"policy_activation_changed"}}', 1),
     (409, b'bad asr_secret', 1),
+    (503, b'{"ok":false,"error":{"code":"paused","message":"asr_secret"}}', 21),
+    (503, b'{"ok":false,"error":{"code":"busy"}}', 21),
+    (503, b'{"ok":false,"error":{"code":"paused","code":"busy"}}', 1),
+    (500, b'{"ok":false,"error":{"code":"paused"}}', 1),
 ])
 def test_activation_changed_has_only_bounded_whitelisted_exit_protocol(monkeypatch, capsys, status, body, exit_code):
     monkeypatch.setenv('ASHARE_TOKEN', 'asr_secret')
@@ -198,3 +202,20 @@ def test_activation_changed_has_only_bounded_whitelisted_exit_protocol(monkeypat
     assert cli.main(['call', 'policy.monitor', '--json', '{}']) == exit_code
     output = capsys.readouterr()
     assert output.out == '' and 'asr_secret' not in output.err
+
+
+@pytest.mark.parametrize(('error', 'exit_code'), [
+    (urllib.error.URLError(ConnectionRefusedError()), 21),
+    (ConnectionRefusedError(), 21),
+    (urllib.error.URLError(TimeoutError()), 1),  # the request may have reached a handler
+    (TimeoutError(), 1),
+    (ConnectionResetError(), 1),
+])
+def test_only_refused_connections_are_resendable(monkeypatch, capsys, error, exit_code):
+    monkeypatch.setenv('ASHARE_TOKEN', 'asr_secret')
+    class Opener:
+        def open(self, req, timeout):
+            raise error
+    monkeypatch.setattr(cli.urllib.request, 'build_opener', lambda *args: Opener())
+    assert cli.main(['call', 'policy.stop_alert', '--json', '{}']) == exit_code
+    assert 'asr_secret' not in capsys.readouterr().err

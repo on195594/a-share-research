@@ -226,7 +226,7 @@ ledger 采集校验资金与成本重放、政策期初、编号、活动周期�
 
 `policy.monitor`、`policy.stop_alert`、`policy.daily_brief` 共用 `_run`：始终先查 `(created_by,request_id)` 的既有回执，跨激活仍原样返回；请求键用于不同输入仍是普通 conflict。只有确认没有回执、原 expected_activation_id 是已存在的前驱且 current 确实改变、未写评估时，返回 **HTTP 409 / error.code=`policy_activation_changed`**；采集后事务重检同样适用。无激活、未知指针、身份不匹配、来源/账户范围冲突、权限错误均不冒用该码。原成功包格式不变。
 
-错误体仍为 `{ok:false,error:{code,message}}`。`scripts/ashare.py` 只对白名单的 409、非重复键且 ≤4096 字节错误体识别该码，专用退出码 **20**；错误 stdout 为空，不透传原始错误体，中文 stderr 不作为协议。503 paused/busy、超时、坏包、通用 409 与旧服务均按原非零失败处理。MCP 的旧失败语义不变，不承诺自动转接。
+错误体仍为 `{ok:false,error:{code,message}}`。`scripts/ashare.py` 只对白名单的 409、非重复键且 ≤4096 字节错误体识别该码，专用退出码 **20**；错误 stdout 为空，不透传原始错误体，中文 stderr 不作为协议。503 paused/busy（同一有界白名单）与连接被拒（请求未到达处理器，如发布重启）映射为专用退出码 **21**，表示原请求可原样重发；超时、连接重置、坏包、通用 409 与旧服务仍按非零 1 失败处理，不保证未写入。MCP 的旧失败语义不变，不承诺自动转接。
 
 Hermes helper 只将 CLI 退出码 20 映射为同名 `ToolsError.code`，三消费者每轮最多封存/转接一次；状态、原回执优先级、过期与通知边界见 [宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。服务端先部署，CLI、helper、调用方再同步；回退到旧服务/CLI 时安全保留 pending，不能批量清空状态或回退旧对象不兼容的脚本。应用镜像发布不安装宿主客户端。
 
