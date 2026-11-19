@@ -53,6 +53,32 @@ def test_forecast_is_superseded_only_by_a_cited_later_periodic_report():
     assert scans.event_evidence(earlier, case['event'])['state'] == 'not_read'
 
 
+def test_forecast_is_superseded_only_by_its_own_issuers_periodic_report():
+    case = REVIEWS[6]
+    event = case['event']
+    assert case['body']['sources']['D1']['document']['code'] == '002648.SZ' and event['code'] == '002648'
+    bare = deepcopy(case['body'])
+    bare['sources']['D1']['document']['code'] = '002648'  # Suffix-free variant of the same issuer.
+    assert scans.event_evidence(bare, event)['state'] == 'superseded'
+    # Peer variant: report 70's real 长江电力 Q3 report (600900.SH, 2026-09-30, announced after the
+    # forecast) sits under D1 with case 6's citations, as a peer read for comparison would.
+    peer = deepcopy(case['body'])
+    peer['sources']['D1']['document'] = deepcopy(REVIEWS[3]['body']['sources']['D1']['document'])
+    assert peer['sources']['D1']['document']['period'] == '2026-09-30'
+    assert scans.event_evidence(peer, event)['state'] == 'not_read'
+    for variant in (None, '', '002648.XX', 2648):  # Missing or malformed issuer codes.
+        unknown = deepcopy(case['body'])
+        if variant is None:
+            del unknown['sources']['D1']['document']['code']
+        else:
+            unknown['sources']['D1']['document']['code'] = variant
+        assert scans.event_evidence(unknown, event)['state'] == 'not_read', variant
+    for code in (None, '', 'abc'):  # The event's own code must also normalize.
+        assert scans.event_evidence(case['body'], {**event, 'code': code})['state'] == 'not_read', code
+    # A directly read and cited announcement needs no issuer match: report 70 settles its own Q3 event.
+    assert scans.event_evidence(REVIEWS[3]['body'], {**REVIEWS[3]['event'], 'code': None})['state'] == 'included'
+
+
 def test_open_question_unable_and_uncited_states_stay_open():
     case = REVIEWS[11]
     event, body = case['event'], case['body']

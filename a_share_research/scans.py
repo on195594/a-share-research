@@ -94,20 +94,33 @@ def _settled(body: dict, refs: list[tuple[str, dict]]) -> str:
     return 'open' if unsettled else 'unable'
 
 
+def _issuer(code) -> str | None:
+    """Six-digit company key of a stored code, or None when it is missing or malformed."""
+    try:
+        return stock_codes.normalize_key(code)
+    except ValueError:
+        return None
+
+
 def event_evidence(body: dict, event: dict) -> dict:
     """How one published report used an announcement, judged only from its read sources and citations.
 
     A newer report or a passed review alone proves nothing: the announcement must have been read
     and cited by a settled item. A forecast also counts once a later periodic report covering its
-    period was read and cited, since the official statements replace the estimate.
+    period was read and cited, since the official statements replace the estimate; that report must
+    name the forecast's issuer, so a peer's statements read for comparison never replace it.
     """
     documents = {'D0': body.get('document') or {}} | {
         key: (source or {}).get('document') or {} for key, source in (body.get('sources') or {}).items()}
     keys = {key for key, doc in documents.items() if doc.get('url') == event['url']}
     refs = _citing(body, keys)
     state = _settled(body, refs) if refs else 'read_uncited' if keys else 'not_read'
-    if state not in RESOLVED and event['kind'] == 'forecast' and (period := period_of(event['title'])):
+    issuer = _issuer(event.get('code'))
+    if (state not in RESOLVED and event['kind'] == 'forecast' and issuer is not None
+            and (period := period_of(event['title']))):
+        # A missing or unparsable issuer code proves nothing about whose statements these are.
         later = {key for key, doc in documents.items() if key not in keys and doc.get('period')
+                 and _issuer(doc.get('code')) == issuer
                  and doc['period'] >= period and (doc.get('announced') or '') >= event['announced']}
         covered = _citing(body, later)
         if covered and _settled(body, covered) == 'included':

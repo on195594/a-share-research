@@ -275,3 +275,40 @@ def test_distorted_baseline_shadowed_models_and_confidence_coverage(tmp_path, mo
     mixed_html = tmp_path / 'mixed.html'
     validation.write_forecast_html(mixed, str(mixed_html))
     assert '按契约独立去重' in mixed_html.read_text()
+
+
+FEEDBACK = json.loads(Path(__file__).with_name('data').joinpath('research-methods.json').read_text())['reports'][0]['request']
+
+
+@pytest.mark.parametrize('request_json', [None, '{}', json.dumps({'question': '', 'feedback': None, 'parent_report_id': None})],
+                         ids=['legacy-null', 'empty', 'current'])
+def test_corrections_are_dropped_before_first_forecast_marking(tmp_path, request_json):
+    from a_share_research import db
+    assert FEEDBACK['feedback'] and FEEDBACK['parent_report_id']  # Real correction request of production run 17.
+
+    def stored(name, correction_request):
+        path = tmp_path / f'{name}.db'
+        conn = db.connect(path)
+        # Marked variant: a correction finished an hour before report 103 and carries its captured checkpoints.
+        earlier = '2026-11-05T08:13:05+08:00'
+        for run_id, created, request in ((90, earlier, json.dumps(correction_request, ensure_ascii=False)),
+                                         (CAPTURE['id'], CAPTURE['created_at'], request_json)):
+            conn.execute('INSERT INTO runs(id,kind,code,status,created_at,request) VALUES (?,?,?,?,?,?)',
+                         (run_id, 'research', CAPTURE['code'], 'done', created, request))
+            conn.execute('INSERT INTO reports(id,run_id,code,name,period,passed,body,created_at) VALUES (?,?,?,?,?,?,?,?)',
+                         (run_id, run_id, CAPTURE['code'], CAPTURE['body']['name'], CAPTURE['period'], 1,
+                          json.dumps(CAPTURE['body'], ensure_ascii=False), created))
+        conn.commit()
+        conn.close()
+        return str(path)
+
+    path = stored('correction', FEEDBACK)
+    for contract in (None, 0):
+        items = validation.load_forecasts(path, contract)
+        assert [(i['report'], i['first']) for i in items] == [(CAPTURE['id'], True)] * 2
+    # Mutual check: the same earlier run without feedback is ordinary research and takes the first slot.
+    plain = validation.load_forecasts(stored('plain', FEEDBACK | {'feedback': None}))
+    assert sorted((i['report'], i['first']) for i in plain) == [(90, True)] * 2 + [(CAPTURE['id'], False)] * 2
+    # Old fixture schema: runs without a request column still load every captured forecast as first.
+    old = validation.load_forecasts(database(tmp_path / 'old-schema.db'))
+    assert [(i['report'], i['first']) for i in old] == [(CAPTURE['id'], True)] * 2

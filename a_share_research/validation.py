@@ -16,7 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from a_share_research import market, agenda, forecasts, report as report_body, screening, stance as stances
-from a_share_research.db import SHANGHAI
+from a_share_research.db import RESEARCH_ORIGINAL, SHANGHAI
 
 log = logging.getLogger(__name__)
 
@@ -365,11 +365,18 @@ def size_bucket(mv: float | None, cuts: tuple[float, float]) -> str:
 # ---------- data ----------
 
 def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
-    """Every checkpoint forecast in passed, non-replay research reports (corrections excluded, as in V0)."""
+    """Passed original research only, before any forecast can claim a first slot."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_xinfo(runs)")}
+        original = RESEARCH_ORIGINAL
+        if "is_feedback" not in columns:
+            # Older snapshots predate the generated flag. Some have no request metadata at all.
+            original = "u.kind = 'research' AND u.replay_of IS NULL"
+            if "request" in columns:
+                original += " AND json_extract(u.request, '$.feedback') IS NULL"
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.created_at, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
-            "WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL "
+            f"WHERE r.passed = 1 AND {original} "
             "AND r.body LIKE '%\"forecast\"%'").fetchall()
     out = []
     for report_id, code, name, created, body in rows:
