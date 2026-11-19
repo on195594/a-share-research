@@ -268,7 +268,7 @@ uv run python -m a_share_research.deploy "$release_code" \
 
 经当次授权有配置变更时追加 `--allow-config`（挂载按已提交 `compose.yaml` 核对）。发布与 `--complete-held` 共用 `.git/ashare-deploy.lock`，并发调用直接拒绝。政策门禁默认 required：缺表、缺激活、未知状态或异常都失败；只有从未启用政策的纯研究实例可用 `--policy-not-applicable`。
 
-政策身份包含应用源码、`uv.lock`、规则与指南，改了这些就需要新 identity。先生成只读计划（新建目录），核对 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数：
+政策身份包含 `a_share_research/policy/` 的静态导入闭包、`uv.lock` 中的运行时依赖子图、规则与指南，改了这些就需要新 identity；只改研究侧代码（不在闭包内）或开发依赖时身份不变，按例行发布。先生成只读计划（新建目录），核对 `policy-plan.json` 的 `images`、`policy.target_identity`、`policy.predecessor.id`、`policy.diff` 与原参数：
 
 ```bash
 uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目录>" --plan-policy

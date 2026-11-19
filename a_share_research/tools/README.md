@@ -149,7 +149,7 @@ v18 在同一 `account_analysis_history` 表增加 account_id/cycle_id 作用域
 
 ## 完整政策身份、生效指针与固定输入重放（影子入口）
 
-v19 增加不可变 `policy_versions` / `policy_evaluations`，扩展既有只追加的 `policy_activations`。完整身份由当前安装的应用 Python 源码及 `uv.lock`、实际生效参数、规则索引/指南规则和全部指南内容共同确定。代码范围包含共享运行时，所以任何应用源码变更都须显式登记新身份；旧身份保留供历史核验，不会随升级静默改写。原 `v0:` 投影 profile 继续用于历史成本投影，不能代替完整 `policy:` 身份。
+v19 增加不可变 `policy_versions` / `policy_evaluations`，扩展既有只追加的 `policy_activations`。完整身份由代码范围、实际生效参数、规则索引/指南规则和全部指南内容共同确定。schema 2 的代码范围是 `a_share_research/policy/` 全部模块的静态导入闭包（含被导入的共享模块及其父包；闭包内出现动态导入即拒绝生成身份）加 `uv.lock` 运行时依赖子图（`uv.lock:runtime`，不含 dev 组）；政策能执行到的共享实现变更须显式登记新身份，研究侧代码与开发依赖变更不影响。schema 1 的整包源码加原始 `uv.lock` 清单仍可核验；旧身份保留供历史核验，不会随升级静默改写。原 `v0:` 投影 profile 继续用于历史成本投影，不能代替完整 `policy:` 身份。
 
 登记参数须为 `risk_policy.resolve_risk_parameters(...).risk_policy` 的实际解析结果（固定输入包中的 `risk_policy` 同形），包括来源与适用范围，不能直接把未经解析的原 `risk-policy.json` 当成运行参数。保存参数的本地文件须由当前用户持有且无组/其他用户权限；不得把账户参数提交到仓库。
 

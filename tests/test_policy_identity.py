@@ -3,6 +3,8 @@ import copy
 import hashlib
 from pathlib import Path
 
+import shutil
+
 import pytest
 
 from a_share_research import gate
@@ -22,7 +24,9 @@ def test_real_installation_identity_and_archived_guides():
     assert manifest['identity'].startswith('policy:')
     assert 'a_share_research/policy/identity.py' in manifest['files']['code']
     assert 'a_share_research/db.py' in manifest['files']['code']
-    assert manifest['files']['code']['uv.lock'] == hashlib.sha256((identity.ROOT/'uv.lock').read_bytes()).hexdigest()
+    assert manifest['schema_version'] == 2 and identity.LOCK in manifest['files']['code']
+    assert 'a_share_research/research.py' not in manifest['files']['code']
+    assert 'a_share_research/prompts.py' not in manifest['files']['code']
     guide = 'a-stock-monitor/SKILL.md'
     assert manifest['guides'][guide] == (identity.ROOT/identity.GUIDE/guide).read_text()
     assert manifest['files']['rules'][identity.RULES] == hashlib.sha256((identity.ROOT/identity.RULES).read_bytes()).hexdigest()
@@ -123,3 +127,71 @@ def test_no_old_runtime_imported_by_identity_module():
     result = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).parents[1],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture
+def install(tmp_path, monkeypatch):
+    shutil.copytree(identity.ROOT/'a_share_research', tmp_path/'a_share_research',
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copyfile(identity.ROOT/'uv.lock', tmp_path/'uv.lock')
+    monkeypatch.setattr(identity, 'ROOT', tmp_path)
+    return tmp_path
+
+
+def _edit(path, old, new):
+    text = path.read_text()
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, new))
+
+
+def _locked(name):
+    return f'[[package]]\nname = "{name}"\nversion = "'
+
+
+@pytest.mark.parametrize(('change', 'same'), [
+    (lambda root: (root/'a_share_research/prompts.py').open('a').write('\n# research-only variant\n'), True),
+    (lambda root: (root/'a_share_research/research.py').open('a').write('\n# research-only variant\n'), True),
+    (lambda root: _edit(root/'uv.lock', _locked('pytest'), _locked('pytest') + '0.'), True),
+    (lambda root: _edit(root/'uv.lock', 'dev = [\n    { name = "httpx" },\n', 'dev = [\n'), True),
+    (lambda root: (root/'a_share_research/gate.py').open('a').write('\n# shared variant\n'), False),
+    (lambda root: (root/'a_share_research/policy/v0/__init__.py').open('a').write('\n# policy variant\n'), False),
+    (lambda root: _edit(root/'uv.lock', _locked('pandas'), _locked('pandas') + '0.'), False),
+])
+def test_code_scope_is_policy_import_closure_and_runtime_lock(install, change, same):
+    manifest = identity.build({'source': 'explicit-identity-test'})
+    change(install)
+    if same:
+        identity.check_installed(manifest)
+        assert identity.build(manifest['parameters']) == manifest
+    else:
+        with pytest.raises(identity.IdentityError, match='当前安装'):
+            identity.check_installed(manifest)
+
+
+def test_newly_imported_shared_module_joins_scope(install):
+    before = identity.build({'source': 'explicit-identity-test'})
+    assert 'a_share_research/prompts.py' not in before['files']['code']
+    (install/'a_share_research/policy/v0/__init__.py').open('a').write('\nfrom a_share_research import prompts\n')
+    assert 'a_share_research/prompts.py' in identity.build(before['parameters'])['files']['code']
+
+
+def test_dynamic_import_in_scope_fails_closed(install):
+    (install/'a_share_research/gate.py').open('a').write('\nimport importlib\nimportlib.import_module("x")\n')
+    with pytest.raises(identity.IdentityError, match='动态导入'):
+        identity.build({'source': 'explicit-identity-test'})
+
+
+def test_schema_1_whole_package_manifest_still_verifies():
+    manifest = identity.build({'source': 'explicit-identity-test'})
+    code = {path.relative_to(identity.ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in (identity.ROOT/'a_share_research').rglob('*.py') if '__pycache__' not in path.parts}
+    code['uv.lock'] = hashlib.sha256((identity.ROOT/'uv.lock').read_bytes()).hexdigest()
+    manifest.update(schema_version=1, code_hash=gate.digest(code))
+    manifest['files']['code'] = code
+    identity.verify(resign(manifest))
+    with pytest.raises(identity.IdentityError, match='当前安装'):
+        identity.check_installed(manifest)
+    manifest['files']['code'][identity.LOCK] = manifest['files']['code'].pop('uv.lock')
+    manifest['code_hash'] = gate.digest(manifest['files']['code'])
+    with pytest.raises(identity.IdentityError):
+        identity.verify(resign(manifest))
