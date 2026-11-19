@@ -43,7 +43,8 @@ def test_malformed_fields_of_a_captured_line():
     for previous_close, expected in (("bad", None), ("", None)):
         variant = ",".join([*fields[:2], previous_close, *fields[3:]])
         assert market_quotes.parse_sina_quote_line(variant, {"600036"})[4] == expected
-    assert market_quotes.parse_sina_quote_line(",".join([*fields[:3], "bad", *fields[4:]]), {"600036"}) is None
+    for bad_price in ("bad", "-1", "nan", "inf"):
+        assert market_quotes.parse_sina_quote_line(",".join([*fields[:3], bad_price, *fields[4:]]), {"600036"}) is None
     # Truncated before the date/time columns: the price survives, the timestamp does not.
     truncated = ",".join(fields[:6]) + '";'
     assert market_quotes.parse_sina_quote_line(truncated, {"600036"}) == ("600036", 43.33, None, None, 43.12)

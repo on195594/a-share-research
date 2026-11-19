@@ -373,7 +373,8 @@ def test_check_holdings_stale_quote_is_observation_only(capsys, monkeypatch):
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "📋 上一交易日收盘价观察提醒（2026-07-01收盘31.00" in out
-    assert "无预警" in out
+    assert "无预警；1 只持仓无当日有效报价，未判定止损" in out
+    assert "所有持仓价格在止损线之上" not in out
     assert "🔴" not in out
     assert "⚠️" not in out
 
@@ -384,8 +385,23 @@ def test_check_holdings_unknown_quote_timestamp_is_not_actionable(capsys, monkey
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "行情时间戳不可验证" in out
-    assert "无预警" in out
+    assert "无预警；1 只持仓无当日有效报价，未判定止损" in out
+    assert "所有持仓价格在止损线之上" not in out
     assert "建议立即止损" not in out
+
+
+def test_check_holdings_mixed_unpriced_and_stale_quotes_lists_both(capsys, monkeypatch):
+    seed_position("600036", 40.0, 100, notes="测试")
+    seed_position("600900", 30.0, 100, notes="测试")
+    _FixedDatetime._fixed = datetime(2026, 7, 2, 1, 30)
+    monkeypatch.setattr(domain, "datetime", _FixedDatetime)
+    mock_fixed_quote(
+        monkeypatch, price=31.0, quote_date="2026-07-01", quote_time="15:00:00", codes={"600036"}
+    )
+    commands_holdings.cmd_check_holdings()
+    out = capsys.readouterr().out
+    assert "无预警；1 只持仓无实时价格、1 只无当日有效报价，未判定止损" in out
+    assert "所有持仓价格在止损线之上" not in out
 
 
 def test_check_holdings_intraday_breach_uses_alarm_prefix(capsys, monkeypatch):
@@ -623,10 +639,9 @@ def test_get_stop_loss_pct_all_six_frameworks(framework, expected):
 
 
 def test_infer_framework_works_in_subprocess_without_checklist_preimported():
-    """生产CLI入口（add-holding/portfolio-risk）调cache.infer_framework()时，
-    那个进程里checklist.py从未被import过（cmd_checklist()那次懒加载没有被触发）。
-    必须用子进程隔离验证infer_framework()不依赖checklist导入副作用，不能依赖
-    测试套件里某个其他文件先import了checklist。"""
+    """生产CLI入口（如 portfolio-risk）调 domain.infer_framework()时，
+    进程里未触发任何懒加载副作用。必须用子进程隔离验证 infer_framework()
+    不依赖测试套件里其他文件的导入顺序。"""
     script = (
         "from a_share_research.policy.v0 import domain; "
         "fw, confident = domain.infer_framework('煤炭开采'); "

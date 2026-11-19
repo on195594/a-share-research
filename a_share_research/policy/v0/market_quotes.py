@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 import requests
@@ -72,7 +73,7 @@ def parse_sina_quote_line(
     except ValueError:
         return None
     # Sina reports 0.000 before the first trade of the day (and for halted symbols); that is no quote.
-    if not price > 0:
+    if not (math.isfinite(price) and price > 0):
         return None
     try:
         previous_close = float(fields[2]) if fields[2] else None

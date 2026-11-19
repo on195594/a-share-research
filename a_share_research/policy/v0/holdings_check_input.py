@@ -79,8 +79,22 @@ def calculate(holdings, defers, quotes, market_snapshot, now) -> dict:
         for label, status in alerts:
             emit(f"    {label}: {status}")
     unpriced = sum(1 for _id, code, *_ in holdings if quotes.get(code) is None)
-    if not alerts and unpriced:
-        emit(f"  无预警；{unpriced} 只持仓无实时价格，未判定止损")
+    unverified = sum(
+        1
+        for _id, code, *_ in holdings
+        if (quote := quotes.get(code)) is not None and quote.quote_date != today_str
+    )
+    if not alerts and (unpriced or unverified):
+        parts = []
+        if unpriced:
+            parts.append(f"{unpriced} 只持仓无实时价格")
+        if unverified:
+            parts.append(
+                f"{unverified} 只无当日有效报价"
+                if parts
+                else f"{unverified} 只持仓无当日有效报价"
+            )
+        emit(f"  无预警；{'、'.join(parts)}，未判定止损")
     elif not alerts:
         emit("  无预警，所有持仓价格在止损线之上")
     emit()

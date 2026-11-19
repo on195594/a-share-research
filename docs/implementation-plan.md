@@ -1,6 +1,6 @@
 # 跨项目实施计划
 
-更新：2026-11-18。职责见[系统架构](../ARCHITECTURE.md)，演进原则见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、固定里程碑、当前部署与直接回退。11-15 精简前的版本（含合一割接与 11-13 核查的逐项记录）见 `git show e239649:docs/implementation-plan.md`，更早历史沿 Git 追溯。下文私有证据路径均相对 `~/.local/share/a-share-research-evaluations/`。
+更新：2026-11-19。职责见[系统架构](../ARCHITECTURE.md)，演进原则见[路线图](roadmap.md)。本页只维护当前状态、剩余验收、固定里程碑、当前部署与直接回退。11-15 精简前的版本（含合一割接与 11-13 核查的逐项记录）见 `git show e239649:docs/implementation-plan.md`，更早历史沿 Git 追溯。下文私有证据路径均相对 `~/.local/share/a-share-research-evaluations/`。
 
 ## 工作包与状态
 
@@ -69,7 +69,7 @@ Hermes 任务每周一读取本表推送进度（所有者 2026-11-06 授权）�
 
 审查基线 main=`a5cee3f71b6516643860c3f9e10c2d91b1a9a43a`；修复分支 `fix/release-policy-reliability`。现有 deploy 内串联宿主 flock、实际镜像候选/只读政策探针、本次精确批准、所有 resume 路径的统一政策门禁、追加式获批恢复与 held 显式完成；未新增服务或授权库。三消费者复用专用 `policy_activation_changed`/CLI 退出码 20 的最多一次 pending 转接，旧回执始终优先，不确定错误保留原请求。操作协议只在 [README](../README.md#发布批准与暂停完成)、[tools](../a_share_research/tools/README.md#跨激活-pending-的确定拒绝协议) 与 [Hermes](../ops/hermes/README.md#跨激活-pending-转接) 维护。
 
-首轮 `c642481` 验证：影响面测试 **664 passed**（155.98s，1 条既有 Starlette/httpx 弃用警告），覆盖 deploy/control/initial/backup、policy 全入口、tools、CLI/MCP、三消费者、顾问两段流程与客户端包；改动范围 ruff 和 git diff --check 均通过。真实本地镜像隔离测试另 **1 passed**（20.01s），同一镜像/探针结果沿用，不重复运行。针对性测试使用真实 registry/完整 identity、临时 SQLite、Gate；Docker 编排故障注入不代表生产验收。已实际运行本地镜像对新建空白 v23 库的禁网只读 rollback_probe 与真实 tools HTTP /ready，脱敏报告 [`tests/data/release-policy-isolated-v23.json`](../tests/data/release-policy-isolated-v23.json)：f480507/v22 拒绝，cb9a035/v23 通过（暂停时 /ready 为 503 且 database_ready=true）。这是空白库隔离结果，不是生产数据兼容或生产回退验证。
+首轮 `c642481` 验证：影响面测试 **664 passed**（155.98s，1 条既有 Starlette/httpx 弃用警告），覆盖 deploy/control/initial/backup、policy 全入口、tools、CLI/MCP、三消费者、顾问两段流程与客户端包；改动范围 ruff 和 git diff --check 均通过。真实本地镜像隔离测试另 **1 passed**（20.01s），同一镜像/探针结果沿用，不重复运行。针对性测试使用真实 registry/完整 identity、临时 SQLite、Gate；Docker 编排故障注入不代表生产验收。已实际运行本地镜像对新建空白 v23 库的禁网只读 rollback_probe 与真实 tools HTTP /ready，脱敏报告见历史提交（`git show 8731524^:tests/data/release-policy-isolated-v23.json`）：f480507/v22 拒绝，cb9a035/v23 通过（暂停时 /ready 为 503 且 database_ready=true）。这是空白库隔离结果，不是生产数据兼容或生产回退验证。
 
 Codex 只读审查 `a5cee3f..c642481` 发现并确认 3 项（1 P1、2 P2）：证据 I/O 失败阻断二次排空、顾问真实 holdings 调用阻断独立 Web 扫描、补偿回执双丢失后 held 政策观察陈旧。新增回归在修复前逐项失败；本轮已修复并扩展到普通回退、首次迁移兼容恢复、显式完成的同类证据失败路径。最终针对性测试 **289 passed**（147.22s，deploy/initial/backup/control、顾问真实 holdings 链及恢复/预算、客户端包等），改动范围 ruff 与 diff 检查通过。held 探针失败明确 unknown，不冒充最终政策状态；账户未知不清订阅、不当空仓。未变代码与既有镜像结果沿用，不重复研究或生产验收。
 
@@ -81,7 +81,7 @@ Codex 只读审查 `a5cee3f..c642481` 发现并确认 3 项（1 P1、2 P2）：�
 
 生产 `tools` 仍仅监听 `127.0.0.1:8621`，独立 `.env.tools` 仅有行情凭据；账户开关为 1，外部研究开关已随代码删除。11-12 16:41:39 新账本成为唯一账户写入来源，旧库已持久封锁且只读保留。五宿主统一入口与 Hermes 替代脚本已安装，原账户定时任务已恢复。研究主模型于 11-18 切换为 `openai-codex / gpt-6.2-sol / medium`，`review` 阶段独立使用 `openai-codex / gpt-6.1-sol / high`。
 
-当前发布证据 `deploy-7db29e6-20261118/`（只读计划 `plan-7db29e6-20261118/`），备份 `backup-pre-7db29e6-20261118-164253.db` 与同名 `.bundle/`（已按 K4 清理最旧备份 `backup-pre-b88f420-20261117-215422.db`）。以下为 v24 迁移版本 `4881924` 的历史发布记录：证据 `deploy-4881924-20261117-181831/`（只读计划 `plan-4881924-20261117-175735/`，真实数据副本预检 `prepare-4881924-20261117-180142/`）；原停服备份 `backup-pre-4881924-20261117-181838.db` 已随 K4 轮替。实际迁移后与停服备份逐表核对原列：45 张原表哈希不变，仅本次追加政策登记/激活、短期验收会话及对应序列变化；完整性检查通过。390px 真实浏览器验收首页、带后缀公司页 `/stock/002648.SZ` 与正常报告页 `/reports/165` 均 200、关联正确且无横向溢出，会话已退出撤销。未主动运行生产扫描、付费研究/复核或对外通知；生产机械检查仍为 0 条，自然披露继续非阻塞观察。GitHub 登录流程与 30 天记住设备交互仍待所有者实测。
+上一版 `7db29e6` 发布证据 `deploy-7db29e6-20261118/`（只读计划 `plan-7db29e6-20261118/`），备份 `backup-pre-7db29e6-20261118-164253.db` 与同名 `.bundle/`。以下为 v24 迁移版本 `4881924` 的历史发布记录：证据 `deploy-4881924-20261117-181831/`（只读计划 `plan-4881924-20261117-175735/`，真实数据副本预检 `prepare-4881924-20261117-180142/`）；原停服备份 `backup-pre-4881924-20261117-181838.db` 已随 K4 轮替。实际迁移后与停服备份逐表核对原列：45 张原表哈希不变，仅本次追加政策登记/激活、短期验收会话及对应序列变化；完整性检查通过。390px 真实浏览器验收首页、带后缀公司页 `/stock/002648.SZ` 与正常报告页 `/reports/165` 均 200、关联正确且无横向溢出，会话已退出撤销。未主动运行生产扫描、付费研究/复核或对外通知；生产机械检查仍为 0 条，自然披露继续非阻塞观察。GitHub 登录流程与 30 天记住设备交互仍待所有者实测。
 
 **回退标签不等于已验证基线**：`rollback-8b0d3ec` 指向 `7db29e6`（v24、激活记录 17 `policy:641d89b6...0a37`，同配置无迁移）；二级 `rollback-7db29e6` 指向 `ef66a32`（v24、激活记录 16 `policy:bbcc3b0e...6fd8`，同配置无迁移），均按 README 前置条件执行。在真实数据迁到 v24 的私有副本上，`2ba0598`（v23）的 web/worker 均被只读探针以 `external_acquisition_unsupported` 拒绝；旧 A4b 读取器也不理解追加版本，因此 **不能对 v24 使用旧 v23 镜像回退**，不能降库或关闭 schema 检查。`4881924`（v24）的 web/worker 曾在同一真实副本上均 `read_compatible=true`，仅作保留 v24 的前向恢复读取兼容历史证据（该镜像已按 K4 清理），不声称完成跨镜像全栈回退。故障时保留新库、新账本、现有客户端及暂停标记，核对实际进程后前向恢复；需要另一兼容镜像、新 identity 或还原备份时须另行明确批准，不自动恢复旧 DB/旧 Skills。政策门禁与 held 完成要求见 README。
 
