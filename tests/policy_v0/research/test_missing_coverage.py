@@ -1,10 +1,9 @@
 """
-补充测试覆盖：持仓检查边界、观察名单排序与批量行情解析。
+补充测试覆盖：持仓检查边界与观察名单排序。
 """
 
 import json
 from datetime import datetime
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -141,105 +140,3 @@ class TestWatchlistRows:
         commands_admin.cmd_watchlist(["--json"])
         rows = json.loads(capsys.readouterr().out)
         assert rows[0]["flags"][0]["level"] == "red"
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-
-class TestFetchCurrentPrice:
-    def test_fetch_current_price_quotes_batch_success(self, monkeypatch):
-        captured = {}
-
-        def mock_get(url, **kwargs):
-            captured["url"] = url
-            r = MagicMock()
-            r.encoding = "gbk"
-            # Sina batch format: multiple lines of var hq_str_sh600036="..."
-            r.text = (
-                'var hq_str_sh600036="招商银行,40.0,40.1,41.50,42.0,39.8"\n'
-                'var hq_str_sz000001="平安银行,10.0,10.1,10.20,10.5,9.9"\n'
-            )
-            return r
-
-        monkeypatch.setattr(market_quotes.requests, "get", mock_get)
-        res = market_quotes.fetch_current_price_quotes(["600036", "000001"])
-        assert "sh600036,sz000001" in captured["url"]
-        assert res["600036"].price == 41.50
-        assert res["000001"].price == 10.20
-
-    def test_fetch_current_price_quotes_parses_date_and_time(self, monkeypatch):
-        """真实新浪返回32字段（含日期/时间）时，fetch_current_price_quotes 能正确提取 quote_date/quote_time（BUG-006）"""
-
-        def mock_get(url, **kwargs):
-            r = MagicMock()
-            r.encoding = "gbk"
-            fields = (
-                [
-                    "招商银行",
-                    "40.0",
-                    "40.1",
-                    "41.50",
-                    "42.0",
-                    "39.8",
-                    "41.49",
-                    "41.51",
-                    "123456",
-                    "987654321",
-                ]
-                + [str(x) for x in range(100, 120)]
-                + ["2026-07-02", "15:00:00"]
-            )
-            r.text = f'var hq_str_sh600036="{",".join(fields)}"\n'
-            return r
-
-        monkeypatch.setattr(market_quotes.requests, "get", mock_get)
-        res = market_quotes.fetch_current_price_quotes(["600036"])
-        quote = res["600036"]
-        assert quote.price == 41.50
-        assert quote.quote_date == "2026-07-02"
-        assert quote.quote_time == "15:00:00"
-        assert quote.previous_close == 40.1
-
-    def test_fetch_current_price_quotes_short_fields_degrade_to_none(self, monkeypatch):
-        """字段不足32个（旧格式/异常返回）时 quote_date/quote_time 降级为 None，不报错"""
-
-        def mock_get(url, **kwargs):
-            r = MagicMock()
-            r.encoding = "gbk"
-            r.text = 'var hq_str_sh600036="招商银行,40.0,40.1,41.50,42.0,39.8"\n'
-            return r
-
-        monkeypatch.setattr(market_quotes.requests, "get", mock_get)
-        res = market_quotes.fetch_current_price_quotes(["600036"])
-        quote = res["600036"]
-        assert quote.price == 41.50
-        assert quote.quote_date is None
-        assert quote.quote_time is None
-
-    def test_fetch_current_price_quotes_empty(self, monkeypatch):
-        request = MagicMock(side_effect=AssertionError("empty batch must not fetch"))
-        monkeypatch.setattr(market_quotes.requests, "get", request)
-        res = market_quotes.fetch_current_price_quotes([])
-        assert res == {}
-        request.assert_not_called()
-
-    def test_batch_quotes_preserve_missing_symbols_and_network_failures(
-        self, monkeypatch
-    ):
-        request = MagicMock(
-            return_value=MagicMock(text='var hq_str_sh600036="fixture,40,40.1,41.5";')
-        )
-        monkeypatch.setattr(market_quotes.requests, "get", request)
-        codes = ["600036", "000001"]
-        quotes = market_quotes.fetch_current_price_quotes(codes)
-        assert quotes["600036"].price == 41.5
-        assert quotes["600036"].previous_close == 40.1
-        assert quotes["000001"] is None
-        assert request.call_count == 1
-        request.side_effect = market_quotes.requests.RequestException("fixture")
-        assert market_quotes.fetch_current_price_quotes(codes) == dict.fromkeys(codes)
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-

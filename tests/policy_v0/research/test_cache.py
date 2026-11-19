@@ -14,6 +14,7 @@ import pytest
 
 from a_share_research.policy.v0 import commands_admin, commands_holdings, db, domain, market_quotes
 from policy_v0.helpers import (
+    mock_fixed_quote,
     mock_price_quotes,
     record_valid_quote,
     seed_event,
@@ -243,17 +244,7 @@ def test_portfolio_risk_no_holdings(capsys):
 def test_portfolio_risk_with_holdings(capsys, monkeypatch):
     """有持仓时正常输出持仓明细和框架分布"""
     seed_position("600036", 45.0, 100, notes="测试招行")
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(
-                    50.0, domain.cst_today(), "15:00:00", "fixture"
-                )
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 50.0, domain.cst_today(), "15:00:00", "fixture")
     commands_holdings.cmd_portfolio_risk()
     out = capsys.readouterr().out
     assert "600036" in out
@@ -267,17 +258,7 @@ def test_portfolio_risk_with_holdings(capsys, monkeypatch):
 
 def test_portfolio_risk_labels_explicit_account_weight(capsys, monkeypatch):
     seed_position("600036", 45.0, 100, notes="测试招行")
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(
-                    50.0, domain.cst_today(), "15:00:00", "fixture"
-                )
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 50.0, domain.cst_today(), "15:00:00", "fixture")
 
     commands_holdings.cmd_portfolio_risk(["--portfolio-value", "10000"])
 
@@ -289,19 +270,7 @@ def test_portfolio_risk_labels_explicit_account_weight(capsys, monkeypatch):
 def test_portfolio_risk_labels_partial_quote_weight_as_lower_bound(capsys, monkeypatch):
     seed_position("600036", 45.0, 100, notes="测试招行")
     seed_position("600900", 25.0, 100, notes="测试长电")
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(
-                    50.0, domain.cst_today(), "15:00:00", "fixture"
-                )
-                if code == "600036"
-                else None
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 50.0, domain.cst_today(), "15:00:00", "fixture", codes={"600036"})
 
     commands_holdings.cmd_portfolio_risk(["--portfolio-value", "10000"])
 
@@ -313,12 +282,7 @@ def test_portfolio_risk_labels_partial_quote_weight_as_lower_bound(capsys, monke
 
 def test_portfolio_risk_rejects_quote_without_date(capsys, monkeypatch):
     seed_position("600036", 45.0, 100, notes="测试招行")
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (market_quotes.PriceQuote(50.0, None, None)) for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 50.0, None, None)
     commands_holdings.cmd_portfolio_risk()
     out = capsys.readouterr().out
     assert "无法计算：所有持仓均缺少股数或实时价格" in out
@@ -347,13 +311,7 @@ def test_check_holdings_price_fetch_fails(capsys, monkeypatch):
 def test_check_holdings_normal(capsys, monkeypatch):
     """现价高于止损线时显示✅正常，不计入预警"""
     seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (market_quotes.PriceQuote(38.0, domain.cst_today(), "15:00:00"))
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 38.0, domain.cst_today(), "15:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "✅ 正常" in out
@@ -364,13 +322,7 @@ def test_check_holdings_warns_below_15pct(capsys, monkeypatch):
     """现价跌破15%止损线但未到20%时触发⚠️黄色预警"""
     seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (market_quotes.PriceQuote(33.0, domain.cst_today(), "15:00:00"))
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 33.0, domain.cst_today(), "15:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "⚠️ 已跌破15%止损线" in out
@@ -381,13 +333,7 @@ def test_check_holdings_alerts_below_20pct(capsys, monkeypatch):
     """现价跌破20%止损线时触发🔴红色预警"""
     seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (market_quotes.PriceQuote(31.0, domain.cst_today(), "15:00:00"))
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 31.0, domain.cst_today(), "15:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "🔴 已跌破20%止损线" in out
@@ -399,13 +345,7 @@ def test_check_holdings_skips_closed_positions(capsys, monkeypatch):
     """已平仓持仓不参与止损检查"""
     holding = seed_position("600036", 40.0, 100, notes="测试")
     seed_event(holding, "sell", "2026-01-06", shares=100, price=50.0, close=True)
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (market_quotes.PriceQuote(31.0, domain.cst_today(), "15:00:00"))
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, 31.0, domain.cst_today(), "15:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "暂无持仓" in out
@@ -429,17 +369,7 @@ def test_check_holdings_stale_quote_is_observation_only(capsys, monkeypatch):
     seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     _FixedDatetime._fixed = datetime(2026, 7, 2, 1, 30)  # 周四凌晨，非交易时段
     monkeypatch.setattr(domain, "datetime", _FixedDatetime)
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(
-                    price=31.0, quote_date="2026-07-01", quote_time="15:00:00"
-                )
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, price=31.0, quote_date="2026-07-01", quote_time="15:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "📋 上一交易日收盘价观察提醒（2026-07-01收盘31.00" in out
@@ -450,15 +380,7 @@ def test_check_holdings_stale_quote_is_observation_only(capsys, monkeypatch):
 
 def test_check_holdings_unknown_quote_timestamp_is_not_actionable(capsys, monkeypatch):
     seed_position("600036", 40.0, 100, notes="测试")
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(price=31.0, quote_date=None, quote_time=None)
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, price=31.0, quote_date=None, quote_time=None)
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "行情时间戳不可验证" in out
@@ -471,17 +393,7 @@ def test_check_holdings_intraday_breach_uses_alarm_prefix(capsys, monkeypatch):
     seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     _FixedDatetime._fixed = datetime(2026, 7, 2, 10, 0)  # 周四盘中
     monkeypatch.setattr(domain, "datetime", _FixedDatetime)
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(
-                    price=31.0, quote_date="2026-07-02", quote_time="10:00:00"
-                )
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, price=31.0, quote_date="2026-07-02", quote_time="10:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "🚨 盘中已跌破20%止损线" in out
@@ -496,17 +408,7 @@ def test_check_holdings_after_hours_breach_uses_close_price_wording(
     seed_position("600036", 40.0, 100, notes="测试")  # 止损15%=34.0 20%=32.0
     _FixedDatetime._fixed = datetime(2026, 7, 2, 16, 0)  # 周四收盘后
     monkeypatch.setattr(domain, "datetime", _FixedDatetime)
-    mock_price_quotes(
-        monkeypatch,
-        lambda codes: {
-            code: (
-                market_quotes.PriceQuote(
-                    price=31.0, quote_date="2026-07-02", quote_time="15:00:00"
-                )
-            )
-            for code in codes
-        },
-    )
+    mock_fixed_quote(monkeypatch, price=31.0, quote_date="2026-07-02", quote_time="15:00:00")
     commands_holdings.cmd_check_holdings()
     out = capsys.readouterr().out
     assert "🔴 已跌破20%止损线（32.000），收盘价31.00，暂不可执行" in out

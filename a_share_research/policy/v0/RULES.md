@@ -2,7 +2,7 @@
 
 本索引把旧 Skills 的规则、带日期规格与合仓后的实现连接起来，不复制阈值或另建规则源。源码与指南取自 `a-stock-agent-skills` 固定提交 `1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8`；下表的规格链接全部固定到该提交，供后续归档后追溯。当前开发约束以根目录 [AGENTS.md](../../../AGENTS.md) 为准，合仓边界见[合一方案](../../../docs/consolidation.md)。
 
-`guide/` 只剩持仓监控指南 `a-stock-monitor`，保留不等于重新授权旧工作流。旧首次研究指南 `a-stock-research` 与本地 QA 指南 `a-stock-qa` 已于 2026-11-15 退役（去向见文末），表中标“已退役”的资料从该次提交之前的历史查看。`research-service.md` 仍记载旧 HTTP 和提交命令：本包 [research_client.py](research_client.py) 已只提供进程内读取，`research start` / `research feedback` 已移除，实际命令以 [cache.py](cache.py) 为准。`fetcher.py`、`commands_analysis.py`、`check_regulatory_freshness.py`、`performance.py` 与确定性评分器已退役（`2180beb` 及后续清理），表中提到它们的条目只记录规则当时的实现位置，源码从该提交之前的历史查看；指南里依赖 `a-stock-fetch` 和 `a-stock-cache check / checklist / score-fundamentals / set-analysis / set` 的步骤不可执行。切换前宿主仍使用旧入口；新 tools 服务和统一 Skill 的启用按合一方案验收，不由本索引宣布完成。
+`guide/` 只剩持仓监控指南 `a-stock-monitor`，保留不等于重新授权旧工作流。旧首次研究指南 `a-stock-research` 与本地 QA 指南 `a-stock-qa` 已于 2026-11-15 退役（去向见文末），表中标“已退役”的资料从该次提交之前的历史查看。本包 [research_client.py](research_client.py) 只提供进程内读取；发起研究与反馈经研究 API，[研究服务指南](guide/a-stock-monitor/references/research-service.md)已据此改写（2026-11-19）。`fetcher.py`、`commands_analysis.py`、`check_regulatory_freshness.py`、`performance.py` 与确定性评分器已退役（`2180beb` 及后续清理），表中提到它们的条目只记录规则当时的实现位置，源码从该提交之前的历史查看；指南里依赖 `a-stock-fetch` 和 `a-stock-cache check / checklist / score-fundamentals / set-analysis / set` 的步骤不可执行。切换前宿主仍使用旧入口；新 tools 服务和统一 Skill 的启用按合一方案验收，不由本索引宣布完成。
 
 下表列的是对应实现或资料入口，不代表规格中的所有建议、历史部署步骤和验收均已在合仓版本完成。历史规格的用户授权、安装路径、版本号、截止日期和逐次确认要求不自动成为新系统规则。规则之间的替代关系见表内说明；改变 v0 的投资语义须用新政策版本和对照证据。
 

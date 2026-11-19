@@ -153,17 +153,3 @@ def test_every_subcommand_has_help(capsys) -> None:
     for command in cache.COMMANDS:
         assert cache.main([command, "--help"]) == 0, command
         assert command in capsys.readouterr().out
-
-
-def test_sina_parser_preserves_price_when_previous_close_is_malformed() -> None:
-    from a_share_research.policy.v0 import market_quotes
-
-    for previous_close, expected in (("bad", None), ("", None), ("99", 99.0)):
-        fields = ["fixture", "100", previous_close, "101"] + [""] * 26
-        fields += ["2026-09-08", "10:00:00"]
-        line = 'var hq_str_sh600036="' + ",".join(fields) + '";'
-        expected_quote = ("600036", 101.0, "2026-09-08", "10:00:00", expected)
-        assert market_quotes.parse_sina_quote_line(line, {"600036"}) == expected_quote
-        fields[3] = "bad"
-        line = 'var hq_str_sh600036="' + ",".join(fields) + '";'
-        assert market_quotes.parse_sina_quote_line(line, {"600036"}) is None

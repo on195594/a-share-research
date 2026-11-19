@@ -41,18 +41,6 @@ def record_valid_quote(code: str, price: float = 10.0, *, fetched_at: str | None
         conn.commit()
 
 
-def seed_indicator(key: str, value: float, as_of: str, source: str = "test") -> None:
-    """Seed one legacy market indicator row."""
-    with db.db_session() as conn:
-        conn.execute(
-            """INSERT OR REPLACE INTO market_indicator_snapshots
-               (indicator_key, value, as_of, fetched_at, source, status)
-               VALUES (?,?,?,?,?,'ok')""",
-            (key, value, as_of, domain.utc_now().isoformat(), source),
-        )
-        conn.commit()
-
-
 def seed_qualitative_only(code: str, name: str, industry: str) -> None:
     """Seed one legacy qualitative-only security row."""
     with db.db_session() as conn:
@@ -75,6 +63,16 @@ def mock_price_quotes(monkeypatch, fetch):
         lambda codes: (fetch(codes), None),
     )
 
+
+
+def mock_fixed_quote(monkeypatch, price, quote_date, quote_time="15:00:00", source=None, *, codes=None):
+    """Quote every requested code, or only ``codes``, at one fixed price; the rest get no quote."""
+    from a_share_research.policy.v0 import market_quotes
+
+    quote = market_quotes.PriceQuote(price, quote_date, quote_time, source)
+    mock_price_quotes(
+        monkeypatch, lambda requested: {c: quote if codes is None or c in codes else None for c in requested}
+    )
 
 def seed_position(
     code: str,

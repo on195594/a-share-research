@@ -78,7 +78,10 @@ def calculate(holdings, defers, quotes, market_snapshot, now) -> dict:
         emit(f"  共 {len(alerts)} 项预警，请及时处理：")
         for label, status in alerts:
             emit(f"    {label}: {status}")
-    if not alerts:
+    unpriced = sum(1 for _id, code, *_ in holdings if quotes.get(code) is None)
+    if not alerts and unpriced:
+        emit(f"  无预警；{unpriced} 只持仓无实时价格，未判定止损")
+    elif not alerts:
         emit("  无预警，所有持仓价格在止损线之上")
     emit()
     return dict(status="ready", exit_code=0, stdout="\n".join(lines) + "\n", stderr="", checks=checks)
