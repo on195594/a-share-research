@@ -386,10 +386,14 @@ def test_discovered_bad_default_file_fails_closed(case, tmp_path, monkeypatch):
         else:
             path.symlink_to(tmp_path / "missing-target")
     elif case == "owner":
+        # Fake a foreign owner for the policy file only; pytest's own capture files keep real fstat.
+        real_fstat, policy_inode = os.fstat, path.stat().st_ino
         monkeypatch.setattr(
             paths.os,
             "fstat",
-            lambda fd: SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o100600),
+            lambda fd: SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o100600)
+            if real_fstat(fd).st_ino == policy_inode
+            else real_fstat(fd),
         )
     else:
         path.write_text(
