@@ -77,7 +77,7 @@ Codex 只读审查 `a5cee3f..c642481` 发现并确认 3 项（1 P1、2 P2）：�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。例行发布不逐次更新本节：当前应用版本以运行中镜像标签为准（`docker inspect a-share-research-web --format '{{.Config.Image}}'`），回退链看 `git tag -l 'rollback-*'`，发布明细、只读计划、身份差异与备份见证据目录最新的 `deploy-<sha>-<时间>/`、`plan-<sha>-<时间>/`。本节只记基线：**数据库 v24，判断契约 7，生效政策激活记录 19**（11-19 `136a247` 发布时以所有者当次批准激活 `policy:bbbe5019...d2c3`）；数据库、契约、政策激活、模型、配置或宿主任务变化时再更新。前版 `8b0d3ec` 扩大的首次真实披露扫描及之后约 7 个工作日的三季报接续复核积压继续作为非阻塞观察。逐次发布的历史记录见本文件 git 历史（最后一份为 `git show 0125860:docs/implementation-plan.md`）。
+入口 [stock.keyi.win](https://stock.keyi.win)。例行发布不逐次更新本节：当前应用版本以运行中镜像标签为准（`docker inspect a-share-research-web --format '{{.Config.Image}}'`），回退链看 `git tag -l 'rollback-*'`，发布明细、只读计划、身份差异与备份见证据目录最新的 `deploy-<sha>-<时间>/`、`plan-<sha>-<时间>/`。本节只记基线：**数据库 v24，判断契约 7，生效政策激活记录 20**（11-19 `fed90da` 发布时以所有者当次批准激活 schema 2 身份 `policy:5b77d4c5...fccf`，代码范围收窄为政策导入闭包加运行时依赖，参数、规则与指南不变；前驱为激活记录 19 `policy:bbbe5019...d2c3`）；数据库、契约、政策激活、模型、配置或宿主任务变化时再更新。前版 `8b0d3ec` 扩大的首次真实披露扫描及之后约 7 个工作日的三季报接续复核积压继续作为非阻塞观察。逐次发布的历史记录见本文件 git 历史（最后一份为 `git show 0125860:docs/implementation-plan.md`）。
 
 生产 `tools` 仍仅监听 `127.0.0.1:8621`，独立 `.env.tools` 仅有行情凭据；账户开关为 1，外部研究开关已随代码删除。11-12 16:41:39 新账本成为唯一账户写入来源，旧库已持久封锁且只读保留。五宿主统一入口与 Hermes 替代脚本已安装，原账户定时任务已恢复。研究主模型于 11-18 切换为 `openai-codex / gpt-6.2-sol / medium`，`review` 阶段独立使用 `openai-codex / gpt-6.1-sol / high`。
 
