@@ -18,21 +18,11 @@
 - `read_cached_industry_map()` 只读缓存、不联网、不写入；过期返回 `CACHE_STALE`，缺失、损坏、结构错误、未来时间戳或读失败统一返回 `CACHE_MISSING`，状态均为 `failed`。缓存年龄以 `fetched_at` 为准；旧缓存仍可读取，新写入不再保存重复的 `fetched_at_epoch`。
 - `fetch_industry_map()` 缓存不可用时回源；远端成功但写缓存失败返回 `degraded` + `CACHE_WRITE_FAILED`，数据仍可用。
 
-## 实时行情时效校验
-
-`validate_quote_observation(observation, now, trading_dates)` 是无 I/O 纯函数：校验 `QuoteObservation` 的正有限价格、来源与日期时间，并按上海时区判定交易时段。`now` 必须带时区；盘中要求报价为当日且年龄不超过 `max_intraday_age_seconds`（默认 120 秒，容忍 30 秒时钟超前），盘前要求上一交易日，非交易时段要求最近交易日。合法返回 `None`，否则返回原因字符串。交易日历由调用方提供（例如 `fetch_trade_calendar`）。
-
 ## 行情价格合同
 
 - `fetch_index_bars(symbol, start_date, end_date)`：闭区间请求，支持 `.SH` / `.SZ` / `.CSI`（包括 `H00300.CSI`、`H00922.CSI`）；只返回升序的 `date/close` 指数点位，不捏造 OHLC、成交量或复权含义。非法代码/日期返回 `INVALID_ARGUMENT`，缺列、非正/非有限点位、重复日期、区间外数据均 fail-closed。`source_as_of` 是实际最后观察日，`freshness_days` 相对请求截止日。
 - `fetch_close_price(code, target_date)`：查询 `[target_date - 10 天, target_date]`，返回最近有效收盘价。当天为 `ok`，之前交易日为 `degraded` + `NEAREST_AVAILABLE_PRICE`；保留实际日期、天数、来源、请求指纹。长停牌超过窗口或无行情返回失败，不无限回溯。
-- `fetch_trade_calendar` 返回 SSE 交易日期表，不将计划交易日标作行情观察日。
 - `to_tushare_stock_code` / `to_tushare_index_code` 是公开的代码规范化函数。
-
-### 接口变动记录
-
-- **0.10.x**：稳定公共表面以 `a_share_research.core.providers.__all__` 与 `a_share_research.core.market_data.__all__` 为准，包含 `py.typed`；`MarketDataResult.fetched_at` 统一为带 `+08:00` 的上海时间 ISO 字符串；移除无消费者的 `fetch_daily_bars_range` 与 `MarketSession` 顶层导出。
-- **0.9.0**：移除旧 Tracker 遗留 `MarketDataProvider`、`fetch_l3_bars` 与十年月度分位算法；`fetch_score_price` / `fetch_outcome_price` 合并为 `fetch_close_price`；`fetch_index_bars` 要求显式起止日期并支持全收益指数。
 
 ## 估值
 

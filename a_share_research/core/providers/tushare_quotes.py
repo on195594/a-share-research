@@ -20,13 +20,10 @@ from a_share_research.core.providers.tushare_common import (
     compact_date,
     invalid_argument_result,
     parse_date,
-    replace_frame_result,
-    schema_failure_result,
 )
 
 DAILY_SOURCE = "tushare.daily"
 INDEX_DAILY_SOURCE = "tushare.index_daily"
-TRADE_CAL_SOURCE = "tushare.trade_cal"
 TUSHARE_VOLUME_UNIT = "hand"
 
 
@@ -64,36 +61,6 @@ class TushareMarketDataProvider(TushareProviderBase):
         )
         normalized = _normalize_requested_bars(result, "index_bars", end)
         return _validate_range(normalized, start, end)
-
-    def fetch_trade_calendar(self, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
-        try:
-            start = parse_date(start_date)
-            end = parse_date(end_date)
-            if start > end:
-                raise ValueError("start_date must not be after end_date")
-        except ValueError as exc:
-            return invalid_argument_result(TRADE_CAL_SOURCE, exc)
-        result = self._request_frame(
-            TRADE_CAL_SOURCE,
-            "trade_cal",
-            {
-                "exchange": "SSE",
-                "is_open": "1",
-                "start_date": compact_date(start),
-                "end_date": compact_date(end),
-                "fields": "cal_date",
-            },
-            {"cal_date"},
-        )
-        if result.value is None:
-            return result
-        try:
-            normalized = result.value[["cal_date"]].rename(columns={"cal_date": "date"}).copy()
-            normalized["date"] = normalized["date"].map(_iso_date)
-            normalized = normalized.sort_values("date").reset_index(drop=True)
-        except Exception as exc:
-            return schema_failure_result(result, exc)
-        return replace_frame_result(result, normalized, None)
 
     def _fetch_daily(self, code: str, start_date: str, end_date: str, purpose: str) -> MarketDataResult[pd.DataFrame]:
         try:

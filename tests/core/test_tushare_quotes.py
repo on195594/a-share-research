@@ -12,7 +12,6 @@ from a_share_research.core.market_data import (
 )
 from a_share_research.core.providers.tushare_quotes import (
     DAILY_SOURCE,
-    TRADE_CAL_SOURCE,
     TushareMarketDataProvider,
     _normalize_tushare_bars,
     to_tushare_stock_code,
@@ -116,16 +115,6 @@ def test_fetch_close_price_rejects_malformed_source_date():
     result = provider.fetch_close_price("600036", "2026-06-23")
 
     assert result.status == "failed"
-    assert result.error_code == SCHEMA_CHANGED
-
-
-def test_tushare_trade_calendar_non_dataframe_fails_schema_changed():
-    provider = TushareMarketDataProvider(token="fake-token", client=_DummyClient({"cal_date": []}))
-
-    result = provider.fetch_trade_calendar("2026-06-01", "2026-06-23")
-
-    assert result.status == "failed"
-    assert result.source == TRADE_CAL_SOURCE
     assert result.error_code == SCHEMA_CHANGED
 
 

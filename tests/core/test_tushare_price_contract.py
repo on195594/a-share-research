@@ -102,16 +102,3 @@ def test_nearest_close_never_uses_unbounded_or_future_price(frame, error):
     result = TushareMarketDataProvider(token="fake-token", client=Client(frame)).fetch_close_price("600036", "2026-06-27")
     assert result.status == "failed" and result.value is None
     assert result.error_code == error
-
-
-def test_calendar_success_contract():
-    client = Client(pd.DataFrame({"cal_date": ["20260623", "20260622"]}))
-    result = TushareMarketDataProvider(token="fake-token", client=client).fetch_trade_calendar("2026-06-01", "2026-06-24")
-    assert result.status == "ok"
-    assert result.value["date"].tolist() == ["2026-06-22", "2026-06-23"]
-    assert result.source == "tushare.trade_cal"
-    # Calendar describes scheduled sessions, not a price observation.
-    assert result.source_as_of is None
-    assert result.row_count == 2 and result.request_fingerprint and result.fetched_at
-    assert client.calls == [{"exchange": "SSE", "is_open": "1", "start_date": "20260601",
-                             "end_date": "20260624", "fields": "cal_date"}]

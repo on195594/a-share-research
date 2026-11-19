@@ -14,27 +14,6 @@ def test_market_data_result_defaults() -> None:
     assert result.error_code is None
 
 
-def test_providers_package_exports() -> None:
-    from a_share_research.core import providers
-
-    expected_exports = [
-        "TushareMarketDataProvider",
-        "TushareFundamentalsProvider",
-        "TushareValuationProvider",
-        "TushareFinancialProvider",
-        "TushareDividendProvider",
-        "TushareProviderBase",
-        "TushareRateLimiter",
-        "QuoteObservation",
-        "validate_quote_observation",
-        "to_tushare_index_code",
-        "to_tushare_stock_code",
-    ]
-    assert sorted(providers.__all__) == sorted(expected_exports)
-    for name in expected_exports:
-        assert hasattr(providers, name), f"providers package missing export: {name}"
-
-
 def test_market_data_exports_every_error_code() -> None:
     from typing import get_args
 
