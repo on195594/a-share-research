@@ -62,6 +62,7 @@ def check() -> tuple[str, str, int]:
             result = _check()
         except ToolsError as exc:
             if exc.code != 'service_unavailable':
+                since.unlink(missing_ok=True)
                 raise
             # A release pauses or restarts the service for a few minutes; any saved pending request
             # stays for the next tick, and only an outage beyond the grace period is reported.
@@ -69,7 +70,15 @@ def check() -> tuple[str, str, int]:
             if not since.exists():
                 save_json(since, dict(since=now.isoformat()))
                 return '', '', 0
-            first = datetime.fromisoformat(json.loads(since.read_text())['since'])
+            try:
+                saved_since = json.loads(since.read_text())
+                if not isinstance(saved_since, dict) or not isinstance(saved_since.get('since'), str):
+                    raise ValueError
+                first = datetime.fromisoformat(saved_since['since'])
+                if first.tzinfo is None:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ToolsError('止损暂不可用记录不兼容；保留原请求供核对') from None
             if (now - first).total_seconds() < UNAVAILABLE_GRACE_SECONDS:
                 return '', '', 0
             raise ToolsError(f'工具服务暂停或不可达已超过 {UNAVAILABLE_GRACE_SECONDS // 60} 分钟') from None

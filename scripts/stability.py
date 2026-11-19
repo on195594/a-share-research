@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sqlite3
 import statistics
@@ -35,18 +36,20 @@ def connect(path: Path) -> sqlite3.Connection:
 
 def spread(prices: list) -> dict:
     """Range relative to the median; the boundary band must exceed this to mean anything."""
-    if not prices:
+    valid = [price for price in prices
+             if isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0]
+    if not valid:
         return dict(n=0)
-    middle = statistics.median(prices)
-    return dict(n=len(prices), min=round(min(prices), 2), max=round(max(prices), 2),
-                median=round(middle, 2), range_pct=round((max(prices) - min(prices)) / middle * 100, 1))
+    middle = statistics.median(valid)
+    return dict(n=len(valid), min=round(min(valid), 2), max=round(max(valid), 2),
+                median=round(middle, 2), range_pct=round((max(valid) - min(valid)) / middle * 100, 1))
 
 
 def observed(conn, since: str, code: str | None) -> dict:
     rows = conn.execute(
         "SELECT r.id, r.code, r.name, r.created_at, r.body, c.identity FROM reports r "
         "LEFT JOIN calls c ON c.id = (SELECT max(id) FROM calls WHERE run_id = r.run_id AND step = 'explore') "
-        "WHERE r.created_at >= ? AND (? IS NULL OR r.code LIKE ? || '%') ORDER BY r.code, r.id",
+        "WHERE r.passed = 1 AND r.created_at >= ? AND (? IS NULL OR r.code LIKE ? || '%') ORDER BY r.code, r.id",
         (since, code, code)).fetchall()
     groups: dict[tuple, list[dict]] = {}
     for row in rows:
@@ -56,17 +59,18 @@ def observed(conn, since: str, code: str | None) -> dict:
         if not body.get('stance') or body.get('replay_of') is not None:
             continue
         model = (json.loads(row['identity'] or '{}').get('actual') or {}).get('model')
+        hurdle = calc.get('price') if calc.get('price') is not None else v2.get('support_below')
         groups.setdefault((row['code'], body.get('period')), []).append(dict(
             report=row['id'], date=row['created_at'][:10], model=model, close=(body.get('valuation_calc') or {}).get('close'),
-            action=body['stance'].get('action'), hurdle=calc.get('price') or v2.get('support_below')))
+            action=body['stance'].get('action'), hurdle=hurdle))
     result = []
     for (company, period), items in groups.items():
         if len(items) < 2:
             continue
         actions = [item['action'] for item in items]
-        prices = [item['hurdle'] for item in items if isinstance(item['hurdle'], (int, float))]
         result.append(dict(code=company, period=period, reports=items,
-                           flips=sum(a != b for a, b in zip(actions, actions[1:])), hurdle=spread(prices)))
+                           flips=sum(a != b for a, b in zip(actions, actions[1:])),
+                           hurdle=spread([item['hurdle'] for item in items])))
     ranges = [group['hurdle']['range_pct'] for group in result if group['hurdle'].get('n', 0) >= 2]
     return dict(since=since, groups=result,
                 summary=dict(companies=len(result), with_flip=sum(group['flips'] > 0 for group in result),

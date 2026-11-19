@@ -175,10 +175,44 @@ def test_newly_imported_shared_module_joins_scope(install):
     assert 'a_share_research/prompts.py' in identity.build(before['parameters'])['files']['code']
 
 
-def test_dynamic_import_in_scope_fails_closed(install):
-    (install/'a_share_research/gate.py').open('a').write('\nimport importlib\nimportlib.import_module("x")\n')
+@pytest.mark.parametrize('snippet', [
+    '\nimport importlib\nimportlib.import_module("x")\n',
+    '\nfrom importlib import import_module\nimport_module("x")\n',
+    '\nfrom importlib.util import spec_from_file_location as load\nload("x", "y")\n',
+    '\nimport builtins\nbuiltins.__import__("x")\n',
+])
+def test_dynamic_import_in_scope_fails_closed(install, snippet):
+    (install/'a_share_research/gate.py').open('a').write(snippet)
     with pytest.raises(identity.IdentityError, match='动态导入'):
         identity.build({'source': 'explicit-identity-test'})
+
+
+def test_runtime_lock_handles_cyclic_optional_extras():
+    lock = b'''
+requires-python = ">=3.13"
+
+[[package]]
+name = "a-share-research"
+version = "0.0.0"
+source = { editable = "." }
+dependencies = [{ name = "alpha", extra = ["x"] }]
+
+[[package]]
+name = "alpha"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+[package.optional-dependencies]
+x = [{ name = "beta", extra = ["y"] }]
+
+[[package]]
+name = "beta"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+[package.optional-dependencies]
+y = [{ name = "alpha", extra = ["x"] }]
+'''
+    digest = identity._runtime_lock(lock)
+    assert len(digest) == 64
 
 
 def test_schema_1_whole_package_manifest_still_verifies():

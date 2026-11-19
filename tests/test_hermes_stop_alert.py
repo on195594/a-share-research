@@ -200,3 +200,31 @@ def test_unavailable_beyond_grace_is_reported_and_keeps_pending(client, monkeypa
     monkeypatch.setattr(client, 'tool', other)
     with pytest.raises(client.ToolsError):
         client.check()
+    assert not client.STATE.with_name('state.json.unavailable-since').exists()
+    assert client.load_state()['pending'] == pending
+    # After a non-unavailable failure, a later release pause gets a fresh grace window.
+    monkeypatch.setattr(client, 'tool', paused)
+    assert client.check() == ('', '', 0)
+    assert client.STATE.with_name('state.json.unavailable-since').exists()
+
+
+@pytest.mark.parametrize('payload', [
+    '{}',
+    'not-json',
+    '[]',
+    json.dumps({'since': '2026-10-22T10:31:05'}),  # naive timestamp without timezone
+])
+def test_corrupt_unavailable_since_fails_safely_and_keeps_pending(client, monkeypatch, capsys, payload):
+    call, _ = transport(client, monkeypatch)
+    def paused(name, args):
+        if name == 'policy.stop_alert':
+            raise client.ToolsError('paused', code='service_unavailable')
+        return call(name, args)
+    monkeypatch.setattr(client, 'tool', paused)
+    assert client.check() == ('', '', 0)
+    pending = client.load_state()['pending']
+    client.STATE.with_name('state.json.unavailable-since').write_text(payload)
+    monkeypatch.setattr(client.sys, 'argv', ['a-share-stop-alert.py'])
+    assert client.main() == 1
+    assert '检查未完成' in capsys.readouterr().err
+    assert client.load_state()['pending'] == pending

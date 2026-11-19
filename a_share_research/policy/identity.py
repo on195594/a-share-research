@@ -90,18 +90,24 @@ def _imports(relative: str, data: bytes) -> set[str]:
     names: set[str] = set()
     for node in ast.walk(ast.parse(data, relative)):
         if isinstance(node, ast.Import):
-            names.update(alias.name for alias in node.names)
+            for alias in node.names:
+                if alias.name == 'importlib' or alias.name.startswith('importlib.'):
+                    raise IdentityError(f'政策代码闭包含动态导入，无法确定范围：{relative}')
+                names.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
             base = node.module or ''
             if node.level:
                 parts = package.split('.')[:len(package.split('.')) - node.level + 1]
                 base = '.'.join(parts + [base] if base else parts)
+            elif base == 'importlib' or base.startswith('importlib.'):
+                raise IdentityError(f'政策代码闭包含动态导入，无法确定范围：{relative}')
             names.add(base)
             names.update(base + '.' + alias.name for alias in node.names)
         elif isinstance(node, ast.Call) and (
-                isinstance(node.func, ast.Name) and node.func.id == '__import__'
+                isinstance(node.func, ast.Name)
+                and node.func.id in ('__import__', 'import_module', 'spec_from_file_location')
                 or isinstance(node.func, ast.Attribute)
-                and node.func.attr in ('import_module', 'spec_from_file_location')):
+                and node.func.attr in ('__import__', 'import_module', 'spec_from_file_location')):
             raise IdentityError(f'政策代码闭包含动态导入，无法确定范围：{relative}')
     return {name for name in names if name == PACKAGE or name.startswith(PACKAGE + '.')}
 
@@ -135,7 +141,7 @@ def _runtime_lock(data: bytes) -> str:
         raise IdentityError('依赖锁缺少唯一的本项目条目')
     root = {key: value for key, value in roots[0].items() if key != 'dev-dependencies'}
     root['metadata'] = {key: value for key, value in root.get('metadata', {}).items() if key != 'requires-dev'}
-    selected, pending = {}, list(root.get('dependencies', []))
+    selected, seen_extras, pending = {}, set(), list(root.get('dependencies', []))
     while pending:
         dependency = pending.pop()
         for package in packages.get(dependency['name'], []):
@@ -144,7 +150,9 @@ def _runtime_lock(data: bytes) -> str:
                 selected[key] = package
                 pending.extend(package.get('dependencies', []))
             for extra in dependency.get('extra', []):
-                pending.extend(package.get('optional-dependencies', {}).get(extra, []))
+                if (key, extra) not in seen_extras:
+                    seen_extras.add((key, extra))
+                    pending.extend(package.get('optional-dependencies', {}).get(extra, []))
     if not selected or any(dependency['name'] not in packages for dependency in root.get('dependencies', [])):
         raise IdentityError('依赖锁的运行时依赖不完整')
     content = {'requires-python': lock.get('requires-python'), 'root': root,
