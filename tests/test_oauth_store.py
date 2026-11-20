@@ -96,3 +96,18 @@ def test_oauth_grants_have_distinct_request_identities(grant):
     conn.execute("UPDATE api_keys SET revoked_at='now' WHERE id=?", (grant_id,))
     with pytest.raises(service.RequestError, match="撤销"):
         service.requester(conn, api_keys.Principal(grant_id, "assistant"))
+
+
+def test_evidence_uploads_are_checked_and_append_only(grant):
+    conn, grant_id = grant
+    sha = hashlib.sha256(b"x").hexdigest()
+    insert = ("INSERT INTO account_evidence_uploads(sha256,uploaded_at,key_id,source,filename,label) "
+              "VALUES (?,?,?,?,?,?)")
+    conn.execute(insert, (sha, "2026-11-20T10:00:00+08:00", grant_id, "web", "a.jpg", "交割单"))
+    for bad in ((sha.upper(), grant_id, "web", "a.jpg"), (sha, grant_id, "email", "a.jpg"),
+                (sha, grant_id, "web", ""), (sha, 999, "web", None)):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert, (bad[0], "t", bad[1], bad[2], bad[3], None))
+    for statement in ("UPDATE account_evidence_uploads SET label='x'", "DELETE FROM account_evidence_uploads"):
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute(statement)
