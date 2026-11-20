@@ -180,6 +180,8 @@ class CycleAnalysisHistory(CycleAnalysis):
 
 class EvidenceUpload(Arguments):
     content_base64: str = Field(max_length=28 * 1024 * 1024)
+    filename: str | None = Field(default=None, min_length=1, max_length=200)
+    label: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class RecentEvidence(Arguments):
@@ -215,11 +217,12 @@ class Tool:
     account: bool = False
     collects: bool = False
     destructive: bool = False
+    idempotent: bool = True
 
     def describe(self) -> dict:
         return dict(name=self.name, version=1, description=self.description,
                     input_schema=self.arguments.model_json_schema(), output_schema=self.result.model_json_schema(),
-                    access=self.access, collects=self.collects, idempotent=True,
+                    access=self.access, collects=self.collects, idempotent=self.idempotent,
                     errors=['invalid_arguments', 'forbidden', 'not_found', 'conflict', 'unavailable', 'timeout'])
 
 
@@ -321,12 +324,14 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
         content = base64.b64decode(args.content_base64, validate=True)
     except (ValueError, binascii.Error):
         raise ToolError('invalid_arguments', '凭证须为有效base64内容', 422) from None
-    return Payload(data={'sha256': evidence.store(_evidence_directory(ctx), content)})
+    sha = evidence.store(_evidence_directory(ctx), content)
+    evidence.record_upload(ctx.connection, sha, ctx.principal.key_id, args.filename, args.label)
+    return Payload(data={'sha256': sha})
 
 
 def _recent_evidence(ctx: Context, args: RecentEvidence) -> Payload:
     try:
-        items = evidence.recent(_evidence_directory(ctx), args.limit)
+        items = evidence.recent_uploads(ctx.connection, _evidence_directory(ctx), args.limit)
     except evidence.EvidenceError as exc:
         raise ToolError('unavailable', '账户证据暂不可用，请核对证据目录与文件权限', 503) from exc
     return Payload(data={'evidence': items})
@@ -417,9 +422,9 @@ _TOOLS = (
          lambda c, a: Payload(data=position_store.state(c.connection, c.principal, a.account_id)), account=True),
     Tool('account_current', '读取已核对镜像或明确绑定账本的在仓公司代码与来源；不猜测账户、不采集行情',
          frozenset({'assistant'}), Arguments, Payload, _current_account, account=True),
-    Tool('account_evidence', '私有存储截图或交割单，返回内容哈希', frozenset({'assistant'}), EvidenceUpload, Payload,
-         _store_evidence, access='write', account=True),
-    Tool('account_evidence_recent', '按文件保存时间列出最近账户凭证的 SHA-256、时间和字节数',
+    Tool('account_evidence', '上传截图或交割单，可带文件名和标签；每次记录上传并返回内容 SHA-256',
+         frozenset({'assistant'}), EvidenceUpload, Payload, _store_evidence, access='write', account=True, idempotent=False),
+    Tool('account_evidence_recent', '按上传时间倒序列出凭证的 SHA-256、上传时间、文件名、标签、来源和字节数，同一哈希只列最近一次',
          frozenset({'assistant'}), RecentEvidence, Payload, _recent_evidence, account=True),
     Tool('account_state', '查询账户账本版本、股数与现金余额', frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=ledger.state(c.connection,c.principal,a.account_id)), account=True),

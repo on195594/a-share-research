@@ -75,12 +75,12 @@ a-stock-cache monitor-snapshot --json
 - 持有逻辑、现价新增价值、账户风险贡献分开；不能新增不等于必须卖出，未确认退出也不等于可以加仓。不得仅因浮盈或“防御股”标签确定卖出顺序。
 - 账户、证据和用户目标未变时，追问不改变行动结论，不凭空增加价格或股数；发现前次错误应明确纠正并解释依据，不能为保持一致延续错误。
 - 缺口逐项说明缺什么、由系统还是用户补、影响哪项判断、补齐后复核什么及复核时点/事件；成本对账完成不自动解除财务门禁。能自行取得的公开证据不转嫁用户，已提供材料不重复索取；追问未重述本会话已有材料或已确认的成交事实，不等于缺失；不可恢复时说明具体缺项。
-- **待确认写入**：列出拟议写入的完整 `account.cycle_analysis.update` 变更，填入实际 ID、验证日期、结论/证据与复核日期：L3 用 `kind: "l3"`（status、as_of、evidence、next_review_date、evidence_cadence），预警解除用 `kind: "alert"`、`status: "resolved"`，续期以原 reason_code 用 `kind: "alert_open"`；先以 `account.cycle_analysis.current` 取 expected_version 与当前状态。仅列出，不执行，无拟议写入则写“无”。
+- **待确认写入**：列出拟议写入的完整 `account_cycle_analysis_update` 变更，填入实际 ID、验证日期、结论/证据与复核日期：L3 用 `kind: "l3"`（status、as_of、evidence、next_review_date、evidence_cadence），预警解除用 `kind: "alert"`、`status: "resolved"`，续期以原 reason_code 用 `kind: "alert_open"`；先以 `account_cycle_analysis_current` 取 expected_version 与当前状态。仅列出，不执行，无拟议写入则写“无”。
 
 ## 安全边界
 
 - 账户状态、alerts/L3/Tier、最终动作及交易授权始终由父级拥有；支持任务只提供公开证据。
 - 数据缺失、过期、冲突、不可交易或 runtime 失败时 fail-closed，不得补造触发、股数或成交。
-- 持仓、交易账本、预警、L3 与 Tier 写入只走账本工具（`account.submit`、`account.cycle_analysis.update`），仅在用户确认具体动作后提交；建议、授权、申报与成交必须分开。用户请求的写入尚待具体确认时，整体任务为待确认（结构化状态 `blocked`），不能因快照 `data_status=complete` 标记任务完成；保留 runtime 的 `action_status`。
+- 持仓、交易账本、预警、L3 与 Tier 写入只走账本工具（`account_submit`、`account_cycle_analysis_update`），仅在用户确认具体动作后提交；建议、授权、申报与成交必须分开。用户请求的写入尚待具体确认时，整体任务为待确认（结构化状态 `blocked`），不能因快照 `data_status=complete` 标记任务完成；保留 runtime 的 `action_status`。
 - 冻结新增风险仅约束拟议决策与建议授权，不阻断用户确认的已成交事实记账；即使实际买入造成超预算，也按用户确认记录并报告异常，不拒记、不改写成交。预算只读复核的 `requires_user_confirmation=false` 不授予任何写权限。
 - 本 Skill 基于公开信息和用户提供的账户状态，不构成投资建议。

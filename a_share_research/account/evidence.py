@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import stat
+import unicodedata
 
 MAX_BYTES = 20 * 1024 * 1024
 _SHA = re.compile(r'[0-9a-f]{64}')
@@ -88,30 +91,6 @@ def verify(directory: Path, sha: str) -> bool:
     return True
 
 
-def recent(directory: Path, limit: int) -> list[dict]:
-    """List immutable objects by file mtime; re-uploading identical bytes preserves that time."""
-    try:
-        try:
-            fd = _directory(directory)
-        except FileNotFoundError:
-            return []
-        objects = []
-        try:
-            with os.scandir(fd) as entries:
-                for entry in entries:
-                    if _SHA.fullmatch(entry.name):
-                        metadata = entry.stat(follow_symlinks=False)
-                        _check_file(metadata)
-                        objects.append((metadata.st_mtime_ns, entry.name, metadata.st_size))
-        finally:
-            os.close(fd)
-    except OSError as exc:
-        raise EvidenceError('凭证目录不可安全访问') from exc
-    objects.sort(reverse=True)
-    return [dict(sha256=sha, stored_at=datetime.fromtimestamp(mtime / 1_000_000_000, UTC).isoformat(),
-                 size_bytes=size) for mtime, sha, size in objects[:limit]]
-
-
 def create_upload_table(conn) -> None:
     """Which grant uploaded which immutable object under what name; NAV artifacts are not uploads."""
     conn.execute('''CREATE TABLE IF NOT EXISTS account_evidence_uploads (
@@ -125,6 +104,38 @@ def create_upload_table(conn) -> None:
         conn.execute(f'''CREATE TRIGGER IF NOT EXISTS account_evidence_uploads_no_{operation.lower()}
             BEFORE {operation} ON account_evidence_uploads
             BEGIN SELECT RAISE(ABORT,'evidence uploads are append-only'); END''')
+
+
+def record_upload(conn: sqlite3.Connection, sha: str, key_id: int,
+                  filename: str | None = None, label: str | None = None) -> None:
+    """Append an upload after its content has been stored."""
+    if filename is not None:
+        filename = ''.join(c for c in ntpath.basename(filename) if unicodedata.category(c) != 'Cc') or None
+    conn.execute('''INSERT INTO account_evidence_uploads (sha256, uploaded_at, key_id, filename, label)
+                    VALUES (?, ?, ?, ?, ?)''',
+                 (sha, datetime.now(UTC).isoformat(timespec='microseconds'), key_id, filename, label))
+
+
+def recent_uploads(conn: sqlite3.Connection, directory: Path, limit: int) -> list[dict]:
+    rows = conn.execute('''SELECT sha256, uploaded_at, filename, label FROM (
+        SELECT *, row_number() OVER (PARTITION BY sha256 ORDER BY uploaded_at DESC, id DESC) AS rank
+        FROM account_evidence_uploads
+    ) WHERE rank=1 ORDER BY uploaded_at DESC, id DESC LIMIT ?''', (limit,)).fetchall()
+    if not rows:
+        return []
+    items = []
+    try:
+        fd = _directory(directory)
+        try:
+            for row in rows:
+                metadata = os.stat(_name(row['sha256']), dir_fd=fd, follow_symlinks=False)
+                _check_file(metadata)
+                items.append(dict(row) | {'size_bytes': metadata.st_size})
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise EvidenceError('凭证缺失或路径不可安全访问') from exc
+    return items
 
 
 def store(directory: Path, content: bytes) -> str:

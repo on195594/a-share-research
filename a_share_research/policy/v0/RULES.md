@@ -2,7 +2,7 @@
 
 本索引把旧 Skills 的规则、带日期规格与合仓后的实现连接起来，不复制阈值或另建规则源。源码与指南取自 `a-stock-agent-skills` 固定提交 `1f7c5203aad956fe0c83f0e19e272ea39a4ec2c8`；下表的规格链接全部固定到该提交，供后续归档后追溯。当前开发约束以根目录 [AGENTS.md](../../../AGENTS.md) 为准，合仓边界见[合一方案](../../../docs/consolidation.md)。
 
-`guide/` 只剩持仓监控指南 `a-stock-monitor`，保留不等于重新授权旧工作流。旧首次研究指南 `a-stock-research` 与本地 QA 指南 `a-stock-qa` 已于 2026-11-15 退役（去向见文末），表中标“已退役”的资料从该次提交之前的历史查看。本包 [research_client.py](research_client.py) 只提供进程内读取；发起研究与反馈经研究 API，[研究服务指南](guide/a-stock-monitor/references/research-service.md)已据此改写（2026-11-19）。`fetcher.py`、`commands_analysis.py`、`check_regulatory_freshness.py`、`performance.py` 与确定性评分器已退役（`2180beb` 及后续清理），表中提到它们的条目只记录规则当时的实现位置，源码从该提交之前的历史查看；指南里依赖 `a-stock-fetch` 和 `a-stock-cache check / checklist / score-fundamentals / set-analysis / set` 的步骤不可执行。切换前宿主仍使用旧入口；新 tools 服务和统一 Skill 的启用按合一方案验收，不由本索引宣布完成。
+`guide/` 只剩持仓监控指南 `a-stock-monitor`，保留不等于重新授权旧工作流。旧首次研究指南 `a-stock-research` 与本地 QA 指南 `a-stock-qa` 已于 2026-11-15 退役（去向见文末），表中标“已退役”的资料从该次提交之前的历史查看。本包 [research_client.py](research_client.py) 只提供进程内读取；发起研究与反馈经 MCP，见[研究服务指南](guide/a-stock-monitor/references/research-service.md)。`fetcher.py`、`commands_analysis.py`、`check_regulatory_freshness.py`、`performance.py` 与确定性评分器已退役（`2180beb` 及后续清理），表中提到它们的条目只记录规则当时的实现位置，源码从该提交之前的历史查看；指南里依赖 `a-stock-fetch` 和 `a-stock-cache check / checklist / score-fundamentals / set-analysis / set` 的步骤不可执行。切换前宿主仍使用旧入口；新 tools 服务和统一 Skill 的启用按合一方案验收，不由本索引宣布完成。
 
 下表列的是对应实现或资料入口，不代表规格中的所有建议、历史部署步骤和验收均已在合仓版本完成。历史规格的用户授权、安装路径、版本号、截止日期和逐次确认要求不自动成为新系统规则。规则之间的替代关系见表内说明；改变 v0 的投资语义须用新政策版本和对照证据。
 
@@ -17,7 +17,7 @@
 | 确定性基本面评分接线 | [08-23 Lib 消费者切换][scoring] | 评分命令 `cmd_score_fundamentals` 与评分器 `framework_scoring.py` 均已退役，本仓不计算 A–F 基本面分。 |
 | PS 同口径分位与最新财报方向快照 | [08-23 数据能力与 Skill 拆分][data] | `fetcher.py` 的 `compute_ps_ttm_percentile_5y` / `_build_latest_report_snapshot`、旧缓存合同（已退役）。年报基线与更新季报分别保留，不将累计财报机械年化。 |
 | 持仓查询物理只读、缺库与未持仓区分 | [08-27 时延与只读][readonly] | [commands_holdings.py](commands_holdings.py) 的 `cmd_holdings`、[db.py](db.py)、旧Research 指南（已退役）。旧宿主工具次数、搜索预算和安装步骤是当时工作流，不限制主仓研究 AI 的自主取证。 |
-| L3 重要性、scope/action、活动论点版本 | [08-27 L3 与论点版本][l3] | [commands_monitor.py](commands_monitor.py) 的 `_l3_view`（`cmd_thesis_rewrite` / `cmd_l3_update` 已于 2026-11-19 删除，写入改由 `account.cycle_analysis.update`）、[L3 指南](guide/a-stock-monitor/references/daily-monitoring-and-l3.md)。历史候选个股载荷不是当前账户指令；D7 的分析状态追加历史另按合一方案实施，不能把旧覆盖式更新称为追加账本。 |
+| L3 重要性、scope/action、活动论点版本 | [08-27 L3 与论点版本][l3] | [commands_monitor.py](commands_monitor.py) 的 `_l3_view`（`cmd_thesis_rewrite` / `cmd_l3_update` 已于 2026-11-19 删除，写入改由 `account_cycle_analysis_update`）、[L3 指南](guide/a-stock-monitor/references/daily-monitoring-and-l3.md)。历史候选个股载荷不是当前账户指令；D7 的分析状态追加历史另按合一方案实施，不能把旧覆盖式更新称为追加账本。 |
 | 有界首版、不可变 QA 输入、外部集中风险标签 | [08-28 执行效率][execution] | 旧执行流程（已退役）、旧A 框架（已退役）、旧QA 指南（已退役）。主要是指南合同，不是运行时自动 QA 执行器。 |
 | 复用价格历史计算五交易日涨跌 | [08-30 工具链效率][toolchain] | `fetcher.py` 的 `compute_price_change_5d` / `_load_price_df`；保留来源日期与缺失原因。跨宿主审计路由和旧交付流程不作为本包的可执行能力。 |
 | PE/PS 数据能力与按需加载说明 | [09-01 合同对齐][disclosure] | 旧缓存合同（已退役）、[Monitor 指南](guide/a-stock-monitor/SKILL.md)。字段能力不等于当前输入必然有效；5 年与 10 年窗口不可互代。 |
@@ -41,7 +41,7 @@
 - A–F 分类（[framework_catalog.py](framework_catalog.py)）只决定止损比例与定仓，作为 v0 基线保留；确定性评分器与各框架评分文件已退役。C/D 分级加仓所需的股息率档位已抄入 [步骤 3.5](guide/a-stock-monitor/references/step3.5-cd-accumulation.md)。
 - 旧首次研究流程（2026-11-15 退役）：评分阈值与清零红线、格雷厄姆预筛、择时分、双轨评级矩阵、异动清单、报告模板、缓存与搜索预算编排删除，单一行业 40% 上限按所有者决定不保留；周期分红传导、基本面与股价背离、汇兑同口径剔除、催化证据阶梯四项分析思路写入共享 Wiki 方法卡；股息率交叉验证与 PB 同期检查记为 2027-01-01 月批前的契约候选。评估依据在仓库外证据目录 `legacy-local-flow-eval-20261115/`。
 - 旧 QA 的 22 项文本检查（同日退役）去向：框架路由（2）归止损定仓（`holding-framework` 迁移命令已于 2026-11-19 删除）；唯一动作出口与仓位范围（13）归研究立场、`position-size` 与板块权限；P3 门归 [risk_gates.py](risk_gates.py) 与监控快照，P0–P2 门（19–21）随下条删除；来源、期间、估值算术与最新财报核验（1、5、8、12、15、22）由研究服务的机械校验和独立复核处理；其余随评分器删除（3、4、6、9–11、14、16–18），其中股息率交叉验证（7）见上条契约候选。这是去向说明，不是逐项等价证明。
-- v0 记账与状态写命令（2026-11-19 删除）：建仓、买卖、分红、公司行动、平仓、回报与复盘补录、预警、L3、论点重写、Tier、框架迁移和缓存清理共 19 个写命令连同 `--confirm-write` 门一起删除。合一后账户与分析写入只走账本工具（`account.submit`、`account.cycle_analysis.update`），这些命令已无生产调用方；R0/R1 只读命令保留，作为新政策等价验证的对照。Tier 建仓声明与框架迁移当前没有写入入口。
+- v0 记账与状态写命令（2026-11-19 删除）：建仓、买卖、分红、公司行动、平仓、回报与复盘补录、预警、L3、论点重写、Tier、框架迁移和缓存清理共 19 个写命令连同 `--confirm-write` 门一起删除。合一后账户与分析写入只走账本工具（`account_submit`、`account_cycle_analysis_update`），这些命令已无生产调用方；R0/R1 只读命令保留，作为新政策等价验证的对照。Tier 建仓声明与框架迁移当前没有写入入口。
 - P0 监管、P1 ROE、P2 现金流三道门（2026-11-15 按所有者决定删除）：旧抓取器与 `regulatory-evidence` 补录命令退役后 `stock_fundamentals` 已无写入方，三道门在生产上对每只持仓都只能报过期，补数步骤不可执行。监控快照、持仓检查与指南不再消费它们，决策表 D03P0 随之删除；已证实的监管与诚信事件仍由治理红线和决策表的论点破坏条件覆盖，ROE 与利润连续恶化仍由 D03 覆盖，现金流质量交由研究判断。
 - 阶段进度与对照结果只维护在[实施计划](../../../docs/implementation-plan.md)及仓库外交接证据中，避免本索引成为第二份状态台账。
 
