@@ -326,6 +326,9 @@ def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
         raise ToolError('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
+    # Rechecked on each connection the call uses, so a grant revoked mid-request stops at the write.
+    if not api_keys.is_active(ctx.connection, ctx.principal.key_id, ctx.principal.role):
+        raise ToolError('forbidden', '凭据已撤销或角色已变更', 403)
     return tool
 
 

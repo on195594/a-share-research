@@ -60,7 +60,9 @@ def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, caps
             web.api_session(request)
         assert exc.value.status_code == 400
 
+        key_id = api_keys.authenticate(web.conn, persistent).key_id
         assert web.api_revoke(bearer(persistent))["revoked"]
+        assert web.conn.execute("SELECT revoked_at FROM api_keys WHERE id=?", (key_id,)).fetchone()[0]
         with pytest.raises(HTTPException) as exc:
             web.api_session(bearer(persistent))
         assert exc.value.status_code == 401

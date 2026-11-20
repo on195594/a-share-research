@@ -116,8 +116,7 @@ def migrate(conn):
 
 
 def authorize(conn, principal):
-    role = conn.execute('SELECT role FROM api_keys WHERE id=?', (principal.key_id,)).fetchone()
-    if role is None or role[0] != principal.role or principal.role != 'assistant':
+    if principal.role != 'assistant' or not api_keys.is_active(conn, principal.key_id, principal.role):
         raise LedgerError('此凭据没有账户权限或已撤销', 403)
 
 

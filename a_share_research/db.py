@@ -618,8 +618,22 @@ def _migrate_v24(conn: sqlite3.Connection) -> None:
                      " ON disclosure_checks BEGIN SELECT RAISE(ABORT, 'disclosure_checks is append-only'); END")
 
 
+V25_TABLES = ('oauth_clients', 'oauth_codes', 'oauth_tokens', 'account_nav_refs')
+
+
+def _migrate_v25(conn: sqlite3.Connection) -> None:
+    from a_share_research import api_keys, oauth_store
+    from a_share_research.account import nav_refs
+
+    oauth_store.create_tables(conn)
+    api_keys.migrate_grants(conn)
+    nav_refs.create_table(conn)
+    if conn.execute('PRAGMA foreign_key_check').fetchone():
+        raise ValueError('v25 迁移后存在无效外键，迁移已停止')
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22, _migrate_v23, _migrate_v24)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22, _migrate_v23, _migrate_v24, _migrate_v25)
 
 
 def now() -> str:

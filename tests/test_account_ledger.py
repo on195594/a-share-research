@@ -106,7 +106,8 @@ def test_atomic_insert_failure_rolls_back_receipt_and_projection(book):
 def test_missing_evidence_can_be_supplied_and_same_payload_retried(book):
     value=batch(book)
     path=book[2]/book[3]
-    content=path.read_bytes();path.unlink()
+    content=path.read_bytes()
+    path.unlink()
     assert submit(book,value)['status']=='missing_material'
     evidence.store(book[2],content)
     assert submit(book,value)['status']=='posted'
@@ -136,6 +137,18 @@ def test_explicit_basis_rejects_other_company_future_and_failed_reports(book):
         conn.execute('UPDATE reports SET created_at=? WHERE id=?',(created,rid))
         assert submit(book,batch(book,events=[buy(report_id=rid)]))['status']=='conflict'
     assert conn.execute('SELECT count(*) FROM account_journal').fetchone()[0]==0
+
+
+def test_revoked_or_mismatched_grant_cannot_append_a_batch(book):
+    conn, principal, _, _ = book
+    value = batch(book)
+    research = api_keys.authenticate(conn, api_keys.create(conn, 'research'))
+    assert api_keys.revoke(conn, principal.key_id)
+    for stale in (principal, api_keys.Principal(research.key_id, 'assistant')):
+        with pytest.raises(ledger.LedgerError) as error:
+            ledger.submit(conn, stale, 'a', value, book[2])
+        assert error.value.status == 403
+    assert conn.execute('SELECT COUNT(*) FROM account_batches').fetchone()[0] == 0
 
 
 def test_append_guards_and_observation_never_infer_trades(book):

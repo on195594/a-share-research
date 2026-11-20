@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StrictBool, StrictInt, field_validator
 
 from a_share_research import db, gate
-from a_share_research.account import evidence, ledger
+from a_share_research.account import evidence, ledger, nav_refs
 from a_share_research.account.reconciliation import (
     Event, Money, Opening, Value, ValuationTime, identity, project, valuation_time,
 )
@@ -253,14 +253,17 @@ def _compute(source, request, directory):
 
 
 def evaluate(conn, principal, account_id: str, request: Request, directory: Path) -> dict:
-    """Save immutable inputs/results; no account, policy or original report is modified."""
+    """Record the evidence-backed interval and return its immutable calculation."""
     try:
         request = Request.model_validate(request)
         captured = capture(conn, principal, account_id)
         result = _compute(captured['source'], request, directory)
-        artifact = {'schema': 'account_nav_v1', 'account_id': account_id, 'source': captured['source'],
+        artifact = {'schema': 'account_nav_v1', 'account_id': captured['source']['account_id'], 'source': captured['source'],
                     'request': request.model_dump(mode='json'), 'result': result}
-        sha = evidence.store(directory, gate.canonical(artifact).encode())
+        with db.transaction(conn):
+            ledger.authorize(conn, principal)
+            sha = evidence.store(directory, gate.canonical(artifact).encode())
+            nav_refs.record(conn, artifact, sha, principal.key_id)
         return {'artifact_sha256': sha, 'state_sha256': captured['state_sha256'], **result}
     except (ValueError, KeyError, TypeError) as exc:
         if isinstance(exc, (ledger.LedgerError, evidence.EvidenceError)):
@@ -271,6 +274,7 @@ def evaluate(conn, principal, account_id: str, request: Request, directory: Path
 def replay(conn, principal, account_id: str, artifact_sha256: str, directory: Path) -> dict:
     """Recompute saved inputs, not current account truth; uploaded hashes are not authentication."""
     ledger.authorize(conn, principal)
+    account_id = ledger._account(account_id)
     try:
         artifact = _json(evidence.read(directory, artifact_sha256))
         if (set(artifact) != {'schema', 'account_id', 'source', 'request', 'result'}

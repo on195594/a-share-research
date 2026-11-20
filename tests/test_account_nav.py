@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from a_share_research import api_keys, db, gate
+from a_share_research import api_keys, db, gate, integrity
 from a_share_research.account import evidence, ledger, nav
 from a_share_research.account.reconciliation import Event, Opening, Snapshot
 from a_share_research.tools.registry import Context, ToolError, discover, invoke
@@ -219,9 +219,21 @@ def test_tampered_saved_result_rejected_and_cross_account_denied(book):
 
 def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path):
     from a_share_research import backup
-    result = evaluate(book)
+    value = request(book)
+    coverage = evidence.store(book['directory'], b'Structural NAV coverage declaration')
+    value.coverage.evidence_hashes = [coverage]
+    result = evaluate(book, value)
+    assert evaluate(book, value) == result
+    sha = result['artifact_sha256']
+    hashes = sorted([coverage, book['sha'], value.benchmark_evidence_hash])
+    ref, = book['conn'].execute('SELECT * FROM account_nav_refs')
+    assert (ref['artifact_sha256'], ref['account_id'], ref['start_date'], ref['end_date'],
+            ref['benchmark_code'], ref['key_id']) == (
+                sha, 'a', '2026-01-05', '2026-01-08', 'H00906.CSI', book['principal'].key_id)
+    assert json.loads(ref['evidence_hashes']) == hashes
     bundle, restored = tmp_path / 'bundle', tmp_path / 'restored'
-    backup.create(book['path'], bundle)
+    manifest = backup.create(book['path'], bundle)
+    assert manifest['required']['account_evidence'] == sorted([sha, *hashes])
     backup.verify(bundle)
     backup.restore(bundle, restored)
     conn = db.connect(restored / 'app.db')
@@ -231,6 +243,22 @@ def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path)
         assert capture(book)['state_sha256'] == nav.capture(conn, book['principal'], 'a')['state_sha256']
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize('damage', ['artifact', 'index', 'dates', 'references'])
+def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, damage):
+    value = request(book)
+    sha = evaluate(book, value)['artifact_sha256']
+    if damage in ('artifact', 'index'):
+        (book['directory'] / (sha if damage == 'artifact' else value.benchmark_evidence_hash)).unlink()
+    else:
+        book['conn'].execute('DROP TRIGGER account_nav_refs_no_update')
+        if damage == 'dates':
+            book['conn'].execute("UPDATE account_nav_refs SET start_date='2026-01-06'")
+        else:
+            book['conn'].execute("UPDATE account_nav_refs SET evidence_hashes='[]'")
+    problems, _ = integrity.check(book['path'], book['path'].parent / 'pdf')
+    assert len(problems) == 1 and f'净值引用 {sha}' in problems[0]
 
 
 def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account):
@@ -248,7 +276,7 @@ def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account
         with pytest.raises(ToolError) as error:
             invoke(Context(book['conn'], book['path'], other, account_shadow_enabled=True), 'account.nav.capture', {'account_id': 'a'})
         assert error.value.status == 403
-    book['conn'].execute('DELETE FROM api_keys WHERE id=?', (book['principal'].key_id,))
+    api_keys.revoke(book['conn'], book['principal'].key_id)
     with pytest.raises(ToolError) as error:
         invoke(ctx, 'account.nav.capture', {'account_id': 'a'})
     assert error.value.status == 403

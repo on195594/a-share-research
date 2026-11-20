@@ -89,7 +89,8 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
                 result['schema_version'] = conn.execute('PRAGMA user_version').fetchone()[0]
                 if result['schema_version'] != len(db.MIGRATIONS):
                     return JSONResponse(result,status_code=503)
-                expected = {'api_keys','runs','reports','prices','batches','scan_requests',*db.ACCOUNT_TABLES}
+                expected = {'api_keys','runs','reports','prices','batches','scan_requests',*db.ACCOUNT_TABLES,
+                            *db.V25_TABLES}
                 if account_shadow_enabled:
                     expected.update(('account_books','account_batches','account_journal','account_voids','account_observations',
                                      'account_analysis_history','account_position_books','account_projection_ids',
@@ -98,7 +99,7 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
                     conn.execute('SELECT account_id,cycle_id FROM account_analysis_history LIMIT 0')
                     conn.execute('SELECT capture_context,capture_context_hash FROM policy_evaluations LIMIT 0')
                 tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                conn.execute('SELECT role FROM api_keys LIMIT 0')
+                conn.execute('SELECT role,kind,client,revoked_at FROM api_keys LIMIT 0')
                 if not expected <= tables:
                     return JSONResponse(result,status_code=503)
         except sqlite3.Error:

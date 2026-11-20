@@ -34,7 +34,7 @@ OPTIONAL_TABLES = (*db.ACCOUNT_TABLES, 'account_source', 'policy_activations',
                    'account_books', 'account_batches', 'account_journal', 'account_voids', 'account_observations',
                    'account_analysis_history', 'account_position_books',
                    'account_projection_ids', 'policy_v0_profiles', 'policy_v0_account_openings',
-                   'policy_versions', 'policy_evaluations')
+                   'policy_versions', 'policy_evaluations', *db.V25_TABLES)
 log = logging.getLogger(__name__)
 
 

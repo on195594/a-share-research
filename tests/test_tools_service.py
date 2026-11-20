@@ -116,3 +116,16 @@ def test_upstream_failure_is_retryable(setup, monkeypatch, error):
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'unavailable'
     assert '重试' in response.json()['error']['message']
+
+
+def test_invoke_rechecks_grant_revoked_after_authentication(setup):
+    path, tokens, _ = setup
+    conn = db.connect(path)
+    try:
+        principal = api_keys.authenticate(conn, tokens['research'])
+        api_keys.revoke(conn, principal.key_id)
+        with pytest.raises(ToolError, match='撤销') as error:
+            invoke(Context(conn, path, principal), 'research.cards', {})
+        assert error.value.status == 403
+    finally:
+        conn.close()

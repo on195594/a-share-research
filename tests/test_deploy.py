@@ -17,6 +17,7 @@ def test_idle_guard_and_fingerprints_on_captured_records(tmp_path):
         load(conn)
         assert deploy._source_version(database) == len(db.MIGRATIONS)
         original = deploy.fingerprints(database)
+        assert {'oauth_clients', 'oauth_codes', 'oauth_tokens', 'account_nav_refs'} <= original.keys()
         deploy.idle(database)
         assert deploy.fingerprints(database) == original
         for status in ("queued", "running"):

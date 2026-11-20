@@ -1,14 +1,16 @@
 """Schema migrations and derived writes against captured production report records."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import json
 import sqlite3
 
 import pytest
 
-from a_share_research import db
+from a_share_research import api_keys, db, initial_release, scans
 from support.continuation import RECORDS, load
 from support.reports import MATERIAL
+from test_analysis_scope_migration import insert as insert_analysis
 
 
 def legacy_database(path, columns="present"):
@@ -332,3 +334,76 @@ def test_disclosure_checks_migrations_preserve_evidence_and_rollback_compatibili
     assert conn.execute('SELECT count(*) FROM disclosure_checks').fetchone()[0] == 2
     assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
     conn.close()
+
+
+@pytest.fixture
+def v24(tmp_path, monkeypatch):
+    path = tmp_path / 'app.db'
+    with monkeypatch.context() as old:
+        old.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:24])
+        with closing(db.connect(path)) as conn:
+            load(conn)
+            token = api_keys.create(conn, 'legacy assistant', role='assistant')
+            key_id, token_hash = conn.execute('SELECT id,token_hash FROM api_keys').fetchone()
+            requester = 'key:' + token_hash
+            scan_id = scans.submit_request(conn, requester, 'pending')
+            api_keys.create(conn, 'legacy owner', role='owner')
+            owner_id = conn.execute("SELECT id FROM api_keys WHERE role='owner'").fetchone()[0]
+            # Structural audit references in their original columns, alongside captured reports.
+            insert_analysis(conn, 10, 1, actor_key_id=key_id, company_key=RECORDS[0]['report']['code'])
+            conn.execute("INSERT INTO policy_versions VALUES ('audit','v0',?,?,'{}')", (db.now(), owner_id))
+            conn.execute("""INSERT INTO policy_evaluations
+                (identity,created_at,created_by,request_id,input_hash,result_hash,input,result)
+                VALUES ('audit',?,?,'receipt','structural','structural','{}','{}')""", (db.now(), key_id))
+            api_keys.create(conn, 'previously revoked')
+            conn.execute("DELETE FROM api_keys WHERE name='previously revoked'")
+    return path, token, key_id, requester, scan_id
+
+
+def test_grant_migration_preserves_old_columns_audit_and_pending_request(v24):
+    path, token, key_id, requester, scan_id = v24
+    before = initial_release.state(path)
+    assert before['version'] == 24
+    with closing(db.connect(path)) as conn:
+        after = initial_release.state(path, before['columns'])
+        assert after['version'] == 25 and after['tables'] == before['tables']
+        assert {tuple(row) for row in conn.execute('SELECT kind,client,revoked_at FROM api_keys')} == {('pat', None, None)}
+        assert api_keys.authenticate(conn, token) == api_keys.Principal(key_id, 'assistant')
+        assert scans.submit_request(conn, requester, 'pending') == scan_id
+        with pytest.raises(sqlite3.IntegrityError, match='rotate key'):
+            conn.execute("UPDATE api_keys SET role='owner' WHERE id=?", (key_id,))
+        with pytest.raises(sqlite3.IntegrityError, match='UNIQUE'):
+            conn.execute("INSERT INTO api_keys(name,token_hash,created_at) SELECT name,token_hash,created_at FROM api_keys")
+        assert api_keys.revoke(conn, key_id)
+        for table, ref in (('account_analysis_history', 'actor_key_id'), ('policy_evaluations', 'created_by')):
+            row = conn.execute(f'SELECT k.id,k.revoked_at FROM {table} h JOIN api_keys k ON k.id=h.{ref}').fetchone()
+            assert row['id'] == key_id and row['revoked_at']
+        replacement = api_keys.create(conn, 'replacement')
+        sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='api_keys'").fetchone()[0]
+        assert api_keys.authenticate(conn, replacement).key_id == sequence == 4
+        migrated = list(conn.iterdump())
+        with db.transaction(conn):
+            db._migrate_v25(conn)
+        assert list(conn.iterdump()) == migrated
+        assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    with closing(db.connect(path)) as reopened:
+        assert list(reopened.iterdump()) == migrated and reopened.total_changes == 0
+
+
+def test_grant_copy_hash_mismatch_rolls_back_the_entire_migration(v24, monkeypatch):
+    path = v24[0]
+    before = initial_release.state(path)
+    original = api_keys._column_hashes
+
+    def corrupt_copy(conn):
+        if 'kind' in {row[1] for row in conn.execute('PRAGMA table_info(api_keys)')}:
+            conn.execute("UPDATE api_keys SET name=name || ' corrupt copy'")
+        return original(conn)
+
+    monkeypatch.setattr(api_keys, '_column_hashes', corrupt_copy)
+    with pytest.raises(ValueError, match='旧列哈希不一致'):
+        db.connect(path)
+    assert initial_release.state(path) == before
+    with closing(sqlite3.connect(path)) as conn, pytest.raises(sqlite3.IntegrityError, match='rotate key'):
+        conn.execute("UPDATE api_keys SET role='owner'")

@@ -621,7 +621,7 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
 
 
 # JSON clients accept persistent API keys and legacy agent sessions, never cookies.
-def api_session(request: Request) -> str:
+def _api_credential(request: Request) -> tuple[str, api_keys.Principal | None]:
     header = request.headers.get("authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(401, "需要研究 API bearer token")
@@ -637,7 +637,12 @@ def api_session(request: Request) -> str:
             raise HTTPException(401, "研究凭据无效、已撤销或临时令牌已过期")
     if request.headers.get("x-research-version", service.VERSION) != service.VERSION:
         raise HTTPException(400, "不支持的研究合同版本")
-    return key
+    return key, principal
+
+
+def api_session(request: Request) -> str:
+    requester, _ = _api_credential(request)
+    return requester
 
 
 class ResearchRequest(BaseModel):
@@ -824,9 +829,9 @@ def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
 
 @app.post("/api/session/revoke")
 def api_revoke(request: Request):
-    key = api_session(request)
-    if key.startswith("key:"):
-        conn.execute("DELETE FROM api_keys WHERE token_hash = ?", (key[4:],))
+    key, principal = _api_credential(request)
+    if principal:
+        api_keys.revoke(conn, principal.key_id)
     else:
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (key,))
     return {"version": service.VERSION, "revoked": True}
