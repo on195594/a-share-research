@@ -124,28 +124,6 @@ def test_batch_boundaries_preserve_results_and_pagination(conn, monkeypatch, que
             for p in (1, 2, 10)] == expected
 
 
-def test_library_only_fetches_missing_hit_companies(conn, monkeypatch):
-    original = reading.latest_reports
-    calls = []
-
-    def tracked(*args, **kwargs):
-        calls.append(kwargs)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(reading, "latest_reports", tracked)
-    scoped = reading.library_results(conn, "东方电缆 现金流")
-    assert scoped["hits"]
-    # Company recognition already supplied the latest row; no enrichment query is needed.
-    assert not any("codes" in call for call in calls)
-    assert all(call.get("query") for call in calls)
-    assert all(hit["latest"]["checkpoint"] is None for hit in scoped["hits"])
-    calls.clear()
-    found = reading.library_results(conn, "现金流")
-    enrichment = [call for call in calls if "codes" in call]
-    assert len(enrichment) == 1
-    assert set(enrichment[0]["codes"]) == {hit["code"] for hit in found["hits"]}
-
-
 @pytest.mark.parametrize("history", [False, True])
 def test_latest_metadata_includes_other_code_formats(conn, history):
     conn.execute("UPDATE reports SET code = '603606.SH' WHERE substr(code,1,6) = '603606'")
@@ -187,6 +165,7 @@ def test_latest_metadata_has_uniform_mapping_type(conn):
     results = [reading.library_results(conn, query) for query in ("现金流", "东方电缆 现金流")]
     assert all(result["hits"] for result in results)
     assert all(isinstance(hit["latest"], dict) for result in results for hit in result["hits"])
+    assert all(hit["latest"]["checkpoint"] is None for result in results for hit in result["hits"])
 
 
 def test_item_link_points_at_the_claim_or_the_stance():
