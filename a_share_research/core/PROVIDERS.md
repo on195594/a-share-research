@@ -1,138 +1,42 @@
 # TuShare 生产主源 Provider API
 
-> 本文件随 a-stock-lib 0.10.2（`7bda9cd`）并入 `a_share_research/core/`，仍是 Provider 的现行合同。
-
-本文描述当前源码合同；源码版本以 `pyproject.toml` 为准。生产消费者的已发布版本以各自锁文件和部署记录为准，源码修复不代表已发布或激活。
+从 `a_share_research.core.providers` 导入下列 Provider。结果统一为 `MarketDataResult`，包含值、状态、来源、抓取时间及可得的来源日期、请求指纹和行数。
 
 ## 凭据
 
-本版本固定 `tushare==1.4.29`。Token 优先级：构造参数 → `TUSHARE_TOKEN` → 显式 `env_path` 指向的文件。默认不搜索相邻项目或主目录下的 `.env`；未配置时返回 `AUTH_MISSING`，显式空 Token 仍表示禁用。旧调用若依赖隐式文件发现，须改为环境变量或显式路径。禁止在代码中硬编码 Token。
+TuShare 版本由 `pyproject.toml` 锁定。Token 按构造参数、`TUSHARE_TOKEN`、显式指定的 `env_path` 顺序读取。显式空 Token 禁用访问；缺少凭据时返回 `AUTH_MISSING`。
 
 ## 行情与行业
 
-`TushareMarketDataProvider` 与其他 TuShare Provider 共用 `TushareProviderBase` 的 token、client、限流、typed retry、错误分类和请求指纹。成功行情以实际最大交易日作为 `source_as_of`；标量价格完整继承 bars 的 `source_as_of`、`freshness_days`、`request_fingerprint` 和 `row_count`。
+`TushareFundamentalsProvider.fetch_industry_map()` 返回六位公司代码到行业的映射。行业映射来自 `stock_basic`，没有官方业务日期，`source_as_of` 为空。缓存默认位于 `~/.cache/a_stock_lib/tushare_industry_map.json`，有效期 30 天，可用 `cache_path` 和 `ttl_seconds` 指定。缓存年龄按 `fetched_at` 计算。
 
-`TushareFundamentalsProvider.fetch_industry_map()` 的远端与缓存命中结果都返回缓存年龄、确定性请求指纹和映射行数。行业接口没有官方业务日期，因此 `source_as_of` 保持 `None`；抓取时点只由 `fetched_at` 表示，不伪装成财报期或交易日。
-
-- 缓存默认位于 `~/.cache/a_stock_lib/tushare_industry_map.json`，TTL 30 天，可由 `cache_path` / `ttl_seconds` 注入；写入为临时文件 + fsync + 原子替换。
-- `read_cached_industry_map()` 只读缓存、不联网、不写入；过期返回 `CACHE_STALE`，缺失、损坏、结构错误、未来时间戳或读失败统一返回 `CACHE_MISSING`，状态均为 `failed`。缓存年龄以 `fetched_at` 为准；旧缓存仍可读取，新写入不再保存重复的 `fetched_at_epoch`。
-- `fetch_industry_map()` 缓存不可用时回源；远端成功但写缓存失败返回 `degraded` + `CACHE_WRITE_FAILED`，数据仍可用。
+`read_cached_industry_map()` 只读本地缓存。过期返回 `CACHE_STALE`，缺失、损坏、未来时间戳或读取失败返回 `CACHE_MISSING`。`fetch_industry_map()` 默认优先读有效缓存，缓存不可用时回源，`force_refresh=True` 时直接请求上游。获取成功但缓存写入失败时仍返回映射，状态为 `degraded`，原因为 `CACHE_WRITE_FAILED`。
 
 ## 行情价格合同
 
-- `fetch_index_bars(symbol, start_date, end_date)`：闭区间请求，支持 `.SH` / `.SZ` / `.CSI`（包括 `H00300.CSI`、`H00922.CSI`）；只返回升序的 `date/close` 指数点位，不捏造 OHLC、成交量或复权含义。非法代码/日期返回 `INVALID_ARGUMENT`，缺列、非正/非有限点位、重复日期、区间外数据均 fail-closed。`source_as_of` 是实际最后观察日，`freshness_days` 相对请求截止日。
-- `fetch_close_price(code, target_date)`：查询 `[target_date - 10 天, target_date]`，返回最近有效收盘价。当天为 `ok`，之前交易日为 `degraded` + `NEAREST_AVAILABLE_PRICE`；保留实际日期、天数、来源、请求指纹。长停牌超过窗口或无行情返回失败，不无限回溯。
-- `to_tushare_stock_code` / `to_tushare_index_code` 是公开的代码规范化函数。
+`TushareMarketDataProvider` 提供两种查询。结果中的 `source_as_of` 取实际最后观察日，`freshness_days` 相对请求截止日计算。股票和指数可分别用 `to_tushare_stock_code`、`to_tushare_index_code` 规范化代码。
+
+- `fetch_index_bars(symbol, start_date, end_date)` 在闭区间内返回按日期升序排列的 `date/close` 点位，支持 SH、SZ、CSI（含 H00300.CSI 等全收益指数）。非法参数、缺列、非正或非有限点位、重复日期、区间外数据均返回失败。
+- `fetch_close_price(code, target_date)` 返回目标日及此前 10 个自然日内最近的有效收盘价。目标日命中为 `ok`，取较早交易日为 `degraded`，原因为 `NEAREST_AVAILABLE_PRICE`，无有效价格则失败。
 
 ## 估值
 
-```python
-from a_share_research.core.providers import TushareValuationProvider
-
-provider = TushareValuationProvider()
-history = provider.fetch_valuation_history(
-    "603606",
-    "2016-07-18",
-    "2026-07-17",
-)
-```
-
-返回 `MarketDataResult[pandas.DataFrame]`，字段包括：
-
-```text
-ts_code, trade_date, close,
-pe, pe_ttm, pb, ps, ps_ttm,
-dv_ratio, dv_ttm, total_mv, circ_mv
-```
-
-单位与空值遵循官方 `daily_basic`：
-
-- `dv_ratio/dv_ttm`：百分比；
-- `total_mv/circ_mv`：万元；
-- 亏损公司的 `pe/pe_ttm` 为空是合法业务状态。
-
-官方文档：[每日指标数据](https://tushare.pro/document/2?doc_id=32)。
+`TushareValuationProvider().fetch_valuation_history("603606", "2016-07-18", "2026-07-17")` 成功时结果的 `.value` 是 DataFrame，含 `ts_code`、`trade_date`、`close`、`pe`、`pe_ttm`、`pb`、`ps`、`ps_ttm`、`dv_ratio`、`dv_ttm`、`total_mv`、`circ_mv`。股息率单位为百分比，市值单位为万元；亏损公司的 PE 可为空。[TuShare 每日指标](https://tushare.pro/document/2?doc_id=32)
 
 ## 财务
 
-```python
-from a_share_research.core.providers import TushareFinancialProvider
+`TushareFinancialProvider` 的 `fetch_indicator_history`、`fetch_income_history`、`fetch_balance_history`、`fetch_cashflow_history` 以公司代码查询指标、利润表、资产负债表和现金流量表。可选 `period`、`start_date` 和 `end_date` 均接受 YYYYMMDD 或 ISO 日期，发往 TuShare 时统一为 YYYYMMDD。
 
-provider = TushareFinancialProvider()
-indicator = provider.fetch_indicator_history("600036")
-income = provider.fetch_income_history("600036")
-balance = provider.fetch_balance_history("600036")
-cashflow = provider.fetch_cashflow_history("600036")
-```
-
-四个历史方法的可选 `period` 参数遵循 TuShare 官方报告期格式 `YYYYMMDD`；`start_date/end_date` 也接受 ISO 日期并在请求前转换为 `YYYYMMDD`。
-
-统一输出增加 `endpoint`，并提供以下可空公共键：
-
-```text
-ts_code, endpoint, ann_date, f_ann_date, end_date,
-report_type, comp_type, end_type, update_flag
-```
-
-`fina_indicator` 官方不提供 `f_ann_date/report_type/comp_type/end_type`，这些字段保持 `NULL`，不得伪造。三大报表保留官方 PIT 键和更正标识。
-
-`fina_indicator` 的选择字段包含 `or_yoy`（营业收入同比增长率）与 `dt_netprofit_yoy`（扣除非经常损益后的归母净利润同比增长率），供消费者做最新报告方向核验；它们不是自动评分或单季年化字段。
-
-财务结果的 `source_as_of` 使用有效公告日：三大报表优先 `f_ann_date`、回退 `ann_date`；`fina_indicator` 使用 `ann_date`。
-
-官方文档：
-
-- [财务指标](https://tushare.pro/document/2?doc_id=79)
-- [利润表](https://tushare.pro/document/2?doc_id=33)
-- [资产负债表](https://tushare.pro/document/2?doc_id=36)
-- [现金流量表](https://tushare.pro/document/2?doc_id=44)
+结果保留 `ts_code`、`endpoint`、`ann_date`、`f_ann_date`、`end_date`、`report_type`、`comp_type`、`end_type`、`update_flag`。财务指标上游缺少的实际公告日和报表分类字段留空。三大报表逐行优先取 `f_ann_date`，缺失时用 `ann_date`，最大有效公告日为 `source_as_of`；指标使用 `ann_date`。指标中的 `or_yoy`、`dt_netprofit_yoy` 分别为营业收入与扣非归母净利润同比增长率。[财务指标](https://tushare.pro/document/2?doc_id=79) · [利润表](https://tushare.pro/document/2?doc_id=33) · [资产负债表](https://tushare.pro/document/2?doc_id=36) · [现金流量表](https://tushare.pro/document/2?doc_id=44)
 
 ## 分红
 
-```python
-from a_share_research.core.providers import TushareDividendProvider
-
-provider = TushareDividendProvider()
-result = provider.fetch_dividend_history("600036")
-```
-
-无分红记录返回 `status="ok"` 的空 DataFrame，不作为远端失败。
-
-分红结果的 `source_as_of` 优先使用 `imp_ann_date`，缺失时回退 `ann_date`。
-
-官方字段口径：
-
-- `cash_div`：每股分红，税后；
-- `cash_div_tax`：每股分红，税前。
-
-官方文档：[分红送股](https://tushare.pro/document/2?doc_id=103)。
+`TushareDividendProvider().fetch_dividend_history("600036")` 查询每股分红，`cash_div` 为税后，`cash_div_tax` 为税前。生效资料日期优先用 `imp_ann_date`，缺失时取 `ann_date`。成功查询无记录时返回 `status="ok"` 和空 DataFrame。[TuShare 分红送股](https://tushare.pro/document/2?doc_id=103)
 
 ## 限流、重试和错误
 
-- 真实 TuShare Provider 默认共享进程级 180 次/分钟限流器；
-- 仅 typed timeout/connection 异常重试一次；
-- 权限、积分、认证、参数、schema 和频次错误不重试；
-- SDK 1.4.29 抛出 API 错误时只保留消息，无法可靠取得服务端数字 code；
-- 错误消息在进入 `MarketDataResult` 前移除已知 Token。
-
-常用错误码：
-
-```text
-AUTH_MISSING
-PERMISSION_DENIED
-RATE_LIMITED
-TIMEOUT
-REMOTE_DISCONNECTED
-EMPTY_RESPONSE
-MISSING_COLUMNS
-SCHEMA_CHANGED
-INVALID_ARGUMENT
-SOURCE_STALE
-UNKNOWN_ERROR
-```
-
-行业缓存另有 `CACHE_*` 错误码，见“行情与行业”。
+Provider 默认共用进程级 180 次/分钟限流器。仅对超时或连接类异常重试一次。其他失败查看 `error_code` 和已移除已知 Token 的 `error_message`。常见错误包括权限或限频（`PERMISSION_DENIED`、`RATE_LIMITED`）、传输失败（`TIMEOUT`、`REMOTE_DISCONNECTED`）、输入或来源数据错误（`INVALID_ARGUMENT`、`EMPTY_RESPONSE`、`MISSING_COLUMNS`、`SCHEMA_CHANGED`、`SOURCE_STALE`）。[结果类型与错误码](market_data.py)
 
 ## 测试边界
 
-默认 pytest 通过 autouse fixture 清除 TuShare、Telegram 和代理凭据。单元测试只注入 fake client，不访问网络。真实 smoke test必须单独显式运行，不属于默认测试套件。
+Provider 的离线用例位于 `tests/core/`，该目录的 fixture 隔离行情、Telegram 与代理环境变量，测试注入客户端。其他验证入口见[测试说明](../../tests/README.md)。
