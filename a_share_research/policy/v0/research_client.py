@@ -11,6 +11,8 @@ import sys
 from a_share_research import reading, service
 from a_share_research.policy.v0 import paths
 
+_RESUME_HELP = "请沿用原凭据调用 research_status，传入原 request_id。"
+
 
 def _code(value: str) -> str:
     if not re.fullmatch(r"[0-9]{6}", value):
@@ -36,9 +38,7 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         action = actions.add_parser(name, help=label)
         action.add_argument("id", type=_positive_id)
     actions.add_parser("budget", help="读取研究调用上限；不是费用报价，不启动研究")
-    resume = actions.add_parser(
-        "resume", help="凭原请求编号只读找回任务；不重提、不付费重跑"
-    )
+    resume = actions.add_parser("resume", help=_RESUME_HELP, description=_RESUME_HELP)
     resume.add_argument("--request-id", required=True)
     # Explicit opt-in preserves the existing full report wire contract.
     actions.choices["report"].add_argument("--compact", action="store_true")
@@ -67,7 +67,6 @@ _ROUTES = (
     (re.compile(r"/api/reports"), _reports),
     (re.compile(r"/api/reports/([0-9]+)"), lambda conn, match, params: service.report_view(
         conn, int(match[1]), compact=params.get("compact") == "true")),
-    (re.compile(r"/api/request"), lambda conn, match, params: service.run_view(conn, request_id=params["request_id"])),
     (re.compile(r"/api/research/budget"),
      lambda conn, match, params: {"version": service.VERSION, "budget": service.run_budget(conn)}),
     (re.compile(r"/api/runs/([0-9]+)"), _run),
@@ -118,7 +117,7 @@ def cmd_research(argv: list[str]) -> int:
             if args.compact:
                 params = {"compact": "true"}
         elif args.action == "resume":
-            path, params = "/api/request", {"request_id": args.request_id}
+            raise ValueError(_RESUME_HELP)
         elif args.action == "budget":
             path = "/api/research/budget"
         else:

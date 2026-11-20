@@ -107,7 +107,7 @@ def _copy(source, target=None):
     return dict(sha256=digest.hexdigest(), size=size)
 
 
-def _metadata(database):
+def _metadata(database, *, include_uploads=True):
     with _regular(database) as stream:
         if stream.read(20)[18:20] != b'\x01\x01':
             raise BackupError('备份数据库必须为独立回滚日志格式，不能依赖 WAL 文件')
@@ -116,7 +116,7 @@ def _metadata(database):
         sequences = dict(conn.execute('SELECT name,seq FROM sqlite_sequence')) if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='sqlite_sequence'").fetchone() else {}
         return dict(user_version=conn.execute('PRAGMA user_version').fetchone()[0], sqlite_sequences=sequences,
-                    required=backup_refs.required(conn))
+                    required=backup_refs.required(conn, include_uploads=include_uploads))
 
 
 def _sync_directory(directory):
@@ -246,8 +246,11 @@ def verify(directory: Path) -> dict:
             raise BackupError('PDF 文件名与内容哈希不符')
         if name.startswith('account-evidence/'):
             evidence.verify(directory/'account-evidence',Path(name).name)
-    metadata = _metadata(directory/'app.db')
-    if any(manifest[key] != value for key,value in metadata.items()):
+    database = directory/'app.db'
+    metadata = _metadata(database)
+    # Older v1 manifests omitted upload-only hashes. The inventory must cover them in either case.
+    recorded = metadata if manifest['required'] == metadata['required'] else _metadata(database, include_uploads=False)
+    if any(manifest[key] != value for key,value in recorded.items()):
         raise BackupError('数据库版本、序列或证据引用与清单不一致')
     for kind,subdir,suffix in (('pdf','pdf','.pdf'),('account_evidence','account-evidence','')):
         missing = [sha for sha in metadata['required'][kind] if f'{subdir}/{sha}{suffix}' not in inventory]

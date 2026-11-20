@@ -47,6 +47,8 @@ ashare --config /home/lin/.config/ashare/hermes-assistant.json \
   call research_card --json '{"code":"600938"}'
 ```
 
+大文件上传可用 `ashare call account_evidence --json - < upload.json` 从标准输入读取含 Base64 的 JSON 参数，最多 28 MiB。
+
 取得回执时退出 0，`call` 的业务数据在 stdout 的 `result.data`。失败类别写入 stderr，重试由调用方决定。
 
 | 退出码 | 恢复方式 |
@@ -54,6 +56,7 @@ ashare --config /home/lin/.config/ashare/hermes-assistant.json \
 | 20 | 生效政策变化，原请求确定未写入。读取现行政策后按业务流程确定是否重新提交。 |
 | 21 | 暂停、槽位已满、连接被拒等暂未受理情形。恢复后可原样重试。 |
 | 22 | 超时、连接重置或回执损坏，结果未知。保留待查记录，用原身份和原请求查回。 |
+| 23 | 回执超过 CLI 的 64 MiB 上限。保留待查记录，用支持更大回执的 MCP 客户端、原身份和原请求查回。 |
 | 其他非零 | 按 stderr 提示核对凭据、权限和参数。 |
 
 ## 段 2 切换回退

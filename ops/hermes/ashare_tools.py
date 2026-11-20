@@ -52,6 +52,8 @@ def tool(name: str, arguments: dict) -> dict:
         raise ToolsError(f'{name} 发布暂停或服务繁忙，恢复后可原样重试', code='service_unavailable')
     if result.returncode == 22 or result.returncode < 0:
         raise ToolsError(unknown, code='outcome_unknown')
+    if result.returncode == 23:
+        raise ToolsError(f'{name} 回执超限，请用支持更大回执的 MCP 客户端，沿用原身份和原请求查回', code='outcome_unknown')
     if result.returncode:
         raise ToolsError(f'{name} 调用失败，请核对凭据是否失效、工具权限与请求参数')
     try:

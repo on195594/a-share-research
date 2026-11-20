@@ -49,11 +49,14 @@ def test_real_prompt_dedup_migrates_legacy_keys_and_allows_lapsed_return(advisor
     assert len(set(requests)) == 4
 
 
-@pytest.mark.parametrize('code', [21, 22])
+@pytest.mark.parametrize('code', [21, 22, 23])
 def test_original_monitor_request_recovered_without_new_policy_lookup(advisor, ashare_cli, prompts, code):
     ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 7}))
     ashare_cli.reply('policy_monitor', code=code)
-    assert '检查未完成' in advisor.opportunities()
+    failure = advisor.opportunities()
+    assert '检查未完成' in failure
+    if code == 23:
+        assert '回执超限' in failure and '原请求' in failure
     pending = advisor.read_opportunity_state()['pending']
     ashare_cli.reply('policy_monitor', monitor_receipt(prompts))
     assert '【建仓机会】' in advisor.opportunities()

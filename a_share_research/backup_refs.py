@@ -64,7 +64,7 @@ def _material(value, label):
     return _documents({'document': data['doc'], 'sources': extra.get('sources', {})}, label)
 
 
-def required(conn: sqlite3.Connection) -> dict[str, list[str]]:
+def required(conn: sqlite3.Connection, *, include_uploads: bool = True) -> dict[str, list[str]]:
     """Return sorted, deduplicated hashes from all committed evidence and PDF references.
 
     Missing tables are valid for older schemas. Failed batch requests are deliberately
@@ -72,8 +72,11 @@ def required(conn: sqlite3.Connection) -> dict[str, list[str]]:
     Both sqlite3.Row and ordinary tuple row factories are supported.
     """
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not include_uploads:
+        tables.discard('account_evidence_uploads')
     account, pdf = set(), set()
     for table, column, is_list in (
+        ('account_evidence_uploads', 'sha256', False),
         ('account_books', 'opening_evidence', False),
         ('account_observations', 'evidence', False),
         ('account_position_books', 'evidence_hashes', True),

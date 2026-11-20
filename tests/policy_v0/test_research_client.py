@@ -45,9 +45,6 @@ def test_every_read_returns_what_the_service_returns_and_changes_nothing(researc
     assert compact == json.loads(json.dumps(service.report_view(conn, report, compact=True)))
     assert compact["view"] == "compact"
     assert _output(capsys, "status", str(run)) == {"version": service.VERSION, **dict(reading.api_run(conn, run))}
-    request_id = conn.execute("SELECT request_id FROM runs WHERE id = ?", (run,)).fetchone()[0]
-    assert _output(capsys, "resume", "--request-id", request_id) == json.loads(
-        json.dumps(service.run_view(conn, request_id=request_id)))
     assert _output(capsys, "budget") == {"version": service.VERSION, "budget": service.run_budget(conn)}
     assert _output(capsys, "card", code) == json.loads(json.dumps(service.company_card(conn, code)))
     assert _output(capsys, "cards") == {**service.company_cards(conn), "holdings_available": False}
@@ -124,12 +121,24 @@ def test_missing_database_is_reported_and_not_created(isolated_cache_database, c
 @pytest.mark.parametrize("args, message", [
     (["status", "999"], "Research 404：任务不存在"),
     (["report", "999"], "Research 404"),
-    (["resume", "--request-id", "never-submitted"], "Research 404"),
 ])
 def test_unknown_ids_fail_with_the_service_error(research, capsys, args, message):
     assert cache.main(["research", *args]) == 1
     output = capsys.readouterr()
     assert not output.out and message in output.err
+
+
+def test_local_resume_directs_scoped_request_to_authenticated_status(research, capsys):
+    conn, _, _ = research
+    request_id = "interrupted-request"
+    principal = api_keys.authenticate(conn, api_keys.create(conn, "resume-test", role="research"))
+    requester = service.requester(conn, principal)
+    run = service.submit(conn, SUCCESS["code"], request_id, requester=requester)
+    assert service.research_status(conn, requester=requester, request_id=request_id)["id"] == run
+    assert _output(capsys, "status", str(run))["id"] == run
+    assert cache.main(["research", "resume", "--request-id", request_id]) == 1
+    output = capsys.readouterr()
+    assert not output.out and "原凭据" in output.err and "research_status" in output.err
 
 
 @pytest.mark.parametrize("args", [

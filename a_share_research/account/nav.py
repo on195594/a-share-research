@@ -343,9 +343,13 @@ def replay(conn, principal, account_id: str, artifact_sha256: str, directory: Pa
                 or artifact['source']['account_id'] != account_id):
             raise ValueError('净值输入包格式或账户不一致')
         request = Request.model_validate(artifact['request'])
-        if collected and artifact['collection_request_sha256'] != gate.digest(
-                request.model_dump(mode='json') | {'benchmark_evidence_hash': None}):
-            raise ValueError('净值采集请求与保存凭证不一致')
+        if collected:
+            if artifact['collection_request_sha256'] != gate.digest(
+                    request.model_dump(mode='json') | {'benchmark_evidence_hash': None}):
+                raise ValueError('净值采集请求与保存凭证不一致')
+            if conn.execute('SELECT 1 FROM account_nav_refs WHERE account_id=? AND artifact_sha256=?',
+                            (account_id, artifact_sha256)).fetchone() is None:
+                raise ValueError('当前账户缺少该服务采集凭证的已提交引用，请核对原凭证哈希')
         result = _compute(_account_inputs(artifact['source'], request, directory), request, directory, collected=collected)
         if result != artifact['result']:
             raise ValueError('保存结果与固定输入重放不一致')

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from threading import local
 from typing import TYPE_CHECKING, Literal, Self
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 _VERSION = "2026-07-28"
 _UNKNOWN = "结果未知。请先核对回执，重试时使用同一请求编号和原内容。"
 _PAUSED = "发布中，约 1 分钟后用原请求重试。"
+_worker = local()
 
 
 class ToolCallError(Exception):
@@ -108,9 +110,11 @@ class ToolsClient:
         body = json.dumps({"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": params},
                           allow_nan=False, ensure_ascii=False).encode()
         try:
-            with requests.Session() as http:
-                http.trust_env = False
-                response = http.post(self.endpoint, data=body, headers=headers, allow_redirects=False, timeout=(5, 60))
+            if not hasattr(_worker, "session"):
+                _worker.session = requests.Session()
+                _worker.session.trust_env = False
+            response = _worker.session.post(self.endpoint, data=body, headers=headers, allow_redirects=False,
+                                            timeout=(5, 60))
         except requests.RequestException as exc:
             raise ToolCallError("unknown", _UNKNOWN) from exc
         return _reply(response, request_id)

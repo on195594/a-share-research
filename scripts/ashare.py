@@ -18,7 +18,10 @@ _VERSION = '2026-07-28'
 _VERSION_KEY = 'io.modelcontextprotocol/protocolVersion'
 _CAPABILITIES_KEY = 'io.modelcontextprotocol/clientCapabilities'
 _UNKNOWN = '结果未知，请先查询回执，只能用原身份和原请求恢复'
-_LIMIT = 8 * 1024 * 1024
+_INPUT_LIMIT = 28 * 1024**2  # MCP request body budget, including Base64 evidence.
+# A policy receipt includes the capture (up to 8 MiB), its result and metadata.
+# MCP sends both structured JSON and a second, escaped text representation.
+_RESPONSE_LIMIT = 64 * 1024**2
 
 
 class ClientError(Exception):
@@ -32,6 +35,10 @@ class ClientError(Exception):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class ResponseTooLarge(ValueError):
+    """The response exceeded the caller's byte budget."""
 
 
 def reject_constant(value):
@@ -96,11 +103,17 @@ def configuration(filename):
     return settings
 
 
-def read_json_response(response, limit=_LIMIT):
-    raw = response.read(limit + 1)
+def read_json_response(response, limit):
     size = response.headers.get('Content-Length')
-    if len(raw) > limit or (size is not None and int(size) != len(raw)):
-        raise ValueError('incomplete or oversized response')
+    if size is not None:
+        size = int(size)
+        if size > limit:
+            raise ResponseTooLarge
+    raw = response.read(limit + 1)
+    if len(raw) > limit:
+        raise ResponseTooLarge
+    if size is not None and size != len(raw):
+        raise ValueError('incomplete response')
     return parse_json(raw.decode('utf-8'))
 
 
@@ -166,12 +179,14 @@ def request(settings, method, params):
         except urllib.error.HTTPError as exc:
             raise http_error(exc, settings['token']) from None
         with response:
-            reply = read_json_response(response)
+            reply = read_json_response(response, _RESPONSE_LIMIT)
         if (not isinstance(reply, dict) or reply.get('jsonrpc') != '2.0'
                 or type(reply.get('id')) is not int or reply['id'] != 1
                 or ('result' in reply) == ('error' in reply)
                 or not isinstance(reply.get('error', reply.get('result')), dict)):
             raise ValueError('invalid JSON-RPC response')
+    except ResponseTooLarge:
+        raise ClientError('回执超限，请用支持更大回执的 MCP 客户端，沿用原身份和原请求查回', 23) from None
     except (OSError, http.client.HTTPException, ValueError, RecursionError) as exc:
         if isinstance(exc, ConnectionRefusedError) or isinstance(getattr(exc, 'reason', None), ConnectionRefusedError):
             raise ClientError('发布暂停或暂未受理：连接被拒，请稍后用原请求重试', 21) from None
@@ -240,7 +255,7 @@ def main(argv=None):
     actions.add_parser('tools')
     call = actions.add_parser('call')
     call.add_argument('name')
-    call.add_argument('--json', default='{}', dest='arguments')
+    call.add_argument('--json', default='{}', dest='arguments', help='工具参数 JSON 对象，- 表示从标准输入读取')
     args = parser.parse_args(argv)
     try:
         settings = configuration(args.config)
@@ -250,9 +265,16 @@ def main(argv=None):
             if not _TOOL_NAME.fullmatch(args.name):
                 raise ClientError('参数错误：工具名称无效')
             try:
-                payload = parse_json(args.arguments)
+                raw = args.arguments
+                if raw == '-':
+                    raw = sys.stdin.buffer.read(_INPUT_LIMIT + 1)
+                    if len(raw) > _INPUT_LIMIT:
+                        raise ClientError('参数错误：标准输入超过 28 MiB，请缩小 JSON')
+                payload = parse_json(raw)
                 if not isinstance(payload, dict):
                     raise ValueError
+            except OSError:
+                raise ClientError('参数错误：标准输入读取失败，请核对输入文件或管道') from None
             except (ValueError, RecursionError):
                 raise ClientError('参数错误：--json 须为有效 JSON 对象') from None
             result = cli_result(settings, 'tools/call', {'name': args.name, 'arguments': payload})
