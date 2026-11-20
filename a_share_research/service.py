@@ -1,12 +1,16 @@
 """Shared research submission and public evidence views; no model or account actions."""
 
+import hashlib
 import json
 import re
 import sqlite3
 from datetime import datetime
 
+from pydantic import BaseModel, ConfigDict, Field
+from requests import RequestException
+
 from a_share_research import report as report_body
-from a_share_research import batches, db, stance as stances
+from a_share_research import api_keys, batches, companies, db, stance as stances
 from a_share_research import stock_codes
 from a_share_research.limits import MAX_CALLS, MONTHLY_MAX_CALLS
 from a_share_research.evidence import report_source_view, projection
@@ -21,9 +25,114 @@ class RequestError(ValueError):
         self.status = status
 
 
+class ResearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    code: str = Field(pattern=stock_codes.KEY_PATTERN)
+    request_id: str = Field(min_length=1, max_length=128)
+    question: str = Field(default="", max_length=4000)
+    parent_report_id: int | None = Field(default=None, gt=0)
+
+
+class FeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: str = Field(min_length=1, max_length=128)
+    location: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+def requester(conn: sqlite3.Connection, principal: api_keys.Principal) -> str:
+    """The existing web/scan identity for a persistent credential."""
+    row = conn.execute("SELECT token_hash FROM api_keys WHERE id=? AND role=?",
+                       (principal.key_id, principal.role)).fetchone()
+    if row is None:
+        raise RequestError("研究凭据无效或已撤销", 403)
+    return "key:" + row[0]
+
+
+def _request_key(requester: str, request_id: str) -> str:
+    if not 1 <= len(request_id) <= 128:
+        raise RequestError("请求编号须为 1–128 字")
+    # Longer than any client ID, so a legacy lookup can never match a scoped key.
+    digest = hashlib.sha512(f"{requester}\0{request_id}".encode()).hexdigest()
+    return f"research:{digest}"
+
+
+def _previous_request(conn, requester: str, request_id: str):
+    key = _request_key(requester, request_id)
+    # Legacy web research and feedback shared bare IDs with system-generated tasks.
+    return conn.execute(
+        "SELECT id, kind, company_key, name, request FROM runs WHERE request_id=? "
+        "OR (request_id=? AND kind='research' AND request_id NOT GLOB 'batch-*' "
+        "AND request_id NOT GLOB 'scan-*' AND request_id NOT GLOB 'web-retry:*') "
+        "ORDER BY request_id=? DESC LIMIT 1", (key, request_id, key),
+    ).fetchone()
+
+
+def _form_query(query: str) -> str:
+    return re.sub(r"\s+", "", query).upper().removesuffix(".SH").removesuffix(".SZ").removesuffix(".BJ")
+
+
+def run_link(run_id: int) -> dict:
+    return {"run_id": run_id, "path": f"/runs/{run_id}"}
+
+
+def request_research(conn, requester: str, request_id: str, code: str, *, question: str = "",
+                     parent_report_id: int | None = None, form: bool = False, again: bool = False) -> dict:
+    """Replay the accepted intent before consulting the directory, including browser name searches."""
+    query = _form_query(code) if form else code
+    previous = _previous_request(conn, requester, request_id)
+    if previous:
+        saved = json.loads(previous["request"] or "null") or {}
+        queries = (previous["company_key"], saved.get("company_query", previous["name"]))
+        if (previous["kind"] != "research" or query not in queries or saved.get("feedback") or saved.get("events")
+                or saved.get("question", "") != question.strip() or saved.get("parent_report_id") != parent_report_id):
+            raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
+        return run_link(previous["id"])
+
+    try:
+        if form:
+            company, choices = companies.resolve(query)
+            if company is None:
+                error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
+                return {"q": code, "error": error, "choices": choices}
+        else:
+            company = companies.company(code)
+    except companies.SourceError as exc:
+        raise RequestError(str(exc)) from exc
+    except RequestException as exc:
+        raise RequestError("暂时无法连接巨潮资讯，请稍后重试", 503) from exc
+    name = company["zwjc"].replace(" ", "")
+    if companies.FINANCIAL_NAME.search(company["zwjc"]):
+        if form:
+            return {"q": code, "error": f"{name}属于银行、保险、券商等金融类公司，暂不支持研究。"}
+        raise RequestError("金融类公司暂不支持研究")
+    if form and not again and not question.strip() and parent_report_id is None:
+        from a_share_research import reading
+        if recent := reading.recent_report(conn, company["code"]):
+            return {"q": company["code"], "recent": recent}
+    run_id = submit(conn, company["code"], request_id, name=name, question=question, parent_report_id=parent_report_id,
+                    requester=requester, company_query=query if query != company["code"] else None)
+    return run_link(run_id)
+
+
+def request_feedback(conn, requester: str, report_id: int, request_id: str, location: str, text: str,
+                     *, code: str = "") -> dict:
+    feedback = {"location": location, "text": text.strip()}
+    previous = _previous_request(conn, requester, request_id)
+    if previous:
+        saved = json.loads(previous["request"] or "null") or {}
+        if (previous["kind"] != "research" or (code and previous["company_key"] != code)
+                or saved.get("parent_report_id") != report_id or saved.get("feedback") != feedback):
+            raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
+        run_id = previous["id"]
+    else:
+        run_id = submit(conn, code, request_id, requester=requester, parent_report_id=report_id, feedback=feedback)
+    return run_link(run_id)
+
+
 def submit(conn, code: str, request_id: str, *, name: str | None = None,
            question: str = "", parent_report_id: int | None = None, feedback: dict | None = None,
-           events: list[dict] | None = None) -> int:
+           events: list[dict] | None = None, requester: str | None = None, company_query: str | None = None) -> int:
     valid_code = stock_codes.normalize_key(code) if stock_codes.CODE_RE.fullmatch(code) else ""
     if (not valid_code and (code or parent_report_id is None)) or not 1 <= len(request_id) <= 128 or len(question) > 4000:
         raise RequestError("需要 6 位公司代码、1–128 字请求编号；问题不超过 4000 字")
@@ -59,6 +168,10 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     elif feedback is not None:
         raise RequestError("纠错必须关联原报告")
     request = {"question": question, "parent_report_id": parent_report_id, "feedback": feedback}
+    if requester is not None:
+        request_id = _request_key(requester, request_id)
+    if company_query is not None:
+        request["company_query"] = company_query
     if events:
         # Frozen public announcement identities from the scanner; older requests keep their exact payload.
         request["events"] = events
@@ -97,16 +210,16 @@ def feedback_retry_payload(run) -> dict | None:
     return {'parent_report_id': parent, 'feedback': feedback}
 
 
-def retry_feedback(conn, run_id: int, request_id: str) -> int:
-    run = conn.execute('SELECT kind, code, status, request, replay_of FROM runs WHERE id=?', (run_id,)).fetchone()
+def retry_feedback(conn, run_id: int, request_id: str, *, requester: str) -> int:
+    run = conn.execute('SELECT kind, company_key, status, request, replay_of FROM runs WHERE id=?', (run_id,)).fetchone()
     if run is None:
         raise RequestError('核查任务不存在', 404)
     payload = feedback_retry_payload(run)
     if payload is None:
         raise RequestError('仅支持重试已失败且保留完整原反馈的核查任务', 409)
-    # submit revalidates parent readiness, company and claim position. The browser
-    # supplies neither a replacement parent nor edited feedback on this route.
-    return submit(conn, run['code'], request_id, **payload)
+    feedback = payload['feedback']
+    return request_feedback(conn, requester, payload['parent_report_id'], request_id,
+                            feedback['location'], feedback['text'], code=run['company_key'])['run_id']
 
 
 def retry_view(run) -> dict:
@@ -389,6 +502,35 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
                                        report_available=row["report_id"] is not None)}
 
 
+def run_summary(conn, run_id: int, *, include_gaps: bool = False) -> dict:
+    from a_share_research import reading
+    row = reading.api_run(conn, run_id, include_gaps=include_gaps)
+    if row is None:
+        raise RequestError("任务不存在", 404)
+    result = {"version": VERSION, **dict(row)}
+    if include_gaps:
+        gaps = json.loads(result["gaps"] or "[]")
+        result["gaps"] = ([row["error"]] if row["error"] else []) + gaps
+    return result
+
+
+def research_status(conn, *, requester: str | None = None, request_id: str | None = None,
+                    run_id: int | None = None, compact: bool = True) -> dict:
+    if (run_id is None) == (request_id is None):
+        raise RequestError("run_id 与 request_id 须提供且仅提供一个")
+    if request_id is not None:
+        previous = _previous_request(conn, requester, request_id)
+        if previous is None:
+            raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
+        run_id = previous["id"]
+    if not compact:
+        return run_view(conn, run_id=run_id)
+    summary = run_summary(conn, run_id, include_gaps=True)
+    if summary["kind"] not in ("research", "diagnostic"):
+        raise RequestError("研究任务不存在", 404)
+    return summary
+
+
 def create_batch(conn, request_id: str, *, created_at: str | None = None) -> int:
     """Queue a batch; one live batch per calendar month (failed ones do not count)."""
     created_at = created_at or db.now()
@@ -407,11 +549,55 @@ def create_batch(conn, request_id: str, *, created_at: str | None = None) -> int
     raise RequestError("本月已有批次；每月一个独立批次", 409)
 
 
+def research_search(conn, q: str, *, code: str | None = None, section: str | None = None,
+                    history: bool = False, page: int = 1, library: bool = False) -> dict:
+    """Search saved research. The library view also recognizes company names and codes."""
+    from urllib.parse import urlencode
+    from a_share_research import reading
+
+    if code is not None and not stock_codes.KEY_RE.fullmatch(code):
+        raise RequestError("公司代码必须为六位数字")
+    matched_companies = []
+    if library and code is None and section is None:
+        found = reading.library_results(conn, q.strip(), history=history, page=page)
+        if found["error"]:
+            raise RequestError(found["error"])
+        for row in found["companies"]:
+            matched_companies.append({key: row[key] for key in ("code", "name", "created_at", "coverage", "verdict", "passed")} |
+                                     {"report_id": row["id"], "path": f"/stock/{row['code']}"})
+        items, more = found["hits"], found["more"]
+    else:
+        items, more = reading.search_items(conn, q, code=code, section=section, history=history, page=page)
+    result = {"version": VERSION, "page": page, "more": more}
+    if not library:
+        return result | {"items": items}
+
+    hits = []
+    for hit in items:
+        text = hit["text"]
+        item = {key: hit[key] for key in ("report_id", "code", "name", "created_at", "period", "location")}
+        item.update(excerpt=text[:200] + ("…" if len(text) > 200 else ""),
+                    path=reading.item_link(hit["report_id"], hit["location"]))
+        latest = hit.get("latest")
+        if latest and latest["id"] != hit["report_id"]:
+            item.update(latest_report_id=latest["id"], latest_passed=bool(latest["passed"]))
+        hits.append(item)
+    params = {"q": q, "page": page}
+    if history:
+        params["history"] = "true"
+    return result | {"companies": matched_companies, "items": hits, "queried_at": db.now(),
+                     "status": "found" if matched_companies or hits else "empty",
+                     "gaps": [] if matched_companies or hits else ["本页没有匹配的已有研究"],
+                     "path": "/research-library?" + urlencode(params)}
+
+
 def monthly_batch(conn, month: str, *, submit: bool = False) -> dict:
     """Automatic admission only: any existing month's batch, including failure, is final."""
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise RequestError("月份须为 YYYY-MM", 422)
-    query = "SELECT * FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? ORDER BY id LIMIT 1"
+    fields = ("id, status, error, created_at, frozen_at, as_of, l5, sl3, q20, s10, "
+              "json_extract(NULLIF(selection, ''), '$.ranking.error') AS ranking_error")
+    query = f"SELECT {fields} FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? ORDER BY id LIMIT 1"
     if not submit:
         row, created = conn.execute(query, (month,)).fetchone(), False
     else:
@@ -424,19 +610,18 @@ def monthly_batch(conn, month: str, *, submit: bool = False) -> dict:
             created = row is None
             if created:
                 ident = create_batch(conn, f"monthly:{month}", created_at=stamp)
-                row = conn.execute("SELECT * FROM batches WHERE id = ?", (ident,)).fetchone()
+                row = conn.execute(f"SELECT {fields} FROM batches WHERE id = ?", (ident,)).fetchone()
     if row is None:
         return {"version": VERSION, "month": month, "batch": None, "created": False}
-    batch = batches.load(row)
-    summary = {key: batch.get(key) for key in
-               ("id", "status", "error", "created_at", "frozen_at", "as_of", "l5", "sl3")}
+    summary = {key: row[key] for key in ("id", "status", "error", "created_at", "frozen_at", "as_of", "ranking_error")}
+    for key in ("l5", "sl3"):
+        summary[key] = json.loads(row[key]) if row[key] else None
     # Gather failures keep a six-digit run code; the frozen run links do not change.
     summary["failed_research"] = [dict(r) for r in conn.execute(
         "SELECT code, error FROM runs WHERE status='failed' AND id IN ("
         "SELECT json_extract(value, '$.run_id') FROM json_each(?) "
         "UNION SELECT json_extract(value, '$.run_id') FROM json_each(?)) ORDER BY id",
-        (json.dumps(batch.get("q20") or []), json.dumps(batch.get("s10") or [])))]
-    summary["ranking_error"] = ((batch.get("selection") or {}).get("ranking") or {}).get("error")
+        (row["q20"] or "[]", row["s10"] or "[]"))]
     return {"version": VERSION, "month": month, "created": created, "batch": summary}
 
 

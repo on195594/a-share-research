@@ -112,6 +112,20 @@ def row(conn, report_id):
     return conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
 
 
+@pytest.mark.parametrize(("request_id", "kind"), [
+    ("scan-1-600519", "research"), ("batch-7-600519.SH", "research"), ("web-retry:18", "research"),
+    ("old-price", "price"), ("old-diagnostic", "diagnostic"),
+])
+def test_caller_can_use_a_request_id_already_owned_by_a_system_run(records, request_id, kind):
+    system_run = db.create_run(records, row(records, 11)["code"], request_id, kind=kind)
+    with pytest.raises(service.RequestError) as error:
+        service.research_status(records, requester="web-owner", request_id=request_id)
+    assert error.value.status == 404
+    run = service.request_feedback(records, "web-owner", 11, request_id, "summary", "请核对摘要依据。")["run_id"]
+    assert run != system_run
+    assert service.research_status(records, requester="web-owner", request_id=request_id)["id"] == run
+
+
 def test_compact_comparison_matches_shared_owner_on_real_records(records):
     before = records.total_changes
     for child, parent in [(9, 8), (12, 11), (39, 37)]:
@@ -230,9 +244,11 @@ def test_explicit_feedback_retry_and_read_only_recovery_coexist(records):
     records.execute("UPDATE reports SET passed = 0 WHERE id = 12")
     records.execute("UPDATE runs SET status = 'failed' WHERE id = 18")
     original = service.feedback_retry_payload(records.execute("SELECT * FROM runs WHERE id = 18").fetchone())
-    retried = service.retry_feedback(records, 18, "delivery-retry-interop")
+    legacy = service.submit(records, "600519", "legacy-feedback-retry", **original)
+    assert service.retry_feedback(records, 18, "legacy-feedback-retry", requester="web-owner") == legacy
+    retried = service.retry_feedback(records, 18, "delivery-retry-interop", requester="web-owner")
     before = records.total_changes
-    view = service.run_view(records, request_id="delivery-retry-interop")
+    view = service.research_status(records, requester="web-owner", request_id="delivery-retry-interop", compact=False)
     assert view["id"] == retried and view["status"] == "queued"
     assert view["budget"]["automatic_paid_restart"] is False
     assert records.total_changes == before

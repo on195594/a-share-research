@@ -10,8 +10,10 @@ from pathlib import Path
 import sqlite3
 
 import pytest
+from fastapi.testclient import TestClient
 
-from a_share_research import companies, db, disclosure_checks, overview, scans, service, stance, valuation
+from a_share_research import api_keys, companies, db, disclosure_checks, overview, scans, service, stance, valuation
+from a_share_research.tools.registry import Context, invoke
 from support.continuation import BODY as CAPTURED_BODIES, load
 from support.valuation import BODY, RECORD, STORED, assumptions
 from test_policy_account_input import bound_book  # noqa: F401 (fixture)
@@ -660,6 +662,17 @@ def test_api_auth_single_active_and_weekly_route(server):
     assert client.get(url + '/api/scans/999', timeout=3).status_code == 404
 
 
+@pytest.mark.wide_scan_scope
+def test_owner_weekly_reads_holdings_and_legacy_research_key_keeps_its_scope(web, bound_book):  # noqa: F811
+    token = api_keys.create(web.conn, 'legacy-hermes')
+    with TestClient(web.app, base_url=web.settings.base_url) as client:
+        legacy = client.get('/api/scans/weekly', headers={'Authorization': f'Bearer {token}'}).json()
+        assert client.post('/auth/dev', headers={'Origin': web.settings.base_url}, follow_redirects=False).status_code == 303
+        owner = client.get('/scans/weekly').json()
+    assert all('holding' not in item['origins'] for item in legacy['scan_scope'])
+    assert {item['code'] for item in owner['scan_scope'] if 'holding' in item['origins']} == {'600001'}
+
+
 def test_judgment_change_is_notified_once_and_weekly_counts_current_agenda(conn):
     complete_cards_at(conn)
     scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
@@ -982,7 +995,8 @@ def test_wide_scope_adds_tracking_l5_and_card_companies_but_cards_api_keeps_poli
 
 @pytest.mark.wide_scan_scope
 def test_bound_holding_and_public_scan_sources_merge_without_changing_subscriptions(bound_book):  # noqa: F811
-    _, conn, _, _, _ = bound_book
+    path, conn, principal, _, _ = bound_book
+    ctx = Context(conn, path, principal, account_shadow_enabled=True)
     code = '600001'  # The existing bound-ledger fixture.
     assert [(s['code'], s['origins']) for s in scans.scan_scope(conn)] == [(code, ['holding'])]
     assert scans.weekly(conn, account_sources=False)['scan_scope'] == []
@@ -990,9 +1004,11 @@ def test_bound_holding_and_public_scan_sources_merge_without_changing_subscripti
     conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
                  (AT, json.dumps({'codes': [code + '.SH']}), AT))
     scan = run_scan(conn, CapturedSources([]))
-    [item] = scan['summary']['scope']
+    read = invoke(ctx, 'research.scan.read', {'scan_id': scan['id'], 'compact': False})['data']
+    [item] = read['summary']['scope']
     assert (item['code'], item['origin'], item['origins']) == (code, 'external', ['external', 'l5', 'holding'])
-    assert scans.weekly(conn)['scan_scope'] == [dict(code=code, origin='external', origins=item['origins'])]
+    weekly = invoke(ctx, 'research.scan.weekly', {'compact': False})['data']
+    assert weekly['scan_scope'] == [dict(code=code, origin='external', origins=item['origins'])]
     assert scans.subscriptions(conn)[0]['origins'] == ['external', 'l5']
 
 
@@ -1002,6 +1018,12 @@ def test_unverifiable_holding_scope_keeps_scanning_public_subscriptions(bound_bo
     # Remove one required evidence file from the temporary ledger fixture.
     (directory / sha).unlink()
     scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    # Check the current scope before a scan can contribute any historical failures.
+    weekly = scans.weekly(conn, at=AT)
+    assert weekly['scan_scope'] == [{'code': '603606', 'origin': 'external', 'origins': ['external']}]
+    assert [item['stage'] for item in weekly['failures']] == ['holding_scope']
+    assert scans.weekly(conn, at=AT, compact=True)['failures'] == weekly['failures']
+    assert scans.weekly(conn, at=AT, account_sources=False)['failures'] == []
     result = run_scan(conn)
     assert result['status'] == 'done'
     assert [s['code'] for s in result['summary']['scope']] == ['603606']

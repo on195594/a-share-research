@@ -1,32 +1,13 @@
 """Thread-local web connections against SQLite and captured production records."""
 
 from concurrent.futures import ThreadPoolExecutor
-import importlib
 import sqlite3
-import sys
 from threading import Barrier
 
 import pytest
 
-import a_share_research
 from a_share_research import db
-from support.continuation import RECORDS, load
-
-
-@pytest.fixture
-def web(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DATA", tmp_path)
-    monkeypatch.setenv("DEV_LOGIN", "1")
-    monkeypatch.setenv("PUBLIC_BASE_URL", "http://127.0.0.1:8627")
-    monkeypatch.setenv("SESSION_SECRET", "isolated-web-connection-" * 2)
-    monkeypatch.setattr(a_share_research, "web", None, raising=False)
-    monkeypatch.delitem(sys.modules, "a_share_research.web", raising=False)
-    module = importlib.import_module("a_share_research.web")
-    load(module.conn)
-    try:
-        yield module
-    finally:
-        module.conn.close()
+from support.continuation import RECORDS
 
 
 def test_connections_are_reused_per_thread_and_close_independently(web):

@@ -11,7 +11,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from requests import RequestException
 
-from a_share_research import api_keys, service
+from a_share_research import api_keys, db, scans, service
 from a_share_research.account import trades, ledger, evidence, analysis, position_store, cycle_analysis
 from a_share_research.account import nav
 from a_share_research.policy import account_view, registry as policies
@@ -46,6 +46,48 @@ class Company(Arguments):
 class Report(Arguments):
     report_id: int = Field(gt=0)
     compact: bool = True
+
+
+class ResearchSearch(Arguments):
+    q: str = Field(max_length=100)
+    code: str | None = Field(default=None, pattern=r'^[0-9]{6}$')
+    section: Literal['risks', 'checkpoints', 'answer', 'business', 'financial', 'stance', 'prior_status'] | None = None
+    history: bool = False
+    page: int = Field(default=1, ge=1, le=10000)
+
+
+class MonthlyBatch(Arguments):
+    month: str = Field(pattern=r'^[0-9]{4}-(0[1-9]|1[0-2])$')
+
+
+class MonthlyBatchStatus(MonthlyBatch):
+    compact: bool = True
+
+
+class ResearchStatus(Arguments):
+    run_id: int | None = Field(default=None, gt=0, description='与 request_id 二选一')
+    request_id: str | None = Field(default=None, min_length=1, max_length=128, description='与 run_id 二选一')
+    compact: bool = True
+
+
+class ReportFeedback(service.FeedbackRequest):
+    report_id: int = Field(gt=0)
+
+
+class ScanRequest(Arguments):
+    request_id: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+
+
+class ScanView(Arguments):
+    compact: bool = True
+
+
+class ScanRead(ScanView):
+    scan_id: int = Field(gt=0)
+
+
+class SubscriptionCodes(Arguments):
+    codes: list[str]
 
 
 class PolicyGuide(Arguments):
@@ -151,9 +193,9 @@ class Tool:
     name: str
     description: str
     roles: frozenset[str]
-    arguments: type[Arguments]
+    arguments: type[BaseModel]
     result: type[BaseModel]
-    handler: Callable[[Context, Arguments], BaseModel]
+    handler: Callable[[Context, BaseModel], BaseModel]
 
     access: Literal['read', 'write'] = 'read'
     account: bool = False
@@ -162,8 +204,45 @@ class Tool:
     def describe(self) -> dict:
         return dict(name=self.name, version=1, description=self.description,
                     input_schema=self.arguments.model_json_schema(), output_schema=self.result.model_json_schema(),
-                    access=self.access, idempotent=True,
+                    access=self.access, collects=self.collects, idempotent=True,
                     errors=['invalid_arguments', 'forbidden', 'not_found', 'conflict', 'unavailable', 'timeout'])
+
+
+def _request_scan(ctx: Context, args: ScanRequest) -> Payload:
+    requester = service.requester(ctx.connection, ctx.principal)
+    scan_id = scans.submit_request(ctx.connection, requester, args.request_id)
+    receipt = scans.view(ctx.connection, scan_id, compact=True)
+    return Payload(data=receipt | {'request_id': args.request_id, 'scan_id': scan_id})
+
+
+def _research_status(ctx: Context, args: ResearchStatus) -> Payload:
+    requester = service.requester(ctx.connection, ctx.principal) if args.request_id is not None else None
+    view = service.research_status(ctx.connection, requester=requester, **args.model_dump())
+    return Payload(data=view | service.run_link(view['id']))
+
+
+def _queue_research(ctx: Context, args: service.ResearchRequest | ReportFeedback) -> Payload:
+    submit = service.request_feedback if isinstance(args, ReportFeedback) else service.request_research
+    receipt = submit(ctx.connection, service.requester(ctx.connection, ctx.principal), **args.model_dump())
+    summary = service.run_summary(ctx.connection, receipt['run_id'], include_gaps=True)
+    return Payload(data=summary | receipt | {'request_id': args.request_id})
+
+
+def _monthly_batch(ctx: Context, month: str, *, submit: bool = False, compact: bool = True) -> Payload:
+    data = service.monthly_batch(ctx.connection, month, submit=submit)
+    batch = data['batch']
+    if compact:
+        del data['batch']
+    data['queried_at'] = db.now()
+    if batch is None:
+        return Payload(data=data | {'batch_id': None, 'status': 'absent', 'path': '/batches',
+                                    'gaps': ['该月尚无批次']})
+    gaps = [error[:240] for error in (batch['error'], batch['ranking_error']) if error]
+    if batch['failed_research']:
+        gaps.append('候选研究失败：' + '、'.join(row['code'] for row in batch['failed_research']))
+    data.update(batch_id=batch['id'], status=batch['status'], path=f"/batches/{batch['id']}", gaps=gaps,
+                created_at=batch['created_at'], frozen_at=batch['frozen_at'], as_of=batch['as_of'])
+    return Payload(data=data)
 
 
 def _monitor(ctx: Context, args: PolicyMonitor) -> Payload:
@@ -305,12 +384,36 @@ TOOLS = {tool.name: tool for tool in (
     Tool('account.observe', '仅记录资产观察，不推断或补写成交', frozenset({'assistant'}), AccountObserve, Payload,
          lambda c,a: Payload(data=ledger.observe(c.connection,c.principal,a.account_id,a.observation,
                                                 _evidence_directory(c),a.evidence_hash)), access='write', account=True),
+    Tool('research.search', '按公司或内容检索已有报告，返回匹配段落摘要和链接', _READERS, ResearchSearch, Payload,
+         lambda c, a: Payload(data=service.research_search(c.connection, **a.model_dump(), library=True))),
     Tool('research.cards', '读取论点卡', _READERS, Arguments, Payload,
          lambda c, a: Payload(data=service.company_cards(c.connection))),
+    Tool('research.request', '提交单股研究，立即返回任务编号、状态和进度页', _READERS,
+         service.ResearchRequest, Payload, _queue_research, access='write', collects=True),
+    Tool('research.status', '按任务编号或原凭据的请求编号查询研究状态，compact=false 展开诊断与预算', _READERS,
+         ResearchStatus, Payload, _research_status),
+    Tool('research.feedback', '按报告段落提交纠错，返回核查任务编号、状态和进度页', _READERS,
+         ReportFeedback, Payload, _queue_research, access='write'),
     Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,
          lambda c, a: Payload(data=service.company_card(c.connection, a.code))),
     Tool('research.report', '读取报告及证据', _READERS, Report, Payload,
          lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
+    Tool('research.scan.request', '按原凭据与请求编号提交或找回扫描，采集由 worker 执行', frozenset({'assistant'}),
+         ScanRequest, Payload, _request_scan, access='write', account=True),
+    Tool('research.scan.read', '读取扫描状态、事件数和缺口，compact=false 展开事件及通知', frozenset({'assistant'}),
+         ScanRead, Payload, lambda c, a: Payload(data=scans.view(c.connection, a.scan_id, compact=a.compact)), account=True),
+    Tool('research.scan.weekly', '读取近七日扫描分布和覆盖缺口，compact=false 展开周报', frozenset({'assistant'}),
+         ScanView, Payload, lambda c, a: Payload(data=scans.weekly(c.connection, compact=a.compact, account_sources=True)),
+         account=True),
+    Tool('research.subscriptions', '读取显式订阅和冻结候选及最近收盘时点', frozenset({'assistant'}), Arguments, Payload,
+         lambda c, a: Payload(data=scans.subscription_view(scans.subscriptions(c.connection))), account=True),
+    Tool('research.subscriptions.replace', '按公司代码完整替换外部订阅，提交空列表清空外部订阅', frozenset({'assistant'}),
+         SubscriptionCodes, Payload, lambda c,a: Payload(data=scans.subscription_view(
+             scans.replace_subscriptions(c.connection, a.codes))), access='write', collects=True, account=True),
+    Tool('research.batch.monthly.request', '受理上海当月的候选批次，已有批次返回原编号和状态',
+         _READERS, MonthlyBatch, Payload, lambda c, a: _monthly_batch(c, a.month, submit=True), access='write'),
+    Tool('research.batch.monthly.status', '按月查询候选批次状态和缺口，可展开冻结名单与失败详情',
+         _READERS, MonthlyBatchStatus, Payload, lambda c, a: _monthly_batch(c, a.month, compact=a.compact)),
     Tool('account.research_coverage', '分开读取成交明确采用的报告与成交时可查的报告',
          frozenset({'assistant'}), Arguments, TradeRows, _research_coverage, account=True),
 )}

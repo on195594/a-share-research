@@ -1,12 +1,11 @@
 """Credential isolation and physical database access modes at the tool boundary."""
 from dataclasses import replace
-import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 from requests import ConnectionError as UpstreamConnectionError
 
-from a_share_research import api_keys, db, service
+from a_share_research import api_keys, companies, db, service
 from a_share_research.tools.registry import Arguments, Context, Payload, TOOLS, ToolError, invoke
 from a_share_research.tools.server import create_app
 
@@ -30,6 +29,82 @@ def header(token):
     return {'Authorization': 'Bearer ' + token}
 
 
+def test_research_replays_web_admission_before_cninfo_and_scopes_request_ids(web, tmp_path, monkeypatch):
+    company = dict(web.conn.execute("SELECT company_key AS code, name AS zwjc FROM reports WHERE id=39").fetchone())
+    monkeypatch.setattr(companies, 'stock_list', lambda: {company['code']: company})
+    first = header(api_keys.create(web.conn, 'web-to-tools'))
+    second = header(api_keys.create(web.conn, 'second-caller', role='assistant'))
+    args = {'code': company['code'], 'request_id': 'x' * 128, 'question': '现金流'}
+    legacy = args | {'request_id': 'before-caller-scoping'}
+    old_run = service.submit(web.conn, **legacy)
+    before = web.conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0]
+
+    with TestClient(web.app, base_url=web.settings.base_url) as browser, TestClient(create_app(tmp_path / 'app.db')) as tools:
+        accepted = browser.post('/api/research', json=args, headers=first)
+        assert accepted.status_code == 202
+        run_id = accepted.json()['run_id']
+        assert accepted.json() == {'version': service.VERSION, 'run_id': run_id}
+        by_key = {'request_id': args['request_id']}
+        assert tools.post('/tools/research.status', json=by_key, headers=second).status_code == 404
+        other = tools.post('/tools/research.request', json=args, headers=second).json()['result']['data']
+        assert other['run_id'] != run_id
+        assert browser.get('/api/request', params=by_key, headers=second).json()['id'] == other['run_id']
+
+        def unavailable():
+            raise UpstreamConnectionError('offline directory')
+
+        monkeypatch.setattr(companies, 'stock_list', unavailable)
+        assert browser.post('/api/research', json=legacy, headers=first).json()['run_id'] == old_run
+        assert browser.get('/api/request', params={'request_id': legacy['request_id']}, headers=first).json() == (
+            service.run_view(web.conn, run_id=old_run))
+        replay = tools.post('/tools/research.request', json=args, headers=first).json()['result']['data']
+        assert (replay['run_id'], replay['status'], replay['path']) == (run_id, 'queued', f'/runs/{run_id}')
+        assert replay['created_at'] and replay['gaps'] == []
+        assert browser.post('/api/research', json=args, headers=first).json() == accepted.json()
+        for changed in ({'question': '分红'}, {'code': '600519'}, {'parent_report_id': 39}):
+            conflict = tools.post('/tools/research.request', json=args | changed, headers=first)
+            assert conflict.status_code == 409 and conflict.json()['error']['code'] == 'conflict'
+        fresh = tools.post('/tools/research.request', json=args | {'request_id': 'new'}, headers=first)
+        assert fresh.status_code == 503 and fresh.json()['error']['code'] == 'unavailable'
+        for selector in (by_key, {'run_id': run_id}):
+            status = tools.post('/tools/research.status', json=selector, headers=first).json()['result']['data']
+            assert status['id'] == run_id and status['path'] == replay['path']
+    assert web.conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == before + 2
+
+
+def test_feedback_reuses_web_run_and_rejects_changed_text(web, tmp_path):
+    headers = header(api_keys.create(web.conn, 'feedback'))
+    args = {'request_id': 'check-claim', 'location': 'summary', 'text': '请核对原文依据。'}
+    with TestClient(web.app, base_url=web.settings.base_url) as browser, TestClient(create_app(tmp_path / 'app.db')) as tools:
+        original = browser.post('/api/reports/39/feedback', json=args, headers=headers)
+        assert original.status_code == 202
+        args['report_id'] = 39
+        replay = tools.post('/tools/research.feedback', json=args, headers=headers).json()['result']['data']
+        assert replay['path'] == f"/runs/{original.json()['run_id']}"
+        changed = tools.post('/tools/research.feedback', json=args | {'text': '请核对期间。'}, headers=headers)
+        assert changed.status_code == 409 and changed.json()['error']['code'] == 'conflict'
+
+
+def test_owner_form_replays_the_accepted_short_name_during_directory_outage(web, monkeypatch):
+    company = dict(web.conn.execute("SELECT company_key AS code, name AS zwjc FROM reports WHERE id=39").fetchone())
+    monkeypatch.setattr(companies, 'stock_list', lambda: {company['code']: company})
+    origin = {'Origin': web.settings.base_url}
+    with TestClient(web.app, base_url=web.settings.base_url, follow_redirects=False) as browser:
+        assert browser.post('/auth/dev', headers=origin).status_code == 303
+        form = browser.get('/').context
+        args = {'csrf': form['csrf'], 'request_id': form['request_id'], 'q': company['zwjc'][:2], 'again': '1'}
+        accepted = browser.post('/research', headers=origin, data=args)
+        assert accepted.status_code == 303
+
+        def unavailable():
+            raise UpstreamConnectionError('offline directory')
+
+        monkeypatch.setattr(companies, 'stock_list', unavailable)
+        replay = browser.post('/research', headers=origin, data=args)
+        assert replay.status_code == 303 and replay.headers['location'] == accepted.headers['location']
+        assert browser.post('/research', headers=origin, data=args | {'question': '现金流'}).status_code == 409
+
+
 @pytest.mark.parametrize('account_enabled', [False, True])
 def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     path, tokens, client = setup
@@ -39,6 +114,13 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
         assert ('research.cards' in names) == (role != 'owner')
         for name in ('account.research_coverage', 'account.portfolio_overview', 'research.company_overview'):
             assert (name in names) == (account_enabled and role == 'assistant')
+        for name in ('research.scan.request', 'research.scan.read', 'research.scan.weekly',
+                     'research.subscriptions', 'research.subscriptions.replace'):
+            assert (name in names) == (account_enabled and role == 'assistant')
+            if name not in names:
+                denied = client.post(f'/tools/{name}', json={}, headers=header(token))
+                assert (denied.status_code, denied.json()['error']['code']) == (
+                    (403, 'forbidden') if account_enabled else (404, 'not_found'))
         response = client.post('/tools/account.research_coverage', json={}, headers=header(token))
         expected = (409 if role == 'assistant' else 403) if account_enabled else 404
         assert response.status_code == expected

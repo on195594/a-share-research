@@ -31,13 +31,25 @@ python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具
 
 桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
 
-- `research`：通过 `research.cards`、`research.card`、`research.report` 读取研究卡片及报告；看不到也不能调用账户和政策工具。
-- `assistant`：可读取研究。账户开关启用后，可调用账户、政策工具及两项只读总览。
+- `research` 与 `assistant` 均可检索和读取研究、提交研究与反馈、查询进度和操作月批。
+- 扫描范围含已核实持仓，外部订阅含 Hermes 同步的持仓镜像。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
   - `research.company_overview` 与 `account.portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
   - `account.research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
 - `owner`：本地政策登记与切换；影子开关启用时可读取政策身份、指南和保存的评估；没有 HTTP 切换工具，也不允许调用旧研究 API。
 
-旧 Key 迁移后仍为 research。角色不可原地更改；更换角色须创建新 Key 并撤销旧 Key。assistant 可通过研究 API 发起请求，由隔离的 worker 执行研究。
+旧 Key 迁移后仍为 research。更换角色须创建新 Key 并撤销旧 Key。
+
+| 工具 | 输入与回执 |
+|---|---|
+| `research.search` | 用 `q` 搜公司或报告段落，可按 `code`、`section`、`history`、`page` 筛选，结果附报告或段落链接。 |
+| `research.cards`、`research.card`、`research.report` | 读取卡片列表、单公司卡片或指定报告。报告默认精简，`compact=false` 读取完整证据。 |
+| `research.request`、`research.status` | 提交六位 `code` 与 `request_id`，可附 `question`、`parent_report_id`。状态按 `run_id` 或原凭据的 `request_id` 二选一查询，`compact=false` 读取诊断与预算。 |
+| `research.feedback` | 指定 `report_id`、段落 `location`、反馈 `text` 与 `request_id`，返回独立核查任务。 |
+| `research.scan.request`、`research.scan.read`、`research.scan.weekly` | 按原凭据与 `request_id` 受理或找回扫描。按 `scan_id` 读取扫描，或读取最近一周汇总，两种读取均可传 `compact=false` 展开详情。 |
+| `research.subscriptions`、`research.subscriptions.replace` | 读取订阅代码与来源，或传 `codes` 完整替换外部订阅。空列表清空外部订阅，冻结候选仍按原来源展示。 |
+| `research.batch.monthly.request`、`research.batch.monthly.status` | 按上海自然月 `month`（YYYY-MM）提交或查状态。提交仅限当月，已存在的批次返回原编号；状态可传 `compact=false` 查看冻结名单和候选失败详情。 |
+
+研究和反馈受理后立即向用户给出 `run_id` 和 `path`（如 `/runs/42`，相对于 Web 站点），结束本轮等待。研究由 worker 执行，不在一轮里轮询。用户稍后询问进展时调用 `research.status`。响应丢失时保留原凭据和请求编号；同号改问题、公司或父报告会返回 409。旧版受理的研究没有保存调用身份，仍可用原编号找回。
 
 `GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 
