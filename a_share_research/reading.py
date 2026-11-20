@@ -469,28 +469,9 @@ def library_results(conn, query: str, *, history: bool = False, whole_library: b
     except service.RequestError as exc:
         return results | {"error": str(exc)}
     if hits:
-        known = {r["code"]: dict(r) | {"checkpoint": None}
-                 for r in list(companies) + ([scope[0]] if scope else [])}
-        prefixes = sorted({stock_codes.normalize_key(hit["code"]) for hit in hits})
-        # Discover alternate stored code formats without reading report bodies. The high-water
-        # ID also prevents reusing metadata superseded since the company query. Replays/feedback
-        # can cause an extra refresh, but latest_reports still applies the eligibility rules.
-        versions = conn.execute(
-            "SELECT code, MAX(id) AS id FROM reports WHERE company_key IN ("
-            + ",".join("?" for _ in prefixes) + ") GROUP BY code", prefixes).fetchall()
-        reusable, missing_codes = [], []
-        for row in versions:
-            cached = known.get(row["code"])
-            if cached is not None and cached["id"] == row["id"]:
-                reusable.append(cached)
-            else:
-                missing_codes.append(row["code"])
-        refreshed = latest_reports(conn, codes=missing_codes, include_checkpoint=False) if missing_codes else []
-        latest = {}
-        for row in reusable + list(refreshed):
-            prefix = stock_codes.normalize_key(row["code"])
-            if prefix not in latest or row["id"] > latest[prefix]["id"]:
-                latest[prefix] = dict(row)
+        codes = sorted({stock_codes.normalize_key(hit["code"]) for hit in hits})
+        latest = {stock_codes.normalize_key(row["code"]): dict(row)
+                  for row in latest_reports(conn, codes=codes, include_checkpoint=False)}
         results["hits"] = [hit | {"latest": latest.get(stock_codes.normalize_key(hit["code"])), "label": SEARCH_SECTIONS[hit["location"].split("[")[0]],
                                   "url": item_link(hit["report_id"], hit["location"])} for hit in hits]
     return results | {"more": more or hits_more}

@@ -47,6 +47,7 @@ PENDING_COOKIE = "mcp_authorization"
 LEDGER_RETURN_COOKIE = "resume_ledger"
 SESSION_SECONDS = 8 * 3600
 DEVICE_COOKIE = "remember_device"
+DEVICE_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 DEVICE_SECONDS = 30 * 24 * 3600
 STEPS = {"gather": "取资料", "explore": "补读披露与计算", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改",
          "price": "计算价格参考"}
@@ -162,8 +163,9 @@ async def guard(request: Request, call_next):
     # Restore only safe page reads, never use a device cookie as API/write authorization.
     restored = None
     if (not machine and request.method in ("GET", "HEAD") and not path.startswith(("/static/", "/auth/"))
-            and path not in ("/oauth_callback", "/mcp") and not current_session(request)):
-        restored = restore_device(request)
+            and path not in ("/oauth_callback", "/mcp")
+            and DEVICE_TOKEN.fullmatch(request.cookies.get(DEVICE_COOKIE, ""))):
+        restored = await run_in_threadpool(restore_device, request)
     response = await call_next(request)
     if restored:
         token, age = restored
@@ -210,7 +212,7 @@ def current_session(request: Request) -> str | None:
 
 def active_device(request: Request):
     token = request.cookies.get(DEVICE_COOKIE, "")
-    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+    if not DEVICE_TOKEN.fullmatch(token):
         return None
     return conn.execute("SELECT token_hash, expires_at FROM remembered_devices "
                         "WHERE token_hash=? AND owner_id=? AND expires_at>?",
@@ -218,6 +220,8 @@ def active_device(request: Request):
 
 
 def restore_device(request: Request):
+    if current_session(request):
+        return None
     with db.transaction(conn):
         device = active_device(request)
         if not device:

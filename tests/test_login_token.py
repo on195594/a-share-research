@@ -5,10 +5,28 @@ import time
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from a_share_research import api_keys, db, login_token
 from a_share_research.login_token import mint
+
+
+def test_anonymous_login_skips_write_transaction(web, monkeypatch):
+    statements = []
+    connect = db.connect
+
+    def traced(path):
+        conn = connect(path)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(db, "connect", traced)
+    with TestClient(web.app, base_url=web.settings.base_url) as browser:
+        for headers in ({}, {"Cookie": "remember_device="}, {"Cookie": "remember_device=" + "a" * 42 + "."}):
+            response = browser.get("/login", headers=headers)
+            assert response.status_code == 200 and "set-cookie" not in response.headers
+    assert not any(sql.startswith("BEGIN") for sql in statements)
 
 
 def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, capsys):
