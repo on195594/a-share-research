@@ -83,18 +83,18 @@ def test_http_permissions_shape_pause_and_receipt(configured):
     payload = dict(request_id='http-stop', expected_activation_id=activation['id'], previous_state={})
     headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
     with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy.stop_alert', headers=headers('assistant'), json=payload).status_code == 404
+        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload).status_code == 404
     app = create_app(path, account_shadow_enabled=True)
     with TestClient(app) as client:
-        assert client.post('/tools/policy.stop_alert', headers=headers('research'), json=payload).status_code == 403
-        assert client.post('/tools/policy.stop_alert', headers=headers('assistant'),
+        assert client.post('/tools/policy_stop_alert', headers=headers('research'), json=payload).status_code == 403
+        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'),
                            json=payload | {'previous_state': {'date': '2026-02-30'}}).status_code == 422
-        first = client.post('/tools/policy.stop_alert', headers=headers('assistant'), json=payload)
+        first = client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload)
         assert first.status_code == 200, first.text
-        assert client.post('/tools/policy.stop_alert', headers=headers('assistant'), json=payload).json() == first.json()
+        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload).json() == first.json()
         assert len(calls) == 1
         app.state.gate.pause(1)
-        assert client.post('/tools/policy.stop_alert', headers=headers('assistant'), json=payload).status_code == 503
+        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload).status_code == 503
 
 
 def test_context_action_state_and_source_corruption_rejected(configured):

@@ -35,7 +35,6 @@ def prepare(output: Path, home: Path, role: str='assistant') -> dict:
         write(relative,json.dumps(value,ensure_ascii=False,indent=2)+'\n')
     def stdio(host):
         args=['--config',str(profiles[host]),'mcp']
-        if host=='agy':args.append('--portable-names')
         return dict(command=str(client),args=args)
     write('bin/ashare',(ROOT/'scripts/ashare.py').read_bytes(),executable=True)
     write('skill/a-share/SKILL.md',(ROOT/'skill/a-share/SKILL.md').read_bytes())

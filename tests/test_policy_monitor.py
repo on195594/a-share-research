@@ -309,8 +309,8 @@ def test_changed_machine_code_survives_tools_mapping_but_no_other_conflict(setup
                       request_id='new-pointer', reason='test exact machine rejection')
     ctx = Context(conn, path, principals['assistant'], account_shadow_enabled=True)
     with pytest.raises(ToolError) as caught:
-        invoke(ctx, 'policy.monitor', dict(request_id='no-receipt', expected_activation_id=activation['id']))
+        invoke(ctx, 'policy_monitor', dict(request_id='no-receipt', expected_activation_id=activation['id']))
     assert caught.value.status == 409 and caught.value.code == 'policy_activation_changed'
     with pytest.raises(ToolError) as caught:
-        invoke(ctx, 'policy.monitor', dict(request_id='unknown-pointer', expected_activation_id=999))
+        invoke(ctx, 'policy_monitor', dict(request_id='unknown-pointer', expected_activation_id=999))
     assert caught.value.code == 'conflict'

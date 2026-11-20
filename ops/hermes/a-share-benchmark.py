@@ -44,7 +44,7 @@ def check() -> tuple[str, str, int]:
             return '', '', 0
         saved = load_state()
         if saved['pending'] is None:
-            current = tool('policy.current', {})
+            current = tool('policy_current', {})
             active = current.get('activation') or {}
             if (current.get('installed') is not True or not isinstance(active, dict)
                     or type(active.get('id')) is not int or active['id'] < 1):
@@ -52,7 +52,7 @@ def check() -> tuple[str, str, int]:
             saved['pending'] = dict(request_id='hermes-benchmark-' + uuid.uuid4().hex, expected_activation_id=active['id'],
                                     end=datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat())
             save_json(STATE, saved)
-        receipt = tool('policy.benchmark', saved['pending'])
+        receipt = tool('policy_benchmark', saved['pending'])
         try:
             if (receipt['mode'] != 'service_benchmark_capture'
                     or receipt['request_id'] != saved['pending']['request_id']

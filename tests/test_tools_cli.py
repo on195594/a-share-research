@@ -36,9 +36,9 @@ def test_call_wire_contract_and_proxy_redirect_protection(monkeypatch, capsys):
         return Opener()
 
     monkeypatch.setattr(cli.urllib.request, 'build_opener', build)
-    assert cli.main(['call', 'research.card', '--json', '{"code":"600519"}']) == 0
+    assert cli.main(['call', 'research_card', '--json', '{"code":"600519"}']) == 0
     req, timeout = seen[0]
-    assert req.full_url == 'http://127.0.0.1:8621/tools/research.card'
+    assert req.full_url == 'http://127.0.0.1:8621/tools/research_card'
     assert req.get_method() == 'POST' and timeout == 30
     assert json.loads(req.data) == {'code': '600519'}
     assert req.get_header('Authorization') == 'Bearer asr_test-secret'
@@ -63,7 +63,7 @@ def test_cli_returns_actionable_validation_detail_without_echoing_credentials(mo
     monkeypatch.setenv('ASHARE_TOKEN', 'asr_secret')
     for reason in ('batch.snapshot.market_values: 缺 600519 市值', 'asr_secret: unexpected field', '   '):
         body = json.dumps({'ok': False, 'error': {'code': 'invalid_arguments', 'message': reason}})
-        error = cli.http_error(urllib.error.HTTPError('/tools/account.submit', 422, '', {}, io.BytesIO(body.encode())))
+        error = cli.http_error(urllib.error.HTTPError('/tools/account_submit', 422, '', {}, io.BytesIO(body.encode())))
         assert error.status == 422 and 'asr_secret' not in str(error)
         if '600519' in reason:
             assert reason in str(error)
@@ -100,7 +100,7 @@ def test_service_error_guidance_is_safe_and_does_not_retry(monkeypatch, status, 
 
     monkeypatch.setattr(cli.urllib.request, 'build_opener', lambda *args: Opener())
     with pytest.raises(cli.ClientError) as caught:
-        cli.request('/tools/research.report', {'report_id': 157})
+        cli.request('/tools/research_report', {'report_id': 157})
     message = str(caught.value)
     assert expected in message and str(status) in message
     assert '未自动重试' in message and '凭据' not in message
@@ -142,8 +142,7 @@ def test_private_config_mcp_startup_and_error_restore_environment(tmp_path,monke
     path=private_config(tmp_path)
     monkeypatch.delenv('ASHARE_TOKEN',raising=False)
     monkeypatch.delenv('ASHARE_URL',raising=False)
-    def fail(*, portable_names):
-        assert portable_names is False
+    def fail():
         assert cli.os.environ['ASHARE_TOKEN']=='asr_private-fixture'
         raise cli.ClientError('fixture failure')
     monkeypatch.setattr(cli,'serve_mcp',fail)
@@ -191,7 +190,7 @@ def test_unsafe_config_files_fail_without_echoing_content(tmp_path,monkeypatch,c
 @pytest.mark.parametrize('payload',['{"x":1e999}','{"x":1,"x":2}'])
 def test_cli_rejects_overflow_and_duplicate_arguments(payload,monkeypatch):
     monkeypatch.setattr(cli,'request',lambda *args:pytest.fail('must not connect'))
-    assert cli.main(['call','fixture.read','--json',payload])==1
+    assert cli.main(['call','fixture_read','--json',payload])==1
 
 
 @pytest.mark.parametrize(('status', 'body', 'exit_code'), [
@@ -212,7 +211,7 @@ def test_activation_changed_has_only_bounded_whitelisted_exit_protocol(monkeypat
         def open(self, req, timeout):
             raise urllib.error.HTTPError(req.full_url, status, 'asr_secret', {}, io.BytesIO(body))
     monkeypatch.setattr(cli.urllib.request, 'build_opener', lambda *args: Opener())
-    assert cli.main(['call', 'policy.monitor', '--json', '{}']) == exit_code
+    assert cli.main(['call', 'policy_monitor', '--json', '{}']) == exit_code
     output = capsys.readouterr()
     assert output.out == '' and 'asr_secret' not in output.err
 
@@ -230,5 +229,5 @@ def test_only_refused_connections_are_resendable(monkeypatch, capsys, error, exi
         def open(self, req, timeout):
             raise error
     monkeypatch.setattr(cli.urllib.request, 'build_opener', lambda *args: Opener())
-    assert cli.main(['call', 'policy.stop_alert', '--json', '{}']) == exit_code
+    assert cli.main(['call', 'policy_stop_alert', '--json', '{}']) == exit_code
     assert 'asr_secret' not in capsys.readouterr().err

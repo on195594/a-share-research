@@ -14,6 +14,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+_TOOL_NAME = re.compile(r'[a-z][a-z0-9_]*')
+
 
 class ClientError(ValueError):
     """Safe error message for the CLI."""
@@ -188,27 +190,12 @@ def rpc_error(request_id, code, message):
 class MCPBridge:
     """Sequential stdio adapter; HTTP remains the sole permission/write boundary."""
 
-    def __init__(self, *, portable_names=False):
+    def __init__(self):
         self.initialized = False
         self.ready = False
-        self.portable_names = portable_names
-        self.tool_names = None
 
     def list_tools(self):
-        # Rebuild atomically: ambiguous aliases must never dispatch a different tool.
-        self.tool_names = None
-        tools = [self.describe(tool) for tool in request('/tools')['tools']]
-        names = {}
-        if self.portable_names:
-            for tool in tools:
-                canonical = tool['name']
-                alias = canonical.replace('.', '_')
-                if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', alias) or alias in names:
-                    raise ClientError('工具名称无法安全转换为 MCP 兼容名称')
-                names[alias] = canonical
-                tool['name'] = alias
-        self.tool_names = names
-        return tools
+        return [self.describe(tool) for tool in request('/tools')['tools']]
 
     def handle(self, message):
         if (not isinstance(message, dict) or message.get('jsonrpc') != '2.0'
@@ -252,16 +239,10 @@ class MCPBridge:
         elif method == 'tools/call':
             name, arguments = params.get('name'), params.get('arguments', {})
             if (set(params) - {'name', 'arguments', '_meta'} or not isinstance(name, str)
-                    or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,99}', name)
+                    or not _TOOL_NAME.fullmatch(name)
                     or not isinstance(arguments, dict)):
                 return rpc_error(request_id, -32602, 'Invalid tool name or arguments')
             try:
-                if self.portable_names:
-                    if self.tool_names is None:
-                        self.list_tools()
-                    if name not in self.tool_names:
-                        return rpc_error(request_id, -32602, 'Unknown tool; use a name from tools/list')
-                    name = self.tool_names[name]
                 payload = request('/tools/' + name, arguments)['result']
                 result = {'content': [{'type': 'text', 'text': json.dumps(payload, ensure_ascii=False, allow_nan=False)}],
                           'structuredContent': payload, 'isError': False}
@@ -277,6 +258,7 @@ class MCPBridge:
     def describe(tool):
         if (not isinstance(tool, dict)
                 or not all(isinstance(tool.get(k), str) for k in ('name', 'description'))
+                or not _TOOL_NAME.fullmatch(tool['name'])
                 or not all(isinstance(tool.get(k), dict) for k in ('input_schema', 'output_schema'))
                 or tool.get('access') not in ('read', 'write') or type(tool.get('idempotent')) is not bool):
             raise ClientError('工具列表响应格式不兼容')
@@ -285,11 +267,11 @@ class MCPBridge:
                 'annotations': {'readOnlyHint': tool['access'] == 'read', 'idempotentHint': tool['idempotent']}}
 
 
-def serve_mcp(input_stream=None, output_stream=None, *, portable_names=False):
+def serve_mcp(input_stream=None, output_stream=None):
     """Read UTF-8 JSON lines until EOF. Never retry or roll back an admitted HTTP call."""
     input_stream = input_stream if input_stream is not None else sys.stdin.buffer
     output_stream = output_stream if output_stream is not None else sys.stdout.buffer
-    bridge = MCPBridge(portable_names=portable_names)
+    bridge = MCPBridge()
     limit = 32 * 1024 * 1024  # Includes the largest evidence upload, plus its envelope.
     while raw := input_stream.readline(limit + 1):
         oversized = len(raw) > limit
@@ -315,9 +297,7 @@ def main(argv=None):
     parser.add_argument('--config',help='绝对路径的私有 JSON 客户端配置，仅含 url/token；显式选择时覆盖本次环境值')
     actions = parser.add_subparsers(dest='action', required=True)
     actions.add_parser('tools')
-    mcp = actions.add_parser('mcp', help='MCP stdio bridge to the local HTTP tools service')
-    mcp.add_argument('--portable-names', action='store_true',
-                     help='Expose dot-separated HTTP tool names as underscore-separated MCP names')
+    actions.add_parser('mcp', help='MCP stdio bridge to the local HTTP tools service')
     call = actions.add_parser('call')
     call.add_argument('name')
     call.add_argument('--json', default='{}', dest='arguments')
@@ -325,11 +305,11 @@ def main(argv=None):
     try:
         with configuration(args.config):
             if args.action == 'mcp':
-                return serve_mcp(portable_names=args.portable_names)
+                return serve_mcp()
             if args.action == 'tools':
                 result = request('/tools')
             else:
-                if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,99}', args.name):
+                if not _TOOL_NAME.fullmatch(args.name):
                     raise ClientError('工具名称格式无效')
                 try:
                     payload = json.loads(args.arguments, parse_constant=reject_constant,

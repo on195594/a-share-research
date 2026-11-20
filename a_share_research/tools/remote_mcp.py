@@ -33,7 +33,7 @@ _BUSY = '写入或采集名额已满，请稍后用原请求重试'
 
 def _describe(tool: Tool) -> types.Tool:
     spec = tool.describe()
-    return types.Tool(name=tool.name.replace('.', '_'), description=spec['description'],
+    return types.Tool(name=tool.name, description=spec['description'],
                       input_schema=spec['input_schema'], output_schema=spec['output_schema'],
                       annotations=types.ToolAnnotations(read_only_hint=spec['access'] == 'read',
                                                         destructive_hint=tool.destructive,
@@ -147,9 +147,6 @@ def mcp_router(resource: str, connection, context, gate: Gate) -> APIRouter:
         hosts = {host}
     origin = f'{url.scheme}://{host}'
     catalog = {name: _describe(tool) for name, tool in TOOLS.items()}
-    names = {spec.name: name for name, spec in catalog.items()}
-    if len(names) != len(catalog):
-        raise ValueError('MCP 工具名转换后重复')
 
     def listed(request: Request) -> types.ListToolsResult:
         with context(request, principal=request.state.mcp_principal) as ctx:
@@ -185,8 +182,7 @@ def mcp_router(resource: str, connection, context, gate: Gate) -> APIRouter:
         return _result({'error': {'code': code, 'message': message}}, error=True)
 
     async def call_tool(ctx, params):
-        name = names.get(params.name, '')
-        return await run_in_threadpool(called, ctx.request, name, params.arguments or {})
+        return await run_in_threadpool(called, ctx.request, params.name, params.arguments or {})
 
     root = Path(__file__).resolve().parents[2]
     with (root / 'pyproject.toml').open('rb') as project:
@@ -198,7 +194,7 @@ def mcp_router(resource: str, connection, context, gate: Gate) -> APIRouter:
         '按字段路径纠正参数。凭据失效时刷新或重新授权。发布暂停或繁忙时稍后重试。'
         '超时或断线先查回执，沿用原身份、请求编号及内容。'),
         on_list_tools=list_tools, on_call_tool=call_tool,
-        get_tool_input_schema=lambda name: catalog[names[name]].input_schema if name in names else None)
+        get_tool_input_schema=lambda name: catalog[name].input_schema if name in catalog else None)
 
     async def protocol_request(ctx, call_next):
         # Business handlers enter the shared Gate in their synchronous connection scope.

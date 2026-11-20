@@ -32,7 +32,7 @@ def test_rebind_conserves_state_and_new_uuid_before_collection(tmp_path, kind, o
             if outcome in ('paused', 'timeout', 'generic-409', 'bad-response'):
                 raise helper.ToolsError('uncertain, never parse this text')
             raise helper.ToolsError('safe certain rejection', code='policy_activation_changed')
-        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        if name == 'policy_current': return dict(installed=True, activation={'id': 4})
         assert args['request_id'] != original['pending']['request_id']
         assert args['expected_activation_id'] == 4
         if kind == 'stop': assert args['previous_state'] == original['state']
@@ -60,9 +60,9 @@ def test_no_valid_new_pointer_keeps_original(tmp_path, current):
     saved = dict(pending=dict(request_id='old', expected_activation_id=3), state={'levels': {}})
     helper.save_json(path, saved)
     def call(name, args):
-        if name == 'policy.current': return current
+        if name == 'policy_current': return current
         raise helper.ToolsError('certain', code='policy_activation_changed')
-    with pytest.raises(helper.ToolsError): helper.policy_receipt('policy.stop_alert', saved, path, call=call)
+    with pytest.raises(helper.ToolsError): helper.policy_receipt('policy_stop_alert', saved, path, call=call)
     assert json.loads(path.read_text()) == saved and saved['pending']['request_id'] == 'old'
 
 
@@ -70,6 +70,6 @@ def test_no_valid_new_pointer_keeps_original(tmp_path, current):
 def test_cli_protocol_does_not_parse_chinese_or_leak_raw_errors(monkeypatch, status):
     monkeypatch.setattr(subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=status,
         stdout='raw-owner-secret', stderr='policy_activation_changed 生效政策已变化 raw-owner-secret'))
-    with pytest.raises(helper.ToolsError) as caught: helper.tool('policy.monitor', {})
+    with pytest.raises(helper.ToolsError) as caught: helper.tool('policy_monitor', {})
     assert caught.value.code == ('policy_activation_changed' if status == 20 else None)
     assert 'raw-owner-secret' not in str(caught.value)

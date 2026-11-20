@@ -69,7 +69,7 @@ def test_http_permissions_strict_args_pause_and_retry(configured):
     tokens = {role: api_keys.create(conn, 'holdings-check-' + role, role=role) for role in ('assistant', 'research')}
     args = dict(request_id='holdings-check-http', expected_activation_id=active['id'])
     headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
-    endpoint = '/tools/policy.holdings_check'
+    endpoint = '/tools/policy_holdings_check'
     with TestClient(create_app(path)) as client:
         assert client.post(endpoint, headers=headers('assistant'), json=args).status_code == 404
     app = create_app(path, account_shadow_enabled=True)

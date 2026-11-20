@@ -31,8 +31,8 @@ def transport(client, monkeypatch, source):
     calls = []
     def call(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current': return dict(installed=True, activation={'id': 7})
-        assert name == 'policy.benchmark' and client.load_state()['pending'] == args
+        if name == 'policy_current': return dict(installed=True, activation={'id': 7})
+        assert name == 'policy_benchmark' and client.load_state()['pending'] == args
         value = deepcopy(source)
         return dict(mode='service_benchmark_capture', request_id=args['request_id'], activation_id=7,
                     input=value, result=benchmark_evaluation.evaluate(value, value['risk_policy']))
@@ -69,7 +69,7 @@ def test_response_loss_retries_original_request_and_cross_day_resolution(client,
     receipt = {}
     def lost(name, args):
         value = call(name, args)
-        if name == 'policy.benchmark':
+        if name == 'policy_benchmark':
             receipt.update(value)
             raise client.ToolsError('lost response')
         return value
@@ -77,7 +77,7 @@ def test_response_loss_retries_original_request_and_cross_day_resolution(client,
     with pytest.raises(client.ToolsError): client.check()
     pending = client.load_state()['pending']
     def recover(name, args):
-        assert name == 'policy.benchmark' and args == pending
+        assert name == 'policy_benchmark' and args == pending
         return receipt
     monkeypatch.setattr(client, 'tool', recover)
     assert client.check()[0] == '📊 A股账本月度对比\n' + GOLDEN
@@ -94,7 +94,7 @@ def test_bad_receipt_keeps_pending(client, source, monkeypatch, variant):
     call, _ = transport(client, monkeypatch, source)
     def corrupt(name, args):
         value = call(name, args)
-        if name == 'policy.benchmark':
+        if name == 'policy_benchmark':
             if variant == 'mode': value['mode'] = 'other'
             if variant == 'activation': value['activation_id'] = 9
             if variant == 'bool_activation': value['activation_id'] = True

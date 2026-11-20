@@ -138,10 +138,10 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 在启用账户工具的实例，以 assistant 凭据通过现有 `ashare` / HTTP / MCP 调用，参数结构以 `GET /tools` 返回的 schema 为准。以下示例使用唯一绑定的账本；也可显式传入与绑定一致的 account_id。计算口径和边界见[合一方案的量尺](docs/consolidation.md#4-现有代码与知识的去向)，上线状态见[实施计划](docs/implementation-plan.md)。
 
-1. `account.nav.capture({})`：读取一致快照，返回 `source` 和 `state_sha256`。从中选起止资产观察/已入账快照及每笔有效出入金的流前观察；`kind` 为 `observation` 或 `batch`，每个引用包含 `id` 与选择理由 `reason`。
-2. 通过 `account.evidence` 保存完整资金流水原件。如已有指数响应，也可保存指数 JSON 并取得其哈希。格式为 `{schema_version:1, code:"H00906.CSI", currency:"CNY", return_type:"total_return", source:"tushare.index_daily", fetched_at:"含时区的实际采集时间", source_as_of:"YYYY-MM-DD", status:"ok", rows:[{date:"YYYY-MM-DD",close:"实际收盘值"},...]}`；保留原响应金额与时点，失败响应不能标记成 ok。
-3. `account.nav.evaluate({request})`：`request` 包含 `expected_state_sha256`、`start/end` 估值引用、`flows:[{event_id,before:估值引用}]` 和 `coverage`。省略 `request.benchmark_evidence_hash` 时，服务端采集并保存 `H00906.CSI` 收盘证据。传入该字段时使用指定证据。两端估值均须为上海时间 15:00:00，指数响应须含两日收盘值。`coverage` 明确 `start/end` 时点、`currency:"CNY"`、`scope:"cash_equity_no_liabilities"`、`complete_external_flows:true`、`no_security_transfers:true`、`evidence_hashes` 与 `explanation`。这些声明必须由原件支持；没有出入金记录不能自动填 true。首次计算时账本资料已变化返回 409，缺项或口径不符返回 422。
-4. 保存返回的 `artifact_sha256`。相同输入重试得到相同哈希；`account.nav.replay({artifact_sha256})` 重放原输入并核对原结果，即使后来发生更正也不改写历史。结果保存在 `account-evidence/`，随正式备份包保留；工具不修改账户、政策或旧双基准报告，不发送通知。重放只读取已保存的证据。
+1. `account_nav_capture({})`：读取一致快照，返回 `source` 和 `state_sha256`。从中选起止资产观察/已入账快照及每笔有效出入金的流前观察；`kind` 为 `observation` 或 `batch`，每个引用包含 `id` 与选择理由 `reason`。
+2. 通过 `account_evidence` 保存完整资金流水原件。如已有指数响应，也可保存指数 JSON 并取得其哈希。格式为 `{schema_version:1, code:"H00906.CSI", currency:"CNY", return_type:"total_return", source:"tushare.index_daily", fetched_at:"含时区的实际采集时间", source_as_of:"YYYY-MM-DD", status:"ok", rows:[{date:"YYYY-MM-DD",close:"实际收盘值"},...]}`；保留原响应金额与时点，失败响应不能标记成 ok。
+3. `account_nav_evaluate({request})`：`request` 包含 `expected_state_sha256`、`start/end` 估值引用、`flows:[{event_id,before:估值引用}]` 和 `coverage`。省略 `request.benchmark_evidence_hash` 时，服务端采集并保存 `H00906.CSI` 收盘证据。传入该字段时使用指定证据。两端估值均须为上海时间 15:00:00，指数响应须含两日收盘值。`coverage` 明确 `start/end` 时点、`currency:"CNY"`、`scope:"cash_equity_no_liabilities"`、`complete_external_flows:true`、`no_security_transfers:true`、`evidence_hashes` 与 `explanation`。这些声明必须由原件支持；没有出入金记录不能自动填 true。首次计算时账本资料已变化返回 409，缺项或口径不符返回 422。
+4. 保存返回的 `artifact_sha256`。相同输入重试得到相同哈希；`account_nav_replay({artifact_sha256})` 重放原输入并核对原结果，即使后来发生更正也不改写历史。结果保存在 `account-evidence/`，随正式备份包保留；工具不修改账户、政策或旧双基准报告，不发送通知。重放只读取已保存的证据。
 
 `account_return` 与 `benchmark_return` 为小数收益率，`excess_percentage_points` 为百分点；所有计算金额和比率用十进制字符串返回，`flows` 留存逐笔份额变化。完整性是带凭证的调用者声明，重放不是券商/供应商认证，也不是当前账户状态或完整历史验收。请保留回执哈希以便检索，当前不提供净值历史列表或自动日报。
 

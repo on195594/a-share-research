@@ -13,9 +13,9 @@ DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
 
 ```sh
 python scripts/ashare.py tools
-python scripts/ashare.py call research.card --json '{"code":"600519"}'
-python scripts/ashare.py call research.methods --json '{"query":"低PE"}'
-python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具并绑定账本
+python scripts/ashare.py call research_card --json '{"code":"600519"}'
+python scripts/ashare.py call research_methods --json '{"query":"低PE"}'
+python scripts/ashare.py call account_state --json '{}'  # 需启用账户工具并绑定账本
 ```
 
 `ASHARE_URL` 缺省为 `http://127.0.0.1:8621`，客户端仅允许回环 IP、禁止代理和重定向，不自动重试。
@@ -32,29 +32,29 @@ python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具
 
 桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
 
-- `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research.methods`）、提交研究与反馈、查询进度和操作月批。
+- `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research_methods`）、提交研究与反馈、查询进度和操作月批。
 - 扫描范围含已核实持仓，外部订阅含 Hermes 同步的持仓镜像。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
-  - `research.company_overview` 与 `account.portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
-  - `account.research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
+  - `research_company_overview` 与 `account_portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
+  - `account_research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
 - `owner`：本地政策登记与切换；影子开关启用时可读取政策身份、指南和保存的评估；没有 HTTP 切换工具，也不允许调用旧研究 API。
 
 旧 Key 迁移后仍为 research。更换角色须创建新 Key 并撤销旧 Key。
 
 | 工具 | 输入与回执 |
 |---|---|
-| `research.search` | 用 `q` 搜公司或报告段落，可按 `code`、`section`、`history`、`page` 筛选，结果附报告或段落链接。 |
-| `research.cards`、`research.card`、`research.report` | 读取卡片列表、单公司卡片或指定报告。报告默认精简，`compact=false` 读取完整证据。 |
-| `research.request`、`research.status` | 提交六位 `code` 与 `request_id`，可附 `question`、`parent_report_id`。状态按 `run_id` 或原凭据的 `request_id` 二选一查询，`compact=false` 读取诊断与预算。 |
-| `research.feedback` | 指定 `report_id`、段落 `location`、反馈 `text` 与 `request_id`，返回独立核查任务。 |
-| `research.scan.request`、`research.scan.read`、`research.scan.weekly` | 按原凭据与 `request_id` 受理或找回扫描。按 `scan_id` 读取扫描，或读取最近一周汇总，两种读取均可传 `compact=false` 展开详情。 |
-| `research.subscriptions`、`research.subscriptions.replace` | 读取订阅代码与来源，或传 `codes` 完整替换外部订阅。空列表清空外部订阅，冻结候选仍按原来源展示。 |
-| `research.batch.monthly.request`、`research.batch.monthly.status` | 按上海自然月 `month`（YYYY-MM）提交或查状态。提交仅限当月，已存在的批次返回原编号；状态可传 `compact=false` 查看冻结名单和候选失败详情。 |
+| `research_search` | 用 `q` 搜公司或报告段落，可按 `code`、`section`、`history`、`page` 筛选，结果附报告或段落链接。 |
+| `research_cards`、`research_card`、`research_report` | 读取卡片列表、单公司卡片或指定报告。报告默认精简，`compact=false` 读取完整证据。 |
+| `research_request`、`research_status` | 提交六位 `code` 与 `request_id`，可附 `question`、`parent_report_id`。状态按 `run_id` 或原凭据的 `request_id` 二选一查询，`compact=false` 读取诊断与预算。 |
+| `research_feedback` | 指定 `report_id`、段落 `location`、反馈 `text` 与 `request_id`，返回独立核查任务。 |
+| `research_scan_request`、`research_scan_read`、`research_scan_weekly` | 按原凭据与 `request_id` 受理或找回扫描。按 `scan_id` 读取扫描，或读取最近一周汇总，两种读取均可传 `compact=false` 展开详情。 |
+| `research_subscriptions`、`research_subscriptions_replace` | 读取订阅代码与来源，或传 `codes` 完整替换外部订阅。空列表清空外部订阅，冻结候选仍按原来源展示。 |
+| `research_batch_monthly_request`、`research_batch_monthly_status` | 按上海自然月 `month`（YYYY-MM）提交或查状态。提交仅限当月，已存在的批次返回原编号；状态可传 `compact=false` 查看冻结名单和候选失败详情。 |
 
-研究和反馈受理后立即向用户给出 `run_id` 和 `path`（如 `/runs/42`，相对于 Web 站点），结束本轮等待。研究由 worker 执行，不在一轮里轮询。用户稍后询问进展时调用 `research.status`。响应丢失时保留原凭据和请求编号；同号改问题、公司或父报告会返回 409。旧版受理的研究没有保存调用身份，仍可用原编号找回。
+研究和反馈受理后立即向用户给出 `run_id` 和 `path`（如 `/runs/42`，相对于 Web 站点），结束本轮等待。研究由 worker 执行，不在一轮里轮询。用户稍后询问进展时调用 `research_status`。响应丢失时保留原凭据和请求编号；同号改问题、公司或父报告会返回 409。旧版受理的研究没有保存调用身份，仍可用原编号找回。
 
-`research` 和 `assistant` 均可调用 `research.methods` 按关键词检索已审核方法卡。结果包含适用条件原文、来源链接和完整卡片目录的 `catalog_sha256`。目录不可用时，`gaps` 说明原因。
+`research` 和 `assistant` 均可调用 `research_methods` 按关键词检索已审核方法卡。结果包含适用条件原文、来源链接和完整卡片目录的 `catalog_sha256`。目录不可用时，`gaps` 说明原因。
 
-`GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
+HTTP、远程 MCP、stdio 桥与 CLI 共用注册表的下划线规范名，例如 `research_card` 与 `account_submit`。`GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 
 工具标注 `access=write` 时 HTTP 使用 SQLite `mode=rw`，其余使用 `mode=ro`。参数错误返回 `invalid_arguments` 及字段路径和原因，例如 `batch.snapshot.market_values: 缺 600519 市值`。同一请求编号用于不同内容返回 409 / `conflict`；上游暂时不可用返回 503 / `unavailable`，可稍后用原请求重试。
 
@@ -74,12 +74,12 @@ Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TU
 
 v14 新增期初与投影、批次回执、事件、作废记录、资产观察五张独立表；不改写旧持仓/成交表，不切换账户事实来源。开发实例须显式设 `create_app(database, account_shadow_enabled=True)`。只有启用账户开关的 assistant 可发现和调用账户工具。带 `account_id` 的工具可省略该字段，服务从 `account_source` 取唯一绑定账本；显式传入时必须一致。绑定缺失、无效或不唯一时，须由所有者核对绑定后重试。
 
-- `account.evidence` 接收 base64 原始证据（解码后最多 20 MiB），返回 SHA-256。文件原子写入数据库同目录下的私有 `account-evidence/`，重传幂等，读取验证哈希并拒绝符号链接路径。
-- `account.state` 返回账本版本、持仓股数、现金及显式容差。建立期初目前仅供内部调用，必须提供期初、时点、证据和经确认的容差，不向助手开放猜测期初或修改容差的入口。
-- `account.submit` 接收版本号、事件、原事件作废编号、证据哈希和完整期末快照；按业务身份去重，重新计算有效事件，校验股数、现金和总资产后事务入账。更正用作废加替代事件，保留原始内容。报告依据必须为同公司、不晚于成交日、通过复核的正式报告。
-- `account.events` 按事件编号分页返回原事件及当前是否有效，可据此取得更正所需编号；`account.receipt` 查询不可变批次回执。
-- `account.nav.capture`、`account.nav.evaluate`、`account.nav.replay` 分别捕获账本、计算区间净值、重放已有凭证。计算时可省略 `request.benchmark_evidence_hash`，由服务端采集并保存 `H00906.CSI` 的 `tushare.index_daily` 响应。也可传入已保存的指数证据哈希。起止估值均须为上海时间 15:00:00。区间无交易日数据或缺任一端点收盘值时返回 422 / `invalid_arguments`，请另选区间。行情采集故障返回 503 / `unavailable`，稍后用原请求重试。两类错误均附指数响应的证据哈希。[净值工具手册](../../README.md#账户净值工具)
-- `account.observe` 将不完整截图保存为资产观察，只记录明确提供的金额，不推断缺失交易；重复提交复用观察编号。
+- `account_evidence` 接收 base64 原始证据（解码后最多 20 MiB），返回 SHA-256。文件原子写入数据库同目录下的私有 `account-evidence/`，重传幂等，读取验证哈希并拒绝符号链接路径。
+- `account_state` 返回账本版本、持仓股数、现金及显式容差。建立期初目前仅供内部调用，必须提供期初、时点、证据和经确认的容差，不向助手开放猜测期初或修改容差的入口。
+- `account_submit` 接收版本号、事件、原事件作废编号、证据哈希和完整期末快照；按业务身份去重，重新计算有效事件，校验股数、现金和总资产后事务入账。更正用作废加替代事件，保留原始内容。报告依据必须为同公司、不晚于成交日、通过复核的正式报告。
+- `account_events` 按事件编号分页返回原事件及当前是否有效，可据此取得更正所需编号；`account_receipt` 查询不可变批次回执。
+- `account_nav_capture`、`account_nav_evaluate`、`account_nav_replay` 分别捕获账本、计算区间净值、重放已有凭证。计算时可省略 `request.benchmark_evidence_hash`，由服务端采集并保存 `H00906.CSI` 的 `tushare.index_daily` 响应。也可传入已保存的指数证据哈希。起止估值均须为上海时间 15:00:00。区间无交易日数据或缺任一端点收盘值时返回 422 / `invalid_arguments`，请另选区间。行情采集故障返回 503 / `unavailable`，稍后用原请求重试。两类错误均附指数响应的证据哈希。[净值工具手册](../../README.md#账户净值工具)
+- `account_observe` 将不完整截图保存为资产观察，只记录明确提供的金额，不推断缺失交易；重复提交复用观察编号。
 
 观察和完整快照均可提供 `portfolio_value_as_of`，只在原始证据明确给出估值时点时填写。须为完整、带时区的日期时间，程序统一为上海时区；日期、无时区时间和数字时间戳均拒绝。观察同时须有 total_assets，且 observed_at 明确时区、不早于估值时点；快照的时点不得早于期初或本次有效事件。未来估值拒绝：观察返回 422，快照返回 conflict 回执且不写交易。记录时间保留必要的微秒精度。
 
@@ -103,9 +103,9 @@ v14 新增期初与投影、批次回执、事件、作废记录、资产观察�
 
 v16 新增 `account_position_books`。内部 `position_store.initialize` 在首笔金融事件之前，把有证据的成本期初与账户股数期初绑定：每个周期提供 cycle_id/code/shares/cost_price/buy_date/policy_identity，可携旧持仓编号 legacy_holding_id。股数必须一致，买入日不得晚于账户期初；期初不可覆盖。同内容重复初始化返回当前投影。policy_identity 保存来源引用，政策参数与行动尚未据此执行。
 
-`account.state.cost_basis_configured` 表示是否已配置；`account.positions` 返回版本和成本周期投影。现金流字段明确为 `since_opening`：期初之前的投入、分红和已实现收益均不反推。影子账本尚未绑定成本时，读取成本会返回明确缺口。
+`account_state` 返回的 `cost_basis_configured` 表示是否已配置；`account_positions` 返回版本和成本周期投影。现金流字段明确为 `since_opening`：期初之前的投入、分红和已实现收益均不反推。影子账本尚未绑定成本时，读取成本会返回明确缺口。
 
-配置后，`account.submit` 同事务重建所有有效事件的成本与周期、核对股数，并更新现金/股数/成本版本；作废更正一起重放。成功回执带 position_before/position_after。加仓费用税费进入加权成本，部分卖出保留每股成本并累计已实现盈亏，全部卖出关闭周期，下次买入创建由业务身份确定的新周期。失败批次不改变这些投影，SQL 故障沿用回滚和可查询失败回执。
+配置后，`account_submit` 同事务重建所有有效事件的成本与周期、核对股数，并更新现金/股数/成本版本；作废更正一起重放。成功回执带 position_before/position_after。加仓费用税费进入加权成本，部分卖出保留每股成本并累计已实现盈亏，全部卖出关闭周期，下次买入创建由业务身份确定的新周期。失败批次不改变这些投影，SQL 故障沿用回滚和可查询失败回执。
 
 新开仓须在 batch.position_entries 中，以本批买入事件的字符串下标提供 policy_identity（可选 name），例如 `{"0":{"policy_identity":"已核对的政策来源引用"}}`。缺少上下文返回 missing_material。已有周期的上下文不能通过重复成交覆盖，须作废更正；空扩展字段不改变旧请求哈希。
 
@@ -129,9 +129,9 @@ v17 新增不可变周期/事件整数编号、政策投影参数和期初快照
 
 v18 在同一 `account_analysis_history` 表增加 account_id/cycle_id 作用域。旧记录保留原列值、编号、哈希和父链，不同账户即使使用相同持仓整数编号，也不会混用状态。新入口均要求 assistant 及账户影子开关：
 
-- `account.cycle_analysis.initialize`：提供 cycle_id，以及 initialize 对象中的 expected_account_version、evidence_hashes。新周期从空论点/L3/预警和 pending Tier 开始，不借用上一个周期的判断。已有期初周期还须提供 legacy_revision_id，明确选择其当前旧分析版本；导入快照与来源版本完整保留。
-- `account.cycle_analysis.current/history`：读取指定账户周期的最新值或分页历史。周期清仓或因交易作废失效后，历史仍可查询。
-- `account.cycle_analysis.update`：提供 cycle_id、update，沿用既有 expected_version/evidence_hashes/reason/changes 合同和论点、L3、预警、Tier 转移逻辑；该版本号属于分析分支，与初始化核对的账户版本分开。一次提交原子追加，重复请求返回原回执，关闭或失效周期拒绝新更新。
+- `account_cycle_analysis_initialize`：提供 cycle_id，以及 initialize 对象中的 expected_account_version、evidence_hashes。新周期从空论点/L3/预警和 pending Tier 开始，不借用上一个周期的判断。已有期初周期还须提供 legacy_revision_id，明确选择其当前旧分析版本；导入快照与来源版本完整保留。
+- `account_cycle_analysis_current/history`：读取指定账户周期的最新值或分页历史。周期清仓或因交易作废失效后，历史仍可查询。
+- `account_cycle_analysis_update`：提供 cycle_id、update，沿用既有 expected_version/evidence_hashes/reason/changes 合同和论点、L3、预警、Tier 转移逻辑；该版本号属于分析分支，与初始化核对的账户版本分开。一次提交原子追加，重复请求返回原回执，关闭或失效周期拒绝新更新。
 
 `changes` 中的 `kind=thesis` 接收 `l1`、`l2`、`rewrite_reason`、`retire_l3_ids` 和 `new_l3`。退休编号必须覆盖该持仓周期全部活动条件，整批保存旧论点 superseded、旧 L3 退休及新论点/新 L3；新条件初始为 pending。每个新条件须提供 condition/scope/action/materiality_basis/temporary_exit_rule，可选 evidence_cadence；non_core 只能 review。论点重写与 L3 状态更新分批提交，避免同批先退休再修改的顺序歧义。新实体编号跨持仓唯一，并保留旧库已发放编号的上限。
 
@@ -161,48 +161,48 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 显式账户开关下可读取政策身份、指南及历史评估：
 
-- `policy.current`（assistant/owner）：读取生效身份、实际参数、生效时间及 installed 状态；没有指针时返回空，代码变更后 installed=false。
-- `policy.guide`（assistant/owner）：省略 path 发现指南列表，传返回的 path 读取已保存的确切版本；不接受任意文件路径。指南是历史政策资料，文中的旧工作流不能覆盖当前宿主授权。
-- `policy.evaluation`（assistant/owner）：按 evaluation_id 读取原输入、结果及不可变回执。
+- `policy_current`（assistant/owner）：读取生效身份、实际参数、生效时间及 installed 状态；没有指针时返回空，代码变更后 installed=false。
+- `policy_guide`（assistant/owner）：省略 path 发现指南列表，传返回的 path 读取已保存的确切版本；不接受任意文件路径。指南是历史政策资料，文中的旧工作流不能覆盖当前宿主授权。
+- `policy_evaluation`（assistant/owner）：按 evaluation_id 读取原输入、结果及不可变回执。
 
 旧评估的 `mode=supplied_input_replay` 标识其输入由调用者提供。历史回执和原始输入可按编号查阅。所有者网页 `/policy` 只读展示登记、参数与账户来源；服务化监控/止损/日报的统一留存与宿主恢复协议见下节，实际生产安装状态以实施计划为准。镜像与明确绑定账本的采集见下节。切换新指针不改变旧周期已绑定的投影参数，不重新解释历史交易。
 
 
 ## 服务端监控采集（镜像或明确绑定账本，开发入口）
 
-`account.current` 接受空对象，要求 assistant 与账户影子开关，返回 `data.codes`（去重排序的六位公司代码）和 `data.source`。同一只读事务内复用监控的来源核验，镜像读取未关闭持仓，账本读取明确绑定账户的已核验资金投影；来源缺失、投影或证据损坏、不可转换的代码均拒绝，不用空持仓掩盖失败。不查询行情、不依赖生效政策、不修改订阅，供宿主在扫描前和通知前刷新当前在仓集合。
+`account_current` 接受空对象，要求 assistant 与账户影子开关，返回 `data.codes`（去重排序的六位公司代码）和 `data.source`。同一只读事务内复用监控的来源核验，镜像读取未关闭持仓，账本读取明确绑定账户的已核验资金投影；来源缺失、投影或证据损坏、不可转换的代码均拒绝，不用空持仓掩盖失败。不查询行情、不依赖生效政策、不修改订阅，供宿主在扫描前和通知前刷新当前在仓集合。
 
-`policy.stop_alert` 同样要求 assistant 与账户影子开关，输入为 request_id、expected_activation_id 和 previous_state（旧通知 `{date,levels}`，也接受空对象）。固定子进程只采集未关闭持仓的 canonical 止损线与当前行情；非 v0 交易时段不取行情。服务复用政策/来源/撤销检查、无网络写锁与幂等追加，保存包含参数、时钟、持仓止损线、行情和旧通知状态的原始输入及纯函数结果。回执 mode 为 `service_stop_alert_capture`，capture_context 版本 3 的 request 还绑定 previous_state；同请求不能换状态或与 monitor/replay 混用。结果固定为 status、exit_code、stdout、stderr、state、alerts；state 是下一通知状态，服务不代发通知或改调用方状态。
+`policy_stop_alert` 同样要求 assistant 与账户影子开关，输入为 request_id、expected_activation_id 和 previous_state（旧通知 `{date,levels}`，也接受空对象）。固定子进程只采集未关闭持仓的 canonical 止损线与当前行情；非 v0 交易时段不取行情。服务复用政策/来源/撤销检查、无网络写锁与幂等追加，保存包含参数、时钟、持仓止损线、行情和旧通知状态的原始输入及纯函数结果。回执 mode 为 `service_stop_alert_capture`，capture_context 版本 3 的 request 还绑定 previous_state；同请求不能换状态或与 monitor/replay 混用。结果固定为 status、exit_code、stdout、stderr、state、alerts；state 是下一通知状态，服务不代发通知或改调用方状态。
 
-止损规则不从新监控结论近似推导：直接复用 v0 的 stop_level/new_stop_alerts，保留同日与绝对 15 分钟行情窗、3% 临近线、逐代码每日升档、部分行情有效时只检查有效部分的既有行为。全部行情无效返回已保存的 unavailable 评估（exit_code=1），与采集器异常、来源变动等未保存成功回执的服务错误区分。可用 `policy.evaluation` 查回原输入/结果/身份；纯函数 `policy.stop_evaluation.evaluate` 可离线复算。无数据库列变更，但旧版本不识别上下文 3，不可作为这些记录的直接回退版本；发布前仍须兼容合并镜像演练。
+止损规则不从新监控结论近似推导：直接复用 v0 的 stop_level/new_stop_alerts，保留同日与绝对 15 分钟行情窗、3% 临近线、逐代码每日升档、部分行情有效时只检查有效部分的既有行为。全部行情无效返回已保存的 unavailable 评估（exit_code=1），与采集器异常、来源变动等未保存成功回执的服务错误区分。可用 `policy_evaluation` 查回原输入/结果/身份；纯函数 `policy.stop_evaluation.evaluate` 可离线复算。无数据库列变更，但旧版本不识别上下文 3，不可作为这些记录的直接回退版本；发布前仍须兼容合并镜像演练。
 
-`policy.daily_brief` 接受 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。采集沿用监控输入但不加入旧 daily-brief 未读取的研究卡片；另保留每个未关闭持仓的完整生命周期事件、Provider 规范化分红行、来源/获取时间/源日期与安全错误类别、分红检查日和格式化日。成功空行集与失败 null 行集区分；逐持仓身份、代码、名称、股数必须与监控输入一致，遗漏或重复核查项拒绝。新旧入口共用从旧函数原样抽出的 implemented_rows，再由 unrecorded_dividends 和 format_daily_brief 复算，不采用调用方提供的计算结论。
+`policy_daily_brief` 接受 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。采集沿用监控输入但不加入旧 daily-brief 未读取的研究卡片；另保留每个未关闭持仓的完整生命周期事件、Provider 规范化分红行、来源/获取时间/源日期与安全错误类别、分红检查日和格式化日。成功空行集与失败 null 行集区分；逐持仓身份、代码、名称、股数必须与监控输入一致，遗漏或重复核查项拒绝。新旧入口共用从旧函数原样抽出的 implemented_rows，再由 unrecorded_dividends 和 format_daily_brief 复算，不采用调用方提供的计算结论。
 
 日报回执 mode=`service_daily_brief_capture`、上下文版本 4，原始输入根部仍保存 risk_policy。结果包含 status（ready/silent）、exit_code、stdout、stderr、snapshot 及 dividends.checked/findings/failures；无当日报价时保留 v0 静默行为，失败项仍可查。可由 `policy.daily_evaluation.evaluate` 离线复算，避免旧监控对嵌套 L3 的注解改变原始留存输入。采集仍在固定 25 秒预算内；日报与基准两个固定子进程允许从 tools 的环境接收 TUSHARE_TOKEN，其余模型/owner/宿主配置不传入。分红 Provider 异常逐持仓记录安全类别，不回显异常正文；数据库/来源/政策漂移等仍使整体回执失败。未新增数据库列，兼容回退版本必须识别上下文 4。
 
-`policy.benchmark` 接受 request_id / expected_activation_id / end（严格 YYYY-MM-DD），同为 assistant、账户影子开关及评估追加入口。服务从已核验镜像或显式绑定账本读取截至 end 的完整 holding_events，包含期初前历史和已关闭持仓；不能用新增事件流替代完整现金流。固定子进程获取 H00300.CSI（沪深 300 全收益）、H00922.CSI（中证红利全收益）和估值日在仓股票收盘价，留存规范化行、来源时点与安全失败类别。两个指数最晚可用日期的较早者作为估值日；同日重复行沿用最后一行，费用、分红、调整与相同现金流比较共用 v0 纯函数，降级股票报价沿用原警告。保留原计算口径不表示供应商历史已经完整，须另核对实际原件和日期覆盖。
+`policy_benchmark` 接受 request_id / expected_activation_id / end（严格 YYYY-MM-DD），同为 assistant、账户影子开关及评估追加入口。服务从已核验镜像或显式绑定账本读取截至 end 的完整 holding_events，包含期初前历史和已关闭持仓；不能用新增事件流替代完整现金流。固定子进程获取 H00300.CSI（沪深 300 全收益）、H00922.CSI（中证红利全收益）和估值日在仓股票收盘价，留存规范化行、来源时点与安全失败类别。两个指数最晚可用日期的较早者作为估值日；同日重复行沿用最后一行，费用、分红、调整与相同现金流比较共用 v0 纯函数，降级股票报价沿用原警告。保留原计算口径不表示供应商历史已经完整，须另核对实际原件和日期覆盖。
 
 基准回执 mode=`service_benchmark_capture`、上下文版本 5，request 绑定 end；同请求换截止日冲突。结果包含 status（ready/no_events/unavailable）、exit_code、stdout、stderr、metrics、failures，可用 `policy.benchmark_evaluation.evaluate` 离线复算。缺失指数、无法选出估值日或缺少股票价格均保存明确失败，metrics 为 null；指数不可用时不继续取股票价格，不补零生成收益。调用者不能提交行情或计算结论。采集仍限 25 秒，使用 tools 的 TUSHARE_TOKEN，成功双指数与实际耗时验收尚未完成；上下文 5 也须纳入兼容回退版本。
 
-`policy.position_size` 是基于既存监控的派生计算，接受 request_id、expected_activation_id、monitor_evaluation_id 与 proposal。proposal 包含六位 code、正数 price、framework（A–F），cash 可省略或为非负数；省略表示沿用 v0“不另加资金约束”，不等于账户实际现金充足。价格和现金是调用者声明的测算条件，不自动充当行情或券商事实。仅 assistant、账户影子开关下开放。
+`policy_position_size` 是基于既存监控的派生计算，接受 request_id、expected_activation_id、monitor_evaluation_id 与 proposal。proposal 包含六位 code、正数 price、framework（A–F），cash 可省略或为非负数；省略表示沿用 v0“不另加资金约束”，不等于账户实际现金充足。价格和现金是调用者声明的测算条件，不自动充当行情或券商事实。仅 assistant、账户影子开关下开放。
 
 新测算只接受当前生效身份的 `service_monitor_capture` 回执，并核对原输入/结果哈希、当前账户来源及已安装实现；参数重放、日报和其他评估不能充当监控快照。账户、资产观察或政策变化时应先重新监控，不沿用旧风险预算。它不刷新价格、研究卡片或分母，来源一致也不表示行情实时；调用者仍须阅读原快照时点与缺口。有效快照缺已确认分母、风险不完整或板块无权限时保存 unavailable，不生成股数。正常计算直接调用 v0 position_size.size，保留交易单位、原累计分批股数与加仓检查点提示，action_status 仍为 not_formed。
 
 派生回执 mode=`derived_position_size`，capture_context 版本 6 保存请求、账户来源及 derived_at（计算时间，不是行情或资产估值时间）。输入保存实际 snapshot、proposal、risk_policy 及父回执编号/输入哈希/结果哈希；结果为 status、exit_code、stdout、stderr、sizing，可由 `policy.position_evaluation.evaluate` 离线复算。读取与完整性检查还核对父子引用。全部检查和追加在单个无网络事务内，失败整体回滚；重复请求查回原结果，不因后续账户或政策改变而重算，改变 proposal 或父回执必须使用新请求。服务不下单、不记交易；未新增数据库列，兼容回退版须识别上下文 6。
 
-`policy.portfolio_scenario` 与定仓共用同一父回执核验和无网络事务。输入为 request_id、expected_activation_id、monitor_evaluation_id、proposal；proposal 必须包含非空 sales（六位代码到正整数股数的映射）及非负 fees（零也须显式填写），cash 可省略或为非负数。卖出数量由调用者明确指定，费用为估计；未提供现金时保留 cash_before/cash_after 为 null，不从资产差额推算。不得把假设数量或价格当作已成交、可卖数量或当前行情。
+`policy_portfolio_scenario` 与定仓共用同一父回执核验和无网络事务。输入为 request_id、expected_activation_id、monitor_evaluation_id、proposal；proposal 必须包含非空 sales（六位代码到正整数股数的映射）及非负 fees（零也须显式填写），cash 可省略或为非负数。卖出数量由调用者明确指定，费用为估计；未提供现金时保留 cash_before/cash_after 为 null，不从资产差额推算。不得把假设数量或价格当作已成交、可卖数量或当前行情。
 
 服务复用 v0 portfolio_scenario.compare，不自动选股或推荐数量。卖出所得只转成现金，总资产仅扣估计费用，不重复加上卖出金额；原数据缺口、L3、门禁及复核状态保留。报价、股数、止损线、完整估值或已确认分母不足，以及过量卖出、费用或汇总冲突，按原规则拒绝计算。格式合法但不能计算时保存 unavailable 和原错误文本，result.scenario 为 null；有效情景仍标记 action_status=not_formed、execution_status=not_checked、writes=false。
 
 情景回执 mode=`derived_portfolio_scenario`、上下文版本 7，输入保存同样的 snapshot/父回执引用/参数/提案，结果字段为 status、exit_code、stdout、stderr、scenario，可用 `policy.scenario_evaluation.evaluate` 离线复算。同请求不能在仓位与情景工具之间复用，账户或政策变化后新计算必须重新监控，已保存回执仍可查询。两种派生计算共用 policy.derived 的父子一致性检查及原子留存；旧上下文 6 记录保持可读。未新增数据库列，兼容回退版须同时支持版本 6、7。
 
-`policy.holdings_check` 保存原 check-holdings 的独立检查语义，参数为 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。固定只读采集进程保存未关闭持仓的原成本/两档止损线、未解决的流动性延迟记录（evidence 和 review_due）、逐代码报价、实际使用的基本面缓存 payload（含命中时的 _cache_meta，未命中或过期为 null）、全市场快照及检查时钟。原数据库允许的空值与数值边界不另行伪造成新政策；不能执行原计算或不能规范化保存的输入拒绝。
+`policy_holdings_check` 保存原 check-holdings 的独立检查语义，参数为 request_id / expected_activation_id，同为 assistant、账户影子开关及评估追加入口。固定只读采集进程保存未关闭持仓的原成本/两档止损线、未解决的流动性延迟记录（evidence 和 review_due）、逐代码报价、实际使用的基本面缓存 payload（含命中时的 _cache_meta，未命中或过期为 null）、全市场快照及检查时钟。原数据库允许的空值与数值边界不另行伪造成新政策；不能执行原计算或不能规范化保存的输入拒绝。
 
 新旧入口共用 v0 holdings_check_input 纯函数，保留盘中/收盘/旧日报价提示、已有延迟起点与 review_due 回退、24 小时后恢复或不可交易等分支。当前 v0 全市场快照接口实际返回 null，服务保留这一缺口，不假造跌停家数或据测试中的 501 家场景宣称已有实时市场证据。已有延迟记录可独立参与原复核流程；此检查不自动新增、推进或解决预警记录。
 
 回执 mode=`service_holdings_check_capture`、上下文版本 8；输入与逐项 checks（含 p3；11-15 起不再含基本面与 governance_gates）、stdout/stderr/exit_code 一并留存，可用 `policy.holdings_check_evaluation.evaluate` 离线复算。status=ready 只表示检查完成，不表示行情齐全或允许交易，须读取逐项状态、P3 缺口与原时点；无持仓为 no_holdings。旧 CLI 正文保持原样，不能把它与普通 monitor 的聚合输出视为逐字等价。采集沿用 25 秒隔离预算，不传行情或模型凭据，不取研究卡片；政策/来源漂移与重试规则同 monitor。未增加数据库列，回退合并版须理解上下文 8。
 
-v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy.monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy.current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
+v20 为 `policy_evaluations` 增加 capture_context 与其哈希，旧重放行原字段不改。`policy_monitor` 要求 assistant 凭据和账户影子开关，参数只有 request_id 与 expected_activation_id（由 `policy_current` 读取）。服务核对当前实现与生效政策及 `account_source`，随后用固定子进程读取对应账户、资产观察和研究卡片，再调用 v0 现有的 Sina 行情与本地行业缓存读取。调用者不能传账户内容、风险参数、命令、路径或环境变量。
 
 mirror 模式保持原逻辑：核对镜像全量哈希及相邻资产原件，来源上下文版本为 1。ledger 模式要求 watermark 严格包含 `schema_version=1`、`account_id`、`account_scope`、`mirror_watermark` 四项；账户范围必须与生效政策一致，不能猜唯一账本。`source_sha256` 与 mirror_watermark 保留末次镜像来源；活动账本另外生成 state_sha256；生产绑定与切换证据见[实施计划](../../docs/implementation-plan.md#合一重构收尾)。
 
@@ -216,10 +216,10 @@ ledger 采集校验资金与成本重放、政策期初、编号、活动周期�
 
 ### 跨激活 pending 的确定拒绝协议
 
-`policy.monitor`、`policy.stop_alert`、`policy.daily_brief` 共用 `_run`：始终先查 `(created_by,request_id)` 的既有回执，跨激活仍原样返回；请求键用于不同输入仍是普通 conflict。只有确认没有回执、原 expected_activation_id 是已存在的前驱且 current 确实改变、未写评估时，返回 **HTTP 409 / error.code=`policy_activation_changed`**；采集后事务重检同样适用。无激活、未知指针、身份不匹配、来源/账户范围冲突、权限错误均不冒用该码。原成功包格式不变。
+`policy_monitor`、`policy_stop_alert`、`policy_daily_brief` 共用 `_run`：始终先查 `(created_by,request_id)` 的既有回执，跨激活仍原样返回；请求键用于不同输入仍是普通 conflict。只有确认没有回执、原 expected_activation_id 是已存在的前驱且 current 确实改变、未写评估时，返回 **HTTP 409 / error.code=`policy_activation_changed`**；采集后事务重检同样适用。无激活、未知指针、身份不匹配、来源/账户范围冲突、权限错误均不冒用该码。原成功包格式不变。
 
 错误体仍为 `{ok:false,error:{code,message}}`。`scripts/ashare.py` 只对白名单的 409、非重复键且 ≤4096 字节错误体识别该码，专用退出码 **20**；错误 stdout 为空，不透传原始错误体，中文 stderr 不作为协议。503 paused/busy（同一有界白名单）与连接被拒（请求未到达处理器，如发布重启）映射为专用退出码 **21**，表示原请求可原样重发；超时、连接重置、坏包、通用 409 与旧服务仍按非零 1 失败处理，不保证未写入。MCP 的旧失败语义不变，不承诺自动转接。
 
 Hermes helper 将 CLI 退出码 20 映射为 `policy_activation_changed`（三消费者每轮最多封存/转接一次），将退出码 21 映射为 `service_unavailable`（仅止损脚本在 10 分钟宽限内保留 pending 静默跳过，日报与顾问仍按普通失败处理）；状态、原回执优先级、过期与通知边界见 [宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。服务端先部署，CLI、helper、调用方再同步；回退到旧服务/CLI 时安全保留 pending，不能批量清空状态或回退旧对象不兼容的脚本。应用镜像发布不安装宿主客户端。
 
-同一 Key 的同 request_id 返回第一次已提交回执，不重新采集；希望获得新观察须使用新 request_id。并发重复请求可能各自取一次行情，但只保存并返回第一份回执。request_id 与不同操作/生效指针复用会冲突。子进程 25 秒超时后清理自身进程组，失败无成功回执；HTTP/CLI 超时后可用原请求查询重试，不假定已写入。`policy.evaluation` 同样可读取这类结果。
+同一 Key 的同 request_id 返回第一次已提交回执，不重新采集；希望获得新观察须使用新 request_id。并发重复请求可能各自取一次行情，但只保存并返回第一份回执。request_id 与不同操作/生效指针复用会冲突。子进程 25 秒超时后清理自身进程组，失败无成功回执；HTTP/CLI 超时后可用原请求查询重试，不假定已写入。`policy_evaluation` 同样可读取这类结果。

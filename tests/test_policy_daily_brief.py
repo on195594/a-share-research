@@ -63,17 +63,17 @@ def test_http_permissions_invalid_arguments_pause_and_idempotence(configured):
     args = dict(request_id='daily-http', expected_activation_id=active['id'])
     headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
     with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy.daily_brief', headers=headers('assistant'), json=args).status_code == 404
+        assert client.post('/tools/policy_daily_brief', headers=headers('assistant'), json=args).status_code == 404
     app = create_app(path, account_shadow_enabled=True)
     with TestClient(app) as client:
-        assert client.post('/tools/policy.daily_brief', headers=headers('research'), json=args).status_code == 403
-        assert client.post('/tools/policy.daily_brief', headers=headers('assistant'), json=args | {'token': 'no'}).status_code == 422
-        first = client.post('/tools/policy.daily_brief', headers=headers('assistant'), json=args)
+        assert client.post('/tools/policy_daily_brief', headers=headers('research'), json=args).status_code == 403
+        assert client.post('/tools/policy_daily_brief', headers=headers('assistant'), json=args | {'token': 'no'}).status_code == 422
+        first = client.post('/tools/policy_daily_brief', headers=headers('assistant'), json=args)
         assert first.status_code == 200, first.text
-        assert client.post('/tools/policy.daily_brief', headers=headers('assistant'), json=args).json() == first.json()
+        assert client.post('/tools/policy_daily_brief', headers=headers('assistant'), json=args).json() == first.json()
         assert len(calls) == 1
         app.state.gate.pause(1)
-        assert client.post('/tools/policy.daily_brief', headers=headers('assistant'), json=args).status_code == 503
+        assert client.post('/tools/policy_daily_brief', headers=headers('assistant'), json=args).status_code == 503
 
 
 def test_source_change_and_corrupt_context_cannot_be_success(configured, monkeypatch):

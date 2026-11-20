@@ -68,7 +68,7 @@ def test_errors_release_gate_and_capacity_slots(database, monkeypatch):
     monkeypatch.setattr(server, 'invoke', fail)
     with TestClient(app) as client:
         for _ in range(4):
-            response = client.post('/tools/research.cards', json={}, headers=header(tokens['research']))
+            response = client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
             assert response.status_code == 503
             assert response.json()['error']['code'] == 'unavailable'
             assert client.get('/ready').json()['in_flight'] == 0
@@ -90,7 +90,7 @@ def test_full_gate_admits_reads_and_discovery_but_rejects_writes_and_collectors(
     app = server.create_app(path, account_shadow_enabled=True)
     headers = header(tokens['assistant'])
     writing, release = threading.Barrier(3), threading.Event()
-    evidence = server.TOOLS['account.evidence']
+    evidence = server.TOOLS['account_evidence']
 
     def slow_write(ctx, args):
         writing.wait(timeout=5)
@@ -99,18 +99,18 @@ def test_full_gate_admits_reads_and_discovery_but_rejects_writes_and_collectors(
 
     monkeypatch.setitem(server.TOOLS, evidence.name, replace(evidence, handler=slow_write))
     with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
-        writes = [pool.submit(client.post, '/tools/account.evidence', headers=headers,
+        writes = [pool.submit(client.post, '/tools/account_evidence', headers=headers,
                               json={'content_base64': content}) for content in ('YQ==', 'Yg==')]
         try:
             writing.wait(timeout=5)
             assert app.state.gate.status()['in_flight'] == 2
             for token, status in (('invalid', 401), (tokens['research'], 403)):
-                rejected = client.post('/tools/account.evidence', headers=header(token),
+                rejected = client.post('/tools/account_evidence', headers=header(token),
                                        json={'content_base64': 'Yw=='})
                 assert rejected.status_code == status
             assert client.get('/tools', headers=headers).status_code == 200
-            assert client.post('/tools/research.cards', json={}, headers=headers).status_code == 200
-            collecting = replace(server.TOOLS['research.cards'], collects=True)
+            assert client.post('/tools/research_cards', json={}, headers=headers).status_code == 200
+            collecting = replace(server.TOOLS['research_cards'], collects=True)
             monkeypatch.setitem(server.TOOLS, collecting.name, collecting)
             for name in (evidence.name, collecting.name):
                 response = client.post('/tools/' + name, json={}, headers=headers)
@@ -138,7 +138,7 @@ def test_pause_rejects_new_work_and_drain_waits_for_inflight_completion(database
         def request():
             if request_kind == 'discovery':
                 return client.get('/tools', headers=header(tokens['research']))
-            return client.post('/tools/research.cards', json={}, headers=header(tokens['research']))
+            return client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
         pending = pool.submit(request)
         try:
             assert entered.wait(3)
@@ -148,7 +148,7 @@ def test_pause_rejects_new_work_and_drain_waits_for_inflight_completion(database
             assert gate.status() == dict(paused=True, in_flight=1)
             draining = pool.submit(gate.pause, timeout=4)
             assert not draining.done()
-            for method, endpoint in (('get', '/tools'), ('post', '/tools/research.cards')):
+            for method, endpoint in (('get', '/tools'), ('post', '/tools/research_cards')):
                 kwargs = dict(headers=header(tokens['research']))
                 if method == 'post':
                     kwargs['json'] = {}
@@ -177,7 +177,7 @@ def test_unhandled_tool_failure_also_releases_gate(database, monkeypatch):
     monkeypatch.setattr(server, 'invoke', fail)
     with TestClient(app) as client:
         with pytest.raises(RuntimeError, match='structural'):
-            client.post('/tools/research.cards', json={}, headers=header(tokens['research']))
+            client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
         assert app.state.gate.status()['in_flight'] == 0
         assert client.get('/ready').status_code == 200
 

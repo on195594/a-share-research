@@ -10,6 +10,7 @@ import pytest
 from a_share_research import api_keys, gate
 from a_share_research.core.market_data import MarketDataResult
 from a_share_research.policy import benchmark, benchmark_evaluation, monitor, registry
+from a_share_research.tools.registry import Context, invoke
 from a_share_research.tools.server import create_app
 from test_benchmark_evaluation import bundle as structural_bundle
 from test_policy_monitor import setup as monitor_setup
@@ -55,7 +56,10 @@ def test_saved_benchmark_identity_end_hashes_and_retry(configured):
     assert saved['result_hash'] == gate.digest(saved['result'])
     assert saved['result'] == benchmark_evaluation.evaluate(saved['input'], manifest['parameters'])
     assert saved['result']['status'] == 'ready' and saved['result']['metrics']['pnl'] == 2787
-    assert run(configured) == saved and len(calls) == 1
+    ctx = Context(conn, path, principals['assistant'], account_shadow_enabled=True)
+    replay = invoke(ctx, 'policy_benchmark', dict(request_id=saved['request_id'],
+        expected_activation_id=active['id'], end=saved['input']['end']))
+    assert replay['data'] == saved and len(calls) == 1
     assert registry.evaluation(conn, principals['assistant'], saved['id']) == saved
     assert registry.inspect(conn) == []
     with pytest.raises(registry.PolicyError, match='不同'):
@@ -72,18 +76,18 @@ def test_http_permissions_arguments_pause_and_retry(configured):
     args = dict(request_id='benchmark-http', expected_activation_id=active['id'], end='2026-10-22')
     headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
     with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy.benchmark', headers=headers('assistant'), json=args).status_code == 404
+        assert client.post('/tools/policy_benchmark', headers=headers('assistant'), json=args).status_code == 404
     app = create_app(path, account_shadow_enabled=True)
     with TestClient(app) as client:
-        assert client.post('/tools/policy.benchmark', headers=headers('research'), json=args).status_code == 403
+        assert client.post('/tools/policy_benchmark', headers=headers('research'), json=args).status_code == 403
         for changed in (args | {'token': 'no'}, args | {'end': '2026-02-30'}, args | {'end': '20261022'}, args | {'end': None}):
-            assert client.post('/tools/policy.benchmark', headers=headers('assistant'), json=changed).status_code == 422
-        first = client.post('/tools/policy.benchmark', headers=headers('assistant'), json=args)
+            assert client.post('/tools/policy_benchmark', headers=headers('assistant'), json=changed).status_code == 422
+        first = client.post('/tools/policy_benchmark', headers=headers('assistant'), json=args)
         assert first.status_code == 200, first.text
-        assert client.post('/tools/policy.benchmark', headers=headers('assistant'), json=args).json() == first.json()
+        assert client.post('/tools/policy_benchmark', headers=headers('assistant'), json=args).json() == first.json()
         assert len(calls) == 1
         app.state.gate.pause(1)
-        assert client.post('/tools/policy.benchmark', headers=headers('assistant'), json=args).status_code == 503
+        assert client.post('/tools/policy_benchmark', headers=headers('assistant'), json=args).status_code == 503
 
 
 def test_changed_source_and_corrupt_request_end_are_detected(configured, monkeypatch):

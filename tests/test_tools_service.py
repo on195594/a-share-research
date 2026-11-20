@@ -45,8 +45,8 @@ def test_research_replays_web_admission_before_cninfo_and_scopes_request_ids(web
         run_id = accepted.json()['run_id']
         assert accepted.json() == {'version': service.VERSION, 'run_id': run_id}
         by_key = {'request_id': args['request_id']}
-        assert tools.post('/tools/research.status', json=by_key, headers=second).status_code == 404
-        other = tools.post('/tools/research.request', json=args, headers=second).json()['result']['data']
+        assert tools.post('/tools/research_status', json=by_key, headers=second).status_code == 404
+        other = tools.post('/tools/research_request', json=args, headers=second).json()['result']['data']
         assert other['run_id'] != run_id
         assert browser.get('/api/request', params=by_key, headers=second).json()['id'] == other['run_id']
 
@@ -57,17 +57,17 @@ def test_research_replays_web_admission_before_cninfo_and_scopes_request_ids(web
         assert browser.post('/api/research', json=legacy, headers=first).json()['run_id'] == old_run
         assert browser.get('/api/request', params={'request_id': legacy['request_id']}, headers=first).json() == (
             service.run_view(web.conn, run_id=old_run))
-        replay = tools.post('/tools/research.request', json=args, headers=first).json()['result']['data']
+        replay = tools.post('/tools/research_request', json=args, headers=first).json()['result']['data']
         assert (replay['run_id'], replay['status'], replay['path']) == (run_id, 'queued', f'/runs/{run_id}')
         assert replay['created_at'] and replay['gaps'] == []
         assert browser.post('/api/research', json=args, headers=first).json() == accepted.json()
         for changed in ({'question': '分红'}, {'code': '600519'}, {'parent_report_id': 39}):
-            conflict = tools.post('/tools/research.request', json=args | changed, headers=first)
+            conflict = tools.post('/tools/research_request', json=args | changed, headers=first)
             assert conflict.status_code == 409 and conflict.json()['error']['code'] == 'conflict'
-        fresh = tools.post('/tools/research.request', json=args | {'request_id': 'new'}, headers=first)
+        fresh = tools.post('/tools/research_request', json=args | {'request_id': 'new'}, headers=first)
         assert fresh.status_code == 503 and fresh.json()['error']['code'] == 'unavailable'
         for selector in (by_key, {'run_id': run_id}):
-            status = tools.post('/tools/research.status', json=selector, headers=first).json()['result']['data']
+            status = tools.post('/tools/research_status', json=selector, headers=first).json()['result']['data']
             assert status['id'] == run_id and status['path'] == replay['path']
     assert web.conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == before + 2
 
@@ -79,9 +79,9 @@ def test_feedback_reuses_web_run_and_rejects_changed_text(web, tmp_path):
         original = browser.post('/api/reports/39/feedback', json=args, headers=headers)
         assert original.status_code == 202
         args['report_id'] = 39
-        replay = tools.post('/tools/research.feedback', json=args, headers=headers).json()['result']['data']
+        replay = tools.post('/tools/research_feedback', json=args, headers=headers).json()['result']['data']
         assert replay['path'] == f"/runs/{original.json()['run_id']}"
-        changed = tools.post('/tools/research.feedback', json=args | {'text': '请核对期间。'}, headers=headers)
+        changed = tools.post('/tools/research_feedback', json=args | {'text': '请核对期间。'}, headers=headers)
         assert changed.status_code == 409 and changed.json()['error']['code'] == 'conflict'
 
 
@@ -111,18 +111,18 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     assert client.get('/tools').status_code == 401
     for role, token in tokens.items():
         names = {t['name'] for t in client.get('/tools', headers=header(token)).json()['tools']}
-        for name in ('research.cards', 'research.methods'):
+        for name in ('research_cards', 'research_methods'):
             assert (name in names) == (role != 'owner')
-        for name in ('account.research_coverage', 'account.portfolio_overview', 'research.company_overview'):
+        for name in ('account_research_coverage', 'account_portfolio_overview', 'research_company_overview'):
             assert (name in names) == (account_enabled and role == 'assistant')
-        for name in ('research.scan.request', 'research.scan.read', 'research.scan.weekly',
-                     'research.subscriptions', 'research.subscriptions.replace'):
+        for name in ('research_scan_request', 'research_scan_read', 'research_scan_weekly',
+                     'research_subscriptions', 'research_subscriptions_replace'):
             assert (name in names) == (account_enabled and role == 'assistant')
             if name not in names:
                 denied = client.post(f'/tools/{name}', json={}, headers=header(token))
                 assert (denied.status_code, denied.json()['error']['code']) == (
                     (403, 'forbidden') if account_enabled else (404, 'not_found'))
-        response = client.post('/tools/account.research_coverage', json={}, headers=header(token))
+        response = client.post('/tools/account_research_coverage', json={}, headers=header(token))
         expected = (409 if role == 'assistant' else 403) if account_enabled else 404
         assert response.status_code == expected
         if expected == 409:
@@ -135,7 +135,7 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
 
 def test_method_search_refuses_owner_and_blank_query(setup):
     _, tokens, client = setup
-    endpoint = '/tools/research.methods'
+    endpoint = '/tools/research_methods'
     assert client.post(endpoint, json={'query': '低PE'}, headers=header(tokens['owner'])).status_code == 403
     invalid = client.post(endpoint, json={'query': '  '}, headers=header(tokens['research']))
     assert invalid.status_code == 422
@@ -147,13 +147,13 @@ def test_validation_errors_identify_field_and_reason(setup):
     headers = header(tokens['assistant'])
     for payload, path, reason in (({'report_id': True}, 'report_id', 'integer'),
                                   ([], 'body', 'JSON 对象')):
-        response = client.post('/tools/research.report', json=payload, headers=headers)
+        response = client.post('/tools/research_report', json=payload, headers=headers)
         assert response.status_code == 422
         error = response.json()['error']
         assert error['code'] == 'invalid_arguments'
         assert path in error['message'] and reason in error['message']
     assert client.post('/tools/missing', json={}, headers=headers).status_code == 404
-    assert client.post('/tools/research.report', json={'report_id': 999}, headers=headers).status_code == 404
+    assert client.post('/tools/research_report', json={'report_id': 999}, headers=headers).status_code == 404
 
 
 def test_service_connection_enforces_declared_access_with_account_disabled(setup, monkeypatch):
@@ -165,17 +165,17 @@ def test_service_connection_enforces_declared_access_with_account_disabled(setup
         run_id = service.submit(ctx.connection, '600519', 'lost-http-response', question=args.question)
         return Payload(data={'run_id': run_id})
 
-    tool = replace(TOOLS['research.cards'], name='test.submit', arguments=Submission, handler=submit)
+    tool = replace(TOOLS['research_cards'], name='test_submit', arguments=Submission, handler=submit)
     monkeypatch.setitem(TOOLS, tool.name, tool)
     headers = header(tokens['research'])
     args = {'question': '现金流'}
-    response = client.post('/tools/test.submit', json=args, headers=headers)
+    response = client.post('/tools/test_submit', json=args, headers=headers)
     assert response.status_code == 503
     monkeypatch.setitem(TOOLS, tool.name, replace(tool, access='write'))
-    saved = client.post('/tools/test.submit', json=args, headers=headers)
+    saved = client.post('/tools/test_submit', json=args, headers=headers)
     assert saved.status_code == 200
-    assert client.post('/tools/test.submit', json=args, headers=headers).json() == saved.json()
-    conflict = client.post('/tools/test.submit', json={'question': '估值'}, headers=headers)
+    assert client.post('/tools/test_submit', json=args, headers=headers).json() == saved.json()
+    conflict = client.post('/tools/test_submit', json={'question': '估值'}, headers=headers)
     assert conflict.status_code == 409 and conflict.json()['error']['code'] == 'conflict'
 
 
@@ -185,11 +185,11 @@ def test_in_process_dispatch_cannot_bypass_permissions(setup):
     try:
         ctx = Context(conn, path, api_keys.authenticate(conn, tokens['research']), account_shadow_enabled=True)
         with pytest.raises(ToolError, match='凭据'):
-            invoke(ctx, 'account.research_coverage', {})
+            invoke(ctx, 'account_research_coverage', {})
         revoked = api_keys.authenticate(conn, tokens['assistant'])
         conn.execute('DELETE FROM api_keys WHERE id=?', (revoked.key_id,))
         with pytest.raises(ToolError, match='撤销') as error:
-            invoke(Context(conn, path, revoked, account_shadow_enabled=True), 'account.research_coverage', {})
+            invoke(Context(conn, path, revoked, account_shadow_enabled=True), 'account_research_coverage', {})
         assert error.value.status == 403
     finally:
         conn.close()
@@ -204,7 +204,7 @@ def test_upstream_failure_is_retryable(setup, monkeypatch, error):
         raise error
 
     monkeypatch.setattr(service, 'company_cards', unavailable)
-    response = client.post('/tools/research.cards', headers=header(tokens['research']), json={})
+    response = client.post('/tools/research_cards', headers=header(tokens['research']), json={})
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'unavailable'
     assert '重试' in response.json()['error']['message']
@@ -217,7 +217,7 @@ def test_invoke_rechecks_grant_revoked_after_authentication(setup):
         principal = api_keys.authenticate(conn, tokens['research'])
         api_keys.revoke(conn, principal.key_id)
         with pytest.raises(ToolError, match='撤销') as error:
-            invoke(Context(conn, path, principal), 'research.cards', {})
+            invoke(Context(conn, path, principal), 'research_cards', {})
         assert error.value.status == 403
     finally:
         conn.close()

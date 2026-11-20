@@ -130,18 +130,18 @@ def test_http_permissions_validation_pause_and_saved_retry(setup, parent):
     args = dict(request_id='sizing-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
     headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
     with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy.position_size', headers=headers('assistant'), json=args).status_code == 404
+        assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).status_code == 404
     app = create_app(path, account_shadow_enabled=True)
     with TestClient(app) as client:
-        assert client.post('/tools/policy.position_size', headers=headers('research'), json=args).status_code == 403
+        assert client.post('/tools/policy_position_size', headers=headers('research'), json=args).status_code == 403
         for changed in (args | {'extra': True}, args | {'monitor_evaluation_id': True}, args | {'proposal': PROPOSAL | {'price': 0}},
                         args | {'proposal': PROPOSAL | {'cash': -1}}, args | {'proposal': PROPOSAL | {'extra': True}}):
-            assert client.post('/tools/policy.position_size', headers=headers('assistant'), json=changed).status_code == 422
-        first = client.post('/tools/policy.position_size', headers=headers('assistant'), json=args)
+            assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=changed).status_code == 422
+        first = client.post('/tools/policy_position_size', headers=headers('assistant'), json=args)
         assert first.status_code == 200, first.text
-        assert client.post('/tools/policy.position_size', headers=headers('assistant'), json=args).json() == first.json()
+        assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).json() == first.json()
         app.state.gate.pause(1)
-        assert client.post('/tools/policy.position_size', headers=headers('assistant'), json=args).status_code == 503
+        assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).status_code == 503
 
 
 def test_old_parent_rejected_under_new_activation(setup, parent):

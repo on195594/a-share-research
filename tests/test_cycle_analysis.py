@@ -287,7 +287,7 @@ def test_http_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(book, t
     sha = evidence.store(tmp_path / 'account-evidence', b'Invented HTTP cycle analysis evidence only')
     scope = dict(account_id='a', cycle_id=cycle)
     initial = scope | dict(initialize=dict(expected_account_version=2, evidence_hashes=[sha]))
-    endpoint = '/tools/account.cycle_analysis.'
+    endpoint = '/tools/account_cycle_analysis_'
     with TestClient(create_app(tmp_path / 'app.db')) as client:
         assert client.post(endpoint + 'initialize', headers=headers, json=initial).status_code == 404
         assert client.post(endpoint + 'current', headers=headers, json=scope).status_code == 404

@@ -21,9 +21,9 @@ def test_recent_evidence_distinguishes_invalid_limit_from_storage_failure(tmp_pa
     (directory / sha).chmod(0o644)
     headers = {'Authorization': 'Bearer ' + token}
     with TestClient(create_app(path, account_shadow_enabled=True)) as client:
-        invalid = client.post('/tools/account.evidence.recent', headers=headers, json={'limit': 0})
+        invalid = client.post('/tools/account_evidence_recent', headers=headers, json={'limit': 0})
         assert invalid.status_code == 422 and invalid.json()['error']['code'] == 'invalid_arguments'
-        unavailable = client.post('/tools/account.evidence.recent', headers=headers, json={'limit': 1})
+        unavailable = client.post('/tools/account_evidence_recent', headers=headers, json={'limit': 1})
         assert unavailable.status_code == 503 and unavailable.json()['error']['code'] == 'unavailable'
         assert '核对证据目录' in unavailable.json()['error']['message']
 
@@ -37,10 +37,10 @@ def test_account_scope_observation_and_duplicate_json_rejection(tmp_path, bind_a
         return {'Authorization': 'Bearer ' + tokens[role]}
     payload = {'content_base64': base64.b64encode(b'Structural transport evidence, no financial assertions').decode()}
     with TestClient(create_app(path)) as client:
-        assert client.post('/tools/account.evidence', headers=headers('assistant'), json=payload).status_code == 404
+        assert client.post('/tools/account_evidence', headers=headers('assistant'), json=payload).status_code == 404
     with TestClient(create_app(path, account_shadow_enabled=True)) as client:
-        assert client.post('/tools/account.evidence', headers=headers('research'), json=payload).status_code == 403
-        response = client.post('/tools/account.evidence', headers=headers('assistant'), json=payload)
+        assert client.post('/tools/account_evidence', headers=headers('research'), json=payload).status_code == 403
+        response = client.post('/tools/account_evidence', headers=headers('assistant'), json=payload)
         assert response.status_code == 200
         sha = response.json()['result']['data']['sha256']
         assert evidence.verify(tmp_path / 'account-evidence', sha)
@@ -51,16 +51,16 @@ def test_account_scope_observation_and_duplicate_json_rejection(tmp_path, bind_a
             bind_account(conn, 'test')
         args = dict(evidence_hash=sha,
                     observation={'observed_at':'2026-11-11T15:00:00+08:00','cash':'100'})
-        result = client.post('/tools/account.observe', headers=headers('assistant'), json=args)
+        result = client.post('/tools/account_observe', headers=headers('assistant'), json=args)
         assert result.status_code == 200 and result.json()['result']['data']['trades_recorded'] is False
-        assert client.post('/tools/account.observe', headers=headers('assistant'),
+        assert client.post('/tools/account_observe', headers=headers('assistant'),
                            json=args | {'account_id': 'test'}).json() == result.json()
-        wrong = client.post('/tools/account.observe', headers=headers('assistant'), json=args | {'account_id': 'other'})
+        wrong = client.post('/tools/account_observe', headers=headers('assistant'), json=args | {'account_id': 'other'})
         assert wrong.status_code == 409 and 'account_id' in wrong.json()['error']['message']
         for body in ('{"account_id":"a","account_id":"b"}',
                      '{"account_id":"a","observation":{"cash":1,"cash":2}}',
                      '{"account_id":"a","observation":{"cash":NaN}}'):
-            rejected = client.post('/tools/account.observe', headers=headers('assistant'), content=body)
+            rejected = client.post('/tools/account_observe', headers=headers('assistant'), content=body)
             assert rejected.status_code == 422 and rejected.json()['error']['code'] == 'invalid_arguments'
     conn = db.connect(path)
     assert conn.execute('SELECT count(*) FROM account_journal').fetchone()[0] == 0
@@ -78,7 +78,7 @@ def test_account_state_requires_a_unique_binding_even_with_explicit_id(tmp_path,
                       directory, sha, tolerance=Decimal(0))
     with TestClient(create_app(path, account_shadow_enabled=True)) as client:
         def state(arguments):
-            return client.post('/tools/account.state', headers={'Authorization': 'Bearer ' + token}, json=arguments)
+            return client.post('/tools/account_state', headers={'Authorization': 'Bearer ' + token}, json=arguments)
 
         unbound = state({'account_id': 'test'})
         assert unbound.status_code == 409 and '绑定' in unbound.json()['error']['message']
@@ -109,19 +109,19 @@ def test_database_failure_returns_service_failure_and_original_request_can_retry
     with TestClient(create_app(path, account_shadow_enabled=True)) as client:
         snapshot = args['batch']['snapshot'] | {'positions': {'600519': 100}}
         incomplete = args | {'batch': args['batch'] | {'snapshot': snapshot}}
-        invalid = client.post('/tools/account.submit', headers=headers, json=incomplete)
+        invalid = client.post('/tools/account_submit', headers=headers, json=incomplete)
         assert invalid.status_code == 422
         assert invalid.json()['error'] == {'code': 'invalid_arguments',
                                            'message': 'batch.snapshot.market_values: 缺 600519 市值'}
-        failed = client.post('/tools/account.submit',headers=headers,json=args)
+        failed = client.post('/tools/account_submit',headers=headers,json=args)
         assert failed.status_code == 200 and failed.json()['result']['data']['status'] == 'service_failure'
         rid = failed.json()['result']['data']['receipt_id']
-        read = client.post('/tools/account.receipt',headers=headers,json={'account_id':'test','receipt_id':rid})
+        read = client.post('/tools/account_receipt',headers=headers,json={'account_id':'test','receipt_id':rid})
         assert read.json()['result']['data'] == failed.json()['result']['data']
         assert conn.execute("SELECT count(*) FROM account_batches WHERE status='posted'").fetchone()[0] == 0
         assert conn.execute('SELECT count(*) FROM account_journal').fetchone()[0] == 0
         conn.execute('DROP TRIGGER fail_journal')
-        success = client.post('/tools/account.submit',headers=headers,json=args)
+        success = client.post('/tools/account_submit',headers=headers,json=args)
         assert success.json()['result']['data']['status'] == 'posted'
-        assert client.post('/tools/account.submit',headers=headers,json=args).json() == success.json()
+        assert client.post('/tools/account_submit',headers=headers,json=args).json() == success.json()
     conn.close()

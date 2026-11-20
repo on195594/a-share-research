@@ -71,7 +71,7 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
                     yield replace(ctx, connection=conn)
         except sqlite3.Error:
             logger.exception('Tool database unavailable')
-            account_tool = account_shadow_enabled and tool and tool.name.startswith('account.')
+            account_tool = account_shadow_enabled and tool and tool.name.startswith('account_')
             raise ToolError('service_failure' if account_tool else 'unavailable',
                             '工具数据库不可用；未返回成功回执，可用原请求重试', 503) from None
 

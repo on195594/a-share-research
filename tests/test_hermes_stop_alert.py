@@ -28,8 +28,8 @@ def transport(client, monkeypatch, price=24.0):
     calls = []
     def call(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current': return {'installed': True, 'activation': {'id': 7}}
-        assert name == 'policy.stop_alert'
+        if name == 'policy_current': return {'installed': True, 'activation': {'id': 7}}
+        assert name == 'policy_stop_alert'
         assert client.load_state()['pending'] == args
         value = bundle(price=price, state=args['previous_state'])
         return dict(mode='service_stop_alert_capture', request_id=args['request_id'], activation_id=7,
@@ -46,7 +46,7 @@ def test_old_state_import_preserves_daily_upgrade_semantics(client, monkeypatch)
     assert '按 a-share 的生效政策' in out and 'a-stock-monitor' not in out
     assert client.load_state()['state'] == {'date': '2026-10-22', 'levels': {'000963': 'stop1'}}
     assert client.check() == ('', '', 0)
-    requests = [args['request_id'] for name, args in calls if name == 'policy.stop_alert']
+    requests = [args['request_id'] for name, args in calls if name == 'policy_stop_alert']
     assert len(set(requests)) == 2
     transport(client, monkeypatch, price=23.0)
     assert '已跌破第二档' in client.check()[0]
@@ -57,7 +57,7 @@ def test_ambiguous_response_reuses_original_request_then_advances_state(client, 
     stored = {}
     def lost(name, args):
         receipt = call(name, args)
-        if name == 'policy.stop_alert':
+        if name == 'policy_stop_alert':
             stored['receipt'] = receipt
             raise client.ToolsError('ambiguous')
         return receipt
@@ -66,7 +66,7 @@ def test_ambiguous_response_reuses_original_request_then_advances_state(client, 
     pending = client.load_state()['pending']
     assert client.load_state()['state'] == {}
     def recover(name, args):
-        assert name == 'policy.stop_alert' and args == pending
+        assert name == 'policy_stop_alert' and args == pending
         return stored['receipt']
     monkeypatch.setattr(client, 'tool', recover)
     assert '第一档' in client.check()[0]
@@ -87,7 +87,7 @@ def test_wrong_receipt_keeps_pending_and_notification_state(client, monkeypatch,
     call, _ = transport(client, monkeypatch)
     def corrupt(name, args):
         result = call(name, args)
-        if name == 'policy.stop_alert':
+        if name == 'policy_stop_alert':
             if variant == 'mode': result['mode'] = 'service_monitor_capture'
             if variant == 'request': result['request_id'] = 'other-request'
             if variant == 'activation': result['activation_id'] = 99
@@ -105,7 +105,7 @@ def test_unavailable_quotes_clear_successful_request_without_marking_notified(cl
     call, _ = transport(client, monkeypatch)
     def unavailable(name, args):
         result = call(name, args)
-        if name == 'policy.stop_alert':
+        if name == 'policy_stop_alert':
             result['input']['quotes'] = {}
             result['result'] = stop_evaluation.evaluate(result['input'], result['input']['risk_policy'])
         return result
@@ -146,7 +146,7 @@ def test_certain_activation_change_preserves_levels_and_uses_durable_replacement
     calls = []
     def tool(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        if name == 'policy_current': return dict(installed=True, activation={'id': 4})
         assert client.load_state()['pending'] == args
         assert args['previous_state'] == original['previous_state']
         if args['request_id'] == original['request_id']:
@@ -164,7 +164,7 @@ def test_certain_activation_change_preserves_levels_and_uses_durable_replacement
 def test_release_pause_is_silent_within_grace_then_reuses_pending(client, monkeypatch):
     call, calls = transport(client, monkeypatch)
     def paused(name, args):
-        if name == 'policy.stop_alert':
+        if name == 'policy_stop_alert':
             raise client.ToolsError('paused', code='service_unavailable')
         return call(name, args)
     monkeypatch.setattr(client, 'tool', paused)
@@ -174,7 +174,7 @@ def test_release_pause_is_silent_within_grace_then_reuses_pending(client, monkey
     assert client.check() == ('', '', 0)
     assert client.load_state()['pending'] == pending
     def resumed(name, args):
-        assert name == 'policy.stop_alert' and args == pending
+        assert name == 'policy_stop_alert' and args == pending
         return call(name, args)
     monkeypatch.setattr(client, 'tool', resumed)
     client.datetime.current += timedelta(minutes=4)
@@ -185,7 +185,7 @@ def test_release_pause_is_silent_within_grace_then_reuses_pending(client, monkey
 def test_unavailable_beyond_grace_is_reported_and_keeps_pending(client, monkeypatch):
     call, _ = transport(client, monkeypatch)
     def paused(name, args):
-        if name == 'policy.stop_alert':
+        if name == 'policy_stop_alert':
             raise client.ToolsError('paused', code='service_unavailable')
         return call(name, args)
     monkeypatch.setattr(client, 'tool', paused)
@@ -217,7 +217,7 @@ def test_unavailable_beyond_grace_is_reported_and_keeps_pending(client, monkeypa
 def test_corrupt_unavailable_since_fails_safely_and_keeps_pending(client, monkeypatch, capsys, payload):
     call, _ = transport(client, monkeypatch)
     def paused(name, args):
-        if name == 'policy.stop_alert':
+        if name == 'policy_stop_alert':
             raise client.ToolsError('paused', code='service_unavailable')
         return call(name, args)
     monkeypatch.setattr(client, 'tool', paused)

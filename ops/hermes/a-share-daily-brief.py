@@ -38,14 +38,14 @@ def check() -> tuple[str, str, int]:
             return '', '', 0
         saved = load_state()
         if saved['pending'] is None:
-            current = tool('policy.current', {})
+            current = tool('policy_current', {})
             active = current.get('activation') or {}
             if (current.get('installed') is not True or not isinstance(active, dict)
                     or type(active.get('id')) is not int or active['id'] < 1):
                 raise ToolsError('尚无与实装一致的生效政策')
             saved['pending'] = dict(request_id='hermes-daily-' + uuid.uuid4().hex, expected_activation_id=active['id'])
             save_json(STATE, saved)
-        receipt = policy_receipt('policy.daily_brief', saved, STATE, call=tool)
+        receipt = policy_receipt('policy_daily_brief', saved, STATE, call=tool)
         try:
             if (receipt['mode'] != 'service_daily_brief_capture'
                     or receipt['request_id'] != saved['pending']['request_id']

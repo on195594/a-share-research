@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Hermes no-agent job for a-share-research batch A (A4).
 
-scan:   sync verified open holdings (account.current) into Research subscriptions, run one disclosure
+scan:   sync verified open holdings (account_current) into Research subscriptions, run one disclosure
         scan, print the notify items. Prints nothing when there is nothing to report.
-        Then append new Research opportunities (policy.monitor `research_opportunity`
+        Then append new Research opportunities (policy_monitor `research_opportunity`
         prompts for researched, not-held candidates); each is pushed once until it lapses.
 weekly: print the weekly digest.
 
@@ -77,7 +77,7 @@ def call(method: str, path: str, body: dict | None = None, *, connection=None, d
 
 
 def holdings() -> list[str]:
-    data = tool('account.current', {})
+    data = tool('account_current', {})
     codes = data.get('codes')
     if (not isinstance(codes, list) or any(not isinstance(c, str) or re.fullmatch('[0-9]{6}', c) is None for c in codes)
             or not isinstance(data.get('source'), dict) or data['source'].get('mode') not in ('mirror', 'ledger')):
@@ -419,14 +419,14 @@ def read_opportunity_state(path: Path | None = None) -> dict:
 def _collect_monitor_prompts(state_path: Path, stale_message: str) -> tuple[dict | None, list[dict] | None, str]:
     state = read_opportunity_state(state_path)
     if state['pending'] is None:
-        current = tool('policy.current', {})
+        current = tool('policy_current', {})
         activation = current.get('activation') or {}
         if current.get('installed') is not True or type(activation.get('id')) is not int or activation['id'] < 1:
             raise AdvisorError('尚无与实装一致的生效政策，未采集建仓机会')
         state['pending'] = dict(request_id='hermes-advisor-' + uuid.uuid4().hex,
                                 expected_activation_id=activation['id'])
         save_opportunity_state(state, state_path)
-    saved = policy_receipt('policy.monitor', state, state_path, call=tool)
+    saved = policy_receipt('policy_monitor', state, state_path, call=tool)
     try:
         if (saved['mode'] != 'service_monitor_capture' or saved['request_id'] != state['pending']['request_id']
                 or saved['activation_id'] != state['pending']['expected_activation_id']):

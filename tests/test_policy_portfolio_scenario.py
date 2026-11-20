@@ -142,7 +142,7 @@ def test_http_permissions_proposal_contract_pause_and_retry(setup, parent):
     tokens = {role: api_keys.create(conn, 'scenario-' + role, role=role) for role in ('assistant', 'research')}
     args = dict(request_id='scenario-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
     headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
-    endpoint = '/tools/policy.portfolio_scenario'
+    endpoint = '/tools/policy_portfolio_scenario'
     with TestClient(create_app(path)) as client:
         assert client.post(endpoint, headers=headers('assistant'), json=args).status_code == 404
     app = create_app(path, account_shadow_enabled=True)

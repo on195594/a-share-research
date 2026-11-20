@@ -35,9 +35,9 @@ def transport(advisor, monkeypatch, prompts):
     calls = []
     def call(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current':
+        if name == 'policy_current':
             return dict(installed=True, activation={'id': 7})
-        assert name == 'policy.monitor'
+        assert name == 'policy_monitor'
         # The request is durable before transport, including when its response is lost.
         assert advisor.read_opportunity_state()['pending'] == args
         return dict(mode='service_monitor_capture', request_id=args['request_id'], activation_id=args['expected_activation_id'],
@@ -54,12 +54,12 @@ def test_client_uses_private_config_and_suppresses_server_error_bodies(advisor, 
         return SimpleNamespace(returncode=0, stdout=json.dumps({'ok': True, 'result': {'data': {'codes': []}}}))
     monkeypatch.setenv('ASHARE_HERMES_CONFIG', '/private/hermes.json')
     monkeypatch.setattr(advisor.subprocess, 'run', run)
-    assert advisor.tool('account.current', {}) == {'codes': []}
-    assert seen[0][0][:5] == ['ashare', '--config', '/private/hermes.json', 'call', 'account.current']
+    assert advisor.tool('account_current', {}) == {'codes': []}
+    assert seen[0][0][:5] == ['ashare', '--config', '/private/hermes.json', 'call', 'account_current']
     assert seen[0][1]['timeout'] == 40 and seen[0][1]['stdin'] == subprocess.DEVNULL
     monkeypatch.setattr(advisor.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=1, stdout='private', stderr='secret'))
     with pytest.raises(advisor.AdvisorError) as exc:
-        advisor.tool('account.current', {})
+        advisor.tool('account_current', {})
     assert 'private' not in str(exc.value) and 'secret' not in str(exc.value)
 
 
@@ -108,7 +108,7 @@ def test_real_prompt_dedup_migrates_legacy_keys_and_allows_lapsed_return(advisor
     prompts.extend(original)
     assert '【建仓机会】' in advisor.opportunities()
     assert advisor.opportunities() == ''
-    requests = [args['request_id'] for name, args in calls if name == 'policy.monitor']
+    requests = [args['request_id'] for name, args in calls if name == 'policy_monitor']
     assert len(set(requests)) == 4
 
 
@@ -116,14 +116,14 @@ def test_lost_response_retries_same_request_without_new_policy_lookup(advisor, m
     call, calls = transport(advisor, monkeypatch, prompts)
     def ambiguous(name, args):
         result = call(name, args)
-        if name == 'policy.monitor': raise advisor.AdvisorError('response lost')
+        if name == 'policy_monitor': raise advisor.AdvisorError('response lost')
         return result
     monkeypatch.setattr(advisor, 'tool', ambiguous)
     assert '检查未完成' in advisor.opportunities()
     pending = advisor.read_opportunity_state()['pending']
     monkeypatch.setattr(advisor, 'tool', call)
     assert '【建仓机会】' in advisor.opportunities()
-    assert calls == [('policy.current', {}), ('policy.monitor', pending), ('policy.monitor', pending)]
+    assert calls == [('policy_current', {}), ('policy_monitor', pending), ('policy_monitor', pending)]
 
 
 @pytest.mark.parametrize('variant', ['replay', 'request', 'activation', 'missing-prompts'])
@@ -132,7 +132,7 @@ def test_incompatible_receipt_preserves_keys_and_pending(advisor, monkeypatch, p
     call, _ = transport(advisor, monkeypatch, prompts)
     def corrupt(name, args):
         result = call(name, args)
-        if name == 'policy.monitor':
+        if name == 'policy_monitor':
             if variant == 'replay': result['mode'] = 'supplied_input_replay'
             if variant == 'request': result['request_id'] = 'another'
             if variant == 'activation': result['activation_id'] = 8
@@ -149,7 +149,7 @@ def test_recovered_old_receipt_is_not_presented_as_today(advisor, monkeypatch, p
     call, _ = transport(advisor, monkeypatch, prompts)
     def old(name, args):
         result = call(name, args)
-        if name == 'policy.monitor':
+        if name == 'policy_monitor':
             result['capture_context']['capture_finished_at'] = (datetime.now(ZoneInfo('Asia/Shanghai')) - timedelta(days=1)).isoformat()
         return result
     monkeypatch.setattr(advisor, 'tool', old)
@@ -196,7 +196,7 @@ def test_opportunity_rebind_preserves_seen_until_success(advisor, monkeypatch, p
     calls = []
     def tool(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        if name == 'policy_current': return dict(installed=True, activation={'id': 4})
         assert advisor.read_opportunity_state()['seen'] == ['old-key']
         assert advisor.read_opportunity_state()['pending'] == args
         if args['request_id'] == original['request_id']:
@@ -250,7 +250,7 @@ def test_real_holdings_failure_never_blocks_web_scan_or_claims_empty_account(adv
                                  detail='isolated disclosure', path='/stock/688578')],
                     requested_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat())
     def tools(name, args):
-        if name == 'account.current':
+        if name == 'account_current':
             account_reads.append(name)
             if paused_at == 'delivery' and len(account_reads) == 1:
                 return dict(codes=['688578'], source=dict(mode='ledger'))
@@ -325,9 +325,9 @@ def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, con
 
     def ok_tool(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current':
+        if name == 'policy_current':
             return dict(installed=True, activation={'id': 7})
-        assert name == 'policy.monitor'
+        assert name == 'policy_monitor'
         return dict(mode='service_monitor_capture', request_id=args['request_id'],
                     activation_id=args['expected_activation_id'],
                     capture_context={'capture_finished_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()},
@@ -343,7 +343,7 @@ def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, con
     assert json.loads(weekly_state.read_text())['pending'] is None
 
     def paused_tool(name, args):
-        if name == 'policy.current':
+        if name == 'policy_current':
             return dict(installed=True, activation={'id': 7})
         raise advisor.AdvisorError('工具服务已暂停')
 

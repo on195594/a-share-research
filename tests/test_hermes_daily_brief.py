@@ -32,8 +32,8 @@ def transport(client, monkeypatch, source):
     calls = []
     def call(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current': return dict(installed=True, activation={'id': 7})
-        assert name == 'policy.daily_brief' and client.load_state()['pending'] == args
+        if name == 'policy_current': return dict(installed=True, activation={'id': 7})
+        assert name == 'policy_daily_brief' and client.load_state()['pending'] == args
         value = deepcopy(source)
         return dict(mode='service_daily_brief_capture', request_id=args['request_id'], activation_id=7,
                     input=value, result=daily_evaluation.evaluate(value, value['risk_policy']))
@@ -57,7 +57,7 @@ def test_response_loss_keeps_same_request_without_second_policy_lookup(client, s
     receipt = {}
     def lost(name, args):
         value = call(name, args)
-        if name == 'policy.daily_brief':
+        if name == 'policy_daily_brief':
             receipt.update(value)
             raise client.ToolsError('lost response')
         return value
@@ -65,7 +65,7 @@ def test_response_loss_keeps_same_request_without_second_policy_lookup(client, s
     with pytest.raises(client.ToolsError): client.check()
     pending = client.load_state()['pending']
     def recover(name, args):
-        assert name == 'policy.daily_brief' and args == pending
+        assert name == 'policy_daily_brief' and args == pending
         return receipt
     monkeypatch.setattr(client, 'tool', recover)
     assert '应收280.00元' in client.check()[0]
@@ -85,7 +85,7 @@ def test_bad_receipt_cannot_clear_pending(client, source, monkeypatch, variant):
     call, _ = transport(client, monkeypatch, source)
     def corrupt(name, args):
         value = call(name, args)
-        if name == 'policy.daily_brief':
+        if name == 'policy_daily_brief':
             if variant == 'mode': value['mode'] = 'service_monitor_capture'
             if variant == 'activation': value['activation_id'] = 9
             if variant == 'request': value['request_id'] = 'wrong'
@@ -128,7 +128,7 @@ def test_certain_activation_change_recollects_with_new_durable_uuid(client, sour
     calls = []
     def tool(name, args):
         calls.append((name, deepcopy(args)))
-        if name == 'policy.current': return dict(installed=True, activation={'id': 4})
+        if name == 'policy_current': return dict(installed=True, activation={'id': 4})
         assert client.load_state()['pending'] == args
         if args['request_id'] == original['request_id']:
             raise client.ToolsError('certain', code='policy_activation_changed')

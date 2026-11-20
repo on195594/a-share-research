@@ -123,9 +123,9 @@ def test_catalog_matches_rest_visibility_schemas_and_operation_semantics(remote,
         response = rpc(client, token, 'tools/list')
         assert response.status_code == 200
         catalog = {tool['name']: tool for tool in response.json()['result']['tools']}
-        assert set(catalog) == {tool['name'].replace('.', '_') for tool in rest}
+        assert set(catalog) == {tool['name'] for tool in rest}
         for tool in rest:
-            actual = catalog[tool['name'].replace('.', '_')]
+            actual = catalog[tool['name']]
             assert actual['description'] == tool['description']
             assert actual['inputSchema'] == tool['input_schema'] and actual['outputSchema'] == tool['output_schema']
             assert actual['annotations']['readOnlyHint'] == (tool['access'] == 'read')
@@ -241,7 +241,7 @@ def test_chunked_json_over_limit_is_rejected_by_both_transports(remote, monkeypa
     client, tokens = remote
     monkeypatch.setattr(http_json, 'MAX_BODY_SIZE', 256)
     headers = {'Authorization': 'Bearer ' + tokens['research'], 'Content-Type': 'application/json'}
-    for path in ['/mcp', '/tools/research.cards']:
+    for path in ['/mcp', '/tools/research_cards']:
         response = client.post(path, headers=headers, content=iter([b'{}', b' ' * 255]))
         assert response.status_code == 413
 
@@ -265,6 +265,8 @@ def test_pause_cannot_finish_while_authentication_is_reading(remote, monkeypatch
 def test_tool_errors_keep_field_paths_and_hide_upstream_exceptions(remote, monkeypatch):
     client, tokens = remote
     token = tokens['research']
+    legacy = client.post('/tools/research.cards', headers={'Authorization': 'Bearer ' + token}, json={})
+    assert legacy.status_code == 404 and legacy.json()['error']['code'] == 'not_found'
     for name in ['missing', 'research.cards']:
         error = rpc(client, token, 'tools/call', {'name': name, 'arguments': {}}).json()['error']
         assert error['code'] == -32602
@@ -377,7 +379,7 @@ def test_revoked_oauth_client_loses_access_immediately(remote, database, oauth_a
 def test_collecting_read_requires_gate_slot(remote, monkeypatch):
     client, tokens = remote
     # Isolate collection from write access using the same read-tool variant as the REST tests.
-    tool = TOOLS['research.cards']
+    tool = TOOLS['research_cards']
     monkeypatch.setitem(TOOLS, tool.name, replace(tool, collects=True))
     with client.app.state.gate.slot():
         busy = call(client, tokens['research'], 'research_cards')

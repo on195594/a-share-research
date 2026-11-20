@@ -131,7 +131,7 @@ def test_tools_resume_web_scan_with_same_credential_after_another_scan_starts(we
     assert scans.submit(web.conn) != scan_id
 
     with TestClient(create_app(tmp_path / 'app.db', account_shadow_enabled=True), headers=headers) as client:
-        resumed = client.post('/tools/research.scan.request', json={'request_id': key})
+        resumed = client.post('/tools/research_scan_request', json={'request_id': key})
     assert resumed.status_code == 200
     result = resumed.json()['result']['data']
     assert (result['scan_id'], result['request_id'], result['status'], result['path']) == (

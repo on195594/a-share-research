@@ -10,7 +10,7 @@
 | 现有研究模块 | 取证、计算核验、报告与论点卡、判断入账和记分 | 研究运行时看不到账户；冻结判断不改写 |
 | `account/` | 账户证据、事件、对账、持仓与现金投影、交易依据 | 对账通过才入账，冲突显式处理；不推造历史现金流水 |
 | `policy/`、`policy/v0/` | 版本化投资政策、监控及账户决策状态 | v0 保留原规则；新政策由所有者激活，不由研究 AI 修改 |
-| `tools/`、`skill/a-share/` | HTTP/CLI/MCP 共用注册表、身份权限与统一 Skill | 能力开放以服务端角色和开关为准；正文不是授权 |
+| `tools/`、`skill/a-share/` | HTTP、CLI 与两种 MCP 传输共用下划线工具名、注册表、身份权限与统一 Skill | 能力开放以服务端角色和开关为准；正文不是授权 |
 | `ops/hermes/` | 定时调用、通知与去重回执 | Hermes 负责调度送达，不拥有业务规则或账户事实 |
 
 依赖方向为 `policy → account → core`；研究模块使用 `core`，不为目录整齐迁移。机器合同随代码维护，工具接口见 [tools/README](a_share_research/tools/README.md)，网页与研究 API 见 [README](README.md#agent-研究-api)。

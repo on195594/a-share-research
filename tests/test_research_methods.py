@@ -116,10 +116,10 @@ def test_registry_method_search_returns_the_catalog_or_directory_gap(tmp_path, m
         token = api_keys.create(conn, "method-reader", role=role)
         conn.execute("PRAGMA query_only=ON")
         ctx = Context(conn, path, api_keys.authenticate(conn, token))
-        assert next(tool for tool in discover(ctx.principal) if tool["name"] == "research.methods")["access"] == "read"
+        assert next(tool for tool in discover(ctx.principal) if tool["name"] == "research_methods")["access"] == "read"
 
         def search(query):
-            return invoke(ctx, "research.methods", {"query": query})["data"]
+            return invoke(ctx, "research_methods", {"query": query})["data"]
 
         monkeypatch.setenv("METHOD_CARDS_DIR", str(CARDS))
         catalog = method_cards(CARDS)

@@ -89,7 +89,7 @@ def check() -> tuple[str, str, int]:
 def _check() -> tuple[str, str, int]:
     saved = load_state()
     if saved['pending'] is None:
-        current = tool('policy.current', {})
+        current = tool('policy_current', {})
         activation = current.get('activation') or {}
         if (current.get('installed') is not True or not isinstance(activation, dict)
                 or type(activation.get('id')) is not int or activation['id'] < 1):
@@ -97,7 +97,7 @@ def _check() -> tuple[str, str, int]:
         saved['pending'] = dict(request_id='hermes-stop-' + uuid.uuid4().hex,
             expected_activation_id=activation['id'], previous_state=saved['state'])
         save_json(STATE, saved)
-    receipt = policy_receipt('policy.stop_alert', saved, STATE, call=tool)
+    receipt = policy_receipt('policy_stop_alert', saved, STATE, call=tool)
     try:
         if (receipt['mode'] != 'service_stop_alert_capture'
                 or receipt['request_id'] != saved['pending']['request_id']

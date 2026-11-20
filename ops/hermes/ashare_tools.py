@@ -50,7 +50,7 @@ def policy_receipt(name, saved, path, *, call=tool):
     digest = hashlib.sha256(original['request_id'].encode()).hexdigest()
     archive = path.with_name(path.name + '.rejected-' + digest + '.json')
     save_json(archive, dict(reason='policy_activation_changed', request=original))
-    current = call('policy.current', {})
+    current = call('policy_current', {})
     activation = current.get('activation') or {}
     if (current.get('installed') is not True or not isinstance(activation, dict)
             or type(activation.get('id')) is not int or activation['id'] < 1

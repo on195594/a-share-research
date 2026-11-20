@@ -27,7 +27,7 @@ python3 ops/clients/prepare.py \
 ```sh
 ashare --config /home/lin/.config/ashare/hermes-assistant.json tools
 ashare --config /home/lin/.config/ashare/hermes-assistant.json \
-  call research.card --json '{"code":"600938"}'
+  call research_card --json '{"code":"600938"}'
 ```
 
 `--config` 放在子命令之前；MCP 的同一入口是 `ashare --config <私有文件> mcp`。旧 Skill 入口退役时保留备份和历史目标，不恢复旧账户写入。账户回退继续使用新账本及兼容客户端，见[部署与回退](../../README.md#部署)。
@@ -40,9 +40,9 @@ ashare --config /home/lin/.config/ashare/hermes-assistant.json \
 | Codex | `~/.codex/config.toml` 的 `mcp_servers.ashare` | `~/.agents/skills/a-share/` | `enabled`、`startup_timeout_sec=10`、`tool_timeout_sec=40` |
 | Hermes | `~/.hermes/config.yaml` 的 `mcp_servers.ashare` | `~/.hermes/skills/a-share/` | `enabled`、`connect_timeout=10`、`timeout=40`；包内 JSON 可作为 YAML 片段 |
 | Pi | `~/.pi/agent/mcp.json` 的 `mcpServers.ashare` | `~/.agents/skills/a-share/` | `enabled`、`timeout=40`、`exposure=direct` |
-| AGY | `~/.gemini/config/mcp_config.json` 的 `mcpServers.ashare` | `~/.gemini/config/skills/a-share/` | command、args、`disabled`；额外使用 `mcp --portable-names` |
+| AGY | `~/.gemini/config/mcp_config.json` 的 `mcpServers.ashare` | `~/.gemini/config/skills/a-share/` | command、args、`disabled` |
 
-客户端 HTTP 超时为 30 秒。每个宿主的 args 都引用自己的私有配置文件，不直接包含 token。AGY 的 `--portable-names` 将发现名称映射为 `research_card` 等下划线形式，再按发现时的精确映射调用原 HTTP 工具；不改变 Schema、权限或 CLI `call` 名称。
+客户端 HTTP 超时为 30 秒。每个宿主的 args 都引用自己的私有配置文件，不直接包含 token。五个宿主与 CLI `call` 共用服务端注册的下划线工具名，例如 `research_card`。
 
 本机 AGY 的 skills 目录链接到 `~/.agents/skills`，更新前核对实际链接；共享目录安装一次即可同时供 Codex、Pi、AGY 使用。Hermes 不再通过 `skills.external_dirs` 加载旧 `a-stock-agent-skills/skills`。Claude 的全局规则也应指向统一 `a-share` 入口，不再指导直接访问旧库。
 

@@ -82,11 +82,11 @@ def test_monthly_tool_replays_web_batch_and_preserves_conflict(tmp_path):
         ctx = Context(conn, path, api_keys.authenticate(conn, token))
         month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
         original = service.monthly_batch(conn, month, submit=True)['batch']['id']
-        result = invoke(ctx, 'research.batch.monthly.request', {'month': month})['data']
+        result = invoke(ctx, 'research_batch_monthly_request', {'month': month})['data']
         assert not result['created'] and result['batch_id'] == original
         assert result['status'] == 'queued' and result['path'] == f'/batches/{original}'
         with pytest.raises(ToolError) as error:
-            invoke(ctx, 'research.batch.monthly.request', {'month': '2020-01'})
+            invoke(ctx, 'research_batch_monthly_request', {'month': '2020-01'})
         assert (error.value.status, error.value.code) == (409, 'conflict')
         assert conn.execute('SELECT COUNT(*) FROM batches').fetchone()[0] == 1
     finally:
