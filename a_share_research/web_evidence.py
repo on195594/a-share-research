@@ -2,10 +2,15 @@
 import base64
 import hashlib
 
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from a_share_research.account.evidence import MAX_BYTES
 from a_share_research.tools_client import ToolCallError
+
+
+def _encode(content: bytes) -> tuple[str, str]:
+    return hashlib.sha256(content).hexdigest(), base64.b64encode(content).decode("ascii")
 
 
 async def _upload(client, file, label):
@@ -15,8 +20,8 @@ async def _upload(client, file, label):
     content = await file.read(MAX_BYTES + 1)
     if not content or len(content) > MAX_BYTES:
         return row | {"message": "文件为空或超过单份大小上限，请重新选择。"}
-    sha = hashlib.sha256(content).hexdigest()
-    args = {"filename": file.filename, "content_base64": base64.b64encode(content).decode("ascii")}
+    sha, encoded = await run_in_threadpool(_encode, content)
+    args = {"filename": file.filename, "content_base64": encoded}
     del content
     if label:
         args["label"] = label

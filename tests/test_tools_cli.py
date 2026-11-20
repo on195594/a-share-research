@@ -1,4 +1,6 @@
 """CLI contracts against the in-process MCP endpoint and bounded transport failures."""
+import base64
+import hashlib
 import http.client
 import io
 import json
@@ -9,12 +11,13 @@ import urllib.request
 import urllib.response
 from contextlib import closing
 from email.message import Message
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from mcp.types import CLIENT_CAPABILITIES_META_KEY, PROTOCOL_VERSION_META_KEY
 
-from a_share_research import api_keys, db, scans
+from a_share_research import api_keys, db, gate, scans
 from a_share_research.policy import registry
 from a_share_research.tools.control import Gate
 from a_share_research.tools.registry import discover
@@ -138,6 +141,41 @@ def test_only_verified_stale_activation_receives_exit_20(asgi, policy_setup, tmp
             assert '政策异常' in output.err
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 0
     assert not captured
+
+
+def test_cli_reads_large_monitor_receipt(asgi, policy_setup, tmp_path, capsys):  # noqa: F811
+    token, _, _ = asgi
+    _, conn, _, _, activation, bundle, _ = policy_setup
+    sample = Path(__file__).parent / 'policy_v0/fixtures/monitor/research-card-stance.json'
+    card = json.loads(sample.read_text())['card']
+    # Repeat a captured card only to exercise the transport near the collector's 8 MiB limit.
+    count = 7 * 1024**2 // len(gate.canonical(card).encode())
+    bundle['research_result'] = {'status': 'ok', 'cards': [card] * count}
+    assert 6 * 1024**2 < len(gate.canonical(bundle).encode()) < 8 * 1024**2
+    args = {'request_id': 'large-cli-receipt', 'expected_activation_id': activation['id']}
+    code = command(private_config(tmp_path, token=token), 'call', 'policy_monitor', '--json', json.dumps(args))
+    assert conn.execute('SELECT count(*) FROM policy_evaluations WHERE request_id=?', (args['request_id'],)).fetchone()[0] == 1
+    assert code == 0
+    receipt = json.loads(capsys.readouterr().out)['result']['data']
+    assert receipt['input_hash'] == gate.digest(receipt['input']) == gate.digest(bundle)
+
+
+def test_cli_uploads_pdf_via_stdin(asgi, tmp_path, monkeypatch, capsys):
+    token, _, _ = asgi
+    document = (Path(__file__).parent / 'data/601138-buyback-announcement.pdf').read_bytes()
+    payload = json.dumps({'content_base64': base64.b64encode(document).decode('ascii')}).encode()
+    assert len(payload) > 128 * 1024
+    monkeypatch.setattr(cli.sys, 'stdin', io.TextIOWrapper(io.BytesIO(payload)))
+    assert command(private_config(tmp_path, token=token), 'call', 'account_evidence', '--json', '-') == 0
+    assert json.loads(capsys.readouterr().out)['result']['data']['sha256'] == hashlib.sha256(document).hexdigest()
+
+
+def test_oversized_stdin_is_bounded_before_transport(tmp_path, monkeypatch, offline, capsys):
+    monkeypatch.setattr(cli, '_INPUT_LIMIT', 64)
+    stream = io.BytesIO(b'{' + b' ' * 1000 + b'}')
+    monkeypatch.setattr(cli.sys, 'stdin', io.TextIOWrapper(stream))
+    assert command(private_config(tmp_path), 'call', 'account_evidence', '--json', '-') == 1
+    assert stream.tell() == 65 and '标准输入' in capsys.readouterr().err
 
 
 def test_missing_receipt_after_commit_requires_original_identity_and_request(asgi, tmp_path, monkeypatch, capsys):
@@ -287,7 +325,7 @@ def test_invalid_call_rejected_before_transport(args, tmp_path, offline):
 
 @pytest.mark.parametrize(('failure', 'exit_code'), [
     ('refused', 21), ('timeout', 22), ('reset', 22), ('truncated', 22),
-    ('invalid-json', 22), ('wrong-id', 22), ('forbidden', 1),
+    ('invalid-json', 22), ('wrong-id', 22), ('forbidden', 1), ('oversized', 23), ('oversized-length', 23),
 ])
 def test_transport_outcomes_never_echo_credentials_or_retry(failure, exit_code, tmp_path, monkeypatch, capsys):
     token = 'asr_private-fixture'
@@ -309,9 +347,14 @@ def test_transport_outcomes_never_echo_credentials_or_retry(failure, exit_code, 
             body = json.dumps({'jsonrpc': '2.0', 'id': reply_id, 'result': {'tools': []}}).encode()
             if failure == 'invalid-json':
                 body = body[:len(body) // 2]
+            if failure == 'oversized':
+                monkeypatch.setattr(cli, '_RESPONSE_LIMIT', len(body) - 1)
             # A bounded HTTPResponse.read(size) can return complete JSON despite a premature EOF.
             length = len(body) + (50 if failure == 'truncated' else 0)
-            wire = f'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {length}\r\n\r\n'.encode()
+            if failure == 'oversized-length':
+                length = cli._RESPONSE_LIMIT + 1
+            header = '' if failure == 'oversized' else f'Content-Length: {length}\r\n'
+            wire = f'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{header}\r\n'.encode()
             class Socket:
                 def makefile(self, mode):
                     return io.BytesIO(wire + body)
@@ -325,5 +368,7 @@ def test_transport_outcomes_never_echo_credentials_or_retry(failure, exit_code, 
     assert len(calls) == 1 and not output.out and token not in output.err
     if exit_code == 22:
         assert '结果未知' in output.err
+    if exit_code == 23:
+        assert '回执超限' in output.err and '原请求' in output.err
     if failure == 'forbidden':
         assert '凭据' in output.err or '权限' in output.err

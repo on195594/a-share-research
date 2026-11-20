@@ -6,9 +6,11 @@ import sqlite3
 
 import pytest
 
-from a_share_research import backup_refs, db, gate, integrity
-from a_share_research.account import analysis
+from a_share_research import backup, backup_refs, db, gate, integrity
+from a_share_research.account import analysis, evidence
 from support.reports import MATERIAL, report
+from test_backup import source as source
+from test_integrity import PDF
 
 
 def put(conn, table, column, value, *, raw=False):
@@ -25,6 +27,31 @@ def conn():
 
 def test_missing_legacy_tables_and_empty_database(conn):
     assert backup_refs.required(conn)=={'account_evidence': [], 'pdf': []}
+
+
+def test_backup_requires_uploaded_file_before_posting_and_restores_complete_legacy_bundle(source, tmp_path):  # noqa: F811
+    directory, conn, principal, opening_sha, _ = source
+    evidence_dir = directory / 'account-evidence'
+    sha = evidence.store(evidence_dir, PDF.read_bytes())
+    evidence.record_upload(conn, sha, principal.key_id, PDF.name)
+    bundle = tmp_path / 'bundle'
+    manifest = backup.create(directory / 'app.db', bundle)
+    (evidence_dir / sha).unlink()
+    with pytest.raises(backup.BackupError, match='缺少.*account_evidence'):
+        backup.create(directory / 'app.db', tmp_path / 'incomplete')
+    assert manifest['required']['account_evidence'] == sorted([opening_sha, sha])
+
+    # Earlier v1 manifests listed the uploaded file in the inventory only.
+    manifest['required']['account_evidence'] = [opening_sha]
+    (bundle / 'manifest.json').write_text(json.dumps(manifest))
+    restored = tmp_path / 'restored'
+    backup.restore(bundle, restored)
+    assert evidence.read(restored / 'account-evidence', sha) == PDF.read_bytes()
+    del manifest['files']['account-evidence/' + sha]
+    (bundle / 'account-evidence' / sha).unlink()
+    (bundle / 'manifest.json').write_text(json.dumps(manifest))
+    with pytest.raises(backup.BackupError, match='缺少.*account_evidence'):
+        backup.verify(bundle)
 
 
 @pytest.mark.parametrize('row_factory', [None, sqlite3.Row], ids=['tuple', 'Row'])

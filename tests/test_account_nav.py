@@ -193,6 +193,20 @@ def test_collected_index_reuses_request_committed_during_fetch(book, collect_nav
     assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 1
 
 
+def test_replay_requires_a_committed_reference_for_collected_provenance(book, collect_nav):
+    collect, _ = collect_nav
+    for receipt in (evaluate(book), collect()):
+        # Same saved inputs and result, re-uploaded as a distinct, unregistered file.
+        raw = evidence.read(book['directory'], receipt['artifact_sha256'])
+        sha = evidence.store(book['directory'], raw + b'\n')
+        if receipt['basis']['benchmark_provenance'] == 'tools_collected_evidence':
+            with pytest.raises(ledger.LedgerError, match='采集.*引用'):
+                nav.replay(book['conn'], book['principal'], 'a', sha, book['directory'])
+        else:
+            replay = nav.replay(book['conn'], book['principal'], 'a', sha, book['directory'])
+            assert replay['basis'] == receipt['basis'] and replay['calculation'] == receipt['calculation']
+
+
 @pytest.mark.parametrize(('endpoint', 'stamp'), [
     ('start', '2026-01-05T14:59:59+08:00'),
     ('end', '2026-01-08T15:00:00.000001+08:00'),

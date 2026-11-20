@@ -1,6 +1,7 @@
 """Web proxy contracts with the in-process MCP endpoint and transport failures."""
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -65,6 +66,23 @@ def call(monkeypatch):
 
 def test_route_and_identity_use_internal_endpoint_and_public_host(call):
     assert call(response(rpc(result={"structuredContent": {"data": {"version": 1}}}))) == {"version": 1}
+
+
+def test_session_is_reused_only_within_one_thread(monkeypatch):
+    client = ToolsClient("http://tools/mcp", "stock.example", "private-test")
+    sessions = []
+
+    def post(session, *args, **kwargs):
+        sessions.append(session)
+        return response(rpc(result={"structuredContent": {"data": {}}}))
+
+    monkeypatch.setattr(requests.Session, "post", post)
+    client._call("account_state", {}, REQUEST_ID)
+    client._call("account_state", {}, REQUEST_ID)
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        worker.submit(client._call, "account_state", {}, REQUEST_ID).result()
+    assert sessions[0] is sessions[1]
+    assert sessions[0] is not sessions[2]
 
 
 @pytest.mark.parametrize(("reply", "kind", "message"), [
