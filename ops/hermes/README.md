@@ -10,7 +10,7 @@
 | `a-share-monthly-submit.sh`、`a-share-monthly-status.sh`（`a-share-monthly.sh`、`a-share-monthly.py`） | 月批发起 `3d8b860808e4` / 状态 `112633a18054` | 每月 1 日 20:00 / 每月 1–3 日每小时 :30 |
 | `a-share-scoring.sh`、`a-share-scoring.py` | 记分 `2c0e2f798501` | 周日 19:07 |
 | `a-share-milestones.sh`、`a-share-milestones.py` | 里程碑进度 `6b6ecd1783ea` | 周一 09:03 |
-凭据：研究 API 使用 `~/.config/a-share-advisor/runtime.env`；统一账户/政策客户端使用 `~/.config/ashare/hermes-assistant.json`。
+Hermes 业务脚本经 `ashare` 调用 MCP。唯一凭据文件为 0600 的 `~/.config/ashare/hermes-assistant.json`，含 `url` 和 `token`。
 去重回执：`~/.local/state/a-share-advisor/opportunities.json`、`~/.local/state/a-share-monthly/<月>.receipt`、`~/.local/state/a-share-scoring/state.json`。
 核对：`python3 ops/hermes/install.py --check`；安装：`python3 ops/hermes/install.py --apply`（须先提交本目录改动，自动复核）。
 可加 `--target <目录>`；安装移除已退役的 `a-share-k7-progress.*`、第 3 段临时对照 `a-share-shadow-diff.sh` 及已完成提醒脚本，其他非清单文件不动；Hermes 任务入口需同步为新名字。
@@ -21,33 +21,35 @@
 
 ## 合一替代调用与切换核对
 
-下表记录已安装脚本的调用、去重与预算合同；任务时间、`no_agent` 模式和通知目标沿用原配置。三个 `a-stock-*` 包装脚本保留原入口名，内部调用统一服务。实际耗时与定时送达状态见[实施计划](../../docs/implementation-plan.md)。
+下表记录本目录脚本的调用、去重与预算合同；任务时间、`no_agent` 模式和通知目标沿用原配置。三个 `a-stock-*` 包装脚本保留原入口名，内部调用统一服务。实际耗时与定时送达状态见[实施计划](../../docs/implementation-plan.md)。
 
 | 任务 | 调用与替代状态 | 去重状态 | 命令预算与回退边界 |
 |---|---|---|---|
 | 止损提醒 | 新脚本 `policy_current` → `policy_stop_alert`；服务保存原始行情、止损线、旧通知状态及评估 | 新 `~/.local/state/ashare-stop-alert/state.json`，切换时从已确认的旧 stop-alert-state.json 导入 | ashare 子进程 40 秒，HTTP 30 秒，服务采集 25 秒；切换后只回兼容新账本及此回执/状态的合并版 |
 | 持仓日报 | 新脚本 `policy_current` → `policy_daily_brief`；监控、逐持仓完整事件与 Provider 分红响应/失败共同留存 | `~/.local/state/ashare-daily-brief/state.json` 仅记录待查请求，无新增每日通知去重 | ashare 子进程 40 秒、HTTP 30 秒、服务整体采集 25 秒；真实账户日报脚本已成功运行；正式定时送达待观察 |
 | 账本月度对比 | 新脚本 `policy_current` → `policy_benchmark`；完整历史、双全收益指数及估值报价或失败留存 | `~/.local/state/ashare-benchmark/state.json` 仅记录待查请求，无新增月度通知去重 | ashare 子进程 40 秒、HTTP 30 秒、采集 25 秒；公开双基准完整响应已验证，真实账户完整采集、预算与正式送达仍待验收 |
-| 顾问扫描 | `account_current` 同步及通知前刷新持仓；新持久扫描 API；`policy_current` + `policy_monitor` 取已留存评估 | 独立 `scan.json` 保存待查扫描；原 `opportunities.json` 保留机会键及待查政策请求 | 整轮 540 秒，共享持仓、HTTP、轮询、机会检查预算；超时保留待查请求，回退服务须支持 v21 协议 |
-| 顾问周报 | 原研究 weekly API，另汇总 `policy_current` + `policy_monitor` 的 `opportunity_cost` 换仓机会成本复核提示（不更改 `policy_daily_brief`） | 独立 `weekly-opportunities.json` 保存待查政策请求、独立运行锁，不混用每日 `opportunities.json` | 同一 advisor 进程监督与 540 秒总预算；工具不可用时周报主体照常输出并附失败说明 |
-| 月批发起 | 原 monthly submit API | `<月>.receipt`，flock 与落盘回执 | 保持原入口；48 小时只用于卡住提示，不是执行超时 |
-| 月批状态 | 原 monthly status API | 共用 `<月>.receipt` 事件去重 | 同上 |
+| 顾问扫描 | `research_scan_request` → `research_scan_read`；通知前用 `account_current` 刷新持仓；`policy_current` + `policy_monitor` 取已留存评估 | 独立 `scan.json` 保存待查扫描；原 `opportunities.json` 保留机会键及待查政策请求 | 整轮 540 秒，共享 MCP 调用、轮询与机会检查预算；超时保留待查请求，恢复须匹配原服务、客户端和凭据 |
+| 顾问周报 | `research_scan_weekly(compact=false)`，另汇总 `policy_current` + `policy_monitor` 的 `opportunity_cost` 换仓机会成本复核提示（不更改 `policy_daily_brief`） | 独立 `weekly-opportunities.json` 保存待查政策请求、独立运行锁，不混用每日 `opportunities.json` | 同一 advisor 进程监督与 540 秒总预算；换仓复核不可用时仍输出已取得的周报主体及失败说明 |
+| 月批发起 | `research_batch_monthly_request(month)` | `<月>.receipt`，flock 与落盘回执 | 保持原入口；48 小时只用于卡住提示，不是执行超时 |
+| 月批状态 | `research_batch_monthly_status(month, compact=false)` | 共用 `<月>.receipt` 事件去重 | 同上 |
 | 记分 | 新 scoring 执行器，原四组记分算法与通知格式 | 原 `~/.local/state/a-share-scoring/state.json`，增加同目录任务锁 | 四组共用 540 秒截止、最多两路；容器内回收子进程，宿主命令最多再留 10 秒清理 |
 | 里程碑 | 原 milestones 脚本 | 无独立通知去重 | 保持原入口 |
 
 宿主配置的 `cron.script_timeout_seconds=600`，调度器可被 `HERMES_CRON_SCRIPT_TIMEOUT` 覆盖。2026-11-11 只读核对运行中 gateway 未设置该覆盖变量，当前源码正常路径据配置解析为 600 秒；未触发真实任务验证到时终止。新版记分和顾问源码均以 540 秒给任务清理留出余量。启用时须确认有效宿主时限、完成耗时与送达；上述 11-11 只读核对当时未修改宿主设置或已安装脚本，后续安装与运行状态见实施计划。
 
-新版顾问源码已接入 v21 [持久扫描请求 API](../../README.md#顾问闭环批次-a)。兼容回退镜像必须支持该端点和 v21 tools 就绪，具体基线与验证限制见[实施计划](../../docs/implementation-plan.md)。
+扫描工具复用 v21 的持久请求记录。服务端提交与查询语义见[顾问闭环](../../README.md#顾问闭环批次-a)。
 
 ## 顾问请求恢复与执行预算
 
-`A_SHARE_ADVISOR_STATE`（默认 `~/.local/state/a-share-advisor`）下新增 0600 的 `scan.json`，格式为 `{schema_version:1,pending:null|{request_id,binding,created_at,scan_id}}`。`binding` 是服务 URL、Host 和研究凭据的联合哈希，不保存原令牌；`scan_id` 在有效提交回执到达前为 null。独立 `scan.lock` 由监督进程持有至清理完成，并发调用静默退出；周报另用 `weekly.lock`。
+`A_SHARE_ADVISOR_STATE`（默认 `~/.local/state/a-share-advisor`）下的 `scan.json` 为 0600。版本 2 保存 `pending` 的 `request_id`、`binding`、`created_at` 与 `scan_id`。绑定值是 MCP 地址与令牌的联合摘要。扫描锁由监督进程持有至清理完成，周报使用独立的 `weekly.lock`。
 
-新请求先核对持仓并同步订阅，再持久保存 UUID、绑定和创建时刻，之后才 PUT 新接口。有待查请求时直接重试原键并查询原扫描，不重新同步订阅或另建扫描。有效回执会补存扫描编号；超时、断连、404、坏回执、损坏状态或服务/凭据变化均保留待查信息，不回落旧 POST，不清空后重新开始。取得终态后刷新当前持仓、构造扫描和机会输出，再结束待查；跨日补回的扫描注明原时间，不作为今日观察。机会检查仍使用原 `opportunities.json` 格式和恢复规则。
+在非扫描时段切换。版本 1 如有 pending，保留原文件，用旧脚本、原研究凭据完成该请求；确认 pending 为空后再换发。政策待查回执也须先用原 assistant 身份查回。发送 MCP 请求前才写入版本 2；流程完成后恢复为两版客户端均可读取的版本 1 空记录。切回旧客户端也应先完成 MCP 待查请求。旧 `runtime.env` 中的 research key 在切换验证后由所有者按退役流程撤销。
 
-当前回退镜像只以[实施计划](../../docs/implementation-plan.md#当前部署)为准，并须保留支持 `scan.json` 的客户端和监督模块；忽略该文件、继续调用旧 POST 的历史 advisor 脚本不是兼容客户端，不能用它处理已有待查请求。
+扫描前将 UUID 和身份绑定原子落盘，同一身份调用 `research_scan_request` 提交或找回原扫描，取得编号后以 `research_scan_read(compact=false)` 查询。跨日查回的终态回执注明原观察时间。有通知时才读当前持仓；读取失败时提示具体类别及“持仓状态未知”。机会检查独立报告失败，保留已取得的扫描通知。
 
-`advisor_budget.py` 用 Linux 子进程和单调时钟限制整轮执行，涵盖阻塞 HTTP、ashare 调用、轮询睡眠和机会检查；HTTP 自身超时不替代总时限。超时或 TERM/INT 后终止进程组，约 4 秒内升级 KILL 并回收后代；正常结束也清理后代，子进程 stdout/stderr 不直接投递，成功返回的文本才交 Hermes。监督进程本身被 SIGKILL 时无法收尾，工具子进程不得另开会话脱离组；正式宿主时限须允许 540 秒预算后的清理。状态写入与 stdout 之间仍无送达 ACK，不能保证恰好一次通知。
+披露扫描的持仓范围由服务端核实，政策监控独立读取持仓卡。切换时按[双入口方案](../../docs/web-mcp-platform.md#43-打通研究账户与政策数据)核对并一次性清理 Hermes 以前写入的 external 持仓镜像行。订阅表仅有 origin，没有写入者字段；须先核对要保留的显式关注，再替换列表。这项清理由所有者切换流程执行。
+
+`advisor_budget.py` 用 Linux 子进程和单调时钟限制整轮执行，涵盖 ashare 子进程、轮询睡眠和机会检查。超时或 TERM/INT 后终止进程组，约 4 秒内升级 KILL 并回收后代；正常结束也清理后代，子进程 stdout/stderr 不直接投递，成功返回的文本才交 Hermes。监督进程本身被 SIGKILL 时无法收尾，工具子进程不得另开会话脱离组；正式宿主时限须允许 540 秒预算后的清理。状态写入与 stdout 之间仍无送达 ACK，不能保证恰好一次通知。
 
 ## 记分执行预算
 
@@ -59,7 +61,7 @@
 
 ## 顾问替代入口
 
-顾问脚本需要已安装的标准库 `ashare` 和私有 `~/.config/ashare/hermes-assistant.json`；可用 `ASHARE_HERMES_CONFIG` 指向其他绝对路径文件，格式见[客户端准备](../clients/README.md)。不读取旧账户库、不在服务失败时回落旧命令；没有已核对来源就报告失败，不用空持仓覆盖订阅。`account_current` 与 `policy_monitor` 要求服务显式账户开关；开关沿用 `account_shadow_enabled` 命名，实际数据来源以服务的 `account_source` 为准。
+顾问脚本需要已安装的标准库 `ashare` 和私有 `~/.config/ashare/hermes-assistant.json`；可用 `ASHARE_HERMES_CONFIG` 指向其他绝对路径文件，格式见[客户端准备](../clients/README.md)。持仓来源无法核实时，通知会标明缺口。`account_current` 与 `policy_monitor` 要求服务显式账户开关；开关沿用 `account_shadow_enabled` 命名，实际数据来源以服务的 `account_source` 为准。
 
 机会去重键仍为 `code|report_id|stance_action|v2_zone`，只保留当次仍存在的键；机会失效后重现可再次提醒。旧 JSON 数组首次使用时升级为 `{schema_version:1,seen:[…],pending:null}`。调用监控前原子保存 `pending` 中的 request_id / expected_activation_id；超时、损坏响应或不匹配回执保留请求，下次复用，不另造编号。锁防止并行改写；损坏状态不覆盖。前日已成功回执只用于清理待查请求，保留 seen，不作为今日机会发送，下次再采集。持久化通知键仍在 stdout 交给 Hermes 之前，未增加送达确认机制，不能宣称通知恰好一次。
 
@@ -67,13 +69,13 @@
 
 ## 跨激活 pending 转接
 
-止损、日报、顾问机会检查共用 `ashare_tools.policy_receipt` 薄 helper。服务先查原回执；原 request_id 已成功时即使跨激活仍返回原回执，不会重采集。只有服务确认无回执、activation 确实变化且未写评估，才有 HTTP 409 `policy_activation_changed`；CLI 有界白名单映射为专用退出码 **20**，helper 只识别该码，不解析中文 stderr、不暴露原始错误体。成功协议保持不变。工具服务暂停或拒绝连接时 CLI 退出码 **21**，helper 映射为 `service_unavailable`；止损脚本保留 pending 静默跳过，首次不可用时刻记在 `state.json.unavailable-since`，持续超过 10 分钟才失败告警，恢复后删除该标记。日报与顾问仍按普通失败处理。
+止损、日报、月度对比和顾问机会检查在调用前绑定 MCP 身份，同一身份、请求编号和参数才能恢复评估。CLI 退出码 **20** 表示政策已变化、确定未写入；止损、日报和顾问机会检查可据此转接。**21** 表示发布暂停或服务繁忙，确定未受理，可原样重试。止损首次记录暂停时间，持续超过 10 分钟才告警。**22** 表示超时或结果未知，只能用原身份和原请求查回。其他非零退出码为确定失败，通知提示核对凭据、权限与参数。原始错误体不进入通知。
 
-收到这一个确定拒绝后，先将原请求和原因封存到状态文件同目录 `<文件名>.rejected-<原 request_id 的 SHA256>.json`（保留供核对），保持止损 state/previous_state 与机会 seen；再发现 installed=true 的新 activation，原子保存新 UUID 与新指针后才重采集。每轮最多转接一次，第二次变化保留新 pending 退出。发现失败、不适用的新指针、写状态失败也不擅自清理原请求。503 paused/busy、超时、坏响应、普通 409 一律保留原请求，旧 CLI/服务不支持专用码时同样安全失败。
+止损、日报与顾问收到退出码 20 后，先将原请求和原因封存到状态文件同目录 `<文件名>.rejected-<原 request_id 的 SHA256>.json`（保留供核对），保持止损 state/previous_state 与机会 seen；再发现 installed=true 的新 activation，原子保存新 UUID 与新指针后才重采集。每轮最多转接一次，第二次变化保留新 pending 退出。发现失败、不适用的新指针、写状态失败也不擅自清理原请求。503 paused/busy、超时、坏响应、普通 409 一律保留原请求，旧 CLI/服务不支持专用码时同样安全失败。
 
-过期行为不变：止损超过 15 分钟的成功告警不补发且不推进档位；日报/机会跨日回执不冒充今日，机会 seen 保持。没有通用补跑、通知 ACK 或恰好一次送达保证，不保证自动补发发布窗口错过的定时任务。不能把暂停或政策失效写成“无信号/无事件”。顾问披露扫描走独立 Web/worker，但订阅同步与发送前持仓读取也经 tools：账户读取失败时不更新/清空现有订阅，仍提交或查回 Web 扫描，并明确提示订阅未同步；通知时持仓无法刷新则以专用未知值呈现“持仓状态未知”，不当作空仓或沿用旧持仓。第二段机会失败单独输出“检查未完成”，不能阻断、抹掉或伪装第一段结果。暂停期间未同步的新持仓不保证被现有订阅覆盖，也不自动补跑漏掉的扫描。
+过期行为不变：止损超过 15 分钟的成功告警不补发且不推进档位；日报/机会跨日回执不冒充今日，机会 seen 保持。没有通用补跑、通知 ACK 或恰好一次送达保证，不保证自动补发发布窗口错过的定时任务。不能把暂停或政策失效写成“无信号/无事件”。
 
-兼容同步顺序：先发布支持新错误码的服务端（另行按 README 门禁批准），再核对/安装同版本 `scripts/ashare.py` CLI，再同步 `ashare_tools.py` 与三个调用方（用现有 install.py 管理，保留状态与封存文件）。新服务+旧客户端、旧服务/CLI+新客户端均保留 pending，不自动转接；完整自动闭环需要四层同版本。应用发布不会安装 ops 脚本；当前宿主安装与运行观察状态见[实施计划](../../docs/implementation-plan.md#合一重构收尾)。
+安装顺序为服务端 → 同版本 MCP CLI → 确认 pending 已结清、切换配置 → 同步本目录脚本 → `install.py --check`。应用发布与 Hermes 宿主安装分开进行，当前安装与正式送达情况见[实施计划](../../docs/implementation-plan.md#合一重构收尾)。
 
 ## 止损提醒替代入口
 

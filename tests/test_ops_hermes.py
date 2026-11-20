@@ -1,6 +1,7 @@
 """Hermes scripts: real plan rows and actual script copies, without host access."""
 
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -81,9 +82,14 @@ def test_existing_scripts_import(name, monkeypatch):
 
 
 @pytest.fixture
-def installer_repo(tmp_path):
+def installer_repo(tmp_path, monkeypatch):
+    monkeypatch.setenv("A_SHARE_ADVISOR_STATE", str(tmp_path / "advisor"))
+    for job in ("stop-alert", "daily-brief", "benchmark"):
+        monkeypatch.setenv("ASHARE_" + job.upper().replace("-", "_") + "_STATE", str(tmp_path / job / "state.json"))
     repo = tmp_path / "repo"
     shutil.copytree(SOURCE, repo / "ops/hermes", ignore=shutil.ignore_patterns("__pycache__"))
+
+    shutil.copyfile(ROOT / ".gitignore", repo / ".gitignore")
 
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
@@ -134,6 +140,44 @@ def test_install_lifecycle(installer_repo, tmp_path):
     installed.chmod(installed.stat().st_mode ^ 0o111)
     result = run_install(repo, target, "--check")
     assert result.returncode == 1 and "不同 a-share-milestones.sh" in result.stdout
+
+
+@pytest.mark.parametrize(("version", "message"), [(1, "旧 research key"), (2, "扫描仍有待查请求")])
+def test_install_preserves_scripts_while_scan_pending(installer_repo, tmp_path, version, message):
+    from datetime import datetime, timezone
+
+    repo, _ = installer_repo
+    state = tmp_path / "advisor" / "scan.json"
+    state.parent.mkdir()
+    pending = dict(request_id="hermes-scan-" + "a" * 32, binding="b" * 64,
+                   created_at=datetime.now(timezone.utc).isoformat(), scan_id=7)
+    state.write_text(json.dumps(dict(schema_version=version, pending=pending)))
+    state.chmod(0o600)
+    target = tmp_path / "target"
+    result = run_install(repo, target, "--apply")
+    assert result.returncode == 1 and message in result.stdout
+    assert not target.exists() and json.loads(state.read_text())["pending"] == pending
+
+
+@pytest.mark.parametrize(("relative", "fields", "args"), [
+    ("stop-alert/state.json", {"state": {}}, {"previous_state": {}}),
+    ("daily-brief/state.json", {}, {}),
+    ("benchmark/state.json", {}, {"end": "2026-11-20"}),
+    ("advisor/opportunities.json", {"seen": []}, {}),
+    ("advisor/weekly-opportunities.json", {"seen": []}, {}),
+])
+def test_module_install_preserves_pending_policy(installer_repo, tmp_path, relative, fields, args):
+    repo, _ = installer_repo
+    state = tmp_path / relative
+    state.parent.mkdir()
+    pending = {"request_id": "hermes-test", "expected_activation_id": 1, **args}
+    original = json.dumps({"schema_version": 1, "pending": pending, **fields})
+    state.write_text(original)
+    target = tmp_path / "target"
+    result = subprocess.run([sys.executable, "-m", "ops.hermes.install", "--apply", "--target", str(target)],
+                            cwd=repo, capture_output=True, text=True)
+    assert result.returncode == 1 and "原 assistant 身份与旧脚本" in result.stdout
+    assert state.read_text() == original and not target.exists()
 
 
 @pytest.mark.parametrize("change", ["modified", "staged", "untracked"])

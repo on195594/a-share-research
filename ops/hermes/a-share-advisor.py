@@ -1,40 +1,30 @@
 #!/usr/bin/env python3
 """Hermes no-agent job for a-share-research batch A (A4).
 
-scan:   sync verified open holdings (account_current) into Research subscriptions, run one disclosure
-        scan, print the notify items. Prints nothing when there is nothing to report.
-        Then append new Research opportunities (policy_monitor `research_opportunity`
-        prompts for researched, not-held candidates); each is pushed once until it lapses.
-weekly: print the weekly digest.
+scan:   request or resume a disclosure scan and render its notifications, then
+        append deduplicated research opportunities from the active policy.
+weekly: render the weekly digest and portfolio review prompts.
 
-Credentials come from ~/.config/a-share-advisor/runtime.env (A_SHARE_RESEARCH_URL, A_SHARE_RESEARCH_TOKEN);
-A_SHARE_RESEARCH_HOST (set by the .sh wrapper) is the public host name the service requires,
-never from this file. Delivery is Hermes' job; this script only writes to stdout.
+The ashare CLI uses the private Hermes assistant configuration. Hermes delivers stdout.
 """
 import json
 import fcntl
-import hashlib
 import os
 import re
 import stat
-import subprocess
 import sys
 import time
 import uuid
 from collections import Counter
 from datetime import datetime
 from contextlib import contextmanager
-import urllib.error
-import urllib.request
-from urllib.parse import urlsplit
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError as AdvisorError, policy_receipt, save_json, tool
+from ashare_tools import ToolsError as AdvisorError, client_identity, policy_receipt, save_json, tool
 from advisor_budget import BudgetError, run_bounded
 
-ENV = Path(os.environ.get("A_SHARE_ADVISOR_ENV", Path.home() / ".config/a-share-advisor/runtime.env"))
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
            "judgment_changed": "研究更新", "current_zone_changed": "估值位置变化",
            "checkpoint_deviated": "披露偏离预测区间", "add_trigger_missed": "加仓条件未达到"}
@@ -51,37 +41,12 @@ OPPORTUNITY_NOTE = ("注：机会来自研究立场与按情景概率加权的�
 POLL_SECONDS, RUN_SECONDS = 20, 540  # Leave cleanup time below Hermes' 600-second limit.
 
 
-def settings() -> tuple[str, str, str | None]:
-    values = {}
-    for line in ENV.read_text().splitlines():
-        if "=" in line and not line.lstrip().startswith("#"):
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip().strip('"')
-    values.update({k: v for k, v in os.environ.items() if k.startswith("A_SHARE_RESEARCH_")})
-    # Optional public Host header: the service only accepts its own host name, even on 127.0.0.1.
-    return values["A_SHARE_RESEARCH_URL"].rstrip("/"), values["A_SHARE_RESEARCH_TOKEN"], values.get("A_SHARE_RESEARCH_HOST")
-
-
-def call(method: str, path: str, body: dict | None = None, *, connection=None, deadline=None) -> dict:
-    base, token, host = connection if connection is not None else settings()
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    if host:
-        headers["Host"] = host
-    request = urllib.request.Request(base + path, method=method,
-                                     data=json.dumps(body).encode() if body is not None else None, headers=headers)
-    remaining = 60 if deadline is None else min(60, deadline - time.monotonic())
-    if remaining <= 0:
-        raise AdvisorError('本轮等待时限已到；待查请求保留，下次继续查询')
-    with urllib.request.urlopen(request, timeout=remaining) as response:
-        return json.loads(response.read())
-
-
 def holdings() -> list[str]:
     data = tool('account_current', {})
     codes = data.get('codes')
     if (not isinstance(codes, list) or any(not isinstance(c, str) or re.fullmatch('[0-9]{6}', c) is None for c in codes)
             or not isinstance(data.get('source'), dict) or data['source'].get('mode') not in ('mirror', 'ledger')):
-        raise AdvisorError('账户代码或来源格式不兼容；未更新订阅')
+        raise AdvisorError('账户代码或来源格式不兼容，无法核实当前持仓')
     return sorted(set(codes))
 
 
@@ -216,17 +181,6 @@ def render_scan(result: dict, held_codes: set[str] | None, public_base: str = ""
     return "\n\n".join(lines)
 
 
-def service_binding(connection) -> str:
-    base, token, host = connection
-    parsed = urlsplit(base)
-    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
-            or parsed.query or parsed.fragment or not isinstance(token, str) or not token
-            or (host is not None and (not isinstance(host, str) or not host))):
-        raise AdvisorError('研究服务配置不兼容；未提交扫描')
-    # Bind both routing and authenticated identity without storing a token or URL.
-    return hashlib.sha256(json.dumps([base, token, host], ensure_ascii=False).encode()).hexdigest()
-
-
 def aware_time(value):
     if not isinstance(value, str):
         raise ValueError('timestamp must be a string')
@@ -256,7 +210,7 @@ def read_scan_state() -> dict:
                 raise ValueError('unsafe state file')
             saved = json.load(stream, object_pairs_hook=unique)
         if (not isinstance(saved, dict) or set(saved) != {'schema_version', 'pending'}
-                or type(saved['schema_version']) is not int or saved['schema_version'] != 1):
+                or type(saved['schema_version']) is not int or saved['schema_version'] not in (1, 2)):
             raise ValueError('state shape')
         pending = saved['pending']
         if pending is not None:
@@ -267,9 +221,11 @@ def read_scan_state() -> dict:
                     or (pending['scan_id'] is not None and (type(pending['scan_id']) is not int or pending['scan_id'] < 1))
                     or aware_time(pending['created_at']) > datetime.now(ZoneInfo('Asia/Shanghai'))):
                 raise ValueError('pending shape')
-        return saved
     except (ValueError, TypeError, KeyError):
         raise AdvisorError('扫描待查记录不兼容；保留原文件，请核对后重试') from None
+    if pending is not None and saved['schema_version'] == 1:
+        raise AdvisorError('发现旧 research key 的未完成扫描，请用旧脚本和原凭据完成原请求，确认 pending 为空后再换发')
+    return saved
 
 
 @contextmanager
@@ -298,35 +254,19 @@ def _scan(deadline: float) -> str:
     if deadline <= time.monotonic():
         raise AdvisorError('本轮等待时限已到；待查请求保留，下次继续查询')
     saved = read_scan_state()
-    connection = settings()
-    binding = service_binding(connection)
-    def send(method, path, body=None):
-        return call(method, path, body, connection=connection, deadline=deadline)
-    subscription_warning = ''
+    binding, public_base = client_identity()
     if saved['pending'] is None:
-        try:
-            codes = holdings()
-        except AdvisorError:
-            # Tools pause must not block independent Web/worker disclosure scanning.
-            # Unknown holdings never authorize clearing the existing subscriptions.
-            subscription_warning = '【研究扫描】账户读取未完成，未同步订阅；保留现有订阅继续扫描。'
-        else:
-            send('PUT', '/api/subscriptions', {'codes': codes})
+        saved['schema_version'] = 2
         saved['pending'] = dict(request_id='hermes-scan-' + uuid.uuid4().hex, binding=binding,
                                 created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(), scan_id=None)
         save_json(SCAN_STATE, saved)
     pending = saved['pending']
     if pending['binding'] != binding:
         raise AdvisorError('研究服务或凭据已变化；保留原扫描请求，请核对后恢复')
-    try:
-        receipt = send('PUT', '/api/scan-requests/' + pending['request_id'])
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            raise AdvisorError('服务尚不支持可恢复扫描；保留原请求，未回落旧提交入口') from None
-        raise
-    if (not isinstance(receipt, dict) or set(receipt) != {'version', 'request_id', 'scan_id'}
-            or receipt['version'] != 'research-v1' or receipt['request_id'] != pending['request_id']
-            or type(receipt['scan_id']) is not int or receipt['scan_id'] < 1
+    receipt = tool('research_scan_request', {'request_id': pending['request_id']})
+    if (receipt.get('version') != 'research-v1' or receipt.get('id') != receipt.get('scan_id')
+            or type(receipt.get('id')) is not int or receipt.get('request_id') != pending['request_id']
+            or type(receipt.get('scan_id')) is not int or receipt['scan_id'] < 1
             or (pending['scan_id'] is not None and receipt['scan_id'] != pending['scan_id'])):
         raise AdvisorError('扫描提交回执不兼容；保留原请求供核对')
     scan_id = receipt['scan_id']
@@ -336,7 +276,7 @@ def _scan(deadline: float) -> str:
     while True:
         if deadline - time.monotonic() <= 1:
             return f'【研究扫描】扫描 #{scan_id} 本轮等待已结束，已保留请求，下次继续查询。'
-        result = send('GET', f'/api/scans/{scan_id}')
+        result = tool('research_scan_read', {'scan_id': scan_id, 'compact': False})
         try:
             if (not isinstance(result, dict) or result.get('version') != 'research-v1'
                     or type(result.get('id')) is not int or result['id'] != scan_id
@@ -354,18 +294,19 @@ def _scan(deadline: float) -> str:
         time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic() - 1)))
     # Refresh at delivery time: a position may have been closed while the scan ran.
     held_codes: set[str] | None = set()
+    holding_note = ''
     if result.get('notify'):
         try:
             held_codes = set(holdings())
-        except AdvisorError:
+        except AdvisorError as exc:
             held_codes = None
-    _, _, host = connection
-    public_base = f"https://{host}" if host else ""
+            holding_note = f'【持仓核对】{exc}'
     text = render_scan(result | {"scan_id": scan_id}, held_codes, public_base)
     if text and requested.astimezone(ZoneInfo('Asia/Shanghai')).date() != datetime.now(ZoneInfo('Asia/Shanghai')).date():
         text = f'【研究扫描补回】原扫描时间 {requested.isoformat()}；以下为历史回执，不代表今日观察。\n\n' + text
     extra = opportunities(public_base)
-    output = "\n\n".join(part for part in (subscription_warning, text, extra) if part)
+    output = "\n\n".join(part for part in (text, holding_note, extra) if part)
+    # A completed scan leaves the empty state readable by the previous client.
     save_json(SCAN_STATE, dict(schema_version=1, pending=None))
     return output
 
@@ -393,7 +334,7 @@ def render_opportunities(prompts: list[dict], seen: set[str], public_base: str =
 
 
 def save_opportunity_state(state: dict, path: Path | None = None) -> None:
-    """Atomically retain the original request before a potentially ambiguous HTTP call."""
+    """Atomically retain the original request before a potentially ambiguous tool call."""
     save_json(path or OPPORTUNITY_STATE, state)
 
 
@@ -403,7 +344,7 @@ def read_opportunity_state(path: Path | None = None) -> dict:
     # Preserve the existing notification keys when installing the replacement.
     if isinstance(value, list):
         value = dict(schema_version=1, seen=value, pending=None)
-    if (not isinstance(value, dict) or set(value) != {'schema_version', 'seen', 'pending'}
+    if (not isinstance(value, dict) or set(value) - {'binding'} != {'schema_version', 'seen', 'pending'}
             or type(value['schema_version']) is not int or value['schema_version'] != 1
             or not isinstance(value['seen'], list) or any(not isinstance(k, str) for k in value['seen'])):
         raise AdvisorError('机会去重记录不兼容；未覆盖原记录')
@@ -422,7 +363,8 @@ def _collect_monitor_prompts(state_path: Path, stale_message: str) -> tuple[dict
         current = tool('policy_current', {})
         activation = current.get('activation') or {}
         if current.get('installed') is not True or type(activation.get('id')) is not int or activation['id'] < 1:
-            raise AdvisorError('尚无与实装一致的生效政策，未采集建仓机会')
+            raise AdvisorError('政策异常：尚无与实装一致的生效政策，请核对后再采集建仓机会')
+        state['binding'] = client_identity()[0]
         state['pending'] = dict(request_id='hermes-advisor-' + uuid.uuid4().hex,
                                 expected_activation_id=activation['id'])
         save_opportunity_state(state, state_path)
@@ -546,7 +488,7 @@ def render_weekly(data: dict, opportunity_costs: list[dict] | None = None, oppor
 
 
 def weekly(deadline=None) -> str:
-    data = call("GET", "/api/scans/weekly", deadline=deadline)
+    data = tool('research_scan_weekly', {'compact': False})
     costs, note = weekly_opportunity_costs(deadline=deadline)
     return render_weekly(data, costs, note)
 
@@ -561,7 +503,7 @@ def main() -> None:
             return weekly(deadline) if mode == 'weekly' else _scan(deadline)
         except AdvisorError as exc:
             return f'【研究扫描】任务未能完成：{exc}'
-        except (urllib.error.URLError, subprocess.SubprocessError, KeyError, OSError, ValueError, TypeError, AttributeError):
+        except (KeyError, OSError, ValueError, TypeError, AttributeError):
             return '【研究扫描】服务或回执不可用；请核对配置与待查记录，未自动清空或重建请求。'
     try:
         with task_lock(mode) as acquired:
@@ -569,7 +511,7 @@ def main() -> None:
     except (BudgetError, AdvisorError, OSError):
         text = '【研究扫描】本轮执行中断或超过时限；请核对待查记录，下次继续恢复，不代表扫描无事件。'
     if text:
-        print(text)
+        sys.stdout.write(text + '\n')
 
 
 if __name__ == "__main__":

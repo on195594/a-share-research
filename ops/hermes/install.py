@@ -2,7 +2,11 @@
 """Check or explicitly install the committed Hermes scripts; never invoke Hermes."""
 
 import argparse
+from contextlib import ExitStack
+import fcntl
+from functools import partial
 import hashlib
+from importlib.util import module_from_spec, spec_from_file_location
 import os
 from pathlib import Path
 import shutil
@@ -51,6 +55,13 @@ def check(target: Path) -> int:
     return int(different)
 
 
+def script_module(name: str):
+    spec = spec_from_file_location(name, SOURCE / f"{name}.py")
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def apply(target: Path) -> None:
     repo = SOURCE.parent.parent
     result = subprocess.run(
@@ -65,6 +76,31 @@ def apply(target: Path) -> None:
     )
     if any(Path(line).suffix in {".py", ".sh"} for line in ignored.stdout.splitlines() if line.strip()):
         raise ValueError("拒绝安装：ops/hermes/ 存在被忽略的脚本文件，请清理后再 --apply。")
+    advisor = script_module("a-share-advisor")
+    with ExitStack() as locks:
+        if not locks.enter_context(advisor.task_lock()):
+            raise ValueError("扫描正在运行，请等原扫描完成后再安装。")
+        if advisor.read_scan_state()["pending"] is not None:
+            raise ValueError("扫描仍有待查请求，请用原身份查回后再安装。")
+        policy_states = []
+        for name in ("a-share-stop-alert", "a-share-daily-brief", "a-share-benchmark"):
+            script = script_module(name)
+            policy_states.append((script.STATE, script.load_state))
+        for path in (advisor.OPPORTUNITY_STATE, advisor.WEEKLY_OPPORTUNITY_STATE):
+            policy_states.append((path, partial(advisor.read_opportunity_state, path)))
+        for path, load in policy_states:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            lock = locks.enter_context(path.with_suffix(".lock").open("a"))
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ValueError(f"{path} 的政策任务正在运行，请等任务完成后再安装。") from None
+            if load()["pending"] is not None:
+                raise ValueError(f"{path} 仍有待查政策请求，请用原 assistant 身份与旧脚本查回后再安装。")
+        copy_scripts(target)
+
+
+def copy_scripts(target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for source in scripts():
         temporary = None
@@ -83,7 +119,10 @@ def apply(target: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, epilog=(
+        "MCP 切换前用原身份完成待查请求，确认扫描和政策任务的 pending 均为空。"
+        "Hermes 通过 ashare 使用 ~/.config/ashare/hermes-assistant.json。"
+    ))
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="只读核对（默认）")
     mode.add_argument("--apply", action="store_true", help="安装已提交的脚本并核对")

@@ -16,7 +16,7 @@ def source():
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, ashare_cli):
     module = load('a-share-benchmark')
     monkeypatch.setattr(module, 'STATE', tmp_path / 'benchmark-state.json')
     class Clock(datetime):
@@ -75,13 +75,14 @@ def test_response_loss_retries_original_request_and_cross_day_resolution(client,
         return value
     monkeypatch.setattr(client, 'tool', lost)
     with pytest.raises(client.ToolsError): client.check()
-    pending = client.load_state()['pending']
+    saved = client.load_state()
+    pending = saved['pending']
     def recover(name, args):
         assert name == 'policy_benchmark' and args == pending
         return receipt
     monkeypatch.setattr(client, 'tool', recover)
     assert client.check()[0] == '📊 A股账本月度对比\n' + GOLDEN
-    client.save_json(client.STATE, {'schema_version': 1, 'pending': pending})
+    client.save_json(client.STATE, saved)
     client.datetime.current += timedelta(days=1)
     out, err, status = client.check()
     assert status == 1 and out == '' and '其他日期' in err

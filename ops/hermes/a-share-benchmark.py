@@ -10,14 +10,14 @@ import uuid
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError, save_json, tool
+from ashare_tools import ToolsError, client_identity, bound_policy_call, save_json, tool
 
 STATE = Path(os.environ.get('ASHARE_BENCHMARK_STATE', Path.home() / '.local/state/ashare-benchmark/state.json'))
 
 
 def load_state():
     value = json.loads(STATE.read_text()) if STATE.exists() else {'schema_version': 1, 'pending': None}
-    if (not isinstance(value, dict) or set(value) != {'schema_version', 'pending'}
+    if (not isinstance(value, dict) or set(value) - {'binding'} != {'schema_version', 'pending'}
             or type(value['schema_version']) is not int or value['schema_version'] != 1):
         raise ToolsError('月度对比待查记录不兼容；未覆盖')
     pending = value['pending']
@@ -48,11 +48,12 @@ def check() -> tuple[str, str, int]:
             active = current.get('activation') or {}
             if (current.get('installed') is not True or not isinstance(active, dict)
                     or type(active.get('id')) is not int or active['id'] < 1):
-                raise ToolsError('尚无与实装一致的生效政策')
+                raise ToolsError('政策异常，请核对当前实装版本与生效政策')
+            saved['binding'] = client_identity()[0]
             saved['pending'] = dict(request_id='hermes-benchmark-' + uuid.uuid4().hex, expected_activation_id=active['id'],
                                     end=datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat())
             save_json(STATE, saved)
-        receipt = tool('policy_benchmark', saved['pending'])
+        receipt = bound_policy_call('policy_benchmark', saved, call=tool)
         try:
             if (receipt['mode'] != 'service_benchmark_capture'
                     or receipt['request_id'] != saved['pending']['request_id']
@@ -92,8 +93,11 @@ def main() -> int:
         return 2
     try:
         output, error, status = check()
-    except (ToolsError, OSError, ValueError):
-        print('持仓月度对比：检查未完成；请核对工具服务、政策、凭据和本地待查请求。', file=sys.stderr)
+    except ToolsError as exc:
+        sys.stderr.write(f'持仓月度对比：检查未完成。{exc}\n')
+        return 1
+    except (OSError, ValueError):
+        sys.stderr.write('持仓月度对比：检查未完成，请核对本地待查记录。\n')
         return 1
     if output: print(output, end='')
     if error: print(error, end='', file=sys.stderr)

@@ -127,3 +127,55 @@ def server(tmp_path):
             process.wait(timeout=5)
         conn.close()
         log.close()
+
+
+@pytest.fixture
+def ashare_cli(tmp_path, monkeypatch):
+    """A real subprocess boundary with scripted MCP data and exit statuses."""
+    import json
+    import sys
+
+    config = tmp_path / "hermes-assistant.json"
+    config.write_text(json.dumps({"url": "https://stock.test/mcp", "token": "fixture-assistant"}))
+    config.chmod(0o600)
+    monkeypatch.setenv("ASHARE_HERMES_CONFIG", str(config))
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    program = tmp_path / "ashare"
+    program.write_text(f"#!{sys.executable}\n" + """\
+import json
+from pathlib import Path
+import sys
+
+root = Path(__file__).parent
+config_flag, config, verb, name, json_flag, raw = sys.argv[1:]
+assert (config_flag, config, verb, json_flag) == ('--config', str(root / 'hermes-assistant.json'), 'call', '--json')
+args = json.loads(raw)
+with (root / 'calls.jsonl').open('a') as calls:
+    print(json.dumps([name, args]), file=calls)
+reply = json.loads((root / (name + '.reply')).read_text())
+
+def echo_inputs(value):
+    if isinstance(value, dict):
+        return {k: echo_inputs(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [echo_inputs(v) for v in value]
+    if isinstance(value, str) and value in ('$request_id', '$expected_activation_id'):
+        return args[value[1:]]
+    return value
+
+print(json.dumps({'ok': True, 'result': {'data': echo_inputs(reply['data'])}}))
+print(reply['stderr'], file=sys.stderr)
+sys.exit(reply['code'])
+""")
+    program.chmod(0o700)
+
+    class Client:
+        def reply(self, name, data=None, *, code=0, stderr=""):
+            (tmp_path / (name + ".reply")).write_text(json.dumps(dict(data=data, code=code, stderr=stderr)))
+
+        @property
+        def calls(self):
+            log = tmp_path / "calls.jsonl"
+            return [(name, args) for name, args in map(json.loads, log.read_text().splitlines())] if log.exists() else []
+
+    return Client()
