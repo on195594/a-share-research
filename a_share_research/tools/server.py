@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 
 from a_share_research import api_keys, db
 from a_share_research.tools.http_json import BodyTooLarge, parse_object, read_body
-from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, discover, invoke, validation_message
+from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, check_tool_scope, discover, invoke, validation_message
 from a_share_research.tools import control
 
 logger = logging.getLogger(__name__)
@@ -60,10 +60,12 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
                     if principal is None:
                         raise ToolError('unauthorized', '凭据无效或已撤销', 401)
                     ctx = Context(conn, database, principal, account_shadow_enabled)
-                    if name is not None:
-                        tool = authorize_tool(ctx, tool)
-                        if tool.access == 'write' or tool.collects:
-                            resources.enter_context(gate.slot())
+                    if tool and (tool.access == 'write' or tool.collects):
+                        if tool.access == 'write':
+                            authorize_tool(ctx, tool)
+                        else:
+                            check_tool_scope(ctx, tool)
+                        resources.enter_context(gate.slot())
                     if tool is None or tool.access == 'read':
                         yield ctx
                         return

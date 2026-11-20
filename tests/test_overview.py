@@ -137,7 +137,13 @@ def test_public_research_and_open_disclosures_survive_an_unavailable_account(web
     scans.replace_subscriptions(conn, [code], catalog=CATALOG)
     scan = run_scan(conn)
     conn.execute('PRAGMA query_only=ON')
-    company = overview.company_overview(conn, code)
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        company = overview.company_overview(conn, code)
+    finally:
+        conn.set_trace_callback(None)
+    assert sum('FROM scan_events e LEFT JOIN runs' in stmt for stmt in statements) == 1
     assert company['held'] is None and company['account_gaps'] == overview.portfolio_overview(conn)['gaps']
     assert not company['gaps'] and company['account_gaps']
     assert company['research']['path'] == f"/reports/{company['research']['report_id']}"
@@ -253,3 +259,28 @@ def test_nav_deep_link_opens_the_saved_after_cost_comparison(nav_book, bind_acco
                   saved['inputs']['end']['as_of'][:10], saved['calculation']['end_nav'],
                   saved['calculation']['benchmark_return'], saved['calculation']['excess_percentage_points']):
         assert value in detail
+
+
+def test_overview_uses_ledger_projection_while_policy_capture_verifies_evidence(configured):
+    from a_share_research.policy.registry import PolicyError
+
+    (_, conn, _, directory, sha), _, _, _ = configured
+    portfolio = overview.portfolio_overview(conn)
+    holding, = portfolio['holdings']
+    company = overview.company_overview(conn, holding['code'])
+    evidence = directory / sha
+    original = evidence.read_bytes()
+    evidence.write_bytes(b'altered evidence fixture')
+
+    assert overview.portfolio_overview(conn) == portfolio
+    assert overview.company_overview(conn, holding['code']) == company
+    with pytest.raises(PolicyError, match='证据无法核对'):
+        save_monitor(configured)
+
+    moved = evidence.rename(directory / 'missing-fixture')
+    assert overview.portfolio_overview(conn)['holdings'] is None
+    moved.rename(evidence)
+    evidence.write_bytes(original)
+    conn.execute("UPDATE account_position_books SET version=version+1 WHERE account_id='a'")
+    stale = overview.company_overview(conn, holding['code'])
+    assert stale['held'] is None and stale['account_gaps']

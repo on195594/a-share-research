@@ -1047,3 +1047,35 @@ def test_code_entering_scan_history_reviews_old_filing_without_pending_notice(co
     assert service.company_card(conn, '603606')['status'] == '待复核'
     pending = [n for n in result['notify'] if n['code'] == '603606' and n['reason'] == 'pending_review']
     assert bool(pending) == scanned_before
+
+
+def test_no_card_disclosure_closes_only_after_a_formal_report_cites_it(conn):
+    code = '603606'
+    # Replay the captured Q3 filing while the company's existing reports are unavailable.
+    conn.execute("UPDATE runs SET status='failed' WHERE company_key=?", (code,))
+    scans.replace_subscriptions(conn, [code], catalog=CATALOG)
+    source = CapturedSources([i for i in ANNOUNCEMENTS if i['code'] == code and i.get('period') == '2026-09-30'])
+    event, = run_scan(conn, source)['events']
+    assert event['action'] == 'no_card'
+
+    run = service.submit(conn, code, 'after-no-card')
+    db.save_report(conn, run, RECORD['code'], RECORD['name'], RECORD['period'], True, RECORD['verdict'], BODY)
+    db.update_run(conn, run, status='done', finished_at='2026-11-01T10:00:00+08:00')
+    before, = overview.company_overview(conn, code)['announcements']
+    assert before['unresolved']
+    cite_in_card(conn, code, [event])
+    after, = overview.company_overview(conn, code)['announcements']
+    assert not after['unresolved']
+    assert after['action'] == 'no_card' and after['review']['state'] == 'included'
+    assert after['path'] == f"/reports/{after['review']['report_id']}"
+
+
+@pytest.mark.wide_scan_scope
+def test_compact_weekly_skips_card_company_scope(conn):
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        scans.weekly(conn, at=AT, compact=True)
+    finally:
+        conn.set_trace_callback(None)
+    assert not any('SELECT DISTINCT r.company_key FROM reports' in sql for sql in statements)

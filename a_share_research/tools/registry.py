@@ -6,6 +6,7 @@ import binascii
 import os
 import re
 import sqlite3
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Callable, Literal
@@ -339,8 +340,11 @@ def _recent_evidence(ctx: Context, args: RecentEvidence) -> Payload:
 
 
 def _research_coverage(ctx: Context, args: Arguments) -> TradeRows:
-    ledger.authorize(ctx.connection, ctx.principal)
-    return TradeRows(rows=trades.research_available_at_trade(ctx.connection))
+    conn = ctx.connection
+    with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
+        ledger.authorize(conn, ctx.principal)
+        account_id = account_view.bound_account_id(conn)
+        return TradeRows(rows=trades.research_available_at_trade(conn, account_id))
 
 
 def _research_methods(ctx: Context, args: MethodQuery) -> Payload:
@@ -491,12 +495,17 @@ def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = Fa
     return [tool.describe() for tool in visible_tools(principal, account_shadow_enabled=account_shadow_enabled)]
 
 
-def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
+def check_tool_scope(ctx: Context, tool: Tool | None) -> Tool:
     if tool is None or (tool.account and not ctx.account_shadow_enabled):
         raise UnknownTool('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
-    # Rechecked on each connection the call uses, so a grant revoked mid-request stops at the write.
+    return tool
+
+
+def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
+    tool = check_tool_scope(ctx, tool)
+    # Recheck the grant on the connection that will perform the operation.
     if not api_keys.is_active(ctx.connection, ctx.principal.key_id, ctx.principal.role):
         raise ToolError('forbidden', '凭据已撤销或角色已变更', 403)
     return tool

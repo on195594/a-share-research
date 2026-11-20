@@ -29,13 +29,13 @@ def _mirror(conn: sqlite3.Connection, directory: Path) -> dict:
     return dict(mode='mirror',source_sha256=row[1],updated_at=row[2],watermark=watermark)
 
 
-def _source(conn: sqlite3.Connection, directory: Path) -> dict:
+def _source(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True) -> dict:
     row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source WHERE id=1').fetchone()
     if row is None or row[0]=='mirror':
         return _mirror(conn,directory)
     from a_share_research.policy import account_input
     try:
-        return account_input.read(conn,directory,row)
+        return account_input.read(conn,directory,row,verify_evidence=verify_evidence)
     except (ValueError,OSError,sqlite3.Error):
         raise registry.PolicyError('账户账本绑定、投影或证据无法核对；不能保存评估，请检查账户来源',409) from None
 

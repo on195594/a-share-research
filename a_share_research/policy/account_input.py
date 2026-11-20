@@ -3,6 +3,7 @@ from contextlib import nullcontext
 from datetime import datetime
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -88,7 +89,8 @@ def validate_source(source):
     try:
         _object(source,('mode','source_sha256','updated_at','watermark','state_sha256','account_version','asset'))
         if source['mode']!='ledger': raise AccountInputError('不是账本采集来源')
-        _sha(source['source_sha256']);_sha(source['state_sha256'])
+        _sha(source['source_sha256'])
+        _sha(source['state_sha256'])
         _timestamp(source['updated_at'])
         _binding(source['watermark'])
         if type(source['account_version']) is not int or source['account_version']<0:
@@ -106,14 +108,16 @@ def _rows(conn, sql, args=()):
     return [dict(zip(fields,row)) for row in cursor]
 
 
-def _read(conn, directory, row):
+def _read(conn, directory, row, *, verify_evidence):
     from a_share_research.account import cycle_analysis, evidence, ledger, projection_ids
     from a_share_research.account.reconciliation import Event, Opening, identity, project, reconcile
     from a_share_research.policy.v0 import account_store
 
     if len(row)!=4 or row[0]!='ledger': raise AccountInputError('需要显式绑定的账本来源')
-    binding=_json(row[3]);_binding(binding)
-    _sha(row[1]);_timestamp(row[2])
+    binding=_json(row[3])
+    _binding(binding)
+    _sha(row[1])
+    _timestamp(row[2])
     account=binding['account_id']
     state={}
     for table in ('account_books','account_position_books','policy_v0_account_openings','account_projection_ids',
@@ -162,7 +166,8 @@ def _read(conn, directory, row):
         hashes.update(_json(state[table][0]['evidence_hashes']))
     legacy_ids=set()
     for history in state['account_analysis_history']:
-        request=_json(history['request']);snapshot=_json(history['snapshot'])
+        request=_json(history['request'])
+        snapshot=_json(history['snapshot'])
         if gate.digest(request)!=history['request_hash'] or gate.digest(snapshot)!=history['snapshot_hash']:
             raise AccountInputError('账户分析历史哈希不一致')
         hashes.update(_json(history['evidence_hashes']))
@@ -192,13 +197,16 @@ def _read(conn, directory, row):
                 source=kind,record_id=item['id'],
                 evidence_hashes=sorted(set(refs))))
     for item in state['account_observations']:
-        raw=_json(item['observation']);observation=ledger.Observation.model_validate(raw)
+        raw=_json(item['observation'])
+        observation=ledger.Observation.model_validate(raw)
         if gate.digest(dict(observation=raw,evidence_hash=item['evidence']))!=item['request_hash']:
             raise AccountInputError('账户资产观察哈希不一致')
         hashes.add(item['evidence'])
         asset('account_observation',item,observation.total_assets,[item['evidence']],observation.portfolio_value_as_of)
     for item in state['account_batches']:
-        raw=_json(item['request']);batch=ledger.Batch.model_validate(raw);receipt=_json(item['receipt'])
+        raw=_json(item['request'])
+        batch=ledger.Batch.model_validate(raw)
+        receipt=_json(item['receipt'])
         expected=dict(receipt_id=item['id'],account_id=account,request_hash=item['request_hash'],status='posted',mode='shadow',evidence_hashes=batch.evidence_hashes)
         if (gate.digest(raw)!=item['request_hash'] or any(receipt.get(k)!=v for k,v in expected.items())
                 or receipt.get('added')!=sum(r['batch_id']==item['id'] for r in journals)
@@ -209,8 +217,16 @@ def _read(conn, directory, row):
             raise AccountInputError('账户已入账快照未与回执资金股数对平')
         hashes.update(batch.evidence_hashes)
         asset('account_batch',item,batch.snapshot.total_assets,batch.evidence_hashes,batch.snapshot.portfolio_value_as_of)
-    for sha in sorted(hashes):
-        _sha(sha);evidence.verify(directory/'account-evidence',sha)
+    evidence_fd = evidence._directory(directory / 'account-evidence')
+    try:
+        for sha in sorted(hashes):
+            _sha(sha)
+            if verify_evidence:
+                evidence._read(evidence_fd, sha)
+            else:
+                evidence._check_file(os.stat(sha, dir_fd=evidence_fd, follow_symlinks=False))
+    finally:
+        os.close(evidence_fd)
     # Record time selects the latest saved evidence; it never becomes a valuation time.
     latest={}
     for candidate in candidates:
@@ -232,11 +248,11 @@ def _read(conn, directory, row):
     return result
 
 
-def read(conn: sqlite3.Connection, directory: Path, row) -> dict:
-    """Read one verified account snapshot in the caller's transaction, or own a read transaction."""
+def read(conn: sqlite3.Connection, directory: Path, row, *, verify_evidence: bool = True) -> dict:
+    """Verify the ledger snapshot; display reads may inspect file metadata only."""
     try:
         with nullcontext() if conn.in_transaction else db.transaction(conn,immediate=False):
-            return _read(conn,Path(directory),row)
+            return _read(conn,Path(directory),row,verify_evidence=verify_evidence)
     except (ValueError, TypeError, KeyError, IndexError, ArithmeticError, sqlite3.Error, OSError, RecursionError) as exc:
         if isinstance(exc,AccountInputError): raise
         raise AccountInputError('无法核对账本、资产证据或账户周期分析') from None

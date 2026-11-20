@@ -24,9 +24,9 @@ def bound_account_id(conn: sqlite3.Connection) -> str:
     return account_id
 
 
-def verified_current(conn: sqlite3.Connection, directory: Path) -> dict:
+def verified_current(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True) -> dict:
     """Read codes and provenance within the caller's snapshot of the shared database."""
-    source = monitor._source(conn, directory)
+    source = monitor._source(conn, directory, verify_evidence=verify_evidence)
     if source['mode'] == 'mirror':
         codes = [row[0] for row in conn.execute('SELECT code FROM holdings WHERE exit_date IS NULL')]
     else:

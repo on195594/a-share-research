@@ -121,14 +121,13 @@ def _policy(saved, holding=None):
                         'data_gaps': [g for g in result['data_gaps'] if g['code'] == captured['code']]}
 
 
-def _announcements(conn, code, path):
-    reviews = {e['id']: e['review'] for e in scans.event_reviews(conn, code)}
-    events = sorted(scans.events(conn, code=code), key=lambda e: (e['announced'], e['id']), reverse=True)
+def _announcements(events, reviews, path):
+    reviews = {e['id']: e['review'] for e in reviews}
+    events = sorted(events, key=lambda e: (e['announced'], e['id']), reverse=True)
     announcements = []
     for index, event in enumerate(events):
         review = reviews.get(event['id'])
-        # A no-card disclosure has no review that could close it.
-        unresolved = event['action'] == 'no_card' or (review is not None and review['state'] not in scans.RESOLVED)
+        unresolved = review['state'] not in scans.RESOLVED if review else event['action'] == 'no_card'
         if index and not unresolved:
             continue
         event_path = path
@@ -142,8 +141,10 @@ def _announcements(conn, code, path):
     return announcements
 
 
-def _company(conn, code, held, position, saved):
-    card = scans.card_or_none(conn, code)
+def _company(conn, code, held, position, saved, history):
+    events = scans.events(conn, code=code)
+    reviews = scans.event_reviews(conn, code, company_events=events, include_no_card=True)
+    card = scans.card_or_none(conn, code, history=history, reviews=reviews)
     gaps = []
     research = None
     path = f'/stock/{code}' if card else f'/stock/{code}/overview'
@@ -157,7 +158,7 @@ def _company(conn, code, held, position, saved):
             gaps.append(card['check_failure']['reason'])
     elif held:
         gaps.append('暂无通过复核的研究报告')
-    if failure := scans.announcement_failure(conn, code):
+    if failure := history.announcements.get(code):
         gaps.append(failure['reason'])
 
     policy = _policy(saved, position) if position else None
@@ -167,7 +168,7 @@ def _company(conn, code, held, position, saved):
         gaps.append('本次持仓周期暂无可引用的监控评估')
     return dict(code=code, name=card['name'] if card else (position or {}).get('name'), path=path,
                 evidence_path=f'/stock/{code}/overview#evidence-{code}',
-                held=held, position=position, research=research, announcements=_announcements(conn, code, path),
+                held=held, position=position, research=research, announcements=_announcements(events, reviews, path),
                 policy=policy, gaps=gaps)
 
 
@@ -176,7 +177,7 @@ def _overview(conn, code=None):
     with db.transaction(conn, immediate=False):
         # An unverified account is unknown, including when public company research exists.
         try:
-            current = account_view.verified_current(conn, mirror.target_directory(conn))
+            current = account_view.verified_current(conn, mirror.target_directory(conn), verify_evidence=False)
         except policies.PolicyError as exc:
             if exc.status != 409:
                 raise
@@ -219,12 +220,13 @@ def _overview(conn, code=None):
                 nav_interval = _nav_summary(row)
         if nav_interval is None:
             account_gaps.append('暂无可查询的 NAV 区间凭证')
+        history = scans.ScanHistory(conn) if code is not None or (current and current['codes']) else None
         if code is not None:
             held = code in current['codes'] if current else None
-            result = _company(conn, code, held, positions.get(code), saved)
+            result = _company(conn, code, held, positions.get(code), saved, history)
             return result | {'account': account, 'nav_interval': nav_interval, 'account_gaps': account_gaps}
         return dict(account=account, policy=_policy(saved), nav_interval=nav_interval, gaps=account_gaps,
-                    holdings=[_company(conn, key, True, positions.get(key), saved)
+                    holdings=[_company(conn, key, True, positions.get(key), saved, history)
                               for key in current['codes']] if current else None)
 
 

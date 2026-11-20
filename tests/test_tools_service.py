@@ -1,5 +1,6 @@
 """Credential isolation and physical database access modes at the tool boundary."""
 from dataclasses import replace
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -131,6 +132,22 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     conn.execute('DELETE FROM api_keys WHERE role=?', ('research',))
     conn.close()
     assert client.get('/tools', headers=header(tokens['research'])).status_code == 401
+
+
+def test_read_call_queries_grant_once_after_pat_lookup(setup, monkeypatch):
+    _, tokens, client = setup
+    connect = sqlite3.connect
+    statements = []
+
+    def traced(*args, **kwargs):
+        conn = connect(*args, **kwargs)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(sqlite3, 'connect', traced)
+    response = client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
+    assert response.status_code == 200
+    assert len([sql for sql in statements if 'FROM api_keys' in sql]) == 2
 
 
 def test_method_search_refuses_owner_and_blank_query(setup):
