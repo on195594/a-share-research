@@ -250,36 +250,44 @@ def allow_notification(item: dict, history: list[dict], at: str, trade_days: lis
     return sum(start < date.fromisoformat(day) <= end for day in trade_days) >= 5
 
 
+def _add_origin(conn, items, code, origin):
+    code = stock_codes.normalize_key(code)
+    if code not in items:
+        items[code] = {'code': code, 'origin': origin, 'origins': [], **latest_close(conn, code)}
+    if origin not in items[code]['origins']:
+        items[code]['origins'].append(origin)
+
+
 def subscriptions(conn) -> list[dict]:
-    items = {r['code']: dict(r) for r in conn.execute(
+    items = {r['code']: dict(r, origins=[r['origin']]) for r in conn.execute(
         'SELECT code,origin,added_at,last_close,last_close_date FROM subscriptions ORDER BY code')}
     batch = conn.execute('SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL '
                          'ORDER BY frozen_at DESC, id DESC LIMIT 1').fetchone()
     if batch:
         for code in json.loads(batch['l5'])['codes']:
-            code = stock_codes.normalize_key(code)
-            if code not in items:
-                items[code] = {'code': code, 'origin': 'l5', **latest_close(conn, code)}
+            _add_origin(conn, items, code, 'l5')
     return list(items.values())
 
 
-def scan_scope(conn) -> list[dict]:
-    """Subscriptions plus every tracking batch's L5 and every company with a formal card.
+def scan_scope(conn, *, account_sources: bool = True) -> list[dict]:
+    """Keep every source for a code, while preserving the primary origin for older clients."""
+    from a_share_research.account import mirror
+    from a_share_research.policy import account_view
 
-    The extra codes are scanned, checked and queued for review only; /api/cards and the policy
-    candidate set stay on subscriptions().
-    """
-    items = {s['code']: s for s in subscriptions(conn)}
-    extra = [(code, 'l5') for batch in conn.execute(
-        "SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL AND status='tracking' ORDER BY frozen_at DESC, id DESC")
-        for code in json.loads(batch['l5'])['codes']]
-    extra += [(row['company_key'], 'card') for row in conn.execute(
-        f"SELECT DISTINCT r.company_key FROM reports r JOIN runs u ON u.id = r.run_id WHERE {db.FORMAL_REPORT} ORDER BY r.company_key")]
-    for code, origin in extra:
-        code = stock_codes.normalize_key(code)
-        if code not in items:
-            items[code] = {'code': code, 'origin': origin, **latest_close(conn, code)}
-    return list(items.values())
+    with db.transaction(conn, immediate=False):
+        items = {s['code']: s for s in subscriptions(conn)}
+        for batch in conn.execute("SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL "
+                                  "AND status='tracking' ORDER BY frozen_at DESC, id DESC"):
+            for code in json.loads(batch['l5'])['codes']:
+                _add_origin(conn, items, code, 'l5')
+        for row in conn.execute(f"SELECT DISTINCT r.company_key FROM reports r JOIN runs u ON u.id = r.run_id "
+                                f"WHERE {db.FORMAL_REPORT} ORDER BY r.company_key"):
+            _add_origin(conn, items, row['company_key'], 'card')
+        if account_sources and conn.execute('SELECT 1 FROM account_source WHERE id=1').fetchone():
+            current = account_view.verified_current(conn, mirror.target_directory(conn))
+            for code in current['codes']:
+                _add_origin(conn, items, code, 'holding')
+        return list(items.values())
 
 
 def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None) -> list[dict]:
@@ -690,6 +698,8 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str], *, history: list[dic
 
 
 def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
+    from a_share_research.policy.registry import PolicyError
+
     fixed_at = at
     at = at or db.now()
     source = source or MarketSources()
@@ -712,7 +722,14 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         log.exception('scan %s consensus prefetch failed', scan_id)
         summary['consensus_prefetch'] = {'covered': 0, 'missing': [], 'reason': str(exc)}
     try:
-        scope = scan_scope(conn)
+        try:
+            scope = scan_scope(conn)
+        except PolicyError as exc:
+            # A failed account verification leaves the public disclosure scan usable.
+            log.warning('scan %s could not verify the holding scope: %s', scan_id, exc)
+            summary['failures'].append({'code': None, 'stage': 'holding_scope',
+                                        'reason': '本次扫描未能核实账户持仓范围'})
+            scope = scan_scope(conn, account_sources=False)
         history = _done_scans(conn, scan_id)
         # A code joining an existing scan history looks back 30 days on its first pass; those
         # old filings are recorded and reviewed, but do not each push a pending-review notice.
@@ -842,7 +859,7 @@ def view(conn, scan_id: int) -> dict:
             'notify': summary.get('notify', [])}
 
 
-def weekly(conn, *, at: str | None = None) -> dict:
+def weekly(conn, *, at: str | None = None, account_sources: bool = True) -> dict:
     at = at or db.now()
     since = instant(at) - timedelta(days=7)
     items = [s | {'card': card_or_none(conn, s['code'])} for s in subscriptions(conn)]
@@ -862,8 +879,9 @@ def weekly(conn, *, at: str | None = None) -> dict:
     done = [r for r in rows if r['status'] == 'done']
     checkpoints = [{'code': item['code'], 'report_id': item['card']['report_id'], **checkpoint}
                    for item in items if item['card'] for checkpoint in item['card']['checkpoints']]
+    scope = scan_scope(conn, account_sources=account_sources)
     return {'version': service.VERSION, 'since': since.isoformat(), 'as_of': at, 'subscriptions': items,
-            'scan_scope': [{'code': s['code'], 'origin': s['origin']} for s in scan_scope(conn)],
+            'scan_scope': [{k: s[k] for k in ('code', 'origin', 'origins')} for s in scope],
             'status_distribution': dict(Counter((s['card'] or {}).get('status', '无论点卡') for s in items)),
             'zone_distribution': dict(Counter(((s['card'] or {}).get('current') or {}).get('current_zone') or '未测算' for s in items)),
             'events': recent, 'checkpoints': checkpoints, 'checkpoint_count': len(checkpoints),

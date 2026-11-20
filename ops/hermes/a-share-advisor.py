@@ -196,7 +196,7 @@ def render_scan(result: dict, held_codes: set[str] | None, public_base: str = ""
     failures = result["summary"].get("failures", [])
     if failures:
         lines.append("【研究扫描】部分代码未扫描成功（不等于无事件）：" + "；".join(
-            f"{f['code']} {f.get('stage')}：{f.get('reason')}" for f in failures))
+            f"{f['code'] or '账户范围'} {f.get('stage')}：{f.get('reason')}" for f in failures))
     checks = result["summary"].get("check_failures", [])
     if checks:
         lines.append("【研究扫描】披露核对未完成（机械检查；不等于披露符合预期；下次扫描自动重试）：" + "；".join(
@@ -506,7 +506,7 @@ def render_weekly(data: dict, opportunity_costs: list[dict] | None = None, oppor
     # Older services have no scan_scope; the line is simply absent then.
     extra = {s["code"] for s in data.get("scan_scope", [])} - {i["code"] for i in data["subscriptions"]}
     if extra:
-        lines.append(f"披露扫描另覆盖 {len(extra)} 家（已研究公司与仍在跟踪批次的入选，只扫描、不逐家列出）")
+        lines.append(f"披露扫描另覆盖 {len(extra)} 家（周报未逐家列出）")
     if data["events"]:
         lines.append(f"本周发现披露 {len(data['events'])} 条：" + "；".join(
             f"{e['code']} {e['title']}（{ACTIONS.get(e['action'], e['action'])}）" for e in data["events"][:10]))

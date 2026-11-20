@@ -11,9 +11,10 @@ import sqlite3
 
 import pytest
 
-from a_share_research import companies, db, disclosure_checks, scans, service, stance, valuation
+from a_share_research import companies, db, disclosure_checks, overview, scans, service, stance, valuation
 from support.continuation import BODY as CAPTURED_BODIES, load
 from support.valuation import BODY, RECORD, STORED, assumptions
+from test_policy_account_input import bound_book  # noqa: F401 (fixture)
 
 DATA = Path(__file__).parent / 'data'
 ANNOUNCEMENTS = sum((json.loads((DATA / f).read_text())['items'] for f in
@@ -699,6 +700,10 @@ def test_major_risk_bypasses_scan_cooldown_and_has_no_card_name(conn):
     assert second['status'] == 'done'
     assert len(second['notify']) == 1 and second['notify'][0]['reason'] == 'major_risk'
     assert not run_scan(conn, source)['notify']
+    announcements = overview.company_overview(conn, '600900')['announcements']
+    risks = {first['notify'][0]['event_id'], second['notify'][0]['event_id']}
+    assert len(risks) == 2
+    assert risks <= {e['id'] for e in announcements if e['action'] == 'no_card'}
 
 
 @pytest.mark.parametrize('case', ['saved', 'not-saved', 'correction'])
@@ -973,6 +978,35 @@ def test_wide_scope_adds_tracking_l5_and_card_companies_but_cards_api_keeps_poli
     # 000963/000651 have no captured close: the gap is a recorded failure, not silence.
     assert {(f['code'], f['stage']) for f in result['summary']['failures']} == {('000963', 'valuation'), ('000651', 'valuation')}
     assert {s['origin'] for s in scans.weekly(conn)['scan_scope']} == {'external', 'l5', 'card'}
+
+
+@pytest.mark.wide_scan_scope
+def test_bound_holding_and_public_scan_sources_merge_without_changing_subscriptions(bound_book):  # noqa: F811
+    _, conn, _, _, _ = bound_book
+    code = '600001'  # The existing bound-ledger fixture.
+    assert [(s['code'], s['origins']) for s in scans.scan_scope(conn)] == [(code, ['holding'])]
+    assert scans.weekly(conn, account_sources=False)['scan_scope'] == []
+    conn.execute('INSERT INTO subscriptions(code,added_at) VALUES (?,?)', (code, AT))
+    conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
+                 (AT, json.dumps({'codes': [code + '.SH']}), AT))
+    scan = run_scan(conn, CapturedSources([]))
+    [item] = scan['summary']['scope']
+    assert (item['code'], item['origin'], item['origins']) == (code, 'external', ['external', 'l5', 'holding'])
+    assert scans.weekly(conn)['scan_scope'] == [dict(code=code, origin='external', origins=item['origins'])]
+    assert scans.subscriptions(conn)[0]['origins'] == ['external', 'l5']
+
+
+@pytest.mark.wide_scan_scope
+def test_unverifiable_holding_scope_keeps_scanning_public_subscriptions(bound_book):  # noqa: F811
+    _, conn, _, directory, sha = bound_book
+    # Remove one required evidence file from the temporary ledger fixture.
+    (directory / sha).unlink()
+    scans.replace_subscriptions(conn, ['603606'], catalog=CATALOG)
+    result = run_scan(conn)
+    assert result['status'] == 'done'
+    assert [s['code'] for s in result['summary']['scope']] == ['603606']
+    assert result['summary']['announcements_succeeded'] == ['603606']
+    assert any(item['stage'] == 'holding_scope' for item in result['summary']['failures'])
 
 
 @pytest.mark.wide_scan_scope

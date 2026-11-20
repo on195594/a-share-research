@@ -1,13 +1,16 @@
-"""Migration v10 account tables, the pre-cutover mirror and the trade/research coverage query."""
+"""Account migrations, the pre-cutover mirror and journal trade/research coverage."""
 
 import sqlite3
-from datetime import date, timedelta
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from a_share_research import db
-from a_share_research.account import mirror, trades
+from a_share_research import db, gate
+from a_share_research.account import ledger, mirror, trades
+from a_share_research.account.reconciliation import Opening
+from test_account_ledger import batch, book as book, buy, submit
 from test_service_delivery import SUCCESS, saved
 
 SOURCE_SCHEMA = (Path(__file__).parent / "data/account_source_schema.sql").read_text()
@@ -188,17 +191,50 @@ def test_policy_activations_only_append(conn):
     assert [row[0] for row in conn.execute("SELECT policy FROM policy_activations")] == ["v0"]
 
 
-def test_research_available_at_trade_only_counts_formal_reports_dated_up_to_the_trade(conn):
-    _, report = saved(conn)
-    saved(conn, passed=False)
-    today = date.fromisoformat(db.now()[:10])
-    code = SUCCESS["code"]
-    events = [("buy", today - timedelta(days=1), code), ("buy", today, code), ("sell", today + timedelta(days=1), code),
-              ("dividend", today + timedelta(days=2), code), ("buy", today + timedelta(days=1), "000858")]
-    conn.executemany("INSERT INTO holding_events (holding_id, code, event_type, event_date, created_at)"
-                     " VALUES (1, ?, ?, ?, 'now')", [(c, kind, day.isoformat()) for kind, day, c in events])
+def test_research_coverage_uses_only_effective_bound_trades_at_their_execution_time(book, monkeypatch):  # noqa: F811
+    conn, principal, directory, sha = book
+    binding = dict(schema_version=1, account_id='a', account_scope='structural-scope', mirror_watermark={})
+    conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)',
+                 ('ledger', 'a' * 64, db.now(), gate.canonical(binding)))
+    assert trades.research_available_at_trade(conn) == []
+    with monkeypatch.context() as published:
+        published.setattr(db, 'now', lambda: SUCCESS['created_at'])
+        _, report_id = saved(conn)
+        saved(conn, passed=False)
+    ledger.initialize(conn, principal, 'b', Opening(positions={}, cash='200000'),
+                      datetime.fromisoformat('2026-10-01T00:00:00+08:00'), directory, sha, tolerance=Decimal('0'))
+    assert ledger.submit(conn, principal, 'b', batch(book), directory)['status'] == 'posted'
 
-    rows = trades.research_available_at_trade(conn)
-    assert [(row["event_type"], row["available_report_id"], row["same_day"]) for row in rows] == [
-        ("buy", None, None), ("buy", report, 1), ("sell", report, 0), ("buy", None, None)]
-    assert all(row["stated_report_id"] is None for row in rows)
+    # The captured report was published between these two trades on the same day.
+    early = buy(occurred_at='2026-10-27T10:00:00+08:00')
+    late = buy(kind='sell', broker_id='sale', occurred_at='2026-10-27T14:00:00+08:00', report_id=report_id)
+    assert submit(book, batch(book, events=[early, late], cash='200000', positions={}))['status'] == 'posted'
+    morning, afternoon = trades.research_available_at_trade(conn)
+    assert (morning['event_type'], morning['available_report_id'], morning['stated_report_id']) == ('buy', None, None)
+    assert (afternoon['event_type'], afternoon['available_report_id'], afternoon['stated_report_id']) == (
+        'sell', report_id, report_id)
+
+    correction = late.model_copy(update={'report_id': None})
+    dividend = buy(kind='dividend', shares=0, price=0, cash='2500', broker_id='div',
+                   occurred_at='2026-10-28T09:00:00+08:00')
+    other = buy(code='000858', broker_id='next', price='120', occurred_at='2026-10-29T10:00:00+08:00')
+    corrected = batch(book, version=1, events=[correction, dividend, other], voids=[afternoon['event_id']],
+                      cash='190500', positions={'000858': 100})
+    assert submit(book, corrected)['status'] == 'posted'
+    first, second, third = trades.research_available_at_trade(conn)
+    assert first == morning and second['event_id'] != afternoon['event_id']
+    assert (second['available_report_id'], second['same_day'], second['stated_report_id']) == (report_id, 1, None)
+    assert (third['company_key'], third['available_report_id']) == ('000858', None)
+
+
+@pytest.mark.parametrize(('mode', 'watermark'), [
+    ('mirror', '{}'),
+    ('ledger', '{'),
+    ('ledger', gate.canonical(dict(schema_version=1, account_id='missing', account_scope='structural-scope', mirror_watermark={}))),
+])
+def test_research_coverage_refuses_an_unbound_source(book, mode, watermark):  # noqa: F811
+    conn = book[0]
+    conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)', (mode, 'a' * 64, db.now(), watermark))
+    with pytest.raises(ledger.LedgerError, match='绑定') as error:
+        trades.research_available_at_trade(conn)
+    assert error.value.status == 409

@@ -1,5 +1,4 @@
 """Credential isolation and physical read-only behavior of the new tools boundary."""
-import sqlite3
 import subprocess
 import sys
 
@@ -12,12 +11,17 @@ from a_share_research.tools.server import create_app
 
 
 @pytest.fixture
-def setup(tmp_path):
+def account_enabled():
+    return False
+
+
+@pytest.fixture
+def setup(tmp_path, account_enabled):
     path = tmp_path / 'app.db'
     conn = db.connect(path)
     tokens = {role: api_keys.create(conn, role, role=role) for role in ('research', 'assistant', 'owner')}
     conn.close()
-    with TestClient(create_app(path)) as client:
+    with TestClient(create_app(path, account_shadow_enabled=account_enabled)) as client:
         yield path, tokens, client
 
 
@@ -25,15 +29,21 @@ def header(token):
     return {'Authorization': 'Bearer ' + token}
 
 
-def test_discovery_and_call_enforce_same_scope(setup):
+@pytest.mark.parametrize('account_enabled', [False, True])
+def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     path, tokens, client = setup
     assert client.get('/tools').status_code == 401
     for role, token in tokens.items():
         names = {t['name'] for t in client.get('/tools', headers=header(token)).json()['tools']}
         assert ('research.cards' in names) == (role != 'owner')
         assert ('policy.v0.read' in names) == (role == 'assistant')
+        for name in ('account.research_coverage', 'account.portfolio_overview', 'research.company_overview'):
+            assert (name in names) == (account_enabled and role == 'assistant')
         response = client.post('/tools/account.research_coverage', json={}, headers=header(token))
-        assert response.status_code == (200 if role == 'assistant' else 403)
+        expected = (409 if role == 'assistant' else 403) if account_enabled else 404
+        assert response.status_code == expected
+        if expected == 409:
+            assert response.json()['error']['code'] == 'conflict'
     conn = db.connect(path)
     conn.execute('DELETE FROM api_keys WHERE role=?', ('research',))
     conn.close()
@@ -79,11 +89,15 @@ def test_service_connection_is_physically_readonly(setup, monkeypatch):
 
 def test_in_process_dispatch_cannot_bypass_permissions(setup):
     path, tokens, _ = setup
-    conn = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)
-    conn.row_factory = sqlite3.Row
+    conn = db.connect(path)
     try:
         ctx = Context(conn, path, api_keys.authenticate(conn, tokens['research']))
         with pytest.raises(ToolError, match='凭据'):
             invoke(ctx, 'policy.v0.read', {'command': 'holdings'})
+        revoked = api_keys.authenticate(conn, tokens['assistant'])
+        conn.execute('DELETE FROM api_keys WHERE id=?', (revoked.key_id,))
+        with pytest.raises(ToolError, match='撤销') as error:
+            invoke(Context(conn, path, revoked, account_shadow_enabled=True), 'account.research_coverage', {})
+        assert error.value.status == 403
     finally:
         conn.close()

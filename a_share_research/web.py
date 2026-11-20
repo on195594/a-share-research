@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
-from a_share_research import stock_codes, api_keys
+from a_share_research import stock_codes, api_keys, overview
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 
@@ -361,6 +361,35 @@ def logout(request: Request, csrf: str = Form("")):
 
 
 # ---------- pages ----------
+
+def _owner_read(request, read, *args):
+    if not current_session(request):
+        return login_required()
+    try:
+        return read(conn, *args)
+    except service.RequestError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+@app.get("/portfolio/overview")
+def portfolio_overview(request: Request):
+    return _owner_read(request, overview.portfolio_overview)
+
+
+@app.get("/stock/{code}/overview")
+def company_overview(request: Request, code: str):
+    return _owner_read(request, overview.company_overview, code)
+
+
+@app.get("/policy/evaluations/{evaluation_id}")
+def monitor_detail(request: Request, evaluation_id: int):
+    return _owner_read(request, overview.monitor_detail, evaluation_id)
+
+
+@app.get("/account/receipts/{receipt_id}")
+def receipt_detail(request: Request, receipt_id: int):
+    return _owner_read(request, overview.receipt_detail, receipt_id)
+
 
 @app.get("/policy")
 def policy_page(request: Request):
@@ -763,7 +792,7 @@ def api_submit_scan_request(request: Request, request_id: str):
 def api_weekly_scan(request: Request):
     api_session(request)
     from a_share_research import scans
-    return scans.weekly(conn)
+    return scans.weekly(conn, account_sources=False)
 
 
 @app.get('/api/scans/{scan_id}')
