@@ -5,38 +5,26 @@ HTTP 按注册表的 access 选择数据库连接。单文件 CLI/MCP 客户端�
 开发验证使用已迁移至当前 schema 的数据库副本；版本由 `db.MIGRATIONS` 确定。服务启动不会创建库或执行迁移，默认监听回环地址 8621。开发实例启动示例：
 
 ```sh
-DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
+ASHARE_PUBLIC_MCP_URL=https://stock.keyi.win/mcp DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
   --control-socket /absolute/private/control/control.sock
 ```
 
-凭据由现有本地 `api_keys create NAME --role research|assistant|owner` 命令创建，只显示一次明文；开发时同样指定副本的 `DATA_DIR`。通过环境变量 `ASHARE_TOKEN` 提供给客户端，不在命令参数中传令牌：
+CLI 通过 HTTPS `/mcp` 调用工具。新接入为每个宿主或脚本单独签发 `assistant` PAT，本机入口为 `python -m a_share_research.api_keys create NAME --role assistant`，令牌仅显示一次。开发时指定副本的 `DATA_DIR`。私有 JSON 配置包含完整 `url` 与 `token`，可选 `connect` 指定本机直连地址，例如 `http://127.0.0.1:8621`。本机直连仍发送公网 Host，`url` 应与服务端的 `ASHARE_PUBLIC_MCP_URL` 一致。配置权限与五宿主安装步骤见[客户端准备手册](../../ops/clients/README.md)。
 
 ```sh
-python scripts/ashare.py tools
-python scripts/ashare.py call research_card --json '{"code":"600519"}'
-python scripts/ashare.py call research_methods --json '{"query":"低PE"}'
-python scripts/ashare.py call account_state --json '{}'  # 需启用账户工具并绑定账本
+ashare --config /absolute/private/client.json tools
+ashare --config /absolute/private/client.json call research_card --json '{"code":"600519"}'
 ```
 
-`ASHARE_URL` 缺省为 `http://127.0.0.1:8621`，客户端仅允许回环 IP、禁止代理和重定向，不自动重试。
+省略 `--config` 时读取 `~/.config/ashare/client.json`。CLI 使用 2026-07-28 无握手请求；发现返回 `{"tools":[...]}`，调用成功返回 `{"ok":true,"result":...}`。业务回执中的状态仍决定是否入账。失败退出码和恢复方法见[客户端准备手册](../../ops/clients/README.md)。
 
-宿主可改用 `python scripts/ashare.py --config /absolute/private/client.json tools`，文件仅含 `url` 与 `token`，须为属主私有常规文件且路径无符号链接。显式配置覆盖本次调用的环境变量，不把令牌放在命令参数里；同一全局参数适用于 `call` 和 `mcp`。五宿主配置包、独立凭据路径与统一 Skill 见[客户端准备手册](../../ops/clients/README.md)，生成包不会安装或启用宿主。
-
-### MCP stdio 客户端
-
-宿主通过 `python /absolute/path/scripts/ashare.py --config /absolute/private/client.json mcp` 启动桥接进程，也可沿用私有环境注入 `ASHARE_TOKEN` / `ASHARE_URL`；不把令牌写进命令参数、仓库或共享配置。此单文件仅用标准库，不能直接读取数据库，也不持模型凭据。宿主安装与启用按整段验收另行执行。
-
-支持 [MCP 生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)中的初始化、版本协商及 ping，协议版本为 2025-11-25 / 2025-06-18。[stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) 使用 UTF-8 JSON 行，stdout 仅输出协议消息；EOF 退出。单条输入上限 32 MiB，重复 JSON 键、非有限数字、批量请求和非法请求编号均拒绝。
-
-`tools/list` 每次向 HTTP 服务发现完整列表，映射注册表输入/输出 Schema、只读及幂等提示；无需 cursor，不宣称列表变更通知。`tools/call` 直接交给服务校验角色和参数；[工具结果](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)同时提供 structuredContent 和 JSON 文本。服务拒绝或连接失败以 isError 返回安全错误，未知工具/不存在资源的 HTTP 404 转为协议参数错误。写入业务回执须继续核对其中的状态，HTTP/MCP 成功本身不代表已入账。
-
-桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
+五宿主使用原生远程 MCP。CLI单次 HTTP 超时为 30 秒，无自动重试。
 
 - `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research_methods`）、提交研究与反馈、查询进度和操作月批。
 - 扫描范围含已核实持仓，外部订阅含 Hermes 同步的持仓镜像。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
   - `research_company_overview` 与 `account_portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
   - `account_research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
-- `owner`：本地政策登记与切换；影子开关启用时可读取政策身份、指南和保存的评估；没有 HTTP 切换工具，也不允许调用旧研究 API。
+- `owner` 用于本机政策登记与切换，远程 `/mcp` 拒绝该凭据。
 
 旧 Key 迁移后仍为 research。更换角色须创建新 Key 并撤销旧 Key。
 
@@ -54,7 +42,7 @@ python scripts/ashare.py call account_state --json '{}'  # 需启用账户工具
 
 `research` 和 `assistant` 均可调用 `research_methods` 按关键词检索已审核方法卡。结果包含适用条件原文、来源链接和完整卡片目录的 `catalog_sha256`。目录不可用时，`gaps` 说明原因。
 
-HTTP、远程 MCP、stdio 桥与 CLI 共用注册表的下划线规范名，例如 `research_card` 与 `account_submit`。`GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
+HTTP、远程 MCP 与 CLI 共用注册表的下划线规范名，例如 `research_card` 与 `account_submit`。`GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 
 工具标注 `access=write` 时 HTTP 使用 SQLite `mode=rw`，其余使用 `mode=ro`。参数错误返回 `invalid_arguments` 及字段路径和原因，例如 `batch.snapshot.market_values: 缺 600519 市值`。同一请求编号用于不同内容返回 409 / `conflict`；上游暂时不可用返回 503 / `unavailable`，可稍后用原请求重试。
 
@@ -216,9 +204,9 @@ ledger 采集校验资金与成本重放、政策期初、编号、活动周期�
 
 ### 跨激活 pending 的确定拒绝协议
 
-`policy_monitor`、`policy_stop_alert`、`policy_daily_brief` 共用 `_run`：始终先查 `(created_by,request_id)` 的既有回执，跨激活仍原样返回；请求键用于不同输入仍是普通 conflict。只有确认没有回执、原 expected_activation_id 是已存在的前驱且 current 确实改变、未写评估时，返回 **HTTP 409 / error.code=`policy_activation_changed`**；采集后事务重检同样适用。无激活、未知指针、身份不匹配、来源/账户范围冲突、权限错误均不冒用该码。原成功包格式不变。
+`policy_monitor`、`policy_stop_alert`、`policy_daily_brief` 共用 `_run`：始终先查 `(created_by,request_id)` 的既有回执，跨激活仍原样返回；请求键用于不同输入仍是普通 conflict。只有确认没有回执、原 expected_activation_id 是已存在的前驱且 current 确实改变、未写评估时，返回 **`policy_activation_changed`**；采集后事务重检同样适用。无激活、未知指针、身份不匹配、来源/账户范围冲突、权限错误均不冒用该码。原成功包格式不变。
 
-错误体仍为 `{ok:false,error:{code,message}}`。`scripts/ashare.py` 只对白名单的 409、非重复键且 ≤4096 字节错误体识别该码，专用退出码 **20**；错误 stdout 为空，不透传原始错误体，中文 stderr 不作为协议。503 paused/busy（同一有界白名单）与连接被拒（请求未到达处理器，如发布重启）映射为专用退出码 **21**，表示原请求可原样重发；超时、连接重置、坏包、通用 409 与旧服务仍按非零 1 失败处理，不保证未写入。MCP 的旧失败语义不变，不承诺自动转接。
+CLI 通过 `/mcp` 调用工具，收到 `isError` 回执中的 `policy_activation_changed` 时退出 **20**。发布暂停、名额已满或连接被拒时退出 **21**，可原样重试。超时、连接重置或响应损坏时退出 **22**，结果未知，只能用原身份和原请求恢复。失败时 stdout 为空，完整分类见[客户端退出码表](../../ops/clients/README.md#cli-与本机-cron)。`/tools` REST 仅作热备至段 4a。
 
 Hermes helper 将 CLI 退出码 20 映射为 `policy_activation_changed`（三消费者每轮最多封存/转接一次），将退出码 21 映射为 `service_unavailable`（仅止损脚本在 10 分钟宽限内保留 pending 静默跳过，日报与顾问仍按普通失败处理）；状态、原回执优先级、过期与通知边界见 [宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。服务端先部署，CLI、helper、调用方再同步；回退到旧服务/CLI 时安全保留 pending，不能批量清空状态或回退旧对象不兼容的脚本。应用镜像发布不安装宿主客户端。
 

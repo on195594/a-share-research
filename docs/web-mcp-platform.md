@@ -133,7 +133,7 @@ registry 的规范名直接用 MCP 安全的下划线名（如 `research_card`�
 
 ### 4.9 退役
 
-退役 stdio 桥、`/tools` 业务 REST 与 web `/api` 中面向 Agent 的 JSON。`ashare` CLI 保留 `tools` / `call` 界面，内部改为 MCP 客户端（旧 CLI 拒绝 HTTPS 与带路径的 URL，只改默认地址不够）。Hermes 的 7 条定时任务与 5 个业务脚本（`a-share-advisor.py`、`a-share-monthly.py`、`a-share-stop-alert.py`、`a-share-daily-brief.py`、`a-share-benchmark.py`，以及共用的 `ashare_tools.py`）迁到 MCP，保留调度、预算、未完成请求记录、运行锁与通知去重；MCP 错误要区分“确定未写入”“发布暂停”与“超时、结果未知”，最后一种只能用原身份和原请求恢复；通知里给出凭据失效、发布暂停、政策异常等类别，手机上就能判断下一步。保留发布 `/ready`、OAuth 与上传页等 HTTP 路由。两家网页客户端与实际使用的脚本验收通过后，才删除旧路径。
+段 2 切换五宿主至原生远程 MCP 并移除 stdio 桥。段 4a 退役 `/tools` 业务 REST 与 web `/api` 中面向 Agent 的 JSON。`ashare` CLI 保留 `tools` / `call` 界面，内部改为 MCP 客户端（旧 CLI 拒绝 HTTPS 与带路径的 URL，只改默认地址不够）。Hermes 的 7 条定时任务与 5 个业务脚本（`a-share-advisor.py`、`a-share-monthly.py`、`a-share-stop-alert.py`、`a-share-daily-brief.py`、`a-share-benchmark.py`，以及共用的 `ashare_tools.py`）迁到 MCP，保留调度、预算、未完成请求记录、运行锁与通知去重；MCP 错误要区分“确定未写入”“发布暂停”与“超时、结果未知”，最后一种只能用原身份和原请求恢复；通知里给出凭据失效、发布暂停、政策异常等类别，手机上就能判断下一步。保留发布 `/ready`、OAuth 与上传页等 HTTP 路由。两家网页客户端与实际使用的脚本验收通过后，才删除旧路径。
 
 ## 5. 实施分段
 
@@ -143,9 +143,9 @@ registry 的规范名直接用 MCP 安全的下划线名（如 `research_card`�
 |---|---|---|---|
 | 0 能力与修复 | 研究受理移入 service；写连接按 `access` 选择；`RequestError` 映射与字段级参数错误；补研究、检索、反馈、扫描、订阅、月批操作与两个总览；扫描范围合并；`research_coverage` 改读新账本；Gate 只给写与采集占名额；`account_id` 可选；删除已取代工具 | 不迁移、不改配置；确定性测试加受影响的真实路径；可在 11-29 前发布 | 回退上一镜像，不涉数据 |
 | 1 迁移与配置 | 一次数据库迁移：grant 列与软撤销、OAuth 令牌表、NAV 区间引用表；共用有效性检查接入账本与政策写事务；服务端 H00906 取证；compose 与 `deploy.py` 同步（tools 入网、方法卡挂载、web 专属 grant）；锁定 `mcp` 2.x | 生产库副本预演迁移与完整性检查；迁移与配置变更按常设授权执行；本段不开放公网 `/mcp` | 旧镜像精确比较 schema 版本，迁移后不能回到旧镜像；故障时前向修复，或在无写入时按发布备份恢复。本段成为后续各段的回退基线 |
-| 2 公网 `/mcp` 与切换 | tools 上线 `/mcp`，规范名改下划线，`account_evidence_recent`；web 上线发现文档、OAuth 与授权管理页；nginx `location = /mcp`；`ashare` CLI 改为 MCP 客户端；确认无未完成扫描后切换 Hermes 与本机宿主 | nginx 路由按常设授权添加；Gemini 与 Claude.ai（所有者本人完成网页端登录与授权点击） 走通第 6 节第 4 项；Hermes 与 CLI 全部经 MCP 跑通；旧 `/api`、`/tools` 暂留作热备 | 撤掉 nginx 路由，回退段 1 镜像，Hermes 恢复旧脚本与凭据 |
+| 2 公网 `/mcp` 与切换 | tools 上线 `/mcp`，规范名改下划线，`account_evidence_recent`；web 上线发现文档、OAuth 与授权管理页；nginx `location = /mcp`；`ashare` CLI 改为 MCP 客户端；确认无未完成扫描后切换 Hermes 脚本与五宿主原生远程配置，移除 stdio 桥 | nginx 路由按常设授权添加；Gemini 与 Claude.ai（所有者本人完成网页端登录与授权点击） 走通第 6 节第 4 项；Hermes 与 CLI 全部经 MCP 跑通；旧 `/api`、`/tools` 暂留作热备 | 撤掉 nginx 路由，回退段 1 镜像，Hermes 恢复旧脚本与凭据，各宿主恢复旧 CLI 与配置备份 |
 | 3 Web 账户体验 | 手机组合页与公司页接入两个总览、多图上传页、预填记账表单、NAV 区间入口。增加 Web 方法卡检索入口。 | 手机尺寸真实浏览器与 Gemini 各走通第 6 节第 1 项 | 回退段 2 镜像 |
-| 4a 退役旧入口 | 删除 stdio 桥、`/tools` 业务 REST、`/api` Agent JSON 与 `agent:` 会话，撤销旧 `research` key，同步第 9 节文档 | 段 2 稳定运行至少一周，日志中已无旧路径调用 | 回退段 3 镜像 |
+| 4a 退役旧入口 | 删除 `/tools` 业务 REST、`/api` Agent JSON 与 `agent:` 会话，撤销旧 `research` key，同步第 9 节文档 | 段 2 稳定运行至少一周，日志中已无旧路径调用 | 回退段 3 镜像 |
 | 4b 知仓研究 | 第 4.3 节 `holdings_context` 全部内容与契约 8 | 12-04 月批验收之后、冻结窗口外；按 D 类完成第 6 节第 3 项 | 回退段 4a 镜像；契约 8 报告的记分需新镜像 |
 
 ## 6. 验收

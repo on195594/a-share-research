@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Standard-library client for the local a-share tools service."""
+"""Standard-library CLI for the a-share MCP endpoint."""
 import argparse
-from contextlib import contextmanager
-import ipaddress
+import http.client
 import json
 import math
 import os
@@ -15,15 +14,19 @@ import urllib.parse
 import urllib.request
 
 _TOOL_NAME = re.compile(r'[a-z][a-z0-9_]*')
+_VERSION = '2026-07-28'
+_VERSION_KEY = 'io.modelcontextprotocol/protocolVersion'
+_CAPABILITIES_KEY = 'io.modelcontextprotocol/clientCapabilities'
+_UNKNOWN = '结果未知，请先查询回执，只能用原身份和原请求恢复'
+_LIMIT = 8 * 1024 * 1024
 
 
-class ClientError(ValueError):
-    """Safe error message for the CLI."""
+class ClientError(Exception):
+    """A local diagnostic safe to show to a caller."""
 
-    def __init__(self, message, *, status=None, code=None):
+    def __init__(self, message, exit_code=1):
         super().__init__(message)
-        self.status = status
-        self.code = code
+        self.exit_code = exit_code
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -31,140 +34,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def valid_token(token):
-    return (isinstance(token,str) and bool(token) and token.isascii()
-            and not any(c.isspace() or ord(c)<32 for c in token))
-
-
-@contextmanager
-def configuration(filename):
-    """Load an explicitly selected private client file, without sourcing shell code."""
-    if filename is None:
-        yield
-        return
-    try:
-        path=Path(filename)
-        if not path.is_absolute() or any(p.is_symlink() for p in (path,*path.parents)):
-            raise ValueError('absolute regular path required')
-        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
-        with os.fdopen(fd,'rb') as stream:
-            info=os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o077:
-                raise ValueError('private owned file required')
-            raw=stream.read(16*1024+1)
-        if len(raw)>16*1024:
-            raise ValueError('oversized configuration')
-        settings=json.loads(raw,object_pairs_hook=unique_object,parse_constant=reject_constant,parse_float=finite_float)
-        if (not isinstance(settings,dict) or set(settings)!={'url','token'}
-                or not isinstance(settings['url'],str) or not valid_token(settings['token'])):
-            raise ValueError('invalid client configuration')
-        selected={'ASHARE_URL':base_url(settings['url']),'ASHARE_TOKEN':settings['token']}
-    except (OSError,ValueError,UnicodeError,RecursionError):
-        raise ClientError('客户端配置须为绝对路径的属主私有常规 JSON 文件，仅含回环 url 和有效 token') from None
-    previous={key:os.environ.get(key) for key in selected}
-    os.environ.update(selected)
-    try:
-        yield
-    finally:
-        for key,value in previous.items():
-            if value is None: os.environ.pop(key,None)
-            else: os.environ[key]=value
-
-
-def base_url(value):
-    try:
-        url = urllib.parse.urlsplit(value)
-        address = ipaddress.ip_address(url.hostname or '')
-        port = url.port
-        if (url.scheme != 'http' or not address.is_loopback or url.username is not None
-                or url.password is not None or url.path not in ('', '/') or url.query or url.fragment
-                or port == 0):
-            raise ValueError
-    except ValueError:
-        raise ClientError('ASHARE_URL 须为无路径、无凭据的本机回环 HTTP 地址') from None
-    return value.rstrip('/')
-
-
-def http_error(error):
-    """Translate bounded, known service codes without exposing raw error contents."""
-    with error:
-        detail = {}
-        if error.code in (400, 409, 422, 503):
-            try:
-                raw = error.read(4097)
-                if len(raw) <= 4096:
-                    body = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant,
-                                      parse_float=finite_float)
-                    if (isinstance(body, dict) and isinstance(body.get('error'), dict)
-                            and (error.code == 503 or body.get('ok') is False)):
-                        detail = body['error']
-            except (ValueError, UnicodeError, RecursionError, OSError):
-                pass  # Keep status-only guidance for malformed error envelopes.
-        code = detail.get('code')
-        if error.code == 409 and code == 'policy_activation_changed':
-            return ClientError('生效政策已变化；原请求确定未写入评估', status=409, code=code)
-        if (error.code in (400, 422) and code == 'invalid_arguments') or (error.code == 409 and code == 'conflict'):
-            reason = detail.get('message')
-            token = os.environ.get('ASHARE_TOKEN')
-            if isinstance(reason, str) and reason.strip() and reason.isprintable() and not (token and token in reason):
-                return ClientError(f'{reason}（HTTP {error.code}）', status=error.code, code=code)
-        if not 500 <= error.code < 600:
-            return ClientError(f'服务拒绝请求（HTTP {error.code}），请检查凭据、权限与参数', status=error.code)
-        message = '工具服务暂不可用，请检查服务状态'
-        if error.code == 503 and code in ('paused', 'busy'):
-            message = {'paused': '工具服务已暂停受理，恢复后可用原请求重试',
-                       'busy': '工具服务繁忙，稍后可用原请求重试'}[code]
-            return ClientError(f'{message}（HTTP 503）；未自动重试', status=503, code='service_unavailable')
-        if error.code == 503 and code == 'unavailable':
-            return ClientError('工具或上游服务暂不可用，稍后可用原请求重试（HTTP 503）；未自动重试',
-                               status=503, code=code)
-        return ClientError(f'{message}（HTTP {error.code}）；未自动重试', status=error.code)
-
-
-def request(path, payload=None):
-    url = base_url(os.environ.get('ASHARE_URL', 'http://127.0.0.1:8621'))
-    token = os.environ.get('ASHARE_TOKEN', '')
-    if not valid_token(token):
-        raise ClientError('请设置有效的 ASHARE_TOKEN')
-    try:
-        data = None if payload is None else json.dumps(payload, allow_nan=False).encode()
-    except (ValueError, RecursionError):
-        raise ClientError('工具参数包含无效数字或嵌套过深') from None
-    req = urllib.request.Request(url + path, data=data, headers={
-        'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
-    })
-    # Do not send local credentials through an inherited HTTP proxy or a redirect.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    try:
-        with opener.open(req, timeout=30) as response:
-            raw = response.read(8 * 1024 * 1024 + 1)
-        if len(raw) > 8 * 1024 * 1024:
-            raise ClientError('服务响应过大')
-        result = json.loads(raw, parse_constant=reject_constant, parse_float=finite_float, object_pairs_hook=unique_object)
-    except urllib.error.HTTPError as exc:
-        # Show only recognized service errors, never the raw HTTP response.
-        raise http_error(exc) from None
-    except (urllib.error.URLError, ConnectionRefusedError) as exc:
-        # Refused means no handler received the request (e.g. a release restart), so resending it is safe.
-        if isinstance(exc, ConnectionRefusedError) or isinstance(getattr(exc, 'reason', None), ConnectionRefusedError):
-            raise ClientError('无法连接工具服务；原请求可原样重试', code='service_unavailable') from None
-        raise ClientError('无法连接工具服务或请求超时；未自动重试') from None
-    except (TimeoutError, OSError):
-        raise ClientError('无法连接工具服务或请求超时；未自动重试') from None
-    except (ValueError, UnicodeError, RecursionError):
-        raise ClientError('服务返回无效 JSON') from None
-    if not isinstance(result, dict):
-        raise ClientError('服务响应须为 JSON 对象')
-    if path == '/tools':
-        if not isinstance(result.get('tools'), list):
-            raise ClientError('工具列表响应格式不兼容')
-    elif result.get('ok') is not True or not isinstance(result.get('result'), dict):
-        raise ClientError('工具调用失败或响应格式不兼容')
-    return result
-
-
 def reject_constant(value):
-    raise ValueError("non-standard JSON constant")
+    raise ValueError('non-standard JSON constant')
 
 
 def finite_float(value):
@@ -183,148 +54,211 @@ def unique_object(pairs):
     return result
 
 
-def rpc_error(request_id, code, message):
-    return {'jsonrpc': '2.0', 'id': request_id, 'error': {'code': code, 'message': message}}
+def parse_json(raw):
+    return json.loads(raw, parse_constant=reject_constant, parse_float=finite_float, object_pairs_hook=unique_object)
 
 
-class MCPBridge:
-    """Sequential stdio adapter; HTTP remains the sole permission/write boundary."""
+def configuration(filename):
+    """Read a private profile without putting its PAT in the process environment."""
+    try:
+        path = Path(filename)
+        if not path.is_absolute() or any(p.is_symlink() for p in (path, *path.parents)):
+            raise ValueError
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise ValueError
+            raw = stream.read(16 * 1024 + 1)
+        if len(raw) > 16 * 1024:
+            raise ValueError
+        settings = parse_json(raw)
+        if not isinstance(settings, dict) or not isinstance(settings.get('url'), str):
+            raise ValueError
+        url = settings['url']
+        if url.rstrip('/') in ('http://127.0.0.1:8621', 'http://127.0.0.1:8621/tools'):
+            raise ClientError('参数错误：请升级旧 /tools 配置，url 改为公网 HTTPS /mcp 地址；本机直连请另填 connect')
+        if set(settings) not in ({'url', 'token'}, {'url', 'token', 'connect'}):
+            raise ValueError
+        if (not re.fullmatch(r'https://(?:[A-Za-z0-9.-]+|\[[a-fA-F0-9:.]+\])(?::[0-9]+)?/mcp', url)
+                or urllib.parse.urlsplit(url).port == 0):
+            raise ValueError
+        if 'connect' in settings:
+            connect = settings['connect']
+            address = isinstance(connect, str) and re.fullmatch(r'http://(?:127\.0\.0\.1|\[::1\]):([0-9]{1,5})', connect)
+            if not address or not 1 <= int(address[1]) <= 65535:
+                raise ClientError('参数错误：connect 仅支持 http://127.0.0.1:端口 或 http://[::1]:端口')
+        token = settings['token']
+        if not isinstance(token, str) or not re.fullmatch(r'[!-~]+', token):
+            raise ClientError('凭据失效：请检查私有配置中的 PAT')
+    except (OSError, ValueError, RecursionError):
+        raise ClientError('参数错误：请检查私有配置的绝对路径、文件权限及 HTTPS /mcp 地址') from None
+    return settings
 
-    def __init__(self):
-        self.initialized = False
-        self.ready = False
 
-    def list_tools(self):
-        return [self.describe(tool) for tool in request('/tools')['tools']]
+def read_json_response(response, limit=_LIMIT):
+    raw = response.read(limit + 1)
+    size = response.headers.get('Content-Length')
+    if len(raw) > limit or (size is not None and int(size) != len(raw)):
+        raise ValueError('incomplete or oversized response')
+    return parse_json(raw.decode('utf-8'))
 
-    def handle(self, message):
-        if (not isinstance(message, dict) or message.get('jsonrpc') != '2.0'
-                or not isinstance(message.get('method'), str)
-                or 'result' in message or 'error' in message
-                or ('id' in message and type(message['id']) not in (int, str))):
-            return rpc_error(None, -32600, 'Invalid Request')
-        method, params = message['method'], message.get('params', {})
-        # Notifications never execute a tool or receive a response.
-        if 'id' not in message:
-            if method == 'notifications/initialized' and self.initialized and isinstance(params, dict):
-                self.ready = True
-            return None
-        request_id = message['id']
-        if not isinstance(params, dict):
-            return rpc_error(request_id, -32602, 'params must be an object')
-        if method == 'ping':
-            result = {}
-        elif method == 'initialize':
-            info = params.get('clientInfo')
-            if self.initialized:
-                return rpc_error(request_id, -32600, 'Already initialized')
-            if (not isinstance(params.get('protocolVersion'), str)
-                    or not isinstance(params.get('capabilities'), dict) or not isinstance(info, dict)
-                    or not all(isinstance(info.get(k), str) for k in ('name', 'version'))):
-                return rpc_error(request_id, -32602, 'Invalid initialize parameters')
-            version = params['protocolVersion']
-            self.initialized = True
-            result = {'protocolVersion': version if version in ('2025-06-18', '2025-11-25') else '2025-11-25',
-                      'capabilities': {'tools': {}},
-                      'serverInfo': {'name': 'ashare', 'version': '1'}}
-        elif not self.ready:
-            return rpc_error(request_id, -32600, 'Initialize before calling tools')
-        elif method == 'tools/list':
-            if set(params) - {'_meta'}:
-                return rpc_error(request_id, -32602, 'This server returns the full list; omit cursor')
+
+def argument_error(detail, token):
+    # Only project a validation field path, never free-form server diagnostics.
+    message = detail.get('message')
+    field = isinstance(message, str) and re.match(r'([a-zA-Z_][a-zA-Z0-9_.]{0,159}): ', message)
+    if field and token not in field[1]:
+        return ClientError(f'参数错误：请按工具定义核对字段 {field[1]}')
+    return ClientError('参数错误：请用 tools 核对工具 name 和 arguments 字段')
+
+
+def http_error(error, token):
+    with error:
+        if error.code in (401, 403):
+            return ClientError(f'凭据失效或权限不足（HTTP {error.code}），请核对授权')
+        if error.code == 429:
+            return ClientError('发布暂停或服务限流，稍后用原请求重试', 21)
+        if error.code in (400, 404, 503):
             try:
-                result = {'tools': self.list_tools()}
-            except ClientError as exc:
-                return rpc_error(request_id, -32603, str(exc))
-        elif method == 'tools/call':
-            name, arguments = params.get('name'), params.get('arguments', {})
-            if (set(params) - {'name', 'arguments', '_meta'} or not isinstance(name, str)
-                    or not _TOOL_NAME.fullmatch(name)
-                    or not isinstance(arguments, dict)):
-                return rpc_error(request_id, -32602, 'Invalid tool name or arguments')
-            try:
-                payload = request('/tools/' + name, arguments)['result']
-                result = {'content': [{'type': 'text', 'text': json.dumps(payload, ensure_ascii=False, allow_nan=False)}],
-                          'structuredContent': payload, 'isError': False}
-            except ClientError as exc:
-                if exc.status == 404:
-                    return rpc_error(request_id, -32602, str(exc))
-                result = {'content': [{'type': 'text', 'text': str(exc)}], 'isError': True}
-        else:
-            return rpc_error(request_id, -32601, 'Method not found')
-        return {'jsonrpc': '2.0', 'id': request_id, 'result': result}
-
-    @staticmethod
-    def describe(tool):
-        if (not isinstance(tool, dict)
-                or not all(isinstance(tool.get(k), str) for k in ('name', 'description'))
-                or not _TOOL_NAME.fullmatch(tool['name'])
-                or not all(isinstance(tool.get(k), dict) for k in ('input_schema', 'output_schema'))
-                or tool.get('access') not in ('read', 'write') or type(tool.get('idempotent')) is not bool):
-            raise ClientError('工具列表响应格式不兼容')
-        return {'name': tool['name'], 'description': tool['description'],
-                'inputSchema': tool['input_schema'], 'outputSchema': tool['output_schema'],
-                'annotations': {'readOnlyHint': tool['access'] == 'read', 'idempotentHint': tool['idempotent']}}
+                body = read_json_response(error, limit=4096)
+            except (OSError, http.client.HTTPException, ValueError, RecursionError):
+                body = None
+            detail = body.get('error') if isinstance(body, dict) else None
+            if (error.code in (400, 404) and isinstance(detail, dict) and body.get('jsonrpc') == '2.0'
+                    and detail.get('code') in (-32601, -32602)):
+                return argument_error(detail, token)
+            if error.code == 503 and isinstance(detail, dict):
+                if detail.get('code') == 'auth_unavailable':
+                    return ClientError('发布暂停或暂未受理：认证服务不可用，请稍后用原请求重试', 21)
+                if detail.get('code') == -32603 and detail.get('data') == {'code': 'paused'}:
+                    return ClientError('发布暂停，请稍后用原请求重试', 21)
+        if error.code == 408 or error.code >= 500:
+            return ClientError(_UNKNOWN, 22)
+        return ClientError(f'参数错误：服务拒绝请求（HTTP {error.code}），请核对地址、协议及参数')
 
 
-def serve_mcp(input_stream=None, output_stream=None):
-    """Read UTF-8 JSON lines until EOF. Never retry or roll back an admitted HTTP call."""
-    input_stream = input_stream if input_stream is not None else sys.stdin.buffer
-    output_stream = output_stream if output_stream is not None else sys.stdout.buffer
-    bridge = MCPBridge()
-    limit = 32 * 1024 * 1024  # Includes the largest evidence upload, plus its envelope.
-    while raw := input_stream.readline(limit + 1):
-        oversized = len(raw) > limit
+def request(settings, method, params):
+    """One POST, without a proxy, redirect, session, or automatic replay."""
+    params = params | {'_meta': {_VERSION_KEY: _VERSION, _CAPABILITIES_KEY: {}}}
+    message = {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}
+    url = settings['url']
+    headers = {'Authorization': 'Bearer ' + settings['token'], 'Host': urllib.parse.urlsplit(url).netloc,
+               'Accept': 'application/json', 'Content-Type': 'application/json'}
+    if 'connect' in settings:
+        url = settings['connect'] + '/mcp'
+    headers['MCP-Protocol-Version'] = _VERSION
+    headers['Mcp-Method'] = method
+    if method == 'tools/call':
+        headers['Mcp-Name'] = params['name']
+
+    try:
+        data = json.dumps(message, allow_nan=False).encode()
+    except (ValueError, RecursionError):
+        raise ClientError('参数错误：无效 JSON 或嵌套过深') from None
+    req = urllib.request.Request(url, data=data, headers=headers)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    try:
         try:
-            if oversized:
-                raise ValueError('oversized message')
-            message = json.loads(raw.decode('utf-8'), parse_constant=reject_constant,
-                                 parse_float=finite_float, object_pairs_hook=unique_object)
-        except (ValueError, UnicodeError, RecursionError):
-            response = rpc_error(None, -32700, 'Invalid JSON or message too large')
-        else:
-            response = bridge.handle(message)
-        if response is not None:
-            output_stream.write((json.dumps(response, ensure_ascii=False, allow_nan=False) + '\n').encode('utf-8'))
-            output_stream.flush()
-        if oversized:
-            return 1
-    return 0
+            response = opener.open(req, timeout=30)
+        except urllib.error.HTTPError as exc:
+            raise http_error(exc, settings['token']) from None
+        with response:
+            reply = read_json_response(response)
+        if (not isinstance(reply, dict) or reply.get('jsonrpc') != '2.0'
+                or type(reply.get('id')) is not int or reply['id'] != 1
+                or ('result' in reply) == ('error' in reply)
+                or not isinstance(reply.get('error', reply.get('result')), dict)):
+            raise ValueError('invalid JSON-RPC response')
+    except (OSError, http.client.HTTPException, ValueError, RecursionError) as exc:
+        if isinstance(exc, ConnectionRefusedError) or isinstance(getattr(exc, 'reason', None), ConnectionRefusedError):
+            raise ClientError('发布暂停或暂未受理：连接被拒，请稍后用原请求重试', 21) from None
+        raise ClientError(_UNKNOWN, 22) from None
+    return reply
+
+
+def tool_error(code, name):
+    if code == 'policy_activation_changed':
+        return ClientError('政策异常：生效政策已变化，原请求确定未写入', 20)
+    if code == 'paused':
+        return ClientError('发布暂停，请稍后用原请求重试', 21)
+    if code == 'busy':
+        return ClientError('发布暂停或暂未受理：名额已满，请稍后用原请求重试', 21)
+    if code in ('unauthorized', 'forbidden'):
+        return ClientError('凭据失效或权限不足，请核对授权')
+    if code in ('conflict', 'not_found') and name.startswith('policy_'):
+        return ClientError('政策异常，请核对当前政策、请求编号与评估状态')
+    if code in ('conflict', 'not_found'):
+        return ClientError('参数错误，请核对工具定义、请求编号与当前记录')
+    return ClientError(_UNKNOWN, 22)
+
+
+def cli_result(settings, method, params):
+    reply = request(settings, method, params)
+    if 'error' in reply:
+        error = reply['error']
+        if error.get('code') == -32603 and error.get('data') == {'code': 'paused'}:
+            raise tool_error('paused', '')
+        raise ClientError(_UNKNOWN, 22)
+    result = reply['result']
+    try:
+        if result.get('resultType', 'complete') != 'complete':
+            raise ValueError
+        if method == 'tools/list':
+            if not isinstance(result.get('tools'), list):
+                raise ValueError
+            tools = []
+            for tool in result['tools']:
+                annotations = tool['annotations']
+                extra = tool['_meta']['win.keyi.stock/registry']
+                tools.append(dict(name=tool['name'], description=tool['description'], input_schema=tool['inputSchema'],
+                                  output_schema=tool['outputSchema'], access='read' if annotations['readOnlyHint'] else 'write',
+                                  idempotent=annotations['idempotentHint'], version=extra['version'],
+                                  collects=extra['collects'], errors=extra['errors']))
+            return {'tools': tools}
+        if result.get('isError') is True:
+            block, = result['content']
+            if block['type'] != 'text' or result.get('structuredContent') is not None:
+                raise ValueError
+            detail = parse_json(block['text'])['error']
+            if detail['code'] == 'invalid_arguments':
+                raise argument_error(detail, settings['token'])
+            raise tool_error(detail['code'], params['name'])
+        if result.get('isError', False) is not False or not isinstance(result.get('structuredContent'), dict):
+            raise ValueError
+        return {'ok': True, 'result': result['structuredContent']}
+    except (KeyError, TypeError, ValueError, RecursionError):
+        raise ClientError(_UNKNOWN, 22) from None
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',help='绝对路径的私有 JSON 客户端配置，仅含 url/token；显式选择时覆盖本次环境值')
+    parser.add_argument('--config', default=str(Path.home() / '.config/ashare/client.json'), help='私有 JSON 配置的绝对路径')
     actions = parser.add_subparsers(dest='action', required=True)
     actions.add_parser('tools')
-    actions.add_parser('mcp', help='MCP stdio bridge to the local HTTP tools service')
     call = actions.add_parser('call')
     call.add_argument('name')
     call.add_argument('--json', default='{}', dest='arguments')
     args = parser.parse_args(argv)
     try:
-        with configuration(args.config):
-            if args.action == 'mcp':
-                return serve_mcp()
-            if args.action == 'tools':
-                result = request('/tools')
-            else:
-                if not _TOOL_NAME.fullmatch(args.name):
-                    raise ClientError('工具名称格式无效')
-                try:
-                    payload = json.loads(args.arguments, parse_constant=reject_constant,
-                                         parse_float=finite_float,object_pairs_hook=unique_object)
-                    if not isinstance(payload, dict):
-                        raise ValueError
-                except (ValueError,RecursionError):
-                    raise ClientError('--json 须为有效 JSON 对象') from None
-                result = request('/tools/' + args.name, payload)
-            print(json.dumps(result, ensure_ascii=False))
-            return 0
+        settings = configuration(args.config)
+        if args.action == 'tools':
+            result = cli_result(settings, 'tools/list', {})
+        else:
+            if not _TOOL_NAME.fullmatch(args.name):
+                raise ClientError('参数错误：工具名称无效')
+            try:
+                payload = parse_json(args.arguments)
+                if not isinstance(payload, dict):
+                    raise ValueError
+            except (ValueError, RecursionError):
+                raise ClientError('参数错误：--json 须为有效 JSON 对象') from None
+            result = cli_result(settings, 'tools/call', {'name': args.name, 'arguments': payload})
+        sys.stdout.write(json.dumps(result, ensure_ascii=False, allow_nan=False) + '\n')
+        return 0
     except ClientError as exc:
-        print(str(exc), file=sys.stderr)
-        # Dedicated exit statuses; other CLI/service failures remain ambiguous (1).
-        return {'policy_activation_changed': 20, 'service_unavailable': 21}.get(exc.code, 1)
+        sys.stderr.write(str(exc) + '\n')
+        return exc.exit_code
 
 
 if __name__ == '__main__':

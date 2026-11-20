@@ -35,6 +35,7 @@ def _describe(tool: Tool) -> types.Tool:
     spec = tool.describe()
     return types.Tool(name=tool.name, description=spec['description'],
                       input_schema=spec['input_schema'], output_schema=spec['output_schema'],
+                      meta={'win.keyi.stock/registry': {key: spec[key] for key in ('version', 'collects', 'errors')}},
                       annotations=types.ToolAnnotations(read_only_hint=spec['access'] == 'read',
                                                         destructive_hint=tool.destructive,
                                                         idempotent_hint=spec['idempotent']))
@@ -80,7 +81,7 @@ class _BearerEndpoint:
                 payload = result.model_dump(by_alias=True, exclude_none=True, exclude=set() if modern else {'result_type'})
                 return JSONResponse({'jsonrpc': '2.0', 'id': rpc.id, 'result': payload})
         return JSONResponse({'jsonrpc': '2.0', 'id': None,
-                             'error': {'code': types.INTERNAL_ERROR, 'message': _PAUSED}},
+                             'error': {'code': types.INTERNAL_ERROR, 'message': _PAUSED, 'data': {'code': 'paused'}}},
                             status_code=503, headers={'Retry-After': '60'})
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -102,7 +103,8 @@ class _BearerEndpoint:
             return await response(scope, receive, send)
         except sqlite3.Error:
             logger.exception('MCP credential database unavailable')
-            response = JSONResponse({'error': '认证服务暂不可用，请稍后用原请求重试'}, status_code=503)
+            response = JSONResponse({'error': {'code': 'auth_unavailable', 'message': '认证服务暂不可用，请稍后用原请求重试'}},
+                                    status_code=503)
             return await response(scope, receive, send)
         if principal is None:
             response = JSONResponse({'error': '需要有效的 Bearer 凭据'}, status_code=401, headers=self.challenge)
@@ -157,7 +159,7 @@ def mcp_router(resource: str, connection, context, gate: Gate) -> APIRouter:
         try:
             return await run_in_threadpool(listed, ctx.request)
         except ControlError:
-            raise MCPError(types.INTERNAL_ERROR, _PAUSED) from None
+            raise MCPError(types.INTERNAL_ERROR, _PAUSED, {'code': 'paused'}) from None
         except ToolError as exc:
             raise MCPError(types.INTERNAL_ERROR, str(exc)) from None
         except Exception:
@@ -206,7 +208,7 @@ def mcp_router(resource: str, connection, context, gate: Gate) -> APIRouter:
         except ValidationError as exc:
             raise MCPError(types.INVALID_PARAMS, validation_message(exc.errors(include_input=False))) from None
         except ControlError:
-            raise MCPError(types.INTERNAL_ERROR, _PAUSED) from None
+            raise MCPError(types.INTERNAL_ERROR, _PAUSED, {'code': 'paused'}) from None
         except MCPError:
             raise
         except Exception:
