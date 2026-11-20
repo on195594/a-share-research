@@ -1,6 +1,5 @@
 """Credential isolation and physical database access modes at the tool boundary."""
 from dataclasses import replace
-import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,7 +35,8 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     assert client.get('/tools').status_code == 401
     for role, token in tokens.items():
         names = {t['name'] for t in client.get('/tools', headers=header(token)).json()['tools']}
-        assert ('research.cards' in names) == (role != 'owner')
+        for name in ('research.cards', 'research.methods'):
+            assert (name in names) == (role != 'owner')
         for name in ('account.research_coverage', 'account.portfolio_overview', 'research.company_overview'):
             assert (name in names) == (account_enabled and role == 'assistant')
         response = client.post('/tools/account.research_coverage', json={}, headers=header(token))
@@ -48,6 +48,15 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     conn.execute('DELETE FROM api_keys WHERE role=?', ('research',))
     conn.close()
     assert client.get('/tools', headers=header(tokens['research'])).status_code == 401
+
+
+def test_method_search_refuses_owner_and_blank_query(setup):
+    _, tokens, client = setup
+    endpoint = '/tools/research.methods'
+    assert client.post(endpoint, json={'query': '低PE'}, headers=header(tokens['owner'])).status_code == 403
+    invalid = client.post(endpoint, json={'query': '  '}, headers=header(tokens['research']))
+    assert invalid.status_code == 422
+    assert 'query' in invalid.json()['error']['message']
 
 
 def test_validation_errors_identify_field_and_reason(setup):

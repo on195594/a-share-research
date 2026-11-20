@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Self
@@ -59,9 +59,12 @@ class Settings:
     github_client_id: str
     github_client_secret: str
     github_user_id: str
+    tools_url: str = ""
+    tools_token: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls) -> Self:
+        tools_url = os.environ.get("ASHARE_TOOLS_URL", "").strip()
         settings = cls(
             base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
             session_secret=os.environ.get("SESSION_SECRET", ""),
@@ -69,10 +72,21 @@ class Settings:
             github_client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
             github_client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
             github_user_id=os.environ.get("GITHUB_USER_ID", ""),
+            tools_url=tools_url.rstrip("/"),
+            tools_token=os.environ.get("ASHARE_TOOLS_TOKEN", "").strip(),
         )
         url = urlparse(settings.base_url)
         if url.scheme not in ("http", "https") or not url.hostname:
             raise SystemExit("PUBLIC_BASE_URL must be an absolute http(s) URL")
+        if bool(tools_url) != bool(settings.tools_token):
+            raise SystemExit("ASHARE_TOOLS_URL and ASHARE_TOOLS_TOKEN must be configured together")
+        if tools_url:
+            try:
+                endpoint = urlparse(tools_url)
+            except ValueError:
+                raise SystemExit("ASHARE_TOOLS_URL is malformed") from None
+            if endpoint.scheme not in ("http", "https") or not endpoint.hostname or endpoint.username is not None:
+                raise SystemExit("ASHARE_TOOLS_URL must be an absolute http(s) URL without userinfo")
         if len(settings.session_secret) < 32:
             raise SystemExit("SESSION_SECRET must be at least 32 characters")
         if settings.dev_login and url.hostname not in ("127.0.0.1", "localhost"):

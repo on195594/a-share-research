@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Annotated, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from requests import RequestException
 
 from a_share_research import api_keys, service
@@ -46,6 +47,10 @@ class Company(Arguments):
 class Report(Arguments):
     report_id: int = Field(gt=0)
     compact: bool = True
+
+
+class MethodQuery(Arguments):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 
 
 class PolicyGuide(Arguments):
@@ -235,6 +240,19 @@ def _research_coverage(ctx: Context, args: Arguments) -> TradeRows:
     return TradeRows(rows=trades.research_available_at_trade(ctx.connection))
 
 
+def _research_methods(ctx: Context, args: MethodQuery) -> Payload:
+    from a_share_research.research_tools import active_methods_digest, method_cards, research_methods
+
+    root = os.environ.get('METHOD_CARDS_DIR')
+    if not root or not Path(root).is_dir():
+        return Payload(data=dict(cards=[], catalog_sha256=None, gaps=['方法卡目录未挂载，请检查 METHOD_CARDS_DIR']))
+    catalog = method_cards(root)
+    if not catalog:
+        return Payload(data=dict(cards=[], catalog_sha256=None, gaps=['方法卡目录没有可用卡片，请检查已审核卡的 stable 状态']))
+    return Payload(data=dict(cards=research_methods(ctx.connection, args.query, catalog=catalog),
+                             catalog_sha256=active_methods_digest(ctx.connection, catalog=catalog), gaps=[]))
+
+
 def _company_overview(ctx: Context, args: Company) -> Payload:
     from a_share_research.overview import company_overview
     ledger.authorize(ctx.connection, ctx.principal)
@@ -320,6 +338,8 @@ TOOLS = {tool.name: tool for tool in (
          lambda c, a: Payload(data=service.company_cards(c.connection))),
     Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,
          lambda c, a: Payload(data=service.company_card(c.connection, a.code))),
+    Tool('research.methods', '按空格分隔的关键词检索最多五张已审核方法卡，返回标题、含适用条件的正文、来源链接与目录哈希',
+         _READERS, MethodQuery, Payload, _research_methods),
     Tool('research.report', '读取报告及证据', _READERS, Report, Payload,
          lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
     Tool('account.research_coverage', '分开读取成交明确采用的报告与成交时可查的报告',
