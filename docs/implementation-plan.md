@@ -37,13 +37,24 @@
 | 新增 registry 操作、总览、扫描范围、Hermes/CLI 客户端改造 | `gpt-6.2-astra` high | Gemini 4 Neon (High) |
 | 改名、删除已取代工具、文档同步、页面样式 | `gpt-6.2-sol` medium | Gemini 3.8 Flash (High)，纯文档与机械改名由主导 Agent 自审 |
 
-段 0 任务（11-20 派发）：
+段 0 任务（11-20 派发，代码已合入 `bc9f3f6`）：
 
 | 任务 | 范围 | 依赖 | 状态 |
 |---|---|---|---|
-| T0.1 registry 基础 | 写连接按 `access`；`RequestError` 映射；字段级参数错误；Gate 只给写与采集占名额；`account_id` 可选；删除已取代工具（先查调用方） | — | 进行中 |
-| T0.2 总览与范围 | `company_overview`、`portfolio_overview`；扫描范围合并已核实持仓、显式关注与冻结候选并保留来源；`research_coverage` 改读当前账本 | — | 进行中 |
-| T0.3 研究受理与操作 | 研究受理移入 service（先按 `request_id` 重放、再查巨潮）；研究、检索、反馈、扫描、订阅、月批 registry 操作 | T0.1 | 未开始 |
+| T0.1 registry 基础 | 写连接按 `access`；`RequestError` 映射；字段级参数错误；Gate 只给写与采集占名额；`account_id` 可选；删除已取代工具（先查调用方） | — | 已合入 `df47dd0` |
+| T0.2 总览与范围 | `company_overview`、`portfolio_overview`；扫描范围合并已核实持仓、显式关注与冻结候选并保留来源；`research_coverage` 改读当前账本 | — | 已合入 `649786e` |
+| T0.3 研究受理与操作 | 研究受理移入 service（先按 `request_id` 重放、再查巨潮）；研究、检索、反馈、扫描、订阅、月批 registry 操作；扫描与订阅属账户数据，只开放给启用账户的 assistant | T0.1 | 已合入 `bc9f3f6` |
+
+段 1 任务（11-20 派发，分支 `wm/t11`，段 0 发布后合入 main）：
+
+| 任务 | 范围 | 状态 |
+|---|---|---|
+| T1.1 迁移 v25 | grant 列与软撤销、共用有效性检查（认证、账本、政策、每次工具调用）、OAuth 存储（OAuth grant 只能是 assistant 且无 PAT）、NAV 区间引用表；生产库副本预演通过（行、自增高水位、触发器、外键守恒，重跑空操作） | 已提交 `62b220e` |
+| T1.2 服务端 H00906 取证 | `account.nav.evaluate` 可省略指数证据，由 tools 采集存证；采集占 Gate 名额 | 审查中 |
+| T1.3 配置与方法卡 | tools 入 `nginx-network`；web/tools 方法卡只读挂载；`deploy.py` 白名单与挂载检查；web 专属 grant 的 `.env.web` 变量；`research.methods` | 审查中 |
+| `mcp` 锁定 | `mcp` 2.3.0（与 FastAPI 0.156.4、Starlette 1.9.0、Pydantic 2.14.1 同锁） | 已提交 `e42e86f` |
+
+段 1 合入时须处理：v25 后 OAuth grant 无 PAT 摘要、撤销清空摘要，研究与扫描的调用身份改为“有 PAT 摘要沿用 `key:`，否则 `grant:<id>`”。段 2 清空 Hermes `external` 持仓镜像时，一并核对 `research.cards` 对 research 角色返回的订阅来源。
 
 ### 合一重构收尾
 
