@@ -57,6 +57,13 @@ class Valuation(_Value):
     total_assets: Annotated[Money, Field(ge=0)]
 
 
+def validate_endpoints(start: Valuation, end: Valuation) -> None:
+    if start.as_of >= end.as_of or start.total_assets <= 0:
+        raise ValueError('interval requires ordered endpoints and positive initial assets')
+    if any(point.as_of.time() != time(15) for point in (start, end)):
+        raise ValueError('endpoints must be Shanghai close at 15:00:00')
+
+
 class Flow(_Value):
     event_id: Annotated[StrictInt, Field(gt=0)]
     occurred_at: Timestamp
@@ -95,10 +102,7 @@ class Inputs(_Value):
 
     @model_validator(mode='after')
     def interval(self):
-        if self.start.as_of >= self.end.as_of or self.start.total_assets <= 0:
-            raise ValueError('interval requires ordered endpoints and positive initial assets')
-        if any(point.as_of.time() != time(15) for point in (self.start, self.end)):
-            raise ValueError('endpoints must be Shanghai close at 15:00:00')
+        validate_endpoints(self.start, self.end)
         if len({flow.event_id for flow in self.flows}) != len(self.flows):
             raise ValueError('duplicate external flow event_id')
         if len({flow.occurred_at for flow in self.flows}) != len(self.flows):

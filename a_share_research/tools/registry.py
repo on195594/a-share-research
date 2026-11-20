@@ -212,6 +212,16 @@ def _evidence_directory(ctx: Context) -> Path:
     return ctx.database.resolve().parent / 'account-evidence'
 
 
+def _collect_nav_index(start: str, end: str) -> dict:
+    from a_share_research.core.providers import TushareMarketDataProvider
+    from a_share_research.policy.benchmark import _response
+
+    response = _response(lambda: TushareMarketDataProvider().fetch_index_bars('H00906.CSI', start, end),
+                         kind='index', source='tushare.index_daily')
+    return dict(schema_version=1, code='H00906.CSI', currency='CNY', return_type='total_return',
+                requested_dates=[start, end], **response)
+
+
 def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
     try:
         content = base64.b64decode(args.content_base64, validate=True)
@@ -246,10 +256,11 @@ TOOLS = {tool.name: tool for tool in (
     Tool('account.nav.capture', '冻结账户账本与估值出处，返回资料哈希；不认定资金流水完整',
          frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=nav.capture(c.connection,c.principal,a.account_id)), account=True),
-    Tool('account.nav.evaluate', '按完整资金声明、明确流前估值和H00906收盘证据保存精确单位净值对照；缺项拒绝',
+    Tool('account.nav.evaluate', '按完整资金声明、明确流前估值保存净值对照；省略指数证据时采集 H00906 收盘值',
          frozenset({'assistant'}), AccountNav, Payload,
-         lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,_evidence_directory(c))),
-         access='write', account=True),
+         lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,
+                                               _evidence_directory(c), collect_index=_collect_nav_index)),
+         access='write', account=True, collects=True),
     Tool('account.nav.replay', '按哈希重放保存的净值输入与结果；不代表当前账户状态或券商认证',
          frozenset({'assistant'}), AccountNavReplay, Payload,
          lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
