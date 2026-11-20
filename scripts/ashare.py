@@ -144,7 +144,9 @@ def request(settings, method, params):
     message = {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}
     url = settings['url']
     headers = {'Authorization': 'Bearer ' + settings['token'], 'Host': urllib.parse.urlsplit(url).netloc,
-               'Accept': 'application/json', 'Content-Type': 'application/json'}
+               'Accept': 'application/json', 'Content-Type': 'application/json',
+               # Cloudflare refuses the default Python-urllib agent at the edge (HTTP 403).
+               'User-Agent': 'ashare-cli/' + _VERSION}
     if 'connect' in settings:
         url = settings['connect'] + '/mcp'
     headers['MCP-Protocol-Version'] = _VERSION
