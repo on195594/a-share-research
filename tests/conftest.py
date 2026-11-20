@@ -47,6 +47,29 @@ def isolate_tushare_cache(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def web(tmp_path, monkeypatch):
+    import importlib
+    import sys
+
+    import a_share_research
+    from a_share_research import db
+    from support.continuation import load
+
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    monkeypatch.setenv("DEV_LOGIN", "1")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "http://127.0.0.1:8627")
+    monkeypatch.setenv("SESSION_SECRET", "isolated-web-connection-" * 2)
+    monkeypatch.setattr(a_share_research, "web", None, raising=False)
+    monkeypatch.delitem(sys.modules, "a_share_research.web", raising=False)
+    module = importlib.import_module("a_share_research.web")
+    load(module.conn)
+    try:
+        yield module
+    finally:
+        module.conn.close()
+
+
+@pytest.fixture
 def server(tmp_path):
     from pathlib import Path
     import socket

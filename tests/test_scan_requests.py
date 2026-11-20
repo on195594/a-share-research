@@ -8,8 +8,10 @@ import time
 
 import pytest
 import requests
+from fastapi.testclient import TestClient
 
 from a_share_research import api_keys, db, scans, service
+from a_share_research.tools.server import create_app
 
 
 REQUESTER = 'key:' + 'a' * 64
@@ -115,6 +117,27 @@ def test_request_key_boundary_and_punctuation(conn):
     assert len(key) == 128
     scan_id = scans.submit_request(conn, OTHER_REQUESTER, key)
     assert scans.submit_request(conn, OTHER_REQUESTER, key) == scan_id
+
+
+def test_tools_resume_web_scan_with_same_credential_after_another_scan_starts(web, tmp_path):
+    token = api_keys.create(web.conn, 'hermes-resume-test', role='assistant')
+    headers = {'Authorization': f'Bearer {token}'}
+    key = 'lost-scan-response'
+    with TestClient(web.app, base_url=web.settings.base_url, headers=headers) as client:
+        response = client.put(f'/api/scan-requests/{key}')
+    assert response.status_code == 202
+    scan_id = response.json()['scan_id']
+    web.conn.execute("UPDATE scans SET status='done',finished_at=? WHERE id=?", (db.now(), scan_id))
+    assert scans.submit(web.conn) != scan_id
+
+    with TestClient(create_app(tmp_path / 'app.db', account_shadow_enabled=True), headers=headers) as client:
+        resumed = client.post('/tools/research.scan.request', json={'request_id': key})
+    assert resumed.status_code == 200
+    result = resumed.json()['result']['data']
+    assert (result['scan_id'], result['request_id'], result['status'], result['path']) == (
+        scan_id, key, 'done', f'/scans/{scan_id}')
+    mapping, = web.conn.execute('SELECT requester,scan_id FROM scan_requests')
+    assert tuple(mapping) == ('key:' + hashlib.sha256(token.encode()).hexdigest(), scan_id)
 
 
 def test_api_retry_after_lost_response_and_bad_requests(server):

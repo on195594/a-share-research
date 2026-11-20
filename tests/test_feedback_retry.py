@@ -8,7 +8,7 @@ import pytest
 from starlette.requests import Request
 
 import a_share_research
-from a_share_research import db, reading, service
+from a_share_research import companies, db, reading, service
 from a_share_research.login_token import mint
 from support.continuation import load, RECORDS
 from support.templates import render
@@ -51,6 +51,10 @@ def test_failed_feedback_form_submission_retry_failure_then_success_closes_group
     assert response.status_code == 303
     first = int(response.headers['location'].split('/')[-1])
     assert json.loads(web.conn.execute('SELECT request FROM runs WHERE id=?', (first,)).fetchone()[0]) == payload
+    assert service.research_status(web.conn, requester='web-owner', request_id='retry-a')['id'] == first
+    with pytest.raises(service.RequestError) as error:
+        service.research_status(web.conn, requester='another-caller', request_id='retry-a')
+    assert error.value.status == 404
     assert web.retry_feedback(request, 18, request_id='retry-a', csrf=csrf).headers['location'] == response.headers['location']
     assert [r['id'] for r in reading.pending_reviews(web.conn)[0]] == [first]
     # Local result stub: the first retry fails, without a worker or model.
@@ -86,16 +90,16 @@ def test_failed_feedback_with_report_also_has_retry_and_revalidates_parent(web):
 def test_retry_rejects_ordinary_completed_replay_and_incomplete_records(web):
     for run_id in (17, 18):  # ordinary and completed feedback
         with pytest.raises(service.RequestError):
-            service.retry_feedback(web.conn, run_id, 'invalid')
+            service.retry_feedback(web.conn, run_id, 'invalid', requester='web-owner')
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=17")
     request, _ = browser_request(web)
     web.conn.execute('DELETE FROM reports WHERE id=11')
     html = web.run_page(request, 17).body.decode()
     assert 'action="/runs/17/retry"' in html and '/retry-feedback' not in html
     web.conn.execute("UPDATE runs SET status='failed',identity=? WHERE id=18", (json.dumps({'replay_of': 18}),))
-    with pytest.raises(service.RequestError): service.retry_feedback(web.conn, 18, 'replay')
+    with pytest.raises(service.RequestError): service.retry_feedback(web.conn, 18, 'replay', requester='web-owner')
     web.conn.execute("UPDATE runs SET identity=NULL,request=json_remove(request, '$.feedback') WHERE id=18")
-    with pytest.raises(service.RequestError): service.retry_feedback(web.conn, 18, 'missing-feedback')
+    with pytest.raises(service.RequestError): service.retry_feedback(web.conn, 18, 'missing-feedback', requester='web-owner')
 
 
 def test_home_search_stays_visible_and_question_fold_keeps_typed_text():
@@ -169,7 +173,7 @@ def test_search_explains_fallback_and_null_legacy_request_renders(web):
     assert web.report_page(request, 37).status_code == 200
 
 
-def test_failed_task_leaves_home_list_once_asked_again_or_stale(web):
+def test_failed_task_leaves_home_list_once_asked_again_or_stale(web, monkeypatch):
     ids = lambda: [r['id'] for r in reading.active_runs(web.conn)]
     fail = lambda run: web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (run,))
     # A feedback retry takes a fresh form request id, so only its saved request identifies it.
@@ -177,13 +181,16 @@ def test_failed_task_leaves_home_list_once_asked_again_or_stale(web):
                               feedback={'location': 'summary', 'text': '核查一下'})
     fail(feedback)
     assert feedback in ids()
-    fail(service.retry_feedback(web.conn, feedback, 'form-request-id'))
+    fail(service.retry_feedback(web.conn, feedback, 'form-request-id', requester='web-owner'))
     assert feedback not in ids()
-    # The ordinary research form takes a fresh request id too.
-    plain = service.submit(web.conn, '600519', 'plain-failure')
+    # The same company can be requested by its short name and then by its code.
+    company = dict(web.conn.execute('SELECT company_key AS code, name AS zwjc FROM reports WHERE id=11').fetchone())
+    monkeypatch.setattr(companies, 'stock_list', lambda: {company['code']: company})
+    plain = service.request_research(web.conn, 'web-owner', 'plain-failure', company['zwjc'][:2],
+                                     form=True, again=True)['run_id']
     fail(plain)
     assert plain in ids()
-    service.submit(web.conn, '600519.SH', 'asked-again')
+    service.request_research(web.conn, 'web-owner', 'asked-again', company['code'], form=True, again=True)
     assert plain not in ids()
     # A different question does not answer the failed one.
     question = service.submit(web.conn, '600519', 'question-failure', question='现金流是否一致？')

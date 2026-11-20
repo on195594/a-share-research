@@ -25,13 +25,14 @@ from fastapi import FastAPI, Form, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
 from a_share_research import stock_codes, api_keys
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
+from a_share_research.service import FeedbackRequest, ResearchRequest
 
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
@@ -479,19 +480,6 @@ def home(request: Request):
     return home_page(request, session, request_id=uuid.uuid4().hex)
 
 
-def resolve(query: str) -> tuple[dict | None, list[dict]]:
-    """A 6-digit code or a (partial) short name -> the company, or candidates when ambiguous."""
-    query = re.sub(r"\s+", "", query).upper().removesuffix(".SH").removesuffix(".SZ").removesuffix(".BJ")
-    stocks = company_data.stock_list()
-    if query in stocks:
-        return stocks[query], []
-    matches = [s for s in stocks.values() if query and query in s["zwjc"].replace(" ", "")]
-    exact = [s for s in matches if s["zwjc"].replace(" ", "") == query]
-    if len(exact) == 1 or len(matches) == 1:
-        return (exact or matches)[0], []
-    return None, matches[:10]
-
-
 @app.post("/research")
 def start_research(request: Request, q: str = Form(""), request_id: str = Form(""), csrf: str = Form(""),
                    again: str = Form(""), question: str = Form(""), parent_report_id: int | None = Form(None)):
@@ -500,26 +488,15 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     if not csrf_ok(session, csrf):
         return message(request, session, "页面已过期", "请返回首页重新提交。", 403)
     try:
-        company, choices = resolve(q)
-    except requests.RequestException:
-        return home_page(request, session, 503, request_id=request_id, q=q, question=question,
-                         error="暂时无法连接巨潮资讯核对公司，请稍后再试")
-    if company is None:
-        error = "找到多家公司，请选择一家" if choices else "没有找到这家公司，请输入 6 位代码或简称"
-        return home_page(request, session, request_id=request_id, q=q, question=question, error=error, choices=choices)
-    if company_data.FINANCIAL_NAME.search(company["zwjc"]):
-        return home_page(request, session, request_id=request_id, q=q, question=question,
-                         error=f"{company['zwjc'].replace(' ', '')}属于银行、保险、券商等金融类公司，暂不支持研究。")
-    code = company["code"]
-    recent = reading.recent_report(conn, code)
-    if recent and not again and not question.strip() and not parent_report_id:
-        return home_page(request, session, request_id=request_id, q=code, recent=recent)
-    try:
-        run_id = service.submit(conn, code, request_id, name=company["zwjc"].replace(" ", ""),
-                                question=question, parent_report_id=parent_report_id)
+        result = service.request_research(conn, "web-owner", request_id, q, question=question,
+                                          parent_report_id=parent_report_id, form=True, again=bool(again))
     except service.RequestError as exc:
+        if exc.status == 503:
+            return home_page(request, session, 503, request_id=request_id, q=q, question=question, error=str(exc))
         return message(request, session, "无法提交研究", str(exc), exc.status)
-    return RedirectResponse(f"/runs/{run_id}", status_code=303)
+    if "run_id" in result:
+        return RedirectResponse(result["path"], status_code=303)
+    return home_page(request, session, request_id=request_id, question=question, **result)
 
 
 @app.get("/runs/{run_id}")
@@ -565,7 +542,7 @@ def retry_feedback(request: Request, run_id: int, request_id: str = Form(''), cs
     if not csrf_ok(session, csrf):
         return message(request, session, '页面已过期', '请返回核查任务重新提交。', 403)
     try:
-        next_run = service.retry_feedback(conn, run_id, request_id)
+        next_run = service.retry_feedback(conn, run_id, request_id, requester='web-owner')
     except service.RequestError as exc:
         return message(request, session, '无法重试核查', str(exc), exc.status)
     return RedirectResponse(f'/runs/{next_run}', status_code=303)
@@ -627,11 +604,10 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
     if not csrf_ok(session, csrf):
         return message(request, session, "页面已过期", "请返回报告重新提交。", 403)
     try:
-        run_id = service.submit(conn, "", request_id, parent_report_id=report_id,
-                                feedback={"location": location, "text": text})
+        result = service.request_feedback(conn, "web-owner", report_id, request_id, location, text)
     except service.RequestError as exc:
         return message(request, session, "无法提交核查请求", str(exc), exc.status)
-    return RedirectResponse(f"/runs/{run_id}", status_code=303)
+    return RedirectResponse(result["path"], status_code=303)
 
 
 # JSON clients accept persistent API keys and legacy agent sessions, never cookies.
@@ -639,13 +615,12 @@ def _api_credential(request: Request) -> tuple[str, api_keys.Principal | None]:
     header = request.headers.get("authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(401, "需要研究 API bearer token")
-    digest = _hash(header[7:])
     if principal := api_keys.authenticate(conn, header[7:]):
         if principal.role == "owner":
             raise HTTPException(403, "所有者管理凭据不能调用研究 API")
-        key = "key:" + digest
+        key = service.requester(conn, principal)
     else:
-        key = "agent:" + digest
+        key = "agent:" + _hash(header[7:])
         row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (key,)).fetchone()
         if row is None or row["expires_at"] <= time.time():
             raise HTTPException(401, "研究凭据无效、已撤销或临时令牌已过期")
@@ -659,21 +634,6 @@ def api_session(request: Request) -> str:
     return requester
 
 
-class ResearchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    code: str = Field(pattern=stock_codes.KEY_PATTERN)
-    request_id: str = Field(min_length=1, max_length=128)
-    question: str = Field(default="", max_length=4000)
-    parent_report_id: int | None = Field(default=None, gt=0)
-
-
-class FeedbackRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    request_id: str = Field(min_length=1, max_length=128)
-    location: str = Field(min_length=1, max_length=80)
-    text: str = Field(min_length=1, max_length=4000)
-
-
 @app.exception_handler(service.RequestError)
 async def api_error(request: Request, exc: service.RequestError):
     return JSONResponse({"version": service.VERSION, "error": str(exc)}, status_code=exc.status)
@@ -681,25 +641,13 @@ async def api_error(request: Request, exc: service.RequestError):
 
 @app.post("/api/research", status_code=202)
 def api_research(request: Request, body: ResearchRequest):
-    api_session(request)
-    if reading.request_run(conn, body.request_id):
-        return {"version": service.VERSION, "run_id": service.submit(conn, **body.model_dump())}
-    try:
-        company = company_data.company(body.code)
-    except company_data.SourceError as exc:
-        raise service.RequestError(str(exc)) from exc
-    except requests.RequestException as exc:
-        raise service.RequestError("暂时无法连接巨潮资讯，请稍后重试", 503) from exc
-    if company_data.FINANCIAL_NAME.search(company["zwjc"]):
-        raise service.RequestError("金融类公司暂不支持研究")
-    run_id = service.submit(conn, **body.model_dump(), name=company["zwjc"].replace(" ", ""))
-    return {"version": service.VERSION, "run_id": run_id}
+    result = service.request_research(conn, api_session(request), **body.model_dump())
+    return {"version": service.VERSION, "run_id": result["run_id"]}
 
 
 @app.get("/api/request")
 def api_request(request: Request, request_id: str):
-    api_session(request)
-    return service.run_view(conn, request_id=request_id)
+    return service.research_status(conn, requester=api_session(request), request_id=request_id, compact=False)
 
 
 @app.get("/api/research/budget")
@@ -711,10 +659,7 @@ def api_research_budget(request: Request):
 @app.get("/api/runs/{run_id}")
 def api_run(request: Request, run_id: int):
     api_session(request)
-    row = reading.api_run(conn, run_id)
-    if row is None:
-        raise service.RequestError("任务不存在", 404)
-    return {"version": service.VERSION, **dict(row)}
+    return service.run_summary(conn, run_id)
 
 
 @app.get("/api/schema")
@@ -739,10 +684,7 @@ def api_reports(request: Request, code: str):
 def api_search(request: Request, q: str, code: str | None = None, section: str | None = None, history: bool = False,
                page: int = Query(1, ge=1, le=10000)):
     api_session(request)
-    if code is not None and not stock_codes.KEY_RE.fullmatch(code):
-        raise service.RequestError("公司代码必须为六位数字")
-    items, more = reading.search_items(conn, q, code=code, section=section, history=history, page=page)
-    return {"version": service.VERSION, "items": items, "page": page, "more": more}
+    return service.research_search(conn, q, code=code, section=section, history=history, page=page)
 
 
 class MonthlyBatchRequest(BaseModel):
@@ -784,11 +726,7 @@ class SubscriptionsRequest(BaseModel):
 def api_replace_subscriptions(request: Request, body: SubscriptionsRequest):
     api_session(request)
     from a_share_research import scans
-    try:
-        items = scans.replace_subscriptions(conn, body.codes)
-    except requests.RequestException as exc:
-        raise service.RequestError('暂时无法连接巨潮公司目录', 503) from exc
-    return {'version': service.VERSION, 'subscriptions': items}
+    return {'version': service.VERSION, 'subscriptions': scans.replace_subscriptions(conn, body.codes)}
 
 
 @app.get('/api/subscriptions')
@@ -827,6 +765,24 @@ def api_scan(request: Request, scan_id: int):
     return scans.view(conn, scan_id)
 
 
+@app.get('/subscriptions')
+def subscription_detail(request: Request):
+    from a_share_research import scans
+    return _owner_read(request, scans.subscriptions)
+
+
+@app.get('/scans/weekly')
+def weekly_scan_detail(request: Request):
+    from a_share_research import scans
+    return _owner_read(request, lambda conn: scans.weekly(conn, account_sources=True))
+
+
+@app.get('/scans/{scan_id}')
+def scan_detail(request: Request, scan_id: int):
+    from a_share_research import scans
+    return _owner_read(request, scans.view, scan_id)
+
+
 @app.get("/api/reports/{report_id}")
 def api_report(request: Request, report_id: int, compact: bool = False):
     api_session(request)
@@ -835,10 +791,8 @@ def api_report(request: Request, report_id: int, compact: bool = False):
 
 @app.post("/api/reports/{report_id}/feedback", status_code=202)
 def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
-    api_session(request)
-    run_id = service.submit(conn, "", body.request_id, parent_report_id=report_id,
-                            feedback={"location": body.location, "text": body.text})
-    return {"version": service.VERSION, "run_id": run_id}
+    result = service.request_feedback(conn, api_session(request), report_id, **body.model_dump())
+    return {"version": service.VERSION, "run_id": result["run_id"]}
 
 
 @app.post("/api/session/revoke")

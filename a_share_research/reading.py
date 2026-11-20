@@ -769,7 +769,7 @@ def active_runs(conn) -> list:
         " AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.run_id=u.id)"
         " AND NOT EXISTS (SELECT 1 FROM runs newer WHERE newer.request_id='web-retry:' || u.id"
         " OR (newer.id > u.id AND newer.kind = u.kind AND newer.company_key = u.company_key"
-        " AND newer.request IS u.request))))"
+        " AND json_remove(newer.request,'$.company_query') IS json_remove(u.request,'$.company_query')))))"
         " ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END, id DESC LIMIT 30", (since,)
     ).fetchall()
 
@@ -843,13 +843,11 @@ def followups(conn, code: str, report_id: int):
         (key, report_id, key, report_id, report_id)).fetchall()
 
 
-def request_run(conn, request_id: str):
-    return conn.execute("SELECT id FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-
-
-def api_run(conn, run_id: int):
+def api_run(conn, run_id: int, *, include_gaps: bool = False):
+    gaps = (", COALESCE(json_extract(r.body, '$.gaps'), json_extract(u.material, '$.data.extra.gaps')) AS gaps"
+            if include_gaps else "")
     return conn.execute("SELECT u.id, u.kind, u.code, u.name, u.status, u.step, u.error, u.created_at, u.finished_at,"
-        " r.id AS report_id FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?", (run_id,)).fetchone()
+        f" r.id AS report_id{gaps} FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?", (run_id,)).fetchone()
 
 
 def api_reports(conn, code: str):

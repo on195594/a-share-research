@@ -17,7 +17,12 @@ description: 通过统一 A 股服务读取研究、处理账户证据与监控�
 
 ## 按服务能力路由
 
-**研究**：使用发现的研究读取、取证、提交和状态工具。旧报告可提供问题线索，事实仍需核对材料及适用期间；新草稿必须经过服务的机械检查和独立复核后，才能称为本系统正式报告。只拿到草稿回执或复核排队状态时，不宣称已发布。缺少新取证能力时报告缺口，不用模型记忆补事实，也不把宿主自由文本当作已核验结果。
+**研究**
+
+- 用 `research.search` 按公司或内容查已有研究，通过 `research.cards`、`research.card`、`research.report` 读卡片和报告。报告默认精简，需要原文证据时传 `compact=false`。历史事实仍需核对材料及适用期间。
+- 发起研究用 `research.request`，核查报告的指定段落用 `research.feedback`。每次新请求生成一个 `request_id`。受理后立即向用户给出 `run_id` 和可点击的进度链接（将回执的 `path` 接到已配置的 Web 站点），本轮不轮询。用户稍后问进度时用 `research.status`，按 `run_id` 或原凭据的 `request_id` 查询。worker 完成并通过复核后，才可引用为正式报告。
+- 扫描和订阅只对启用账户工具的 assistant 开放。用 `research.scan.request` 提交或续接扫描，保留原凭据和请求编号。用 `research.scan.read` 按扫描编号读状态，`research.scan.weekly` 读周报。用 `research.subscriptions` 读订阅，`research.subscriptions.replace` 的 `codes` 须为期望保留的完整外部订阅列表。
+- 用 `research.batch.monthly.request` 提交上海当月批次，`research.batch.monthly.status` 按月读取。扫描和月批先看状态、时点和缺口，按需用 `compact=false` 展开读取。
 
 **账户与政策**：只在当前凭据开放对应工具时使用。带 `account_id` 的工具可省略此字段，服务使用唯一绑定账本；指定账户须与绑定一致。需要确认来源、版本或生效政策时再查询；从服务发现并读取当前身份绑定的指南，只加载任务需要的部分。没有生效身份或实现不匹配时指出缺口，不猜默认政策或写死某个版本。指南中的历史宿主命令、审批流程和安装说明不覆盖当前用户授权或服务权限。
 

@@ -25,7 +25,9 @@ class SourceError(Exception):
 
 @cache
 def stock_list() -> dict[str, dict]:
-    rows = SESSION.get(f"{CNINFO}/data/szse_stock.json", timeout=30).json()["stockList"]
+    response = SESSION.get(f"{CNINFO}/data/szse_stock.json", timeout=30)
+    response.raise_for_status()
+    rows = response.json()["stockList"]
     return {r["code"]: r for r in rows if r.get("category") == "A股"}
 
 
@@ -39,6 +41,18 @@ def company(code: str) -> dict:
     if not found:
         raise SourceError(f"{code} is not a listed A share on cninfo")
     return found
+
+
+def resolve(query: str) -> tuple[dict | None, list[dict]]:
+    """A 6-digit code or a (partial) short name -> the company, or candidates when ambiguous."""
+    stocks = stock_list()
+    if query in stocks:
+        return stocks[query], []
+    matches = [s for s in stocks.values() if query and query in s["zwjc"].replace(" ", "")]
+    exact = [s for s in matches if s["zwjc"].replace(" ", "") == query]
+    if len(exact) == 1 or len(matches) == 1:
+        return (exact or matches)[0], []
+    return None, matches[:10]
 
 
 def due_report(today: date) -> tuple[str, str]:

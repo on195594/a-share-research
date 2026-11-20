@@ -251,6 +251,16 @@ def test_library_answers_one_query_from_both_sides(conn):
     assert "最多 5 个词" in too_many["error"] and too_many["hits"] == []
 
 
+def test_tool_search_recognizes_the_same_company_and_links_to_its_matching_claim(conn):
+    library = service.research_search(conn, "东方电缆 现金流", library=True)
+    assert [company["report_id"] for company in library["companies"]] == [39]
+    assert library["items"] and {item["code"] for item in library["items"]} == {"603606.SH"}
+    hits = service.research_search(conn, "现金流", code="603606")["items"]
+    for item, hit in zip(library["items"], hits, strict=True):
+        assert item["path"] == reading.item_link(hit["report_id"], hit["location"])
+        assert hit["text"].startswith(item["excerpt"].removesuffix("…"))
+
+
 def test_library_next_page_follows_content_hits_when_companies_run_out(conn):
     first = reading.library_results(conn, "的", history=True)
     assert first["companies"] == [] and len(first["hits"]) == reading.PAGE_SIZE and first["more"] is True

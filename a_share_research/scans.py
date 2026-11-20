@@ -8,6 +8,8 @@ import logging
 import math
 import re
 
+from requests import RequestException
+
 from a_share_research import report as report_body
 from a_share_research import companies, db, disclosure_checks, service, stock_codes, valuation
 
@@ -293,7 +295,11 @@ def scan_scope(conn, *, account_sources: bool = True) -> list[dict]:
 def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None) -> list[dict]:
     if not isinstance(codes, list) or any(not isinstance(c, str) or not stock_codes.KEY_RE.fullmatch(c) for c in codes):
         raise service.RequestError('订阅代码必须为六位 A 股代码')
-    catalog = companies.stock_list() if catalog is None and codes else (catalog or {})
+    if catalog is None:
+        try:
+            catalog = companies.stock_list() if codes else {}
+        except RequestException as exc:
+            raise service.RequestError('暂时无法连接巨潮公司目录', 503) from exc
     unknown = sorted(set(codes) - catalog.keys())
     if unknown:
         raise service.RequestError('未知 A 股代码：' + '、'.join(unknown))
@@ -305,6 +311,12 @@ def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None
             conn.execute("INSERT INTO subscriptions(code, added_at) VALUES (?,?) ON CONFLICT(code) DO NOTHING",
                          (code, db.now()))
     return subscriptions(conn)
+
+
+def subscription_view(items: list[dict]) -> dict:
+    return {'version': service.VERSION, 'subscriptions': items, 'status': 'ready', 'as_of': db.now(),
+            'path': '/subscriptions', 'gaps': [{'code': s['code'], 'reason': '尚无收盘价记录'}
+                                              for s in items if s['last_close'] is None]}
 
 
 def _submit(conn) -> int:
@@ -849,24 +861,49 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                      (db.now(), str(exc), json.dumps(summary, ensure_ascii=False), scan_id))
 
 
-def view(conn, scan_id: int) -> dict:
-    row = conn.execute('SELECT * FROM scans WHERE id=?', (scan_id,)).fetchone()
+def view(conn, scan_id: int, *, compact: bool = False) -> dict:
+    columns = '*' if not compact else """
+        id,status,requested_at,started_at,finished_at,error,
+        (SELECT COUNT(*) FROM scan_events WHERE scan_id=scans.id) AS event_count,
+        COALESCE(json_array_length(summary,'$.notify'),0) AS notification_count,
+        json_extract(summary,'$.failures') AS failures,
+        json_extract(summary,'$.check_failures') AS check_failures,
+        json_extract(summary,'$.coverage_gaps') AS coverage_gaps
+    """
+    row = conn.execute(f'SELECT {columns} FROM scans WHERE id=?', (scan_id,)).fetchone()
     if row is None:
         raise service.RequestError('扫描不存在', 404)
+    if compact:
+        data = dict(row)
+        gaps = [gap for key in ('failures', 'check_failures', 'coverage_gaps')
+                for gap in json.loads(data.pop(key) or '[]')]
+        if row['error']:
+            gaps.append({'reason': row['error']})
+        return {'version': service.VERSION, **data, 'gaps': gaps, 'path': f'/scans/{scan_id}'}
     summary = json.loads(row['summary'] or '{}')
     return {'version': service.VERSION, **dict(row), 'summary': summary,
             'events': [dict(e, **latency(e, db.now())) for e in events(conn, scan_id=scan_id)],
             'notify': summary.get('notify', [])}
 
 
-def weekly(conn, *, at: str | None = None, account_sources: bool = True) -> dict:
+def weekly(conn, *, at: str | None = None, account_sources: bool = True, compact: bool = False) -> dict:
+    from a_share_research.policy.registry import PolicyError
+
     at = at or db.now()
     since = instant(at) - timedelta(days=7)
     items = [s | {'card': card_or_none(conn, s['code'])} for s in subscriptions(conn)]
     all_events = events(conn)
     recent = [dict(e, **latency(e, at)) for e in all_events if instant(e['detected_at']) >= since]
     failures, gaps = [], []
-    rows = [dict(r) | {'summary': json.loads(r['summary'] or '{}')} for r in conn.execute('SELECT * FROM scans ORDER BY id')]
+    # Weekly coverage and failures need only these observations from historical scans.
+    rows = [dict(r) | {'summary': json.loads(r['summary'])} for r in conn.execute("""
+        SELECT id,status,requested_at,started_at,finished_at,error,
+               json_object('closes', COALESCE(json_extract(summary,'$.closes'),json('{}')),
+                           'failures', COALESCE(json_extract(summary,'$.failures'),json('[]')),
+                           'check_failures', COALESCE(json_extract(summary,'$.check_failures'),json('[]')),
+                           'coverage_gaps', COALESCE(json_extract(summary,'$.coverage_gaps'),json('[]'))) AS summary
+        FROM scans ORDER BY id
+    """)]
     for row in rows:
         if instant(row['requested_at']) >= since:
             failures.extend({'scan_id': row['id'], 'kind': 'check_failure' if key == 'check_failures' else 'scan_failure', **f}
@@ -879,19 +916,31 @@ def weekly(conn, *, at: str | None = None, account_sources: bool = True) -> dict
     done = [r for r in rows if r['status'] == 'done']
     checkpoints = [{'code': item['code'], 'report_id': item['card']['report_id'], **checkpoint}
                    for item in items if item['card'] for checkpoint in item['card']['checkpoints']]
-    scope = scan_scope(conn, account_sources=account_sources)
-    return {'version': service.VERSION, 'since': since.isoformat(), 'as_of': at, 'subscriptions': items,
-            'scan_scope': [{k: s[k] for k in ('code', 'origin', 'origins')} for s in scope],
+    current = [coverage(done, s['code'], at) for s in items]
+    failed_reviews = [e for e in all_events if e['run_status'] == 'failed'
+                      and e['judgment_completed_at'] and instant(e['judgment_completed_at']) >= since]
+    try:
+        scope = scan_scope(conn, account_sources=account_sources)
+    except PolicyError as exc:
+        log.warning('weekly scan report could not verify the holding scope: %s', exc)
+        failures.append({'code': None, 'stage': 'holding_scope', 'reason': '本次周报未能核实账户持仓范围'})
+        scope = scan_scope(conn, account_sources=False)
+    result = {'version': service.VERSION, 'since': since.isoformat(), 'as_of': at,
             'status_distribution': dict(Counter((s['card'] or {}).get('status', '无论点卡') for s in items)),
             'zone_distribution': dict(Counter(((s['card'] or {}).get('current') or {}).get('current_zone') or '未测算' for s in items)),
-            'events': recent, 'checkpoints': checkpoints, 'checkpoint_count': len(checkpoints),
+            'checkpoint_count': len(checkpoints),
             'forecast_count': sum(bool(c.get('forecast')) for c in checkpoints),
-            'backlog': [dict(e, **latency(e, at)) for e in all_events if e['action'] == 'deferred'],
             'failures': failures,
             'last_scan': {k: done[-1][k] for k in ('id', 'started_at', 'finished_at')} if done else None,
-            'coverage': (current := [coverage(done, s['code'], at) for s in items]),
             'coverage_gaps': list({(g['code'], g['uncovered_from']): g for g in
-                                   gaps + [c | c['gap'] for c in current if c['gap']]}.values()),
+                                   gaps + [c | c['gap'] for c in current if c['gap']]}.values())}
+    if compact:
+        latest = rows[-1] if rows else None
+        return result | {'scan_id': latest['id'] if latest else None, 'status': latest['status'] if latest else 'no_scans',
+                         'event_count': len(recent), 'backlog_count': sum(e['action'] == 'deferred' for e in all_events),
+                         'review_failure_count': len(failed_reviews), 'path': '/scans/weekly'}
+    return result | {'subscriptions': items, 'scan_scope': [{k: s[k] for k in ('code', 'origin', 'origins')} for s in scope],
+            'coverage': current, 'events': recent, 'checkpoints': checkpoints,
+            'backlog': [dict(e, **latency(e, at)) for e in all_events if e['action'] == 'deferred'],
             'open_events': [dict(e, **latency(e, at)) for s in items for e in open_events(conn, s['code'])],
-            'review_failures': [dict(e, **latency(e, at)) for e in all_events if e['run_status'] == 'failed'
-                                and e['judgment_completed_at'] and instant(e['judgment_completed_at']) >= since]}
+            'review_failures': [dict(e, **latency(e, at)) for e in failed_reviews]}

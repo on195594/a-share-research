@@ -82,3 +82,17 @@ def test_schema_rejects_oauth_grants_outside_assistant_scope(grant):
                 ('assistant', 'oauth', 'browser', 'hash'), ('assistant', 'pat', 'browser', 'hash')):
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(insert, row)
+
+
+def test_oauth_grants_have_distinct_request_identities(grant):
+    from a_share_research import service
+    conn, grant_id = grant
+    other = oauth_store.create_grant(conn, "browser")
+    first, second = (service.requester(conn, api_keys.Principal(key_id, "assistant")) for key_id in (grant_id, other))
+    assert first == f"grant:{grant_id}" and second == f"grant:{other}"
+    token = api_keys.create(conn, "pat", role="assistant")
+    pat = api_keys.authenticate(conn, token)
+    assert service.requester(conn, pat).startswith("key:")
+    conn.execute("UPDATE api_keys SET revoked_at='now' WHERE id=?", (grant_id,))
+    with pytest.raises(service.RequestError, match="撤销"):
+        service.requester(conn, api_keys.Principal(grant_id, "assistant"))
