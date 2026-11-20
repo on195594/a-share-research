@@ -18,15 +18,15 @@ ashare --config /absolute/private/client.json call research_card --json '{"code"
 
 省略 `--config` 时读取 `~/.config/ashare/client.json`。CLI 使用 2026-07-28 无握手请求；发现返回 `{"tools":[...]}`，调用成功返回 `{"ok":true,"result":...}`。业务回执中的状态仍决定是否入账。失败退出码和恢复方法见[客户端准备手册](../../ops/clients/README.md)。
 
-五宿主使用原生远程 MCP。CLI单次 HTTP 超时为 30 秒，无自动重试。
+五宿主使用原生远程 MCP。CLI 单次 HTTP 超时为 30 秒，无自动重试。
 
 - `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research_methods`）、提交研究与反馈、查询进度和操作月批。
-- 扫描范围含已核实持仓，外部订阅含 Hermes 同步的持仓镜像。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
+- 扫描范围与政策监控的取卡方式见[系统架构](../../ARCHITECTURE.md#数据与兼容)。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
   - `research_company_overview` 与 `account_portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
   - `account_research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
 - `owner` 用于本机政策登记与切换，远程 `/mcp` 拒绝该凭据。
 
-旧 Key 迁移后仍为 research。更换角色须创建新 Key 并撤销旧 Key。
+旧 Key 迁移后保留原角色。更换角色须签发新 PAT 并撤销旧 Key。
 
 | 工具 | 输入与回执 |
 |---|---|
@@ -48,7 +48,7 @@ HTTP、远程 MCP 与 CLI 共用注册表的下划线规范名，例如 `researc
 
 `/health` 只表示进程存活。`/ready` 只读核对数据库版本、公共表及已启用工具需要的表，返回 database_ready/schema_version/paused/in_flight；暂停或数据库未就绪时为 503，不创建或迁移库。mode 的兼容值 `read-only` 和 `account-shadow` 表示账户工具开关状态，具体工具的连接权限见 access。
 
-写入与会发起行情或网络采集的工具共用两个名额，满时立即返回 503 / `busy`。本地读取和 `GET /tools` 仅登记为在途请求。运维经私有 Unix socket（目录 0700、socket 0600）调用 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`；普通 HTTP 凭据没有暂停/恢复入口。pause 先拒绝新发现/调用，再等待在途请求归零，超时仍保持暂停。`.tools-paused` 标记在数据目录保存并跨重启生效；resume 核对并移除标记后恢复受理，未知文件或符号链接不会被覆盖/删除。
+写入与会发起行情或网络采集的工具共用两个名额。满额时，MCP 调用返回 `isError` 和 `busy`，热备 REST 返回 HTTP 503 和 `busy`。本地读取和工具发现仅登记在途。运维经私有 Unix socket（目录 0700、socket 0600）调用 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`；普通 HTTP 凭据没有暂停/恢复入口。pause 先拒绝新发现/调用，再等待在途请求归零，超时仍保持暂停。`.tools-paused` 标记在数据目录保存并跨重启生效；resume 核对并移除标记后恢复受理，未知文件或符号链接不会被覆盖/删除。
 
 发布的受理恢复还必须经过 [deploy 政策门禁](../../README.md#发布批准与暂停完成)：实际镜像内读取当前政策、installed=true、参数有效且账户适用，required 的缺失/异常一律保持暂停。register/activate 仍只有 owner 本地入口，允许在 tools pause 内执行；不新增 HTTP 激活工具、授权数据库或编排服务。凭据经临时 0600 批准输入和 stdin 传递，不能写入 `.env.tools`。暂停 marker 没有 release_id；未知暂停不接管，工具留下的 held 才能由操作者明确选择 `--complete-held` 重核。异常后的 pause/drain 优先于证据写入；held 的最终政策观察失败会明确记为 unknown，不能把旧 activation/installed 当作当前状态或授权。证据 I/O 持续失败时旧文件可能过时，仍须核对实时状态。
 
@@ -56,7 +56,7 @@ Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TU
 
 ## 外部研究（2026-11-18 退役）
 
-外部研究暂存、受控取证、独立复核与发布从未在生产启用，已整条删除；五张 `external_*` 空表随迁移保留，供旧镜像读取。退役说明见 [README](../../README.md#外部-agent-受控取证与提交2026-11-18-退役)。
+外部研究暂存、受控取证、独立复核与发布从未在生产启用，已整条删除；五张 `external_*` 空表随迁移保留，供旧镜像读取。原设计见[合一方案](../../docs/consolidation.md#35-入账门与外部研究)。
 
 ## 账户影子账本（开发入口，默认关闭）
 
@@ -159,7 +159,7 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 ## 服务端监控采集（镜像或明确绑定账本，开发入口）
 
-`account_current` 接受空对象，要求 assistant 与账户影子开关，返回 `data.codes`（去重排序的六位公司代码）和 `data.source`。同一只读事务内复用监控的来源核验，镜像读取未关闭持仓，账本读取明确绑定账户的已核验资金投影；来源缺失、投影或证据损坏、不可转换的代码均拒绝，不用空持仓掩盖失败。不查询行情、不依赖生效政策、不修改订阅，供宿主在扫描前和通知前刷新当前在仓集合。
+`account_current` 接受空对象，要求 assistant 与账户影子开关，返回 `data.codes`（去重排序的六位公司代码）和 `data.source`。同一只读事务内复用监控的来源核验，镜像读取未关闭持仓，账本读取明确绑定账户的已核验资金投影；来源缺失、投影或证据损坏、不可转换的代码均拒绝，不用空持仓掩盖失败。不查询行情、不依赖生效政策、不修改订阅，供宿主在发出扫描通知前刷新当前在仓集合。
 
 `policy_stop_alert` 同样要求 assistant 与账户影子开关，输入为 request_id、expected_activation_id 和 previous_state（旧通知 `{date,levels}`，也接受空对象）。固定子进程只采集未关闭持仓的 canonical 止损线与当前行情；非 v0 交易时段不取行情。服务复用政策/来源/撤销检查、无网络写锁与幂等追加，保存包含参数、时钟、持仓止损线、行情和旧通知状态的原始输入及纯函数结果。回执 mode 为 `service_stop_alert_capture`，capture_context 版本 3 的 request 还绑定 previous_state；同请求不能换状态或与 monitor/replay 混用。结果固定为 status、exit_code、stdout、stderr、state、alerts；state 是下一通知状态，服务不代发通知或改调用方状态。
 

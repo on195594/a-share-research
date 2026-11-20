@@ -17,14 +17,14 @@
 1. 用本轮快照对比用户最新截图/已成交说明，列出股数、账户范围、成交、费用税费及分红差异；先复用已提供材料，不重跑取价。成本口径与交易限制见 [对账门](portfolio-risk.md#券商成本与规则参考成本对账门)。
 2. 将“用户确认、仅供本次分析的持仓”与“尚未同步的正式账本”分开。无法恢复历史材料时只请求具体缺项；未闭合时不引用旧风险汇总为当前值，不用临时持仓手算风险或推导交易动作，不编造成交价、日期或零费用，不把卖出回款重复加到截图现金。
 3. 一次列齐最小补充项及其用途：成交日期/价格/数量/费用税费、分红实际到账；用户只说“已卖出”不是完整记账参数，也不自动授权写入。公开公告由系统核实，到账事实由用户确认。
-4. 参数齐全后展示拟记事件，取得具体写入授权再提交 `account.submit`；复用已有持仓快照，必要时只读 `holdings <代码>`，用 `position-return <代码> <快照现价>` 核对回款/分红合计（无有效快照价时不省略价格触发重新取价）。当前 CLI 没有逐笔事件列表，合计一致不能证明事件未重复；须结合既有记账回执核对，无法确认是否已记则请用户补充确认依据并暂缓该笔写入，避免重复成交或重复分红。建议、授权、申报、成交、到账事实分开。
+4. 参数齐全后展示拟记事件，取得具体写入授权再提交 `account_submit`；复用已有持仓快照，必要时只读 `holdings <代码>`，用 `position-return <代码> <快照现价>` 核对回款/分红合计（无有效快照价时不省略价格触发重新取价）。当前 CLI 没有逐笔事件列表，合计一致不能证明事件未重复；须结合既有记账回执核对，无法确认是否已记则请用户补充确认依据并暂缓该笔写入，避免重复成交或重复分红。建议、授权、申报、成交、到账事实分开。
 5. 写后复核股数、成本来源、事件与风险，交付“已闭合/仍缺什么/影响哪项判断/下次复核条件”。仅确认本次补录，不声称历史全部闭合；未写入则明确待办，不能用覆盖当前成本替代重建。
 
 账户写入只走账本工具（`a-share` skill 的账户工具，合同见 [tools/README](../../../../../tools/README.md)）；v0 CLI 的记账与状态写命令已于 2026-11-19 删除，下列 `$CACHE`（`CACHE=a-stock-cache`）命令全部只读。
 
 ### 交易记账（禁止直接 SQL 改持仓）
 
-`account.submit` 接收买入、卖出、分红、公司行动等事件与完整期末快照，按业务身份去重并重建成本与周期；更正用作废加替代事件，不改原事件。交易依据了某份 Research 报告时附报告编号：用决策时实际读到的那份；没有依据报告（如止损、再平衡）就不附，不事后猜测或回填。工具会拒绝不属于该股票、未通过复核或晚于成交日的报告，但分不清同股票的多份报告，须核对回执里的报告时间。
+`account_submit` 接收买入、卖出、分红、公司行动等事件与完整期末快照，按业务身份去重并重建成本与周期；更正用作废加替代事件，不改原事件。交易依据了某份 Research 报告时附报告编号：用决策时实际读到的那份；没有依据报告（如止损、再平衡）就不附，不事后猜测或回填。工具会拒绝不属于该股票、未通过复核或晚于成交日的报告，但分不清同股票的多份报告，须核对回执里的报告时间。
 
 ```bash
 # 只读：按登记日账本持股找出已实施但未记账的分红
@@ -44,7 +44,7 @@ $CACHE report-trades [--end YYYY-MM-DD]
 
 ### 结构化状态
 
-L3 状态与证据、论点整组重写、预警开启/pending/解除、Tier 的 pending/completed 状态经 `account.cycle_analysis.update` 写入，须引用已存证据；一次提交全成全败，版本冲突时先读当前值再提交。读取用：
+L3 状态与证据、论点整组重写、预警开启/pending/解除、Tier 的 pending/completed 状态经 `account_cycle_analysis_update` 写入，须引用已存证据；一次提交全成全败，版本冲突时先读当前值再提交。读取用：
 
 ```bash
 $CACHE l3-list <代码> [--all]
@@ -76,7 +76,7 @@ $CACHE alerts <代码>
     有效确认词：「确认」「是，写入」「好，更新」；单纯认可计算结果（「嗯」「算对了」）
     不视为写入授权。
   - 用户明确确认后执行：
-    提交公司行动事件（`account.submit`）。账本把经济成本与规则参考成本分开：现金分红作为回报事件记录，不从经济投入中
+    提交公司行动事件（`account_submit`）。账本把经济成本与规则参考成本分开：现金分红作为回报事件记录，不从经济投入中
     重复扣除；Tier/止损参考成本按除息送转公式调整。不得手工 SQL 或删行重建。
   - 除权成本调整不触发卖出记录。
 ```
@@ -91,14 +91,14 @@ $CACHE alerts <代码>
 | 主力入场日期 | 账本按买入事件维护 | 全部持仓 | `holdings.main_entry_date` |
 | 压力测试后前瞻股息率数值+来源+核查日期 | 每次步骤3.5核查（无论是否加仓） | C/D框架轻仓试探持仓 | 步骤3.5「首次核查」基线比较 |
 | 格档加仓依据（证据+日期、加仓前/后累计增持量、原建仓股数基准） | 步骤3.5"格档小额试探加仓"触发时 | 同上 | 步骤3.5阶段3仓位计算的累计上限判断 |
-| Tier1/2/3状态 | `account.cycle_analysis.update` | A/E/F | `holding_tier_state` |
+| Tier1/2/3状态 | `account_cycle_analysis_update` | A/E/F | `holding_tier_state` |
 | PEG计算记录（数据源、as-of日期、NP0、NP2、`G_pct`、PEG结果） | 每次涉及E框架PEG判定时（Tier1/Tier2-3/Tier1后补仓均适用） | E框架持仓 | 步骤4各处PEG判定 |
-| L3核查结论 | `account.cycle_analysis.update` | 全部持仓 | `holding_l3_conditions` |
-| L1/L2论文版本与L3替换 | `account.cycle_analysis.update`（thesis） | 新建或重写论文的持仓 | `holding_thesis_versions` + `holding_l3_conditions` |
-| 预警及消除依据 | `account.cycle_analysis.update` | 全部持仓 | `holding_alerts` |
+| L3核查结论 | `account_cycle_analysis_update` | 全部持仓 | `holding_l3_conditions` |
+| L1/L2论文版本与L3替换 | `account_cycle_analysis_update`（thesis） | 新建或重写论文的持仓 | `holding_thesis_versions` + `holding_l3_conditions` |
+| 预警及消除依据 | `account_cycle_analysis_update` | 全部持仓 | `holding_alerts` |
 
 本表汇总各步骤的持久化状态。除 PEG 计算明细和格档核查证据仍可作为补充 notes 外，
 交易、L3、Tier、预警与主力入场日期均以结构化列/表为准。
 
-P3 延迟复核复用预警：固定 `reason_code=price_stop2_liquidity_defer`，`evidence` 为包含版本、`defer_started_at`、原第二档价格和原市场快照的 JSON，`review_due` 可为带时区 ISO 8601。check-holdings 只输出候选；用户确认后才经 `account.cycle_analysis.update` 开启 red / holding_deterioration 预警，原因写“系统性流动性休克观察中”。
+P3 延迟复核复用预警：固定 `reason_code=price_stop2_liquidity_defer`，`evidence` 为包含版本、`defer_started_at`、原第二档价格和原市场快照的 JSON，`review_due` 可为带时区 ISO 8601。check-holdings 只输出候选；用户确认后才经 `account_cycle_analysis_update` 开启 red / holding_deterioration 预警，原因写“系统性流动性休克观察中”。
 首次起点不得因重复运行或持续 501 家跌停而重置，停牌/封板不可解除或伪造成交。

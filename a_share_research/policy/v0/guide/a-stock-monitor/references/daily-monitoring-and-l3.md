@@ -116,7 +116,7 @@ P3 只包装实际 `stop_loss_20` 第二档：全市场有效跌停数严格超�
 
 1. 当前证据是否仍成立；
 2. 是否到达 `review_due`；
-3. 已消除时经 `account.cycle_analysis.update` 写入解除证据；
+3. 已消除时经 `account_cycle_analysis_update` 写入解除证据；
 4. 证据不足时保持 `pending`，不得静默丢弃。
 
 只有 `holding_deterioration` 类黄色预警计入“2项→红色”门槛；
@@ -127,7 +127,7 @@ P3 只包装实际 `stop_loss_20` 第二档：全市场有效跌停数严格超�
 
 ## 步骤2.5：L3 失效主动检查（定期审视，不依赖价格触发）
 
-每季报后或有重大行业新闻时，按 `evidence_cadence` 主动检查 L3：季报只能裁定 `quarterly`/`event` 行；`semiannual`/`annual` 行仅作检查点，记录方向并保持状态；`unspecified` 行须经用户确认、以 `account.cycle_analysis.update` 的 L3 变更（`kind: "l3"`，带证据哈希与 `evidence_cadence`）分类后，才能用季报改变状态，不自动回填旧行。当前状态与证据日期用 `account.cycle_analysis.current` 读取，历史用 `account.cycle_analysis.history`。
+每季报后或有重大行业新闻时，按 `evidence_cadence` 主动检查 L3：季报只能裁定 `quarterly`/`event` 行；`semiannual`/`annual` 行仅作检查点，记录方向并保持状态；`unspecified` 行须经用户确认、以 `account_cycle_analysis_update` 的 L3 变更（`kind: "l3"`，带证据哈希与 `evidence_cadence`）分类后，才能用季报改变状态，不自动回填旧行。当前状态与证据日期用 `account_cycle_analysis_current` 读取，历史用 `account_cycle_analysis_history`。
 
 财务核对使用 Research 报告与研究取证（财务表 T.roe、T.core_profit、T.op_cash、T.capex、T.fcf 的报告期、来源与缺失原因，及其引用的定期报告原文）；扫描触发的接续研究会对财报事件给出同口径累计值与上年同期的核查问题。加权 ROE 是期间累计口径，不得用两期累计值相减冒充单季 ROE；不将中期数据年化。D03 的财务恶化条件尚未自动计算，现金流质量由有出处的研究分析解释，不设机械冻结条件。资产负债表增速以去年同一期末同比（`yoy_same_period_end`）为主；较年初（`vs_year_start`）只可明确标为季节性对照，不与收入同比混比。任何 Agent 自算值必须标为“估算”，不能单独据此把 L3 设为 `triggered` 或 `not_triggered`。
 
@@ -136,7 +136,7 @@ P3 只包装实际 `stop_loss_20` 第二档：全市场有效跌停数严格超�
    - L3 条件是否已发生？（是 → 触发论文破灭型止损）
    - L3 条件是否更接近触发边缘？（是 → 升级为黄色预警，缩短复查周期）
    - L3 条件是否已被新信息强化（更难证伪）？（是 → 论文更稳固，记录并继续持有）
-3. 按上述证据频率列出待确认的 L3 变更（上次验证日期 + 结论，检查点保持状态）；用户确认后才经 `account.cycle_analysis.update` 写入，不得更新退役行
+3. 按上述证据频率列出待确认的 L3 变更（上次验证日期 + 结论，检查点保持状态）；用户确认后才经 `account_cycle_analysis_update` 写入，不得更新退役行
 
 **⚠️ L3 全量核查强制要求**：L3 核查结论必须逐条列出所有 L3 可证伪条件的当前状态（`触发` / `未触发` / `待观察（原因）`），附数据依据与来源日期；绝不能只核查最显眼的一条（如煤价）就直接下"L3未触发"结论——其余条件若本次无数据可判断，须明确标注"待观察（等XX报告/数据）"，说明等待何种报告/数据。按实际持仓论文逐条列出，不得省略任一条件。
 
