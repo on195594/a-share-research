@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, StrictInt, StringConstraints, field_validator, model_validator
 
 from a_share_research import db, gate
-from a_share_research.account import evidence, ledger
+from a_share_research.account import ledger
 from a_share_research.account.mirror import MANIFEST
 from a_share_research.account.reconciliation import Value
 
@@ -330,37 +329,6 @@ def apply_changes(conn, holding, snapshot, changes):
             if row[change.tier + '_status'] == 'exempted':
                 raise ledger.LedgerError('买入时豁免不能由普通状态更新更改')
             row.update({change.tier + '_status': change.status, 'updated_at': stamp})
-
-
-def update(conn, principal, holding_id: int, request: Update, evidence_directory: Path) -> dict:
-    """Append an atomic status revision. Does not edit entry configuration or alter legacy state."""
-    request = Update.model_validate(request)
-    data = request.model_dump(mode='json')
-    with db.transaction(conn):
-        ledger.authorize(conn, principal)
-        previous = conn.execute("SELECT * FROM account_analysis_history WHERE holding_id=? AND account_id='' AND request_hash=?",
-                                (holding_id, gate.digest(data))).fetchone()
-        if previous:
-            return revision_result(previous)
-        holding = read_holding(conn, holding_id)
-        if holding['exit_date'] is not None:
-            raise ledger.LedgerError('已关闭持仓周期不能更新分析状态')
-        latest = latest_revision(conn, holding_id)
-        if latest is None:
-            raise ledger.LedgerError('尚未建立分析基线', 404)
-        if holding['company_key'] != latest['company_key']:
-            raise ledger.LedgerError('持仓周期的公司身份已变化，须先核对基线')
-        if request.expected_version != latest['version']:
-            raise ledger.LedgerError(f"分析状态版本冲突，当前版本 {latest['version']}")
-        # A mirror refresh must not silently make a shadow revision refer to another legacy state.
-        if baseline(conn, holding_id) != capture(conn, holding_id):
-            raise ledger.LedgerError('旧分析基线已变化，须先显式核对影子分支')
-        for sha in request.evidence_hashes:
-            evidence.verify(evidence_directory, sha)
-        snapshot = json.loads(latest['snapshot'])
-        apply_changes(conn, holding, snapshot, request.changes)
-        return insert_revision(conn, holding, latest['version'] + 1, latest['id'], 'assistant', principal,
-                       data, request.evidence_hashes, snapshot)
 
 
 def inspect(conn) -> list[str]:

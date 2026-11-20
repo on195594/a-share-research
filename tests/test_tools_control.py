@@ -16,12 +16,14 @@ from a_share_research.tools.control import ControlError, ControlServer, Gate, cl
 def test_admission_limit_and_exception_release():
     gate=Gate()
     assert gate.status()=={'paused':False,'in_flight':0}
-    with gate.acquire(), gate.acquire():
-        assert gate.status()['in_flight']==2
+    with gate.acquire(limited=False), gate.acquire(), gate.acquire():
+        assert gate.status()['in_flight']==3
         with pytest.raises(ControlError) as error:
             with gate.acquire():
                 pytest.fail('full gate admitted request')
         assert (error.value.code,error.value.status)==('busy',503)
+        with gate.acquire(limited=False):
+            assert gate.status()['in_flight']==4
     with pytest.raises(RuntimeError,match='request failed'):
         with gate.acquire():
             raise RuntimeError('request failed')

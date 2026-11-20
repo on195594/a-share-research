@@ -1,22 +1,20 @@
 """Typed tool discovery and dispatch shared by in-process and HTTP callers."""
 from __future__ import annotations
 
-import os
 import base64
 import binascii
 import sqlite3
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from requests import RequestException
 
 from a_share_research import api_keys, service
-from a_share_research.account import trades, ledger, evidence, analysis, analysis_rebase, position_store, cycle_analysis
+from a_share_research.account import trades, ledger, evidence, analysis, position_store, cycle_analysis
 from a_share_research.account import nav
-from a_share_research.policy import registry as policies
+from a_share_research.policy import account_view, registry as policies
 from a_share_research.policy.stop_state import StopState
 from a_share_research.policy.position_request import Proposal
 from a_share_research.policy.scenario_request import Proposal as ScenarioProposal
@@ -26,6 +24,15 @@ class ToolError(Exception):
     def __init__(self, code: str, message: str, status: int = 400):
         super().__init__(message)
         self.code, self.status = code, status
+
+
+def validation_message(errors) -> str:
+    fields = []
+    for error in errors[:8]:
+        path = '.'.join(str(part) for part in error['loc']) or 'arguments'
+        reason = error['msg'].removeprefix('Value error, ')
+        fields.append(f'{path[:160]}: {reason[:240]}')
+    return '；'.join(fields)[:1000]
 
 
 class Arguments(BaseModel):
@@ -41,18 +48,8 @@ class Report(Arguments):
     compact: bool = True
 
 
-class PolicyRead(Arguments):
-    command: Literal['holdings', 'retro-pending', 'retro-stats', 'watchlist', 'list']
-
-
 class PolicyGuide(Arguments):
     path: str | None = None
-
-
-class PolicyReplay(Arguments):
-    identity: str = Field(min_length=1, max_length=128)
-    request_id: str = Field(min_length=1, max_length=128)
-    bundle: dict
 
 
 class PolicyEvaluation(Arguments):
@@ -83,7 +80,7 @@ class PolicyPortfolioScenario(PolicyMonitor):
 
 
 class Account(Arguments):
-    account_id: str = Field(min_length=1, max_length=80)
+    account_id: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class AccountSubmit(Account):
@@ -110,23 +107,6 @@ class AccountNav(Account):
 
 class AccountNavReplay(Account):
     artifact_sha256: nav.Hash
-
-
-class Analysis(Arguments):
-    holding_id: int = Field(gt=0)
-
-
-class AnalysisHistory(Analysis):
-    after_id: int = Field(default=0, ge=0)
-    limit: int = Field(default=100, ge=1, le=1000)
-
-
-class AnalysisUpdate(Analysis):
-    update: analysis.Update
-
-
-class AnalysisRebase(Arguments):
-    rebase: analysis.Rebase
 
 
 class CycleAnalysis(Account):
@@ -158,12 +138,6 @@ class TradeRows(BaseModel):
     rows: list[dict]
 
 
-class CommandResult(BaseModel):
-    exit_code: int
-    stdout: str
-    stderr: str
-
-
 @dataclass(frozen=True)
 class Context:
     connection: sqlite3.Connection
@@ -181,34 +155,15 @@ class Tool:
     result: type[BaseModel]
     handler: Callable[[Context, Arguments], BaseModel]
 
-    access: str = 'read'
+    access: Literal['read', 'write'] = 'read'
     account: bool = False
+    collects: bool = False
 
     def describe(self) -> dict:
         return dict(name=self.name, version=1, description=self.description,
                     input_schema=self.arguments.model_json_schema(), output_schema=self.result.model_json_schema(),
                     access=self.access, idempotent=True,
-                    errors=['invalid_arguments', 'forbidden', 'not_found', 'unavailable', 'timeout'])
-
-
-def _policy(ctx: Context, args: PolicyRead) -> CommandResult:
-    # Explicit R0 allowlist: no caller-controlled argv, environment or shell.
-    argv = [sys.executable, '-m', 'a_share_research.policy.v0.cache', args.command]
-    if args.command == 'holdings':
-        argv.append('--json')
-    env = {k: v for k, v in os.environ.items() if k in ('PATH', 'HOME', 'LANG', 'LC_ALL')}
-    env['POLICY_V0_DB'] = str(ctx.database.resolve())
-    try:
-        result = subprocess.run(argv, env=env, cwd=Path(__file__).resolve().parents[2],
-                                capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        raise ToolError('timeout', '政策读取超时；未重试', 504) from None
-    return CommandResult(exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
-
-
-def _lifecycle(ctx: Context, args: Analysis) -> Payload:
-    from a_share_research.tools.lifecycle import read
-    return Payload(data=read(ctx.connection, ctx.principal, args.holding_id))
+                    errors=['invalid_arguments', 'forbidden', 'not_found', 'conflict', 'unavailable', 'timeout'])
 
 
 def _monitor(ctx: Context, args: PolicyMonitor) -> Payload:
@@ -217,8 +172,7 @@ def _monitor(ctx: Context, args: PolicyMonitor) -> Payload:
 
 
 def _current_account(ctx: Context, args: Arguments) -> Payload:
-    from a_share_research.policy.account_view import current
-    return Payload(data=current(ctx.connection, ctx.principal, ctx.database))
+    return Payload(data=account_view.current(ctx.connection, ctx.principal, ctx.database))
 
 
 def _stop_alert(ctx: Context, args: PolicyStopAlert) -> Payload:
@@ -254,11 +208,6 @@ def _portfolio_scenario(ctx: Context, args: PolicyPortfolioScenario) -> Payload:
                            args.monitor_evaluation_id, args.proposal.model_dump(mode='json')))
 
 
-def _v0_positions(ctx: Context, args: Account) -> Payload:
-    from a_share_research.policy.v0.account_store import read
-    return Payload(data=read(ctx.connection,ctx.principal,args.account_id))
-
-
 def _evidence_directory(ctx: Context) -> Path:
     return ctx.database.resolve().parent / 'account-evidence'
 
@@ -285,29 +234,25 @@ TOOLS = {tool.name: tool for tool in (
          lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
          account=True),
     Tool('policy.holdings_check', '采集并保存原持仓检查和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
-         frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True),
+         frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True, collects=True),
     Tool('policy.portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
          frozenset({'assistant'}), PolicyPortfolioScenario, Payload, _portfolio_scenario, access='write', account=True),
     Tool('policy.position_size', '引用已保存的服务端监控评估，按拟买入条件保存风险预算定仓；不刷新行情、不形成交易动作',
          frozenset({'assistant'}), PolicyPositionSize, Payload, _position_size, access='write', account=True),
     Tool('policy.benchmark', '按指定截止日采集完整交易历史与双全收益指数，保存相同现金流比较及失败证据；不发送通知、不修改账户',
-         frozenset({'assistant'}), PolicyBenchmark, Payload, _benchmark, access='write', account=True),
+         frozenset({'assistant'}), PolicyBenchmark, Payload, _benchmark, access='write', account=True, collects=True),
     Tool('policy.daily_brief', '采集持仓监控和分红核查，保存原始输入、失败项与盘后日报；不发送通知、不记分红账',
-         frozenset({'assistant'}), PolicyMonitor, Payload, _daily_brief, access='write', account=True),
+         frozenset({'assistant'}), PolicyMonitor, Payload, _daily_brief, access='write', account=True, collects=True),
     Tool('policy.stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态；不发送通知、不修改账户',
-         frozenset({'assistant'}), PolicyStopAlert, Payload, _stop_alert, access='write', account=True),
+         frozenset({'assistant'}), PolicyStopAlert, Payload, _stop_alert, access='write', account=True, collects=True),
     Tool('policy.monitor', '从已核对的账户镜像或明确绑定的账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',
-         frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True),
+         frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True, collects=True),
     Tool('policy.current', '读取生效政策身份、参数与实装一致性；未启用时不猜测默认版本',
          frozenset({'assistant','owner'}), Arguments, Payload,
          lambda c,a: Payload(data=policies.current(c.connection,c.principal)), account=True),
     Tool('policy.guide', '发现或读取生效政策保存的指南；文本资料不是可执行指令',
          frozenset({'assistant','owner'}), PolicyGuide, Payload,
          lambda c,a: Payload(data=policies.guide(c.connection,c.principal,a.path)), account=True),
-    Tool('policy.replay', '按已登记身份重放提供的固定输入包并留存；不证明当前行情或真实账户状态',
-         frozenset({'assistant'}), PolicyReplay, Payload,
-         lambda c,a: Payload(data=policies.replay(c.connection,c.principal,a.identity,a.request_id,a.bundle)),
-         access='write', account=True),
     Tool('policy.evaluation', '读取已保存的政策重放输入、结果与身份',
          frozenset({'assistant','owner'}), PolicyEvaluation, Payload,
          lambda c,a: Payload(data=policies.evaluation(c.connection,c.principal,a.evaluation_id)), account=True),
@@ -321,27 +266,10 @@ TOOLS = {tool.name: tool for tool in (
     Tool('account.cycle_analysis.update', '追加指定账户周期的论点、L3、预警与Tier状态', frozenset({'assistant'}), CycleAnalysisUpdate, Payload,
          lambda c,a: Payload(data=cycle_analysis.update(c.connection,c.principal,a.account_id,a.cycle_id,a.update,_evidence_directory(c))),
          access='write', account=True),
-    Tool('policy.v0.positions', '按明确政策期初和新账本事件生成旧表形状的只读投影', frozenset({'assistant'}), Account, Payload,
-         _v0_positions, account=True),
     Tool('account.positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,
          lambda c, a: Payload(data=position_store.state(c.connection, c.principal, a.account_id)), account=True),
     Tool('account.current', '读取已核对镜像或明确绑定账本的在仓公司代码与来源；不猜测账户、不采集行情',
          frozenset({'assistant'}), Arguments, Payload, _current_account, account=True),
-    Tool('account.lifecycle.replay', '只读重放旧持仓周期成本和政策字段，保留推断与历史差异', frozenset({'assistant'}), Analysis, Payload,
-         _lifecycle, account=True),
-    Tool('account.analysis.preview', '对照旧基线、当前镜像与影子结果，取得协调版本和哈希', frozenset({'assistant'}), Analysis, Payload,
-         lambda c, a: Payload(data=analysis_rebase.preview(c.connection, c.principal, a.holding_id)), account=True),
-    Tool('account.analysis.rebase', '显式选择镜像或影子结果，原子追加基线协调历史', frozenset({'assistant'}), AnalysisRebase, Payload,
-         lambda c, a: Payload(data=analysis_rebase.rebase(c.connection, c.principal, a.rebase,
-                              c.database.parent / 'account-evidence')), access='write', account=True),
-    Tool('account.analysis.current', '读取持仓周期最新影子分析状态', frozenset({'assistant'}), Analysis, Payload,
-         lambda c, a: Payload(data=analysis.current(c.connection, c.principal, a.holding_id)), account=True),
-    Tool('account.analysis.history', '分页读取不可变分析历史，旧基线不冒充完整历史', frozenset({'assistant'}), AnalysisHistory, Payload,
-         lambda c, a: Payload(data=analysis.history(c.connection, c.principal, a.holding_id,
-                              after_id=a.after_id, limit=a.limit)), account=True),
-    Tool('account.analysis.update', '带证据追加论点/L3整组重写、预警与Tier状态；不修改旧监控来源', frozenset({'assistant'}), AnalysisUpdate, Payload,
-         lambda c, a: Payload(data=analysis.update(c.connection, c.principal, a.holding_id, a.update,
-                              c.database.parent / 'account-evidence')), access='write', account=True),
     Tool('account.evidence', '私有存储截图或交割单，返回内容哈希', frozenset({'assistant'}), EvidenceUpload, Payload,
          _store_evidence, access='write', account=True),
     Tool('account.state', '查询影子账本版本与股数现金投影', frozenset({'assistant'}), Account, Payload,
@@ -364,9 +292,7 @@ TOOLS = {tool.name: tool for tool in (
          lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
     Tool('account.research_coverage', '成交时可用研究；不作为显式依据或收益归因',
          frozenset({'assistant'}), Arguments, TradeRows,
-         lambda c, a: TradeRows(rows=trades.research_available_at_trade(c.connection))),
-    Tool('policy.v0.read', '隔离子进程读取旧政策结果，保留输出和退出码',
-         frozenset({'assistant'}), PolicyRead, CommandResult, _policy),
+         lambda c, a: TradeRows(rows=trades.research_available_at_trade(c.connection)), account=True),
 )}
 
 
@@ -375,29 +301,36 @@ def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = Fa
             if principal.role in tool.roles and (not tool.account or account_shadow_enabled)]
 
 
-def invoke(ctx: Context, name: str, arguments: dict) -> dict:
-    """Reject scope/shape errors before invoking a handler; never upgrades caller privileges."""
-    tool = TOOLS.get(name)
+def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
     if tool is None or (tool.account and not ctx.account_shadow_enabled):
         raise ToolError('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
+    return tool
+
+
+def invoke(ctx: Context, name: str, arguments: dict) -> dict:
+    """Reject scope/shape errors before invoking a handler; never upgrades caller privileges."""
+    tool = authorize_tool(ctx, TOOLS.get(name))
     try:
         parsed = tool.arguments.model_validate(arguments)
-    except ValidationError:
-        raise ToolError('invalid_arguments', '参数不符合工具 input_schema', 422) from None
+    except ValidationError as exc:
+        raise ToolError('invalid_arguments', validation_message(exc.errors(include_input=False)), 422) from None
     try:
+        if isinstance(parsed, Account):
+            ledger.authorize(ctx.connection, ctx.principal)
+            account_id = account_view.bound_account_id(ctx.connection)
+            if parsed.account_id is not None and parsed.account_id != account_id:
+                raise ToolError('conflict', 'account_id 与当前绑定账户不一致，请核对账户或省略此字段', 409)
+            parsed.account_id = account_id
         return tool.result.model_validate(tool.handler(ctx, parsed)).model_dump(mode='json')
-    except policies.PolicyError as exc:
-        code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments',
-                503: 'unavailable', 504: 'timeout'}[exc.status]
-        if exc.status == 409 and exc.code == 'policy_activation_changed':
+    except (service.RequestError, ledger.LedgerError, policies.PolicyError) as exc:
+        code = {400: 'invalid_arguments', 403: 'forbidden', 404: 'not_found', 409: 'conflict',
+                422: 'invalid_arguments', 503: 'unavailable', 504: 'timeout'}[exc.status]
+        if isinstance(exc, policies.PolicyError) and exc.status == 409 and exc.code == 'policy_activation_changed':
             code = exc.code
-        raise ToolError(code, str(exc), exc.status) from None
-    except ledger.LedgerError as exc:
-        code = {403: 'forbidden', 404: 'not_found', 409: 'conflict', 422: 'invalid_arguments'}[exc.status]
         raise ToolError(code, str(exc), exc.status) from None
     except evidence.EvidenceError as exc:
         raise ToolError('invalid_arguments', str(exc), 422) from None
-    except service.RequestError as exc:
-        raise ToolError('not_found' if exc.status == 404 else 'invalid_arguments', str(exc), exc.status) from None
+    except RequestException:
+        raise ToolError('unavailable', '上游服务暂不可用，请稍后用原请求重试', 503) from None

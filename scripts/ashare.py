@@ -86,38 +86,36 @@ def base_url(value):
 def http_error(error):
     """Translate bounded, known service codes without exposing raw error contents."""
     with error:
-        if error.code == 409:
+        detail = {}
+        if error.code in (400, 409, 422, 503):
             try:
                 raw = error.read(4097)
-                if len(raw) > 4096:
-                    raise ValueError
-                body = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant,
-                                  parse_float=finite_float)
-                if (isinstance(body, dict) and body.get('ok') is False
-                        and isinstance(body.get('error'), dict)
-                        and body['error'].get('code') == 'policy_activation_changed'):
-                    return ClientError('生效政策已变化；原请求确定未写入评估', status=409,
-                                       code='policy_activation_changed')
+                if len(raw) <= 4096:
+                    body = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant,
+                                      parse_float=finite_float)
+                    if (isinstance(body, dict) and isinstance(body.get('error'), dict)
+                            and (error.code == 503 or body.get('ok') is False)):
+                        detail = body['error']
             except (ValueError, UnicodeError, RecursionError, OSError):
-                pass
+                pass  # Keep status-only guidance for malformed error envelopes.
+        code = detail.get('code')
+        if error.code == 409 and code == 'policy_activation_changed':
+            return ClientError('生效政策已变化；原请求确定未写入评估', status=409, code=code)
+        if (error.code in (400, 422) and code == 'invalid_arguments') or (error.code == 409 and code == 'conflict'):
+            reason = detail.get('message')
+            token = os.environ.get('ASHARE_TOKEN')
+            if isinstance(reason, str) and reason.strip() and reason.isprintable() and not (token and token in reason):
+                return ClientError(f'{reason}（HTTP {error.code}）', status=error.code, code=code)
         if not 500 <= error.code < 600:
             return ClientError(f'服务拒绝请求（HTTP {error.code}），请检查凭据、权限与参数', status=error.code)
         message = '工具服务暂不可用，请检查服务状态'
-        if error.code == 503:
-            try:
-                raw = error.read(4097)
-                if len(raw) > 4096:
-                    raise ValueError('oversized error response')
-                body = json.loads(raw, parse_constant=reject_constant, parse_float=finite_float,
-                                  object_pairs_hook=unique_object)
-                detail = body.get('error') if isinstance(body, dict) else None
-                code = detail.get('code') if isinstance(detail, dict) else None
-                if code in ('paused', 'busy'):
-                    message = {'paused': '工具服务已暂停受理，恢复后可用原请求重试',
-                               'busy': '工具服务繁忙，稍后可用原请求重试'}[code]
-                    return ClientError(f'{message}（HTTP 503）；未自动重试', status=503, code='service_unavailable')
-            except (ValueError, UnicodeError, RecursionError, OSError):
-                pass  # An unreadable error body keeps the safe HTTP-status guidance.
+        if error.code == 503 and code in ('paused', 'busy'):
+            message = {'paused': '工具服务已暂停受理，恢复后可用原请求重试',
+                       'busy': '工具服务繁忙，稍后可用原请求重试'}[code]
+            return ClientError(f'{message}（HTTP 503）；未自动重试', status=503, code='service_unavailable')
+        if error.code == 503 and code == 'unavailable':
+            return ClientError('工具或上游服务暂不可用，稍后可用原请求重试（HTTP 503）；未自动重试',
+                               status=503, code=code)
         return ClientError(f'{message}（HTTP {error.code}）；未自动重试', status=error.code)
 
 
@@ -142,7 +140,7 @@ def request(path, payload=None):
             raise ClientError('服务响应过大')
         result = json.loads(raw, parse_constant=reject_constant, parse_float=finite_float, object_pairs_hook=unique_object)
     except urllib.error.HTTPError as exc:
-        # Never echo server bodies, URLs or request headers containing credentials.
+        # Show only recognized service errors, never the raw HTTP response.
         raise http_error(exc) from None
     except (urllib.error.URLError, ConnectionRefusedError) as exc:
         # Refused means no handler received the request (e.g. a release restart), so resending it is safe.
@@ -266,7 +264,7 @@ class MCPBridge:
                     name = self.tool_names[name]
                 payload = request('/tools/' + name, arguments)['result']
                 result = {'content': [{'type': 'text', 'text': json.dumps(payload, ensure_ascii=False, allow_nan=False)}],
-                          'structuredContent': payload, 'isError': payload.get('exit_code', 0) != 0}
+                          'structuredContent': payload, 'isError': False}
             except ClientError as exc:
                 if exc.status == 404:
                     return rpc_error(request_id, -32602, str(exc))

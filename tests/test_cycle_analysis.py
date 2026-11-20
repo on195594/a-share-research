@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from a_share_research import api_keys
 from a_share_research.account import analysis, cycle_analysis, evidence, ledger, position_store
-from test_account_analysis import legacy_rows, request
+from test_account_analysis import historical_revision, legacy_rows, request
 from test_analysis_transitions import rewrite, open_alert
 from test_position_store import seed, event, batch, submit
 from test_v0_account_store import book as policy_book
@@ -59,7 +59,7 @@ def test_seed_baseline_requires_explicit_current_legacy_revision_and_keeps_snaps
     assert analysis.inspect(book[0]) == []
 
 
-def test_same_holding_id_accounts_and_legacy_api_remain_isolated(book):
+def test_same_holding_id_accounts_and_legacy_history_remain_isolated(book):
     conn, principal, directory, sha = book
     conn.execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     old = analysis.initialize(conn, principal, 1)
@@ -72,8 +72,8 @@ def test_same_holding_id_accounts_and_legacy_api_remain_isolated(book):
     assert result['holding_id'] == a['holding_id'] == b['holding_id'] == 1
     assert current(book, account='b') == b
     assert analysis.current(conn, principal, 1) == old
-    legacy = analysis.update(conn, principal, 1,
-        request(book, [dict(kind='tier', tier='tier3', status='completed')]), directory)
+    legacy = historical_revision(book, 1,
+        request(book, [dict(kind='tier', tier='tier3', status='completed')]))
     assert current(book) == result and current(book, account='b') == b
     assert analysis.current(conn, principal, 1) == legacy
     assert analysis.history(conn, principal, 1)['revisions'] == [old, legacy]
@@ -129,8 +129,8 @@ def test_seed_cannot_import_stale_or_other_holdings_revision(book):
     conn, principal, *_ = book
     conn.execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     old = analysis.initialize(conn, principal, 1)
-    latest = analysis.update(conn, principal, 1, request(book,
-        [dict(kind='tier', tier='tier2', status='completed')]), book[2])
+    latest = historical_revision(book, 1, request(book,
+        [dict(kind='tier', tier='tier2', status='completed')]))
     with pytest.raises(ledger.LedgerError, match='当前分析版本'):
         initialize(book, revision=old['revision_id'])
     assert initialize(book, revision=latest['revision_id'])['snapshot'] == latest['snapshot']
@@ -255,8 +255,8 @@ def test_scoped_seed_projection_stays_independent_of_later_legacy_revision(book,
     configure_projection(book, tmp_path, monkeypatch)
     initialize(book, revision=old['revision_id'])
     scoped = update(book)
-    analysis.update(book[0], book[1], 1,
-        request(book, [dict(kind='tier', tier='tier3', status='completed')]), book[2])
+    historical_revision(book, 1,
+        request(book, [dict(kind='tier', tier='tier3', status='completed')]))
     with policy_db.db_session() as projected:
         row = projected.execute('SELECT tier2_status,tier3_status FROM holding_tier_state WHERE holding_id=1').fetchone()
         assert tuple(row) == ('completed', 'pending')
@@ -269,16 +269,17 @@ def test_combined_seed_without_scoped_baseline_uses_legacy_analysis(book, tmp_pa
     book[0].execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     analysis.initialize(book[0], book[1], 1)
     configure_projection(book, tmp_path, monkeypatch)
-    analysis.update(book[0], book[1], 1,
-        request(book, [dict(kind='tier', tier='tier3', status='completed')]), book[2])
+    historical_revision(book, 1,
+        request(book, [dict(kind='tier', tier='tier3', status='completed')]))
     with policy_db.db_session() as projected:
         assert projected.execute('SELECT tier3_status FROM holding_tier_state WHERE holding_id=1').fetchone()[0] == 'completed'
 
 
-def test_http_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(book, tmp_path):
+def test_http_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(book, tmp_path, bind_account):
     from fastapi.testclient import TestClient
     from a_share_research.tools.server import create_app
     cycle = reopened(book)
+    bind_account(book[0], 'a')
     token = api_keys.create(book[0], 'structural-http-assistant', role='assistant')
     research = api_keys.create(book[0], 'structural-http-research', role='research')
     headers = {'Authorization': 'Bearer ' + token}

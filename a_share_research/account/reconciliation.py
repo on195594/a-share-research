@@ -6,7 +6,7 @@ import json
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, ValidationInfo, field_validator, model_validator
 
 
 def money(value):
@@ -57,11 +57,17 @@ class Snapshot(Opening):
     market_values: dict[Code, Annotated[Money, Field(ge=0)]]
     portfolio_value_as_of: ValuationTime | None = Field(default=None,exclude_if=lambda value:value is None)
 
-    @model_validator(mode='after')
-    def complete_values(self):
-        if {k for k, n in self.positions.items() if n} != {k for k, n in self.market_values.items() if n}:
-            raise ValueError('持仓与非零市值代码必须一致，不能缺市值')
-        return self
+    @field_validator('market_values')
+    @classmethod
+    def complete_values(cls, values, info: ValidationInfo):
+        if 'positions' in info.data:
+            held = {code for code, shares in info.data['positions'].items() if shares}
+            valued = {code for code, amount in values.items() if amount}
+            if missing := held - valued:
+                raise ValueError(f"缺 {'、'.join(sorted(missing))} 市值")
+            if extra := valued - held:
+                raise ValueError(f"{'、'.join(sorted(extra))} 无持仓，请核对市值")
+        return values
 
 
 class Event(Value):

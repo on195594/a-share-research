@@ -11,7 +11,7 @@ from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, monitor, portfolio_scenario, position_sizing, registry
 from a_share_research.policy.v0.portfolio_scenario import compare
 from a_share_research.tools.server import create_app
-from test_policy_monitor import setup as monitor_setup
+from test_policy_monitor import historical_replay, setup as monitor_setup
 
 PROPOSAL = dict(sales={'600000': 100}, fees=5.0)
 
@@ -82,14 +82,14 @@ def test_ready_captured_snapshot_transport_matches_pure_comparison(setup, monkey
 
 
 def test_cross_operation_request_conflict_and_invalid_parent_kinds(setup, parent):
-    path, conn, principals, manifest, active, bundle, _ = setup
+    path, conn, principals, _, active, _, _ = setup
     sizing = position_sizing.run(conn, principals['assistant'], path, 'sizing-request', active['id'], parent['id'],
                                  dict(code='600900', price=29.5, framework='A'))
     with pytest.raises(registry.PolicyError, match='不同'):
         run(setup, parent, 'sizing-request')
     with pytest.raises(registry.PolicyError, match='服务端监控'):
         run(setup, sizing, 'derived-parent')
-    replay = registry.replay(conn, principals['assistant'], manifest['identity'], 'scenario-replay', bundle)
+    replay = historical_replay(setup, 'scenario-replay')
     with pytest.raises(registry.PolicyError, match='服务端监控'):
         run(setup, replay, 'replay-parent')
     saved = run(setup, parent)

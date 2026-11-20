@@ -219,14 +219,6 @@ def test_invalid_discovery_schema_is_protocol_error(tool, monkeypatch):
     assert ready_bridge().handle(rpc('tools/list'))['error']['code'] == -32603
 
 
-def test_failed_policy_subprocess_remains_a_tool_failure(monkeypatch):
-    payload = {'exit_code': 1, 'stdout': '', 'stderr': 'fixture subprocess failed'}
-    monkeypatch.setattr(cli, 'request', lambda *args: {'ok': True, 'result': payload})
-    result = ready_bridge().handle(rpc('tools/call', {'name': 'policy.v0.read'}))['result']
-    assert result['isError'] is True
-    assert result['structuredContent'] == payload
-
-
 @pytest.mark.parametrize('method', ['notifications/initialized', 'notifications/cancelled',
                                     'unknown/notification', 'tools/call'])
 def test_notifications_never_dispatch_or_reply(method, monkeypatch):

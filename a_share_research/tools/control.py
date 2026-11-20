@@ -1,6 +1,6 @@
 """Private local release control, independent of HTTP credentials and database state."""
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 import math
 import os
@@ -115,23 +115,34 @@ class Gate:
         self.marker = Path(marker) if marker is not None else None
         self._condition = threading.Condition()
         self._operations = threading.Lock()
-        self._limit, self._in_flight = limit, 0
+        self._slots = threading.BoundedSemaphore(limit)
+        self._in_flight = 0
         self._paused = _marker_exists(self.marker) if self.marker is not None else False
 
     @contextmanager
-    def acquire(self):
-        with self._condition:
-            if self._paused:
-                raise ControlError('paused')
-            if self._in_flight >= self._limit:
-                raise ControlError('busy')
-            self._in_flight += 1
+    def slot(self):
+        """Reserve capacity for an already admitted write or collection."""
+        if not self._slots.acquire(blocking=False):
+            raise ControlError('busy')
         try:
             yield
         finally:
+            self._slots.release()
+
+    @contextmanager
+    def acquire(self, *, limited=True):
+        with self._condition:
+            if self._paused:
+                raise ControlError('paused')
+            self._in_flight += 1
+        try:
+            with self.slot() if limited else nullcontext():
+                yield
+        finally:
             with self._condition:
                 self._in_flight -= 1
-                self._condition.notify_all()
+                if not self._in_flight:
+                    self._condition.notify_all()
 
     def status(self):
         with self._condition:

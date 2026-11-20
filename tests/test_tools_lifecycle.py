@@ -1,5 +1,6 @@
 """Structural operations/HTTP contracts only; not broker or investment evidence."""
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import sqlite3
 import threading
 
@@ -81,6 +82,42 @@ def test_research_key_has_no_http_lifecycle_control_routes(database):
         for endpoint in ('/pause', '/resume', '/drain', '/control', '/control/pause', '/control/resume'):
             assert client.post(endpoint, json={}, headers=header(tokens['research'])).status_code == 404
         assert client.get('/ready').status_code == 200
+
+
+def test_full_gate_admits_reads_and_discovery_but_rejects_writes_and_collectors(database, monkeypatch):
+    path, tokens = database
+    app = server.create_app(path, account_shadow_enabled=True)
+    headers = header(tokens['assistant'])
+    writing, release = threading.Barrier(3), threading.Event()
+    evidence = server.TOOLS['account.evidence']
+
+    def slow_write(ctx, args):
+        writing.wait(timeout=5)
+        assert release.wait(5)
+        return evidence.handler(ctx, args)
+
+    monkeypatch.setitem(server.TOOLS, evidence.name, replace(evidence, handler=slow_write))
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
+        writes = [pool.submit(client.post, '/tools/account.evidence', headers=headers,
+                              json={'content_base64': content}) for content in ('YQ==', 'Yg==')]
+        try:
+            writing.wait(timeout=5)
+            assert app.state.gate.status()['in_flight'] == 2
+            for token, status in (('invalid', 401), (tokens['research'], 403)):
+                rejected = client.post('/tools/account.evidence', headers=header(token),
+                                       json={'content_base64': 'Yw=='})
+                assert rejected.status_code == status
+            assert client.get('/tools', headers=headers).status_code == 200
+            assert client.post('/tools/research.cards', json={}, headers=headers).status_code == 200
+            collecting = replace(server.TOOLS['research.cards'], collects=True)
+            monkeypatch.setitem(server.TOOLS, collecting.name, collecting)
+            for name in (evidence.name, collecting.name):
+                response = client.post('/tools/' + name, json={}, headers=headers)
+                assert response.status_code == 503
+                assert response.json()['error']['code'] == 'busy'
+        finally:
+            release.set()
+        assert all(write.result().status_code == 200 for write in writes)
 
 
 @pytest.mark.parametrize('request_kind', ['discovery', 'call'])

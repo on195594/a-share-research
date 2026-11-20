@@ -6,7 +6,7 @@ import pytest
 
 from a_share_research.account import analysis
 from a_share_research.policy.v0 import commands_monitor, db as policy_db
-from test_account_analysis import branch as branch_fixture, request
+from test_account_analysis import branch as branch_fixture, historical_revision, request
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def test_latest_shadow_visible_with_legacy_unchanged_and_all_connections_readonl
     conn, principal, directory, *_ = branch
     initialize(branch)
     before = rows(conn)
-    analysis.update(conn, principal, 1, request(branch), directory)
+    historical_revision(branch, 1, request(branch))
     configure(monkeypatch, tmp_path)
     assert policy_db.is_read_only()
     with policy_db.db_session() as projected:
@@ -92,7 +92,7 @@ def test_invalid_shadow_refuses_to_return_connection(branch, tmp_path, monkeypat
 def test_closed_holdings_keep_legacy_even_if_shadow_history_exists(branch, tmp_path, monkeypatch):
     conn, principal, directory, *_ = branch
     initialize(branch)
-    analysis.update(conn, principal, 1, request(branch), directory)
+    historical_revision(branch, 1, request(branch))
     conn.execute("UPDATE holdings SET exit_date='2026-11-11' WHERE id=1")
     configure(monkeypatch, tmp_path)
     with policy_db.read_only_db_session() as projected:

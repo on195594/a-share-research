@@ -59,9 +59,22 @@ def test_error_never_echoes_server_body_or_token(monkeypatch, capsys):
     assert output.out == '' and '403' in output.err and 'asr_secret' not in output.err
 
 
+def test_cli_returns_actionable_validation_detail_without_echoing_credentials(monkeypatch):
+    monkeypatch.setenv('ASHARE_TOKEN', 'asr_secret')
+    for reason in ('batch.snapshot.market_values: 缺 600519 市值', 'asr_secret: unexpected field', '   '):
+        body = json.dumps({'ok': False, 'error': {'code': 'invalid_arguments', 'message': reason}})
+        error = cli.http_error(urllib.error.HTTPError('/tools/account.submit', 422, '', {}, io.BytesIO(body.encode())))
+        assert error.status == 422 and 'asr_secret' not in str(error)
+        if '600519' in reason:
+            assert reason in str(error)
+        else:
+            assert '请检查凭据、权限与参数' in str(error)
+
+
 @pytest.mark.parametrize(('status', 'body', 'expected'), [
     (503, b'{"ok":false,"error":{"code":"paused","message":"asr_secret"}}', '暂停'),
     (503, b'{"ok":false,"error":{"code":"busy","message":"asr_secret"}}', '繁忙'),
+    (503, b'{"ok":false,"error":{"code":"unavailable","message":"asr_secret"}}', '原请求重试'),
     (503, b'{"error":{"code":"asr_secret","message":"asr_secret"}}', '暂不可用'),
     (503, b'{"error":{"code":["paused"]}}', '暂不可用'),
     (503, b'{"error":{"code":"paused","code":"busy"}}', '暂不可用'),

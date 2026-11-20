@@ -1,4 +1,6 @@
 """Structural state transitions only; these invented fixtures are not investment evidence."""
+from datetime import datetime
+from decimal import Decimal
 import json
 import sqlite3
 
@@ -6,7 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from a_share_research import api_keys, db
-from a_share_research.account import analysis, evidence, ledger
+from a_share_research.account import analysis, cycle_analysis, evidence, ledger, position_store
+from test_position_store import seed
 
 
 @pytest.fixture
@@ -28,6 +31,10 @@ def branch(tmp_path):
                      " VALUES (?,1,'600001','yellow','unverified',?,'Structural alert',?,'2026-11-01','2026-11-01')",
                      (identity,f'structural-{identity}',status))
     conn.execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
+    seeds = [seed(), seed(code='600002', cycle_id='legacy:2', legacy_holding_id=2)]
+    ledger.initialize(conn, principal, 'a', dict(positions={s.code: s.shares for s in seeds}, cash='10000'),
+                      datetime.fromisoformat('2026-11-01T00:00:00+08:00'), directory, sha, tolerance=Decimal(0))
+    position_store.initialize(conn, principal, 'a', seeds, directory, [sha])
     yield conn, principal, directory, sha
     conn.close()
 
@@ -43,8 +50,26 @@ def request(branch, changes=None, version=0, **extra):
             as_of='2026-11-11',evidence='Structural evidence')]) | extra)
 
 
-def append(branch, value):
-    return analysis.update(branch[0],branch[1],1,value,branch[2])
+def start_cycle(branch, holding_id=1):
+    conn, principal, directory, sha = branch
+    legacy = analysis.initialize(conn, principal, holding_id)
+    return cycle_analysis.initialize(conn, principal, 'a', f'legacy:{holding_id}', dict(
+        expected_account_version=0, evidence_hashes=[sha], legacy_revision_id=legacy['revision_id']), directory)
+
+
+def append(branch, value, holding_id=1):
+    return cycle_analysis.update(branch[0], branch[1], 'a', f'legacy:{holding_id}', value, branch[2])
+
+
+def historical_revision(branch, holding_id, value):
+    """Seed a pre-cutover revision alongside a journal branch for historical reader tests."""
+    conn, principal, *_ = branch
+    holding = analysis.read_holding(conn, holding_id)
+    latest = analysis.current(conn, principal, holding_id)
+    snapshot = latest['snapshot']
+    analysis.apply_changes(conn, holding, snapshot, value.changes)
+    return analysis.insert_revision(conn, holding, latest['version'] + 1, latest['revision_id'],
+        'assistant', principal, value.model_dump(mode='json'), value.evidence_hashes, snapshot)
 
 
 def test_baseline_retains_missing_legacy_fields_and_is_idempotent(branch):
@@ -62,7 +87,7 @@ def test_baseline_retains_missing_legacy_fields_and_is_idempotent(branch):
 
 def test_append_is_atomic_idempotent_and_keeps_original_and_legacy(branch):
     conn, principal, *_ = branch
-    base = analysis.initialize(conn,principal,1)
+    base = start_cycle(branch)
     before = legacy_rows(conn)
     value = request(branch,[dict(kind='l3',id=1,status='watch',as_of='2026-11-11',
         evidence='Structural evidence',evidence_cadence='quarterly'),
@@ -73,7 +98,7 @@ def test_append_is_atomic_idempotent_and_keeps_original_and_legacy(branch):
     assert result['source'] == 'assistant' and result['actor_key_id'] == principal.key_id
     assert result['evidence_hashes'] == [branch[3]]
     assert append(branch,value) == result
-    assert analysis.current(conn,principal,1) == result
+    assert cycle_analysis.current(conn, principal, 'a', 'legacy:1') == result
     assert result['snapshot']['holding_l3_conditions'][0]['status'] == 'watch'
     assert result['snapshot']['holding_alerts'][0]['status'] == 'pending'
     assert result['snapshot']['holding_tier_state'][0]['tier2_status'] == 'completed'
@@ -82,7 +107,7 @@ def test_append_is_atomic_idempotent_and_keeps_original_and_legacy(branch):
     assert legacy_rows(conn) == before
     with pytest.raises(ledger.LedgerError,match='版本冲突'):
         append(branch,request(branch,reason='Different request at old version'))
-    assert conn.execute('SELECT count(*) FROM account_analysis_history').fetchone()[0] == 2
+    assert conn.execute("SELECT count(*) FROM account_analysis_history WHERE account_id='a'").fetchone()[0] == 2
 
 
 @pytest.mark.parametrize('change',[
@@ -93,16 +118,16 @@ def test_append_is_atomic_idempotent_and_keeps_original_and_legacy(branch):
 ])
 def test_invalid_second_change_rolls_back_entire_batch(branch,change):
     conn, principal, *_ = branch
-    base = analysis.initialize(conn,principal,1)
+    base = start_cycle(branch)
     with pytest.raises(ledger.LedgerError):
         append(branch,request(branch,[dict(kind='tier',tier='tier2',status='completed'),change]))
-    assert analysis.current(conn,principal,1) == base
-    assert conn.execute('SELECT count(*) FROM account_analysis_history').fetchone()[0] == 1
+    assert cycle_analysis.current(conn, principal, 'a', 'legacy:1') == base
+    assert conn.execute("SELECT count(*) FROM account_analysis_history WHERE account_id='a'").fetchone()[0] == 1
 
 
 def test_alert_resolution_is_terminal_and_preserves_prior_evidence(branch):
     conn, principal, *_ = branch
-    analysis.initialize(conn,principal,1)
+    start_cycle(branch)
     result = append(branch,request(branch,[dict(kind='alert',id=2,status='resolved',evidence='Structural resolution')]))
     row = result['snapshot']['holding_alerts'][1]
     assert row['status'] == 'resolved' and row['resolution_evidence'] == 'Structural resolution'
@@ -114,79 +139,24 @@ def test_alert_resolution_is_terminal_and_preserves_prior_evidence(branch):
 def test_entry_exemption_cannot_be_changed_by_status_update(branch):
     conn, principal, *_ = branch
     conn.execute("UPDATE holding_tier_state SET tier1_status='exempted' WHERE holding_id=1")
-    base = analysis.initialize(conn,principal,1)
+    base = start_cycle(branch)
     with pytest.raises(ledger.LedgerError,match='豁免'):
         append(branch,request(branch,[dict(kind='tier',tier='tier1',status='pending')]))
-    assert analysis.current(conn,principal,1) == base
+    assert cycle_analysis.current(conn, principal, 'a', 'legacy:1') == base
     with pytest.raises(ValidationError):
         request(branch,[dict(kind='tier',tier='tier1',status='exempted')])
 
 
-def test_mirror_baseline_changes_are_not_silently_merged(branch):
-    conn, principal, *_ = branch
-    base = analysis.initialize(conn,principal,1)
-    conn.execute("UPDATE holding_l3_conditions SET evidence='Later mirrored evidence' WHERE id=1")
-    with pytest.raises(ledger.LedgerError,match='基线已变化'):
-        append(branch,request(branch))
-    assert analysis.current(conn,principal,1) == base
-    assert conn.execute('SELECT evidence FROM holding_l3_conditions WHERE id=1').fetchone()[0] == 'Later mirrored evidence'
-
-
 def test_evidence_failure_and_sql_failure_do_not_append_partial_revision(branch):
     conn, principal, directory, _ = branch
-    base = analysis.initialize(conn,principal,1)
+    base = start_cycle(branch)
     with pytest.raises(evidence.EvidenceError):
         append(branch,request(branch,evidence_hashes=['0'*64]))
     conn.execute("CREATE TRIGGER fail_analysis BEFORE INSERT ON account_analysis_history BEGIN SELECT RAISE(ABORT,'structural failure'); END")
     with pytest.raises(sqlite3.IntegrityError,match='structural failure'):
         append(branch,request(branch))
-    assert analysis.current(conn,principal,1) == base
+    assert cycle_analysis.current(conn, principal, 'a', 'legacy:1') == base
     assert not conn.in_transaction
-
-
-@pytest.mark.parametrize('role',['research','owner'])
-def test_other_roles_cannot_read_or_write(branch,role):
-    conn, principal, directory, _ = branch
-    analysis.initialize(conn,principal,1)
-    denied = api_keys.authenticate(conn,api_keys.create(conn,role,role=role))
-    for action in (lambda: analysis.initialize(conn,denied,1),lambda: analysis.current(conn,denied,1),
-                   lambda: analysis.history(conn,denied,1),lambda: analysis.update(conn,denied,1,request(branch),directory)):
-        with pytest.raises(ledger.LedgerError) as caught:
-            action()
-        assert caught.value.status == 403
-
-
-def test_history_pagination_and_append_only_triggers(branch):
-    conn, principal, *_ = branch
-    base = analysis.initialize(conn,principal,1)
-    result = append(branch,request(branch))
-    first = analysis.history(conn,principal,1,limit=1)
-    assert first['revisions'] == [base]
-    second = analysis.history(conn,principal,1,after_id=first['next_after_id'],limit=1)
-    assert second['revisions'] == [result]
-    assert analysis.history(conn,principal,1,after_id=second['next_after_id'])['revisions'] == []
-    assert analysis.history(conn,principal,2)['revisions'] == []
-    for args in ({'after_id':-1},{'limit':0},{'limit':1001},{'after_id':True}):
-        with pytest.raises(ledger.LedgerError):
-            analysis.history(conn,principal,1,**args)
-    for sql in ('UPDATE account_analysis_history SET source=source','DELETE FROM account_analysis_history'):
-        with pytest.raises(sqlite3.IntegrityError,match='append-only'):
-            conn.execute(sql)
-
-
-def test_missing_or_closed_holding_and_duplicate_targets_are_rejected(branch):
-    conn, principal, *_ = branch
-    with pytest.raises(ledger.LedgerError) as caught:
-        analysis.current(conn,principal,1)
-    assert caught.value.status == 404
-    with pytest.raises(ledger.LedgerError):
-        analysis.initialize(conn,principal,999)
-    analysis.initialize(conn,principal,1)
-    conn.execute("UPDATE holdings SET exit_date='2026-11-10' WHERE id=1")
-    with pytest.raises(ledger.LedgerError,match='已关闭'):
-        append(branch,request(branch))
-    with pytest.raises(ValidationError,match='重复更新'):
-        request(branch,[dict(kind='tier',tier='tier1',status='pending')]*2)
 
 
 @pytest.mark.parametrize('column,value,match', [
@@ -197,17 +167,9 @@ def test_missing_or_closed_holding_and_duplicate_targets_are_rejected(branch):
 ])
 def test_integrity_detects_corrupt_history(branch, column, value, match):
     conn, principal, *_ = branch
-    analysis.initialize(conn, principal, 1)
+    start_cycle(branch)
     result = append(branch, request(branch))
     assert analysis.inspect(conn) == []
     conn.execute('DROP TRIGGER account_analysis_no_update')
     conn.execute(f'UPDATE account_analysis_history SET {column}=? WHERE id=?', (value, result['revision_id']))
     assert any(match in item for item in analysis.inspect(conn))
-
-
-def test_changed_company_identity_cannot_reuse_history(branch):
-    conn, principal, *_ = branch
-    analysis.initialize(conn, principal, 1)
-    conn.execute("UPDATE holdings SET code='600003' WHERE id=1")
-    with pytest.raises(ledger.LedgerError, match='公司身份'):
-        append(branch, request(branch))

@@ -10,7 +10,7 @@ import pytest
 from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, identity, monitor, position_evaluation, position_sizing, registry
 from a_share_research.tools.server import create_app
-from test_policy_monitor import setup as monitor_setup
+from test_policy_monitor import historical_replay, setup as monitor_setup
 
 PROPOSAL = dict(code='600900', price=29.5, framework='A')
 
@@ -84,8 +84,8 @@ def test_new_source_rejected_but_saved_derivation_survives_changes(setup, parent
 
 
 def test_replay_reference_not_service_monitor(setup):
-    _, conn, principals, manifest, _, bundle, _ = setup
-    supplied = registry.replay(conn, principals['assistant'], manifest['identity'], 'supplied', bundle)
+    conn = setup[1]
+    supplied = historical_replay(setup, 'supplied')
     with pytest.raises(registry.PolicyError, match='服务端监控'):
         run(setup, supplied)
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1

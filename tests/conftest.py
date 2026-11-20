@@ -3,6 +3,17 @@ import os
 import pytest
 
 
+@pytest.fixture
+def bind_account():
+    from a_share_research import db, gate
+
+    def bind(conn, account_id):
+        binding = dict(schema_version=1, account_id=account_id, account_scope='structural-scope', mirror_watermark={})
+        conn.execute('INSERT INTO account_source VALUES(1,?,?,?,?)',
+                     ('ledger', 'a' * 64, db.now(), gate.canonical(binding)))
+    return bind
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "wide_scan_scope: scan beyond subscriptions (tracking L5 and card companies)")
 

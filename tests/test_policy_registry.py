@@ -140,69 +140,6 @@ def test_inspection_detects_corrupt_manifest_without_executing_it(setup):
     assert registry.inspect(conn)
 
 
-@pytest.fixture
-def bundle():
-    return dict(local=dict(holdings=[],closed_count=0),quotes={},portfolio_value=None,industry_result=None,
-                now='2026-11-11T12:00:00+08:00',risk_policy=risk_budget.policy(),denominator_evidence={},
-                account_scope_required=False,research_result={'status':'not_configured','cards':[]})
-
-
-def test_replay_binds_inputs_identity_and_activation_and_is_idempotent(setup,bundle):
-    _,conn,_,principals,manifest=setup
-    first=registry.replay(conn,principals['assistant'],manifest['identity'],'replay-before',bundle)
-    assert first['activation_id'] is None and first['mode']=='supplied_input_replay'
-    activation=activate(setup)
-    receipt=registry.replay(conn,principals['assistant'],manifest['identity'],'replay-active',bundle)
-    assert receipt['activation_id']==activation['id']
-    assert receipt['input_hash']==gate.digest(bundle)
-    assert receipt['result_hash']==gate.digest(receipt['result'])
-    assert registry.replay(conn,principals['assistant'],manifest['identity'],'replay-active',bundle)==receipt
-    assert registry.evaluation(conn,principals['assistant'],receipt['id'])==receipt
-    assert registry.inspect(conn)==[]
-    with pytest.raises(registry.PolicyError,match='不同评估'):
-        registry.replay(conn,principals['assistant'],manifest['identity'],'replay-active',bundle|{'portfolio_value':100})
-    for sql in ('DELETE FROM policy_evaluations','UPDATE policy_evaluations SET result="{}"'):
-        with pytest.raises(sqlite3.IntegrityError): conn.execute(sql)
-
-
-def test_bad_parameters_or_input_never_save_evaluation(setup,bundle):
-    _,conn,_,principals,manifest=setup
-    for bad in (bundle|{'risk_policy':risk_budget.policy(3,9)}, bundle|{'now':'not a date'},
-                bundle|{'local':{'holdings':[{}],'closed_count':0}}):
-        with pytest.raises(registry.PolicyError):
-            registry.replay(conn,principals['assistant'],manifest['identity'],'bad',bad)
-    assert conn.execute('SELECT COUNT(*) FROM policy_evaluations').fetchone()[0]==0
-    with pytest.raises(registry.PolicyError):
-        registry.replay(conn,principals['research'],manifest['identity'],'forbidden',bundle)
-
-
-def test_replay_failure_rolls_back_whole_receipt(setup,bundle):
-    _,conn,_,principals,manifest=setup
-    conn.execute("CREATE TRIGGER fail_eval BEFORE INSERT ON policy_evaluations BEGIN SELECT RAISE(ABORT,'injected storage fault'); END")
-    with pytest.raises(sqlite3.IntegrityError,match='injected storage fault'):
-        registry.replay(conn,principals['assistant'],manifest['identity'],'fault',bundle)
-    assert conn.execute('SELECT COUNT(*) FROM policy_evaluations').fetchone()[0]==0
-    assert not conn.in_transaction
-
-
-def test_http_replay_uses_same_identity_and_never_grants_activation(setup,bundle):
-    path,conn,tokens,principals,manifest=setup
-    activate(setup)
-    headers={'Authorization':'Bearer '+tokens['assistant']}
-    payload={'identity':manifest['identity'],'request_id':'http-replay','bundle':bundle}
-    with TestClient(create_app(path,account_shadow_enabled=True)) as client:
-        first=client.post('/tools/policy.replay',headers=headers,json=payload)
-        assert first.status_code==200
-        receipt=first.json()['result']['data']
-        assert receipt['identity']==manifest['identity']
-        assert client.post('/tools/policy.replay',headers=headers,json=payload).json()==first.json()
-        assert client.post('/tools/policy.evaluation',headers=headers,json={'evaluation_id':receipt['id']}).json()==first.json()
-        assert client.post('/tools/policy.replay',headers={'Authorization':'Bearer '+tokens['research']},json=payload).status_code==403
-        bad=payload|{'request_id':'bad','bundle':bundle|{'now':'invalid'}}
-        assert client.post('/tools/policy.replay',headers=headers,json=bad).status_code==422
-    assert registry.inspect(conn)==[]
-
-
 def test_unapplied_parameters_can_be_archived_but_not_activated(setup):
     _,conn,_,principals,_=setup
     marker='not_applied_account_scope_required'

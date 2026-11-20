@@ -4,8 +4,8 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
-from a_share_research.account import analysis, ledger
-from test_account_analysis import branch as _branch_fixture, request, append, legacy_rows
+from a_share_research.account import analysis, cycle_analysis, ledger
+from test_account_analysis import branch as _branch_fixture, request, append, legacy_rows, start_cycle
 
 branch = _branch_fixture
 
@@ -28,7 +28,7 @@ def open_alert(reason_code='structural-new', **overrides):
 
 def test_rewrite_preserves_prior_revisions_and_atomically_links_new_conditions(branch):
     conn, principal, *_ = branch
-    baseline = analysis.initialize(conn, principal, 1)
+    baseline = start_cycle(branch)
     legacy = legacy_rows(conn)
     value = request(branch, [rewrite()])
     result = append(branch, value)
@@ -49,7 +49,7 @@ def test_rewrite_preserves_prior_revisions_and_atomically_links_new_conditions(b
         assert row['is_active'] == 1 and row['status'] == 'pending'
         assert row['thesis_version_id'] == theses[1]['id']
         assert row['evidence'] is None and row['as_of'] is None and row['origin_type'] == 'new_monitoring'
-    assert analysis.history(conn, principal, 1)['revisions'][0] == baseline
+    assert cycle_analysis.history(conn, principal, 'a', 'legacy:1')['revisions'][0] == baseline
     assert legacy_rows(conn) == legacy
     assert analysis.inspect(conn) == []
     with pytest.raises(ledger.LedgerError, match='版本冲突'):
@@ -59,12 +59,12 @@ def test_rewrite_preserves_prior_revisions_and_atomically_links_new_conditions(b
 @pytest.mark.parametrize('ids', [[], [2], [3], [1, 2], [1, 3], [999]])
 def test_incomplete_cross_holding_or_retired_replacement_rejected_atomically(branch, ids):
     conn, principal, *_ = branch
-    baseline = analysis.initialize(conn, principal, 1)
+    baseline = start_cycle(branch)
     value = request(branch, [open_alert(), rewrite(retire_l3_ids=ids)])
     with pytest.raises(ledger.LedgerError, match='全部活动'):
         append(branch, value)
-    assert analysis.current(conn, principal, 1) == baseline
-    assert len(analysis.history(conn, principal, 1)['revisions']) == 1
+    assert cycle_analysis.current(conn, principal, 'a', 'legacy:1') == baseline
+    assert len(cycle_analysis.history(conn, principal, 'a', 'legacy:1')['revisions']) == 1
 
 
 def test_duplicate_retirement_and_mixed_l3_updates_are_rejected(branch):
@@ -82,10 +82,10 @@ def test_non_core_conditions_cannot_request_trades(branch, action):
 
 def test_global_ids_stay_distinct_across_holdings_and_rewrite_generations(branch):
     conn, principal, directory, _ = branch
-    analysis.initialize(conn, principal, 1)
-    analysis.initialize(conn, principal, 2)
+    start_cycle(branch)
+    start_cycle(branch, 2)
     first = append(branch, request(branch, [rewrite()]))
-    second = analysis.update(conn, principal, 2, request(branch, [rewrite(retire_l3_ids=[3]), open_alert()]), directory)
+    second = append(branch, request(branch, [rewrite(retire_l3_ids=[3]), open_alert()]), holding_id=2)
     first_ids = {r['id'] for r in first['snapshot']['holding_l3_conditions']}
     second_ids = {r['id'] for r in second['snapshot']['holding_l3_conditions']}
     assert first_ids.isdisjoint(second_ids)
@@ -104,18 +104,18 @@ def test_global_ids_stay_distinct_across_holdings_and_rewrite_generations(branch
 
 def test_failure_after_rewrite_does_not_publish_half_replacement(branch):
     conn, principal, *_ = branch
-    baseline = analysis.initialize(conn, principal, 1)
+    baseline = start_cycle(branch)
     value = request(branch, [rewrite(), dict(kind='alert', id=3, status='pending', evidence='Structural invalid transition')])
     with pytest.raises(ledger.LedgerError):
         append(branch, value)
-    assert analysis.current(conn, principal, 1) == baseline
-    assert conn.execute('SELECT count(*) FROM account_analysis_history').fetchone()[0] == 1
+    assert cycle_analysis.current(conn, principal, 'a', 'legacy:1') == baseline
+    assert conn.execute("SELECT count(*) FROM account_analysis_history WHERE account_id='a'").fetchone()[0] == 1
 
 
 @pytest.mark.parametrize('reason_code,expected_id,expected_status', [('structural-1',1,'active'), ('structural-2',2,'pending')])
 def test_open_reuses_unresolved_reason_and_keeps_pending_status(branch, reason_code, expected_id, expected_status):
     conn, principal, *_ = branch
-    base = analysis.initialize(conn, principal, 1)
+    base = start_cycle(branch)
     result = append(branch, request(branch, [open_alert(reason_code)]))
     alerts = result['snapshot']['holding_alerts']
     assert len(alerts) == len(base['snapshot']['holding_alerts'])
@@ -128,7 +128,7 @@ def test_open_reuses_unresolved_reason_and_keeps_pending_status(branch, reason_c
 def test_liquidity_defer_preserves_original_deadline(branch):
     conn, principal, *_ = branch
     conn.execute("UPDATE holding_alerts SET reason_code='price_stop2_liquidity_defer', review_due='2026-11-11T16:00:00+08:00' WHERE id=1")
-    analysis.initialize(conn, principal, 1)
+    start_cycle(branch)
     result = append(branch, request(branch, [open_alert('price_stop2_liquidity_defer', review_due='2026-12-01')]))
     row = result['snapshot']['holding_alerts'][0]
     assert row['review_due'] == '2026-11-11T16:00:00+08:00'
@@ -137,7 +137,7 @@ def test_liquidity_defer_preserves_original_deadline(branch):
 
 def test_open_after_resolution_creates_new_entity_and_retries_are_idempotent(branch):
     conn, principal, *_ = branch
-    base = analysis.initialize(conn, principal, 1)
+    base = start_cycle(branch)
     old = deepcopy(base['snapshot']['holding_alerts'][2])
     value = request(branch, [open_alert('structural-3')])
     result = append(branch, value)
@@ -157,7 +157,7 @@ def test_invalid_dates_or_timezone_free_times_rejected(branch, due):
 @pytest.mark.parametrize('due', [None, '2026-11-12', '2026-11-12T16:00:00+08:00'])
 def test_valid_deadline_formats_survive_append(branch, due):
     conn, principal, *_ = branch
-    analysis.initialize(conn, principal, 1)
+    start_cycle(branch)
     result = append(branch, request(branch, [open_alert(review_due=due)]))
     assert result['snapshot']['holding_alerts'][-1]['review_due'] == due
 
@@ -166,7 +166,7 @@ def test_new_entity_ids_do_not_reuse_legacy_autoincrement_high_watermark(branch)
     conn, principal, *_ = branch
     for table in ('holding_l3_conditions', 'holding_thesis_versions', 'holding_alerts'):
         conn.execute('UPDATE sqlite_sequence SET seq=1000 WHERE name=?', (table,))
-    analysis.initialize(conn, principal, 1)
+    start_cycle(branch)
     result = append(branch, request(branch, [rewrite(), open_alert()]))
     snapshot = result['snapshot']
     assert snapshot['holding_thesis_versions'][-1]['id'] == 1001

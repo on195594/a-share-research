@@ -4,8 +4,24 @@ from pathlib import Path
 import sqlite3
 
 from a_share_research import db
-from a_share_research.policy import monitor, registry
+from a_share_research.policy import account_input, monitor, registry
 from a_share_research.stock_codes import normalize_key
+
+
+def bound_account_id(conn: sqlite3.Connection) -> str:
+    """Resolve the explicit ledger binding without capturing portfolio or market data."""
+    rows = conn.execute('SELECT mode,watermark FROM account_source LIMIT 2').fetchall()
+    if len(rows) != 1 or rows[0][0] != 'ledger':
+        raise registry.PolicyError('需要唯一绑定的账本，请所有者核对账户来源并绑定一个账户')
+    try:
+        binding = account_input._json(rows[0][1])
+        account_input._binding(binding)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise registry.PolicyError('账本绑定格式无效，请所有者核对账户来源') from exc
+    account_id = binding['account_id']
+    if not conn.execute('SELECT 1 FROM account_books WHERE account_id=?', (account_id,)).fetchone():
+        raise registry.PolicyError('绑定账户的账本期初不存在，请所有者核对账户来源与期初')
+    return account_id
 
 
 def current(conn: sqlite3.Connection, principal, database: Path) -> dict:

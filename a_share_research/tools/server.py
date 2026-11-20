@@ -1,10 +1,11 @@
-"""Local read-only tools service. Schema migration belongs to the release process."""
+"""Local tools service. Schema migration belongs to the release process."""
 import logging
 import argparse
 import json
 import os
 import sqlite3
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Depends
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from a_share_research import api_keys, db
-from a_share_research.tools.registry import Context, ToolError, TOOLS, discover, invoke
+from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, discover, invoke, validation_message
 from a_share_research.tools import control
 
 logger = logging.getLogger(__name__)
@@ -36,39 +37,43 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):
         return JSONResponse({'ok': False, 'error': {'code': 'invalid_arguments',
-                             'message': '请求须为符合工具 input_schema 的 JSON 对象'}}, status_code=422)
+                             'message': validation_message(exc.errors())}}, status_code=422)
+
+    @contextmanager
+    def connection(mode):
+        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=' + mode, uri=True,
+                                     timeout=5, isolation_level=None)) as conn:
+            conn.execute('PRAGMA foreign_keys=ON')
+            conn.row_factory = sqlite3.Row
+            yield conn
 
     @contextmanager
     def context(request, name=None):
-        header = request.headers.get('authorization', '')
-        if not header.startswith('Bearer '):
-            raise ToolError('unauthorized', '需要 bearer 凭据', 401)
-        with gate.acquire():
-            with connection(header, name) as ctx:
-                yield ctx
-
-    @contextmanager
-    def connection(header, name):
-        conn = None
+        tool = TOOLS.get(name)
         try:
-            tool = TOOLS.get(name)
-            writable = tool is not None and tool.access == 'write' and account_shadow_enabled and tool.account
-            mode = 'rw' if writable else 'ro'
-            conn = sqlite3.connect(database.resolve().as_uri() + '?mode=' + mode, uri=True,
-                                   timeout=5, isolation_level=None)
-            conn.execute('PRAGMA foreign_keys=ON')
-            conn.row_factory = sqlite3.Row
-            principal = api_keys.authenticate(conn, header[7:])
-            if principal is None:
-                raise ToolError('unauthorized', '凭据无效或已撤销', 401)
-            yield Context(conn, database, principal, account_shadow_enabled)
+            with gate.acquire(limited=False), ExitStack() as resources:
+                bearer = request.headers.get('authorization', '')
+                if not bearer.startswith('Bearer '):
+                    raise ToolError('unauthorized', '需要 bearer 凭据', 401)
+                with connection('ro') as conn:
+                    principal = api_keys.authenticate(conn, bearer[7:])
+                    if principal is None:
+                        raise ToolError('unauthorized', '凭据无效或已撤销', 401)
+                    ctx = Context(conn, database, principal, account_shadow_enabled)
+                    if name is not None:
+                        tool = authorize_tool(ctx, tool)
+                        if tool.access == 'write' or tool.collects:
+                            resources.enter_context(gate.slot())
+                    if tool is None or tool.access == 'read':
+                        yield ctx
+                        return
+                with connection('rw') as conn:
+                    yield replace(ctx, connection=conn)
         except sqlite3.Error:
             logger.exception('Tool database unavailable')
-            raise ToolError('service_failure' if name and name.startswith('account.') else 'unavailable',
+            account_tool = account_shadow_enabled and tool and tool.name.startswith('account.')
+            raise ToolError('service_failure' if account_tool else 'unavailable',
                             '工具数据库不可用；未返回成功回执，可用原请求重试', 503) from None
-        finally:
-            if conn is not None:
-                conn.close()
 
     @app.get('/health')
     def health():
@@ -113,18 +118,18 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
             result = {}
             for key, value in pairs:
                 if key in result:
-                    raise ValueError('duplicate JSON key')
+                    raise ValueError(f'JSON 字段 {key!r} 重复')
                 result[key] = value
             return result
         def invalid_constant(value):
-            raise ValueError('nonfinite JSON number')
+            raise ValueError(f'JSON 数值 {value} 必须为有限数')
         try:
             arguments = json.loads(await request.body(), object_pairs_hook=unique, parse_constant=invalid_constant)
             if not isinstance(arguments, dict):
-                raise ValueError('object required')
+                raise ValueError('请求须为 JSON 对象')
             return arguments
-        except (ValueError, UnicodeError):
-            raise ToolError('invalid_arguments', '请求须为无重复键、无非有限数字的JSON对象', 422) from None
+        except ValueError as exc:
+            raise RequestValidationError([{'loc': ('body',), 'msg': str(exc)}]) from None
 
     @app.post('/tools/{name}')
     def call(name: str, request: Request, arguments: dict = Depends(arguments_json)):

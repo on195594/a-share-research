@@ -1,4 +1,4 @@
-"""Immutable policy identities, owner-local activation and evidenced snapshot replays."""
+"""Immutable policy identities, owner-local activation and saved evaluation receipts."""
 import argparse
 import json
 import os
@@ -215,39 +215,6 @@ def _evaluation(row):
             raise PolicyError('政策采集来源或请求记录损坏') from None
         result.update(mode=mode,capture_context=context)
     return result
-
-
-def replay(conn, principal, selected, request_id, bundle):
-    """Save a program-generated replay with its actual identity and input; never label it a live account observation."""
-    from a_share_research.policy.evaluation import evaluate, _json
-    request_id = _text(request_id,'request_id')
-    _authorize(conn,principal)
-    manifest = _version(conn,selected)
-    try:
-        _json(bundle)
-        input_hash = gate.digest(bundle)
-    except (ValueError,TypeError):
-        raise PolicyError('输入包须为可规范化的 JSON',422) from None
-    with db.transaction(conn):
-        _authorize(conn,principal)
-        row = conn.execute('SELECT * FROM policy_evaluations WHERE created_by=? AND request_id=?',
-                           (principal.key_id,request_id)).fetchone()
-        if row:
-            if row[1] != selected or row[6] != input_hash or len(row)>10 and row[10] is not None:
-                raise PolicyError('request_id 已用于不同评估输入或政策')
-            return _evaluation(row)
-        try:
-            identity.check_installed(manifest)
-            result = evaluate(bundle,manifest['parameters'])
-        except (identity.IdentityError,ValueError) as exc:
-            raise PolicyError(f'政策评估拒绝：{exc}',422) from None
-        activation = _current(conn)
-        activation_id = activation['id'] if activation and activation['identity']==selected else None
-        cursor = conn.execute('INSERT INTO policy_evaluations '
-            '(identity,activation_id,created_at,created_by,request_id,input_hash,result_hash,input,result) '
-            'VALUES (?,?,?,?,?,?,?,?,?)', (selected,activation_id,db.now(),principal.key_id,request_id,input_hash,
-                gate.digest(result),gate.canonical(bundle),gate.canonical(result)))
-        return _evaluation(conn.execute('SELECT * FROM policy_evaluations WHERE id=?',(cursor.lastrowid,)).fetchone())
 
 
 def evaluation(conn, principal, evaluation_id):

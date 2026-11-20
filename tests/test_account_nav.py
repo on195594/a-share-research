@@ -233,7 +233,8 @@ def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path)
         conn.close()
 
 
-def test_tools_permissions_discovery_roundtrip_and_revocation(book):
+def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account):
+    bind_account(book['conn'], 'a')
     ctx = Context(book['conn'], book['path'], book['principal'], account_shadow_enabled=True)
     names = {t['name'] for t in discover(book['principal'], account_shadow_enabled=True)}
     assert {'account.nav.capture', 'account.nav.evaluate', 'account.nav.replay'} <= names
@@ -253,7 +254,8 @@ def test_tools_permissions_discovery_roundtrip_and_revocation(book):
     assert error.value.status == 403
 
 
-def test_http_discovery_capture_evaluate_replay_and_missing_material(book):
+def test_http_discovery_capture_evaluate_replay_and_missing_material(book, bind_account):
+    bind_account(book['conn'], 'a')
     token = api_keys.create(book['conn'], 'NAV HTTP structural', role='assistant')
     headers = {'Authorization': 'Bearer ' + token}
     value = request(book).model_dump(mode='json')

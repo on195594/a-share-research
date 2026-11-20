@@ -11,7 +11,7 @@ import pytest
 
 from a_share_research import api_keys, db, gate
 from a_share_research.account import mirror
-from a_share_research.policy import monitor, registry
+from a_share_research.policy import evaluation, monitor, registry
 from a_share_research.policy.v0 import risk_budget
 
 
@@ -45,6 +45,20 @@ def run(setup, request_id='monitor-once', expected=None, role='assistant'):
     return monitor.run(conn,principals[role],path,request_id,activation['id'] if expected is None else expected)
 
 
+def historical_replay(setup, request_id):
+    """Seed a v19 receipt to exercise readers after the replay writer was retired."""
+    _, conn, principals, manifest, activation, bundle, _ = setup
+    result = evaluation.evaluate(bundle, manifest['parameters'])
+    row = conn.execute(
+        'INSERT INTO policy_evaluations '
+        '(identity,activation_id,created_at,created_by,request_id,input_hash,result_hash,input,result) '
+        'VALUES (?,?,?,?,?,?,?,?,?)',
+        (manifest['identity'], activation['id'], db.now(), principals['assistant'].key_id, request_id,
+         gate.digest(bundle), gate.digest(result), gate.canonical(bundle), gate.canonical(result)),
+    )
+    return registry.evaluation(conn, principals['assistant'], row.lastrowid)
+
+
 def test_capture_receipt_binds_identity_source_inputs_and_is_idempotent(setup):
     path,conn,principals,manifest,activation,bundle,captured=setup
     result=run(setup)
@@ -70,14 +84,12 @@ def test_capture_receipt_binds_identity_source_inputs_and_is_idempotent(setup):
 
 
 def test_request_id_cannot_cross_replay_and_service_capture(setup):
-    _,conn,principals,manifest,_,bundle,captured=setup
-    registry.replay(conn,principals['assistant'],manifest['identity'],'replayed',bundle)
+    captured = setup[-1]
+    historical_replay(setup, 'replayed')
     with pytest.raises(registry.PolicyError,match='不同评估'):
         run(setup,'replayed')
     assert captured==[]
     run(setup,'captured')
-    with pytest.raises(registry.PolicyError,match='不同评估'):
-        registry.replay(conn,principals['assistant'],manifest['identity'],'captured',bundle)
     with pytest.raises(registry.PolicyError,match='不同评估'):
         run(setup,'captured',expected=999)
     assert len(captured)==1
@@ -186,8 +198,8 @@ def test_concurrent_same_request_returns_one_committed_receipt(setup,monkeypatch
 
 
 def test_v20_additive_columns_preserve_prior_replay_and_rerun(setup):
-    _,conn,principals,manifest,_,bundle,_=setup
-    registry.replay(conn,principals['assistant'],manifest['identity'],'before-capture-columns',bundle)
+    _,conn,principals,*_=setup
+    historical_replay(setup, 'before-capture-columns')
     conn.execute('ALTER TABLE policy_evaluations DROP COLUMN capture_context_hash')
     conn.execute('ALTER TABLE policy_evaluations DROP COLUMN capture_context')
     before=tuple(conn.execute('SELECT * FROM policy_evaluations').fetchone())

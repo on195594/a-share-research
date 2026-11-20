@@ -1,4 +1,4 @@
-"""Read-only historical replay diagnostics; no fabricated funding or execution timestamps."""
+"""Local, read-only diagnostics for replaying historical holding records."""
 import math
 from datetime import date
 from decimal import Decimal
@@ -9,7 +9,6 @@ from a_share_research.account.mirror import MANIFEST
 
 
 def read(conn, principal, holding_id: int) -> dict:
-    # Imports stay behind the assistant-only tool boundary; research/web need not load policy modules.
     from a_share_research.account.lifecycle import Movement, replay
     from a_share_research.policy.v0.lifecycle_projection import project, current_stops
     with db.transaction(conn, immediate=False):
