@@ -23,10 +23,25 @@ def test_atomic_deduplicated_private_storage(tmp_path):
 
 def test_missing_and_bad_hash_do_not_create_files(tmp_path):
     directory = tmp_path / 'missing'
+    assert evidence.recent(directory, 10) == []
     for sha in ('../escape', 'A' * 64, 'x', '0' * 64):
         with pytest.raises(evidence.EvidenceError):
             evidence.verify(directory, sha)
     assert not directory.exists()
+
+
+def test_recent_lists_committed_files_by_storage_time(tmp_path):
+    directory = tmp_path / 'evidence'
+    first = evidence.store(directory, b'original')
+    second = evidence.store(directory, b'evidence storage boundary sample')
+    os.utime(directory / first, (100, 100))
+    os.utime(directory / second, (200, 200))
+    (directory / '.pending-in-flight-upload').touch()
+    assert evidence.store(directory, b'original') == first
+    assert evidence.recent(directory, 1) == [
+        dict(sha256=second, stored_at='1970-01-01T00:03:20+00:00', size_bytes=len(b'evidence storage boundary sample'))
+    ]
+    assert [entry['sha256'] for entry in evidence.recent(directory, 10)] == [second, first]
 
 
 def test_directory_permissions_and_symlinks_rejected(tmp_path):
@@ -62,6 +77,8 @@ def test_tampering_and_existing_link_never_overwritten(tmp_path):
     target.symlink_to(external)
     with pytest.raises(evidence.EvidenceError):
         evidence.store(directory, content)
+    with pytest.raises(evidence.EvidenceError):
+        evidence.recent(directory, 10)
     assert target.is_symlink() and external.read_bytes() == content
 
 

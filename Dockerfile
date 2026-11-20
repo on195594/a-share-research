@@ -17,6 +17,8 @@ CMD ["uvicorn", "a_share_research.web:app", "--host", "0.0.0.0", "--port", "8620
 
 # Backend Worker service: runs queued research, PDF extraction & LLM inference
 FROM base AS worker
+COPY skill ./skill
+RUN chmod -R a=rX skill
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils poppler-data && rm -rf /var/lib/apt/lists/*
 USER 1000:1000

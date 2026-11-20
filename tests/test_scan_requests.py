@@ -104,7 +104,7 @@ def test_invalid_request_keys_do_not_write(conn, request_id):
 
 
 @pytest.mark.parametrize('requester', ['', 'key:' + 'a' * 63, 'key:' + 'A' * 64,
-                                     'cookie:' + 'a' * 64, 'agent:' + 'g' * 64, None])
+                                     'cookie:' + 'a' * 64, 'agent:' + 'g' * 64, 'grant:0', 'grant:01', None])
 def test_invalid_requesters_do_not_write(conn, requester):
     with pytest.raises(service.RequestError) as exc:
         scans.submit_request(conn, requester, 'valid-key')

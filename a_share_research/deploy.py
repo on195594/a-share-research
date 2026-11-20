@@ -628,9 +628,10 @@ def wait_tools_ready(*, paused=False) -> dict:
 def _tools_config():
     configured = _compose_config()['services']['tools']
     environment = configured.get('environment') or {}
-    allowed = {'DATA_DIR', 'METHOD_CARDS_DIR', 'TUSHARE_TOKEN', 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'}
+    allowed = {'DATA_DIR', 'METHOD_CARDS_DIR', 'TUSHARE_TOKEN', 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED',
+               'ASHARE_PUBLIC_MCP_URL'}
     if environment.keys() - allowed:
-        raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录、方法卡目录和显式功能开关')
+        raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录、方法卡目录、功能开关和公网 MCP 地址')
     if environment.get('METHOD_CARDS_DIR') != '/method-cards':
         raise RuntimeError('tools 的 METHOD_CARDS_DIR 须指向 /method-cards')
     return configured

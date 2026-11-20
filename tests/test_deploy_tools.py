@@ -23,6 +23,7 @@ def operations(monkeypatch,tmp_path):
         state=SimpleNamespace(events=[], existing=existing, failure=failure, paused=paused,
             in_flight=0, data=data, env={'DATA_DIR':'/data','TUSHARE_TOKEN':'private-test-value',
                 'METHOD_CARDS_DIR':'/method-cards',
+                'ASHARE_PUBLIC_MCP_URL':'https://stock.example/mcp',
                 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED':'0'},
             tags={'web':'old-web','worker':'old-worker'},
             containers={'web':'old-web','worker':'old-worker'},

@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 import re
 import secrets
 import stat
 
 MAX_BYTES = 20 * 1024 * 1024
+_SHA = re.compile(r'[0-9a-f]{64}')
 
 
 class EvidenceError(ValueError):
@@ -47,18 +49,21 @@ def _directory(directory: Path, *, create: bool = False) -> int:
 
 
 def _name(sha: str) -> str:
-    if not isinstance(sha, str) or re.fullmatch(r'[0-9a-f]{64}', sha) is None:
+    if not isinstance(sha, str) or _SHA.fullmatch(sha) is None:
         raise EvidenceError('凭证哈希须为64位小写十六进制')
     return sha
+
+
+def _check_file(metadata: os.stat_result) -> None:
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.getuid() or metadata.st_size > MAX_BYTES):
+        raise EvidenceError('凭证文件类型、权限或大小不合规')
 
 
 def _read(fd: int, sha: str) -> bytes:
     handle = os.open(sha, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     with os.fdopen(handle, 'rb') as stream:
-        metadata = os.fstat(stream.fileno())
-        if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
-                or metadata.st_uid != os.getuid() or metadata.st_size > MAX_BYTES):
-            raise EvidenceError('凭证文件类型、权限或大小不合规')
+        _check_file(os.fstat(stream.fileno()))
         content = stream.read(MAX_BYTES + 1)
     if len(content) > MAX_BYTES or hashlib.sha256(content).hexdigest() != sha:
         raise EvidenceError('凭证内容与哈希不符')
@@ -81,6 +86,30 @@ def read(directory: Path, sha: str) -> bytes:
 def verify(directory: Path, sha: str) -> bool:
     read(directory, sha)
     return True
+
+
+def recent(directory: Path, limit: int) -> list[dict]:
+    """List immutable objects by file mtime; re-uploading identical bytes preserves that time."""
+    try:
+        try:
+            fd = _directory(directory)
+        except FileNotFoundError:
+            return []
+        objects = []
+        try:
+            with os.scandir(fd) as entries:
+                for entry in entries:
+                    if _SHA.fullmatch(entry.name):
+                        metadata = entry.stat(follow_symlinks=False)
+                        _check_file(metadata)
+                        objects.append((metadata.st_mtime_ns, entry.name, metadata.st_size))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise EvidenceError('凭证目录不可安全访问') from exc
+    objects.sort(reverse=True)
+    return [dict(sha256=sha, stored_at=datetime.fromtimestamp(mtime / 1_000_000_000, UTC).isoformat(),
+                 size_bytes=size) for mtime, sha, size in objects[:limit]]
 
 
 def store(directory: Path, content: bytes) -> str:

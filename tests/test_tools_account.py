@@ -11,6 +11,23 @@ from a_share_research.account.reconciliation import Opening
 from a_share_research.tools.server import create_app
 
 
+def test_recent_evidence_distinguishes_invalid_limit_from_storage_failure(tmp_path):
+    path = tmp_path / 'app.db'
+    conn = db.connect(path)
+    token = api_keys.create(conn, 'test', role='assistant')
+    conn.close()
+    directory = tmp_path / 'account-evidence'
+    sha = evidence.store(directory, b'Structural transport evidence, no financial assertions')
+    (directory / sha).chmod(0o644)
+    headers = {'Authorization': 'Bearer ' + token}
+    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
+        invalid = client.post('/tools/account.evidence.recent', headers=headers, json={'limit': 0})
+        assert invalid.status_code == 422 and invalid.json()['error']['code'] == 'invalid_arguments'
+        unavailable = client.post('/tools/account.evidence.recent', headers=headers, json={'limit': 1})
+        assert unavailable.status_code == 503 and unavailable.json()['error']['code'] == 'unavailable'
+        assert '核对证据目录' in unavailable.json()['error']['message']
+
+
 def test_account_scope_observation_and_duplicate_json_rejection(tmp_path, bind_account):
     path = tmp_path / 'app.db'
     conn = db.connect(path)

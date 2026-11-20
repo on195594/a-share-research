@@ -1,7 +1,6 @@
 """Local tools service. Schema migration belongs to the release process."""
 import logging
 import argparse
-import json
 import os
 import sqlite3
 from contextlib import ExitStack, closing, contextmanager
@@ -13,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from a_share_research import api_keys, db
+from a_share_research.tools.http_json import BodyTooLarge, parse_object, read_body
 from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, discover, invoke, validation_message
 from a_share_research.tools import control
 
@@ -48,15 +48,15 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
             yield conn
 
     @contextmanager
-    def context(request, name=None):
+    def context(request, name=None, *, principal=None):
         tool = TOOLS.get(name)
         try:
             with gate.acquire(limited=False), ExitStack() as resources:
                 bearer = request.headers.get('authorization', '')
-                if not bearer.startswith('Bearer '):
+                if principal is None and not bearer.startswith('Bearer '):
                     raise ToolError('unauthorized', '需要 bearer 凭据', 401)
                 with connection('ro') as conn:
-                    principal = api_keys.authenticate(conn, bearer[7:])
+                    principal = principal or api_keys.authenticate(conn, bearer[7:])
                     if principal is None:
                         raise ToolError('unauthorized', '凭据无效或已撤销', 401)
                     ctx = Context(conn, database, principal, account_shadow_enabled)
@@ -115,20 +115,10 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
             return {'tools': discover(ctx.principal, account_shadow_enabled=account_shadow_enabled)}
 
     async def arguments_json(request: Request):
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError(f'JSON 字段 {key!r} 重复')
-                result[key] = value
-            return result
-        def invalid_constant(value):
-            raise ValueError(f'JSON 数值 {value} 必须为有限数')
         try:
-            arguments = json.loads(await request.body(), object_pairs_hook=unique, parse_constant=invalid_constant)
-            if not isinstance(arguments, dict):
-                raise ValueError('请求须为 JSON 对象')
-            return arguments
+            return parse_object(await read_body(request))
+        except BodyTooLarge as exc:
+            raise ToolError('invalid_arguments', str(exc), 413) from None
         except ValueError as exc:
             raise RequestValidationError([{'loc': ('body',), 'msg': str(exc)}]) from None
 
@@ -136,6 +126,10 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
     def call(name: str, request: Request, arguments: dict = Depends(arguments_json)):
         with context(request, name) as ctx:
             return {'ok': True, 'result': invoke(ctx, name, arguments)}
+
+    if resource := os.environ.get('ASHARE_PUBLIC_MCP_URL'):
+        from a_share_research.tools.remote_mcp import mcp_router
+        app.include_router(mcp_router(resource, connection, context, gate))
 
     return app
 

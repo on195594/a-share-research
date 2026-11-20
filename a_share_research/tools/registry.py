@@ -27,6 +27,10 @@ class ToolError(Exception):
         self.code, self.status = code, status
 
 
+class UnknownTool(ToolError):
+    """Dispatch failed to find a tool, before any lookup of business data."""
+
+
 def validation_message(errors) -> str:
     fields = []
     for error in errors[:8]:
@@ -177,6 +181,10 @@ class EvidenceUpload(Arguments):
     content_base64: str = Field(max_length=28 * 1024 * 1024)
 
 
+class RecentEvidence(Arguments):
+    limit: int = Field(default=10, ge=1, le=100)
+
+
 class Payload(BaseModel):
     data: dict
 
@@ -205,6 +213,7 @@ class Tool:
     access: Literal['read', 'write'] = 'read'
     account: bool = False
     collects: bool = False
+    destructive: bool = False
 
     def describe(self) -> dict:
         return dict(name=self.name, version=1, description=self.description,
@@ -314,6 +323,14 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
     return Payload(data={'sha256': evidence.store(_evidence_directory(ctx), content)})
 
 
+def _recent_evidence(ctx: Context, args: RecentEvidence) -> Payload:
+    try:
+        items = evidence.recent(_evidence_directory(ctx), args.limit)
+    except evidence.EvidenceError as exc:
+        raise ToolError('unavailable', '账户证据暂不可用，请核对证据目录与文件权限', 503) from exc
+    return Payload(data={'evidence': items})
+
+
 def _research_coverage(ctx: Context, args: Arguments) -> TradeRows:
     ledger.authorize(ctx.connection, ctx.principal)
     return TradeRows(rows=trades.research_available_at_trade(ctx.connection))
@@ -401,11 +418,13 @@ TOOLS = {tool.name: tool for tool in (
          frozenset({'assistant'}), Arguments, Payload, _current_account, account=True),
     Tool('account.evidence', '私有存储截图或交割单，返回内容哈希', frozenset({'assistant'}), EvidenceUpload, Payload,
          _store_evidence, access='write', account=True),
-    Tool('account.state', '查询影子账本版本与股数现金投影', frozenset({'assistant'}), Account, Payload,
+    Tool('account.evidence.recent', '按文件保存时间列出最近账户凭证的 SHA-256、时间和字节数',
+         frozenset({'assistant'}), RecentEvidence, Payload, _recent_evidence, account=True),
+    Tool('account.state', '查询账户账本版本、股数与现金余额', frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=ledger.state(c.connection,c.principal,a.account_id)), account=True),
-    Tool('account.submit', '完整对账后原子写入影子账本；不修改生产持仓', frozenset({'assistant'}), AccountSubmit, Payload,
+    Tool('account.submit', '完整对账后追加账户流水与回执，支持作废并提交更正流水', frozenset({'assistant'}), AccountSubmit, Payload,
          lambda c,a: Payload(data=ledger.submit(c.connection,c.principal,a.account_id,a.batch,_evidence_directory(c))),
-         access='write', account=True),
+         access='write', account=True, destructive=True),
     Tool('account.events', '分页读取原事件与作废状态，按事件编号更正', frozenset({'assistant'}), AccountEvents, Payload,
          lambda c,a: Payload(data=ledger.events(c.connection,c.principal,a.account_id,after_id=a.after_id,limit=a.limit)), account=True),
     Tool('account.receipt', '查阅对账回执', frozenset({'assistant'}), AccountReceipt, Payload,
@@ -440,7 +459,8 @@ TOOLS = {tool.name: tool for tool in (
          lambda c, a: Payload(data=scans.subscription_view(scans.subscriptions(c.connection))), account=True),
     Tool('research.subscriptions.replace', '按公司代码完整替换外部订阅，提交空列表清空外部订阅', frozenset({'assistant'}),
          SubscriptionCodes, Payload, lambda c,a: Payload(data=scans.subscription_view(
-             scans.replace_subscriptions(c.connection, a.codes))), access='write', collects=True, account=True),
+             scans.replace_subscriptions(c.connection, a.codes))), access='write', collects=True, account=True,
+         destructive=True),
     Tool('research.batch.monthly.request', '受理上海当月的候选批次，已有批次返回原编号和状态',
          _READERS, MonthlyBatch, Payload, lambda c, a: _monthly_batch(c, a.month, submit=True), access='write'),
     Tool('research.batch.monthly.status', '按月查询候选批次状态和缺口，可展开冻结名单与失败详情',
@@ -450,14 +470,18 @@ TOOLS = {tool.name: tool for tool in (
 )}
 
 
-def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = False) -> list[dict]:
-    return [tool.describe() for tool in TOOLS.values()
+def visible_tools(principal: api_keys.Principal, *, account_shadow_enabled: bool = False) -> list[Tool]:
+    return [tool for tool in TOOLS.values()
             if principal.role in tool.roles and (not tool.account or account_shadow_enabled)]
+
+
+def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = False) -> list[dict]:
+    return [tool.describe() for tool in visible_tools(principal, account_shadow_enabled=account_shadow_enabled)]
 
 
 def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
     if tool is None or (tool.account and not ctx.account_shadow_enabled):
-        raise ToolError('not_found', '工具不存在', 404)
+        raise UnknownTool('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
     # Rechecked on each connection the call uses, so a grant revoked mid-request stops at the write.
