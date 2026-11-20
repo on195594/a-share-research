@@ -94,10 +94,11 @@ def project(conn, account_id, *, framework_fields=None):
         raise ledger.LedgerError('账户与成本版本不一致')
     rows = _rows(conn,'SELECT j.*,b.created_at FROM main.account_journal j JOIN main.account_batches b ON b.id=j.batch_id'
         ' LEFT JOIN main.account_voids v ON v.event_id=j.id WHERE j.account_id=? AND v.event_id IS NULL ORDER BY j.id',(account_id,))
-    entries = position_store.entries_for(conn,account_id,rows)
+    batches = list(position_store.active_batch_requests(conn, rows))
+    entries = position_store.batch_context(account_id, batches, 'position_entries')
     seeds = [positions.PositionSeed.model_validate(s) for s in json.loads(cost['basis'])]
     economic = positions.replay(seeds,[(r['business_id'],Event.model_validate_json(r['event'])) for r in rows],entries,
-                              dividend_cycles=position_store.dividends_for(conn,account_id,rows))
+                              dividend_cycles=position_store.batch_context(account_id, batches, 'position_dividends'))
     if economic != json.loads(cost['projection']) or economic['positions'] != json.loads(book['projection'])['positions']:
         raise ledger.LedgerError('账户经济投影与重放不一致')
     profiles = {}
@@ -112,7 +113,7 @@ def project(conn, account_id, *, framework_fields=None):
     try:
         projected = account_projection.project(selected,economic,records,entries,profiles,opening['profile_identity'],
             projection_ids.lookup(conn,account_id,'cycle'),projection_ids.lookup(conn,account_id,'event'),
-            position_store.distributions_for(conn,account_id,rows))
+            position_store.batch_context(account_id, batches, 'position_distributions'))
     except (ValueError, KeyError) as exc:
         if isinstance(exc, account_projection.OpeningFrameworkError) and framework_fields:
             if field := framework_fields.get(exc.business_id):

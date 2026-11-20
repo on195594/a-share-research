@@ -63,32 +63,44 @@ def state(conn, principal, account_id: str) -> dict:
                 cash_flow_scope='since_opening',policy_evaluation='pending',projection=json.loads(row['projection']))
 
 
+def active_batch_requests(conn, rows):
+    """Yield each original request with its active business IDs in journal order."""
+    active = {}
+    for row in rows:
+        active.setdefault(row['batch_id'], []).append(row['business_id'])
+    for batch_id, business_ids in active.items():
+        raw, = conn.execute('SELECT request FROM account_batches WHERE id=?', (batch_id,)).fetchone()
+        yield json.loads(raw), business_ids
+
+
+_CONTEXT_PARSERS = {
+    'position_entries': positions.PositionEntry.model_validate,
+    'position_dividends': str,
+    'position_distributions': money,
+}
+
+
+def batch_context(account_id, batches, field):
+    parse = _CONTEXT_PARSERS[field]
+    context = {}
+    for request, business_ids in batches:
+        by_business_id = {identity(Event.model_validate(request['events'][int(i)]), account_id): parse(value)
+                          for i, value in request.get(field, {}).items()}
+        if by_business_id:
+            context.update((key, by_business_id[key]) for key in business_ids if key in by_business_id)
+    return context
+
+
 def entries_for(conn, account_id, rows):
-    return _context_for(conn, account_id, rows, 'position_entries', positions.PositionEntry.model_validate)
+    return batch_context(account_id, active_batch_requests(conn, rows), 'position_entries')
 
 
 def dividends_for(conn, account_id, rows):
-    return _context_for(conn, account_id, rows, 'position_dividends', str)
+    return batch_context(account_id, active_batch_requests(conn, rows), 'position_dividends')
 
 
 def distributions_for(conn, account_id, rows):
-    return _context_for(conn, account_id, rows, 'position_distributions', money)
-
-
-def _context_for(conn, account_id, rows, field, parse):
-    """Recover context from the original immutable batch, keyed by business identity."""
-    entries, batches = {}, {}
-    for row in rows:
-        bid = row['batch_id']
-        if bid not in batches:
-            raw = conn.execute('SELECT request FROM account_batches WHERE id=?',(bid,)).fetchone()[0]
-            request = json.loads(raw)
-            batches[bid] = {identity(Event.model_validate(request['events'][int(i)]),account_id):
-                           parse(value)
-                           for i,value in request.get(field,{}).items()}
-        if row['business_id'] in batches[bid]:
-            entries[row['business_id']] = batches[bid][row['business_id']]
-    return entries
+    return batch_context(account_id, active_batch_requests(conn, rows), 'position_distributions')
 
 
 def inspect(conn):
@@ -107,7 +119,10 @@ def inspect(conn):
                 raise ValueError('期初股数不一致')
             rows = conn.execute('SELECT j.* FROM account_journal j LEFT JOIN account_voids v ON v.event_id=j.id'
                                 ' WHERE j.account_id=? AND v.event_id IS NULL ORDER BY j.id',(account,)).fetchall()
-            replayed = positions.replay(seeds,[(r['business_id'],Event.model_validate_json(r['event'])) for r in rows],entries_for(conn,account,rows),dividend_cycles=dividends_for(conn,account,rows))
+            batches = list(active_batch_requests(conn, rows))
+            replayed = positions.replay(seeds,[(r['business_id'],Event.model_validate_json(r['event'])) for r in rows],
+                                        batch_context(account, batches, 'position_entries'),
+                                        dividend_cycles=batch_context(account, batches, 'position_dividends'))
             if replayed != json.loads(cost['projection']) or replayed['positions'] != json.loads(book['projection'])['positions']:
                 raise ValueError('成本或股数重放不一致')
         except (ValueError, TypeError, KeyError, IndexError) as exc:

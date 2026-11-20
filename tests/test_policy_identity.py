@@ -1,6 +1,8 @@
 """Identity tests use installed sources; corruptions are explicit content variants."""
 import copy
 import hashlib
+import json
+import os
 from pathlib import Path
 
 import shutil
@@ -139,9 +141,11 @@ def install(tmp_path, monkeypatch):
 
 
 def _edit(path, old, new):
+    stamp = path.stat()
     text = path.read_text()
     assert text.count(old) == 1
     path.write_text(text.replace(old, new))
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
 
 
 def _locked(name):
@@ -156,6 +160,7 @@ def _locked(name):
     (lambda root: (root/'a_share_research/gate.py').open('a').write('\n# shared variant\n'), False),
     (lambda root: (root/'a_share_research/policy/v0/__init__.py').open('a').write('\n# policy variant\n'), False),
     (lambda root: _edit(root/'uv.lock', _locked('pandas'), _locked('pandas') + '0.'), False),
+    (lambda root: _edit(root/'uv.lock', 'requires-python = ">=', 'requires-python = "<='), False),
 ])
 def test_code_scope_is_policy_import_closure_and_runtime_lock(install, change, same):
     manifest = identity.build({'source': 'explicit-identity-test'})
@@ -169,9 +174,12 @@ def test_code_scope_is_policy_import_closure_and_runtime_lock(install, change, s
 
 
 def test_newly_imported_shared_module_joins_scope(install):
+    path = install/'a_share_research/policy/v0/__init__.py'
+    with path.open('a') as stream:
+        stream.write('\nfrom a_share_research import reading\n')
     before = identity.build({'source': 'explicit-identity-test'})
     assert 'a_share_research/prompts.py' not in before['files']['code']
-    (install/'a_share_research/policy/v0/__init__.py').open('a').write('\nfrom a_share_research import prompts\n')
+    _edit(path, 'from a_share_research import reading', 'from a_share_research import prompts')
     assert 'a_share_research/prompts.py' in identity.build(before['parameters'])['files']['code']
 
 
@@ -211,8 +219,8 @@ source = { registry = "https://pypi.org/simple" }
 [package.optional-dependencies]
 y = [{ name = "alpha", extra = ["x"] }]
 '''
-    digest = identity._runtime_lock(lock)
-    assert len(digest) == 64
+    runtime = json.loads(identity._runtime_lock_content('uv.lock', lock))
+    assert [package['name'] for package in runtime['packages']] == ['alpha', 'beta']
 
 
 def test_schema_1_whole_package_manifest_still_verifies():

@@ -9,6 +9,7 @@ stay verifiable. This module never activates a policy or imports the v0 runtime.
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -84,7 +85,8 @@ def _module(name: str) -> str | None:
     return None
 
 
-def _imports(relative: str, data: bytes) -> set[str]:
+@lru_cache(maxsize=256)
+def _imports(relative: str, data: bytes) -> frozenset[str]:
     module = relative.removesuffix('.py').replace('/', '.').removesuffix('.__init__')
     package = module if relative.endswith('/__init__.py') else module.rpartition('.')[0]
     names: set[str] = set()
@@ -109,7 +111,7 @@ def _imports(relative: str, data: bytes) -> set[str]:
                 or isinstance(node.func, ast.Attribute)
                 and node.func.attr in ('__import__', 'import_module', 'spec_from_file_location')):
             raise IdentityError(f'政策代码闭包含动态导入，无法确定范围：{relative}')
-    return {name for name in names if name == PACKAGE or name.startswith(PACKAGE + '.')}
+    return frozenset(name for name in names if name == PACKAGE or name.startswith(PACKAGE + '.'))
 
 
 def _closure(seeds: list[str]) -> list[str]:
@@ -130,8 +132,9 @@ def _closure(seeds: list[str]) -> list[str]:
     return sorted(seen)
 
 
-def _runtime_lock(data: bytes) -> str:
-    """Digest the locked runtime dependency graph; dev groups stay out of scope."""
+@lru_cache(maxsize=2)
+def _runtime_lock_content(_relative: str, data: bytes) -> bytes:
+    """Canonical runtime graph for these lockfile bytes; dev groups stay out of scope."""
     lock = tomllib.loads(data.decode('utf-8'))
     packages: dict[str, list[dict]] = {}
     for package in lock['package']:
@@ -157,7 +160,7 @@ def _runtime_lock(data: bytes) -> str:
         raise IdentityError('依赖锁的运行时依赖不完整')
     content = {'requires-python': lock.get('requires-python'), 'root': root,
                'packages': [selected[key] for key in sorted(selected)]}
-    return hashlib.sha256(gate.canonical(content).encode('utf-8')).hexdigest()
+    return gate.canonical(content).encode('utf-8')
 
 
 def _snapshot() -> dict:
@@ -185,7 +188,8 @@ def _snapshot() -> dict:
                         or relative.startswith(GUIDE) and path.suffix not in ('.pyc', '.pyo')):
                     paths.append(relative)
         code = _closure([path for path in paths if path.endswith('.py')])
-        files['code'][LOCK] = _runtime_lock(_read('uv.lock'))
+        lock_path = 'uv.lock'
+        files['code'][LOCK] = hashlib.sha256(_runtime_lock_content(lock_path, _read(lock_path))).hexdigest()
         for relative in sorted(set(paths) | set(code)):
             data = _read(relative)
             digest = hashlib.sha256(data).hexdigest()
