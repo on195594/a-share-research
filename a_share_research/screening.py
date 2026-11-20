@@ -643,7 +643,7 @@ def _auto_freeze(conn, batch_id: int, selection: dict, expected_status: str = "s
             _save(conn, batch_id, coverage=coverage)
         if picks or _cash_large_draft(batch, selection):
             try:
-                freeze(conn, batch_id, picks, "", by="auto")
+                freeze(conn, batch_id, picks, "", by="auto", coverage=coverage)
                 log.info("batch %s frozen with the model draft", batch_id)
             except service.RequestError as exc:
                 log.warning("batch %s draft could not be frozen: %s", batch_id, exc)

@@ -663,7 +663,7 @@ def monthly_batch(conn, month: str, *, submit: bool = False) -> dict:
 
 
 def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "owner", *,
-                 small_codes: list[str] | None = None) -> None:
+                 small_codes: list[str] | None = None, coverage: dict | None = None) -> None:
     """Final picks; validated against the batch and frozen once. `by` is a FROZEN_BY key."""
     row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
     if row is None:
@@ -702,7 +702,7 @@ def freeze_batch(conn, batch_id: int, codes: list[str], note: str, by: str = "ow
         small_fields = {
             "sl3": {"codes": chosen, "note": "", "changed_from_draft": chosen != small_draft,
                     "draft": small_draft, "frozen_by": by},
-            "coverage": batch_coverage(batch),
+            "coverage": batch_coverage(batch) if coverage is None else coverage,
         }
     # RETURNING, not rowcount: keeps the update and atomic id retrieval within one statement.
     extras = "".join(f", {key} = ?" for key in small_fields)

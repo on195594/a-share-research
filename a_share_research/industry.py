@@ -177,7 +177,7 @@ def industry_trend(code, level='l2'):
     started = time.monotonic()
     stats = {'upstream_calls': 0, 'cache_hits': 0, 'queries': []}
 
-    def fetch(api, **params):
+    def fetch(api, *, members=None, **params):
         t = time.monotonic()
         frame = conditions.query(api, **params)
         hit = frame.attrs.get('cache_hit', False)
@@ -187,6 +187,8 @@ def industry_trend(code, level='l2'):
             raise sources.SourceError(f'{api} 无数据：{params}；请检查该交易日数据是否已发布，稍后重试')
         if len(frame) >= 6000:
             raise sources.SourceError(f'{api} 达到6000行，可能截断；需升级分页取数，不能用不完整截面')
+        if members is not None:
+            frame = frame.loc[frame['ts_code'].isin(members)]
         return {'api': api, 'params': params, 'rows': frame.astype(object).where(pd.notna(frame), None).to_dict('records')}
 
     data = {'code': code, 'level': level, 'retrieved_at': db.now()}
@@ -204,9 +206,7 @@ def industry_trend(code, level='l2'):
     for api in FIELDS:
         data[api] = {}
         for day in sorted(set(dates + (ends if api == 'daily_basic' else []))):
-            sample = fetch(api, trade_date=day, fields=FIELDS[api])
-            sample['rows'] = [r for r in sample['rows'] if r['ts_code'] in members]
-            data[api][day] = sample
+            data[api][day] = fetch(api, members=members, trade_date=day, fields=FIELDS[api])
     data['benchmark'] = fetch('index_daily', ts_code='000906.SH', start_date=dates[0], end_date=current, fields='ts_code,trade_date,close')
     rows = industry_rows(data)
     stats['seconds'] = round(time.monotonic()-started, 3)

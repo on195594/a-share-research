@@ -2,6 +2,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -344,7 +345,9 @@ def test_stance_dedup_ignores_earlier_same_month_unrecorded_report(tmp_path, mon
     ])
     v0_out = tmp_path / 'v0.json'
     monkeypatch.setattr(sys, 'argv', ['validation', '--database', str(path), '--json', str(v0_out)])
-    validation.main()
+    with patch.object(validation, '_load_eligible_reports', wraps=validation._load_eligible_reports) as load:
+        validation.main()
+    load.assert_called_once_with(str(path), None)
     v0_data = json.loads(v0_out.read_text())
     assert [r['id'] for r in v0_data['rows']] == [1]
     assert [r['id'] for r in v0_data['stance_rows']] == [2]
