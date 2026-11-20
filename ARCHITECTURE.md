@@ -17,7 +17,7 @@
 
 ## 进程与入口
 
-- `web` 提供网页、GitHub 所有者会话、OAuth 授权与换发令牌、两份 OAuth 发现文档，以及 `/connections` 授权管理页。Web 按站点公开地址签发绑定到 `/mcp` 资源的令牌。
+- `web` 提供网页、GitHub 所有者会话、OAuth 授权与换发令牌、两份 OAuth 发现文档，以及 `/connections` 授权管理页。Web 按站点公开地址签发绑定到 `/mcp` 资源的令牌。账户表单校验所有者会话、同源和 CSRF 后，以专属 `web-owner-proxy` grant 经内网向 tools 的 `/mcp` 提交凭证、记账和 NAV 采集，使用公网 Host，写入与回执由 tools 负责。
 - nginx 用 `location = /mcp` 将 MCP 流量转给 `tools`。`tools` 提供无会话的 Streamable HTTP MCP，使用 JSON 响应，按公开地址校验 Host 和请求携带的 Origin。Bearer 鉴权接受有效 PAT 或绑定该资源的 OAuth access token。本机 owner 凭据用于政策管理。
 - MCP 工具发现与调用和热备 REST 共用 Gate。写入与采集共占两个名额，读取与发现只登记在途。发布暂停拒绝新发现与调用并排空在途请求，暂停标记跨重启保留。调用遇到暂停或满额时返回带错误码的 `isError` 回执，发现可能收到协议错误或 HTTP 503。
 - 五个本机宿主使用原生 HTTP MCP。Hermes 的业务脚本通过远程 MCP 客户端 `ashare` 调用服务。旧 stdio 桥已移除。`/tools` 业务 REST 与 Web `/api` 中面向 Agent 的 JSON 暂作热备，退役条件见[双入口方案段 4a](docs/web-mcp-platform.md#5-实施分段)。

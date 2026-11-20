@@ -14,4 +14,5 @@
 {% endif %}
 {% if view.result.review_prompts %}<h2>研究复核提醒</h2>
 <ul class="facts">{% for prompt in view.result.review_prompts %}<li>{% if prompt.code %}{{ prompt.code }} · {% endif %}{{ prompt.detail }}</li>{% endfor %}</ul>{% endif %}
+<p><a href="/account/nav/new">评估 NAV 区间</a></p>
 {% endblock %}

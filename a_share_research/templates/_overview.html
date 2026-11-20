@@ -11,7 +11,11 @@
 {% endmacro %}
 
 {% macro receipt_status(status) -%}
-{{ {'posted': '已入账', 'conflict': '对账冲突', 'missing_material': '缺少材料'}.get(status, status) }}
+{{ {'posted': '已入账', 'conflict': '对账冲突', 'missing_material': '缺少材料', 'service_failure': '入账服务失败'}.get(status, status) }}
+{%- endmacro %}
+
+{% macro account_gap(gap) -%}
+{{ gap }}{% if 'NAV' in gap %} · <a href="/account/nav/new">评估 NAV 区间</a>{% endif %}
 {%- endmacro %}
 
 {% macro monitor_status(policy) -%}
@@ -45,7 +49,7 @@
 {% endif %}
 {% if view.nav_interval %}{% set nav = view.nav_interval %}
 <p><a href="{{ nav.path }}">NAV 区间 {{ nav.start_date }} 至 {{ nav.end_date }}</a> · {{ nav.benchmark_code }}
-  <span class="muted small">保存于 {{ nav.created_at|shanghai_minute }}</span></p>
+  <span class="muted small">保存于 {{ nav.created_at|shanghai_minute }}</span> · <a href="/account/nav/new">评估新区间</a></p>
 {% endif %}
 {% endmacro %}
 
@@ -73,7 +77,7 @@
 {{ account_header(company) }}
 {% if company.account_gaps %}
 <h3>账户待核对项</h3>
-<ul class="facts">{% for gap in company.account_gaps %}<li>{{ gap }}</li>{% endfor %}</ul>
+<ul class="facts">{% for gap in company.account_gaps %}<li>{{ account_gap(gap) }}</li>{% endfor %}</ul>
 {% endif %}
 {% endif %}
 {% if company.position and company.position.theses %}

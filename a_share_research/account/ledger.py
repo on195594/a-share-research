@@ -162,11 +162,11 @@ def state(conn, principal, account_id: str) -> dict:
                 cost_basis_configured=bool(conn.execute('SELECT 1 FROM account_position_books WHERE account_id=?', (row['account_id'],)).fetchone()))
 
 
-def _save_receipt(conn, account_id, request_hash, result, request):
+def _save_receipt(conn, account_id, key_id, request_hash, result, request):
     # Allocate IDs explicitly within BEGIN IMMEDIATE so the immutable receipt is written only once.
     batch_id = conn.execute('SELECT coalesce(max(id),0)+1 FROM account_batches').fetchone()[0]
     result = result | {'receipt_id': batch_id, 'request_hash': request_hash, 'mode': 'shadow',
-                       'account_id': account_id, 'evidence_hashes': request['evidence_hashes']}
+                       'account_id': account_id, 'key_id': key_id, 'evidence_hashes': request['evidence_hashes']}
     # Preserve sub-second causality for explicit valuation timestamps; old requests keep their format.
     stamp=(datetime.now(db.SHANGHAI).isoformat() if (request.get('snapshot') or {}).get('portfolio_value_as_of') else db.now())
     conn.execute('INSERT INTO account_batches(id,account_id,request_hash,status,created_at,receipt,request) VALUES (?,?,?,?,?,?,?)',
@@ -226,7 +226,7 @@ def submit(conn: sqlite3.Connection, principal, account_id: str, batch: Batch, e
                 raise
             before = json.loads(book['projection'])
             request = batch.model_dump(mode='json')
-            return _save_receipt(conn, account_id, gate.digest(request),
+            return _save_receipt(conn, account_id, principal.key_id, gate.digest(request),
                 dict(status='service_failure',version=book['version'],before=before,after=before,
                      added=0,duplicates=0,voided=0,
                      problems=[{'field':'service','expected':'入账事务已回滚，可用原请求重试'}]), request)
@@ -250,7 +250,7 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
         result = dict(status='conflict', version=book['version'], before=before, after=before,
                       added=0, duplicates=0, voided=0, problems=[])
         def reject(status, problems):
-            return _save_receipt(conn, account_id, request_hash, result | {'status': status, 'problems': problems}, batch.model_dump(mode='json'))
+            return _save_receipt(conn, account_id, principal.key_id, request_hash, result | {'status': status, 'problems': problems}, batch.model_dump(mode='json'))
         missing = []
         if batch.snapshot is None:
             missing.append({'field': 'snapshot', 'expected': '完整期末持仓、现金、市值与总资产'})
@@ -343,7 +343,7 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
                 return reject('conflict', [{'field':'positions','expected':str(exc)}])
             result |= {'position_before':json.loads(cost_book['projection']), 'position_after':cost_projection}
         version = book['version'] + int(bool(new or voids))
-        result = _save_receipt(conn, account_id, request_hash, result | dict(status='posted', version=version,
+        result = _save_receipt(conn, account_id, principal.key_id, request_hash, result | dict(status='posted', version=version,
                               added=len(new), duplicates=duplicates, voided=len(voids),
                               after=projected.model_dump(mode='json')), batch.model_dump(mode='json'))
         for event_id in voids:

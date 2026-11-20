@@ -666,3 +666,12 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .device-preferences { max-width: var(--column); margin: 0 auto; padding: 0 20px; font-size: 13px; color: var(--muted); }
 .device-preferences form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .device-preferences button { min-height: 44px; }
+
+.account-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.account-form input[type="file"] { width: 100%; }
+.account-form fieldset:disabled, .account-form button:disabled { color: var(--muted); }
+.account-form :disabled .btn, .account-form .btn:disabled {
+  color: var(--muted); background: var(--band); border-color: var(--line); cursor: default;
+}
+#ledger-form > fieldset { margin-block: 28px; }
+#ledger-form legend { padding: 0; font-size: 19px; font-weight: 700; }

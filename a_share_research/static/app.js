@@ -281,3 +281,16 @@ document.addEventListener("click", (event) => {
   }
   field.focus();
 });
+
+const evidenceFiles = document.getElementById("evidence-files");
+if (evidenceFiles) {
+  evidenceFiles.addEventListener("change", () => {
+    const limit = Number(evidenceFiles.dataset.maxBytes);
+    const oversized = Array.from(evidenceFiles.files).filter(file => file.size > limit);
+    const message = oversized.length
+      ? oversized.map(file => file.name).join("、") + " 超过 " + limit / 1048576 + " MiB，请缩小文件或重新选择。"
+      : "";
+    evidenceFiles.setCustomValidity(message);
+    document.getElementById("file-status").textContent = message;
+  });
+}

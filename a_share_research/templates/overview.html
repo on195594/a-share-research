@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_overview.html" import account_header, company_body, monitor_items, monitor_status, policy_link %}
+{% from "_overview.html" import account_gap, account_header, company_body, monitor_items, monitor_status, policy_link %}
 {% set portfolio = view.holdings is defined %}
 {% block title %}{{ '我的组合' if portfolio else (view.name or view.code) ~ ' · 公司总览' }}{% endblock %}
 {% block main %}
@@ -10,12 +10,14 @@
 {% elif view.holdings is not none %}<p>已核实持仓 0 家</p>
 {% else %}<p class="flag">持仓范围尚未核实</p>{% endif %}
 {{ account_header(view) }}
+<div class="actions"><a class="link" href="/account/evidence">上传账户凭证</a>
+  <a class="link" href="/account/ledger/new">记一笔成交</a></div>
 {% if view.policy %}
 <p><strong>{{ monitor_status(view.policy) }}</strong></p>
 {{ policy_link(view.policy) }}
 {{ monitor_items(view.policy) }}
 {% endif %}
-{% if view.gaps %}<ul class="facts">{% for gap in view.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% endif %}
+{% if view.gaps %}<ul class="facts">{% for gap in view.gaps %}<li>{{ account_gap(gap) }}</li>{% endfor %}</ul>{% endif %}
 {% for company in view.holdings or [] %}
 <section class="policy-section"{% if loop.first %} id="holdings"{% endif %}>
   <h2><a href="/stock/{{ company.code }}/overview">{{ company.name or company.code }}</a>

@@ -16,6 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlencode, urlparse
@@ -32,7 +33,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
-from a_share_research import stock_codes, api_keys, oauth, oauth_store, template_filters
+from a_share_research import stock_codes, api_keys, oauth, oauth_store, skill_bundle, template_filters
+from a_share_research import web_evidence, web_ledger, web_nav
+from a_share_research.tools_client import ToolsClient
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 from a_share_research.service import FeedbackRequest, ResearchRequest
@@ -41,6 +44,7 @@ HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
 STATE_COOKIE = "oauth_state"
 PENDING_COOKIE = "mcp_authorization"
+LEDGER_RETURN_COOKIE = "resume_ledger"
 SESSION_SECONDS = 8 * 3600
 DEVICE_COOKIE = "remember_device"
 DEVICE_SECONDS = 30 * 24 * 3600
@@ -127,7 +131,8 @@ templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["record_json"] = lambda value: json.dumps(value, ensure_ascii=False, indent=2)
 templates.env.filters.update(template_filters.FILTERS)
 # Busts browser caches of the stylesheet and script on each deploy that changes them.
-ASSET_VERSION = hashlib.sha256(b"".join((HERE / "static" / name).read_bytes() for name in ("app.css", "app.js"))).hexdigest()[:12]
+ASSET_VERSION = hashlib.sha256(b"".join(path.read_bytes() for path in sorted((HERE / "static").iterdir())
+                                        if path.suffix in (".js", ".css"))).hexdigest()[:12]
 templates.env.globals["asset_version"] = ASSET_VERSION
 templates.env.globals["funnel_chart"] = charts.funnel
 templates.env.globals["citation_link"] = citation_link
@@ -255,7 +260,7 @@ def pending_query(request: Request, state: str) -> str | None:
 
 
 def after_login(request: Request | None, state: str) -> RedirectResponse:
-    target = "/"
+    target = "/account/ledger/new" if request and request.cookies.get(LEDGER_RETURN_COOKIE) == "1" else "/"
     if request and (query := pending_query(request, state)):
         try:
             auth = registered_authorization(query)
@@ -264,6 +269,8 @@ def after_login(request: Request | None, state: str) -> RedirectResponse:
         else:
             target = "/oauth/authorize?" + auth.query()
     response = RedirectResponse(target, status_code=303)
+    if request and LEDGER_RETURN_COOKIE in request.cookies:
+        response.delete_cookie(LEDGER_RETURN_COOKIE, path="/")
     if request and PENDING_COOKIE in request.cookies:
         response.delete_cookie(PENDING_COOKIE, path="/")
     return response
@@ -411,6 +418,7 @@ def logout(request: Request, csrf: str = Form("")):
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/")
     response.delete_cookie(DEVICE_COOKIE, path="/")
+    response.delete_cookie(LEDGER_RETURN_COOKIE, path="/")
     response.delete_cookie(PENDING_COOKIE, path="/")
     response.delete_cookie(STATE_COOKIE, path="/")
     return response
@@ -535,6 +543,14 @@ def connections(request: Request):
     return connections_page(request, session) if session else login_required()
 
 
+@app.get("/connections/skill.zip")
+def download_skill(request: Request):
+    if not current_session(request):
+        return login_required()
+    return Response(skill_bundle.archive(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="a-share-{skill_bundle.version()}.zip"'})
+
+
 @app.post("/connections/clients")
 def register_client(request: Request, csrf: str = Form(""), name: str = Form(""), redirect_uris: str = Form("")):
     session = current_session(request)
@@ -630,6 +646,37 @@ def monitor_detail(request: Request, evaluation_id: int):
 @app.get("/account/receipts/{receipt_id}")
 def receipt_detail(request: Request, receipt_id: int):
     return _owner_read(request, "receipt_detail.html", _overview().receipt_detail, receipt_id)
+
+
+async def _account_form(request: Request, page):
+    session = current_session(request)
+    if not session:
+        response = login_required()
+        if request.url.path == "/account/ledger/new":
+            set_cookie(response, LEDGER_RETURN_COOKIE, "1", 600)
+        return response
+    client = ToolsClient.from_settings(settings)
+    if request.method == "POST":
+        async with request.form() as form:
+            if error := owner_form_error(request, session, str(form.get("csrf", ""))):
+                return error
+            return await page(request, session, client, render, form)
+    return await page(request, session, client, render)
+
+
+@app.api_route("/account/evidence", methods=["GET", "POST"])
+async def account_evidence(request: Request):
+    return await _account_form(request, web_evidence.page)
+
+
+@app.api_route("/account/ledger/new", methods=["GET", "POST"])
+async def ledger_new(request: Request):
+    return await _account_form(request, partial(web_ledger.page, connection=conn))
+
+
+@app.api_route("/account/nav/new", methods=["GET", "POST"])
+async def nav_new(request: Request):
+    return await _account_form(request, web_nav.page)
 
 
 @app.get("/account/nav/{artifact_sha256}")

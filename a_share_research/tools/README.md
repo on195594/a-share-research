@@ -18,6 +18,8 @@ ashare --config /absolute/private/client.json call research_card --json '{"code"
 
 省略 `--config` 时读取 `~/.config/ashare/client.json`。CLI 使用 2026-07-28 无握手请求；发现返回 `{"tools":[...]}`，调用成功返回 `{"ok":true,"result":...}`。业务回执中的状态仍决定是否入账。失败退出码和恢复方法见[客户端准备手册](../../ops/clients/README.md)。
 
+Web 账户表单经内网调用同一 MCP 端点，携带公网 Host 和 `web-owner-proxy` 专属授权。新建账本回执的 `key_id` 记录实际写入授权，重放返回原回执。页面与配置见 [Web 与 MCP 接入](../../README.md#web-与-mcp-接入)。
+
 五宿主使用原生远程 MCP。CLI 单次 HTTP 超时为 30 秒，无自动重试。
 
 - `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research_methods`）、提交研究与反馈、查询进度和操作月批。

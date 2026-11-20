@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}上传账户凭证 · 我的组合{% endblock %}
+{% block main %}
+<div class="overview">
+<h1>上传账户凭证</h1>
+{% if not enabled %}<p class="notice caution">Web 账户写入未启用</p>{% endif %}
+<form method="post" enctype="multipart/form-data" class="search narrow account-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset{% if not enabled %} disabled{% endif %}>
+    <label for="evidence-files">截图或交割单</label>
+    <input type="file" id="evidence-files" name="files" accept="image/*,application/pdf" multiple required
+           data-max-bytes="{{ max_bytes }}" aria-describedby="file-help file-status">
+    <p class="hint" id="file-help">可一次选择多份图片或 PDF，每份最多 {{ max_mib }} MiB。</p>
+    <p class="flag" role="status" id="file-status"></p>
+    <label for="evidence-label">本次文件标签（选填）</label>
+    <div class="row"><input id="evidence-label" name="label" maxlength="80" value="{{ label }}" placeholder="例如，收盘持仓或当日成交"></div>
+    {% if error %}<p class="notice caution" role="alert">{{ error }}</p>{% endif %}
+    <div class="actions"><button class="btn" type="submit">上传凭证</button></div>
+  </fieldset>
+</form>
+{% if rows %}
+<section aria-labelledby="uploads-title">
+  <h2 id="uploads-title">本次上传</h2>
+  <ul class="list">{% for row in rows %}<li>
+    <strong>{{ row.filename }}</strong> · {{ row.status }}
+    {% if row.sha256 %}<bdi class="code">SHA-256 {{ row.sha256[:12] }}</bdi>{% endif %}
+    {% if row.message %}<p class="flag">{{ row.message }}</p>{% endif %}
+  </li>{% endfor %}</ul>
+</section>
+{% endif %}
+<p class="actions"><a class="link" href="/account/ledger/new">登记单笔成交</a><a class="link" href="/portfolio/overview">返回组合总览</a></p>
+<section aria-labelledby="recent-title">
+  <h2 id="recent-title">最近上传</h2>
+  {% if recent_error %}<p class="notice caution" role="alert">{{ recent_error }}</p>
+  {% elif recent %}<ul class="list">{% for item in recent %}<li>
+    <strong>{{ item.filename or '未记录文件名' }}</strong>{% if item.label %} · {{ item.label }}{% endif %}
+    <p class="small muted"><time datetime="{{ item.uploaded_at }}">{{ item.uploaded_at|shanghai_minute }}</time> · <bdi>SHA-256 {{ item.sha256[:12] }}</bdi></p>
+  </li>{% endfor %}</ul>
+  {% elif enabled %}<p class="muted">还没有上传凭证。</p>
+  {% else %}<p class="muted">启用账户连接后可查看最近上传的凭证。</p>{% endif %}
+</section>
+</div>
+{% endblock %}

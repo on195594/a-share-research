@@ -45,7 +45,12 @@ uv run --env-file .env.web.dev uvicorn a_share_research.web:app --port 8610  # �
 
 验证按影响范围选择测试文件（见[测试说明](tests/README.md)）；需要完整离线回归时用 `uv run pytest -q tests`。不以离线测试代替真实研究或浏览器验收。
 
-`.env.web`（本机开发可用 `.env.web.dev`）只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
+`.env.web`（本机开发可用 `.env.web.dev`）只放网页配置：`PUBLIC_BASE_URL`、`SESSION_SECRET`（≥32 字符），以及 GitHub OAuth 的 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`；本机开发可用 `DEV_LOGIN=1`（仅限 loopback 地址）代替 OAuth。Web 账户表单另用一对可选配置。
+
+- `ASHARE_TOOLS_URL` 填 tools 内网地址（例如 `http://a-share-research-tools:8621`），Web 追加 `/mcp`，用 `PUBLIC_BASE_URL` 的公网 Host 发请求。
+- `ASHARE_TOOLS_TOKEN` 填专属 `assistant` 授权 `web-owner-proxy` 的 PAT，保存在权限为 0600 的 `.env.web`。两项均留空时账户写入表单停用。
+
+数据默认在 `./data`，生产用 `DATA_DIR` 指到代码目录之外。
 
 初筛与回测的 TuShare 查询使用 `DATA_DIR/tushare_cache.db`（公司研究原有财务取数仍直连；新增外部条件工具使用同一缓存）：仅缓存 `trade_date` 或 `end_date` 早于上海当天日期的历史行情与财报响应；开放时间范围、当天及未来日期的查询和空结果不缓存。设置 `TUSHARE_CACHE=0` 可完全旁路缓存，直接查询 TuShare（不改写已有缓存）。历史披露若发生更正，需刷新对应缓存后再恢复缓存查询。
 
@@ -81,7 +86,13 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## Web 与 MCP 接入
 
-Web 面向所有者。登录后打开 `/connections`，复制 MCP 地址、登记网页客户端的 OAuth 回调地址，查看或撤销有效的 assistant 授权。已登记的客户端连接 `https://stock.keyi.win/mcp` 时，由所有者登录并同意授权。
+Web 面向所有者。登录后打开 `/connections`，复制 MCP 地址、登记网页客户端的 OAuth 回调地址，查看或撤销有效的 assistant 授权，并下载与 MCP 服务指令版本一致的 a-share Skill 压缩包。已登记的客户端连接 `https://stock.keyi.win/mcp` 时，由所有者登录并同意授权。
+
+从 `/portfolio/overview` 进入 Web 账户操作。
+
+1. 在 `/account/evidence` 选取一份或多份原图、交割单，可给本次文件统一加标签。每份最多 20 MiB，页面逐份显示结果与 SHA-256 前缀。
+2. 在 `/account/ledger/new` 登记已发生的单笔成交，勾选成交和券商快照凭证，核对现金、持仓与市值后提交。回执给出入账结果。会话过期后用原浏览器登录可恢复草稿。遇到结果未知，先核对最近回执，再按原编号重试相同内容。
+3. 在 `/account/nav/new` 冻结当前账本，选择带明确估值时点的起止资料，声明区间资金流与覆盖凭证。tools 采集 H00906 收盘数据，成功后可查看区间 NAV 凭证。
 
 五个本机宿主使用原生 HTTP MCP。CLI 与 Hermes 定时脚本使用独立的 `assistant` PAT。在能访问目标实例数据目录的宿主签发、查看或撤销 PAT，签发时只显示一次明文。
 
@@ -251,7 +262,7 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 Web、worker 与 tools 共用 SQLite 数据目录（默认 `/home/lin/a-share-research-data`，可由 `DATA_DIR` 指定）。三个服务都将 `METHOD_CARDS_SOURCE`（默认 `/home/lin/wiki/concepts/company-analysis`）只读挂载到 `METHOD_CARDS_DIR=/method-cards`。
 
-- web 的宿主端口绑定 `127.0.0.1:8620`，经 `nginx-network` 对外。可在 `.env.web`（0600）中设置 `ASHARE_TOOLS_URL=http://a-share-research-tools:8621` 与 `ASHARE_TOOLS_TOKEN`，后者存放 Web 专属的 `assistant` grant 令牌。两项同时设置或同时留空。
+- web 的宿主端口绑定 `127.0.0.1:8620`，经 `nginx-network` 对外。Web 专属账户授权与 tools 内网地址见[运行配置](#运行)。
 - tools 复用 worker 镜像，通过 `nginx-network` 与 web 互通，保留宿主 `127.0.0.1:8621` 供本机客户端直连与发布就绪检查。首次纳入发布使用 `--with-tools --allow-config` 启用 Compose 的 `tools` profile，此后已有容器自动纳入发布。独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据，CPU 限制为 0.4，无 Pi 挂载。
 - 在仓库根目录 `.env` 或发布命令的环境设置 `ASHARE_PUBLIC_MCP_URL=https://stock.keyi.win/mcp`。Compose 将它传入 tools，用于启用 `/mcp`、校验 Host 与 Origin，并限定接受的 OAuth 资源。留空时 tools 不挂载该端点。Web 从 `.env.web` 的 `PUBLIC_BASE_URL` 生成发现文档和资源地址，两者须指向同一个公开 MCP 地址。
 - nginx 通过 `nginx-network` 将 `location = /mcp` 转发到 `http://a-share-research-tools:8621`，保留原路径和公网 Host（含非默认端口），并透传 Authorization。网页与 OAuth 端点及发现文档仍转给 web。路由变更与配置授权见[双入口方案](docs/web-mcp-platform.md#5-实施分段)。

@@ -1,5 +1,4 @@
 """Stateless, authenticated MCP transport for the tools registry."""
-import hashlib
 import json
 import logging
 import sqlite3
@@ -21,7 +20,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
-from a_share_research import api_keys, oauth_store
+from a_share_research import api_keys, oauth_store, skill_bundle
 from a_share_research.tools.control import ControlError, Gate
 from a_share_research.tools.http_json import MAX_BODY_SIZE, BodyTooLarge, parse_object, read_body
 from a_share_research.tools.registry import TOOLS, Tool, ToolError, UnknownTool, invoke, validation_message, visible_tools
@@ -189,9 +188,8 @@ def mcp_router(resource: str, connection, context, gate: Gate) -> APIRouter:
     root = Path(__file__).resolve().parents[2]
     with (root / 'pyproject.toml').open('rb') as project:
         version = tomllib.load(project)['project']['version']
-    skill_version = hashlib.sha256((root / 'skill/a-share/SKILL.md').read_bytes()).hexdigest()[:12]
     server = Server('a-share', version=version, instructions=(
-        f'a-share Skill 版本 {skill_version}。先发现可用工具，读研究摘要，按需读取证据。账户入账前核对凭证和版本。'
+        f'a-share Skill 版本 {skill_bundle.version()}。先发现可用工具，读研究摘要，按需读取证据。账户入账前核对凭证和版本。'
         f'提交研究后立即给出任务编号与进度链接（{origin} 加回执 path），本轮无需轮询。'
         '按字段路径纠正参数。凭据失效时刷新或重新授权。发布暂停或繁忙时稍后重试。'
         '超时或断线先查回执，沿用原身份、请求编号及内容。'),

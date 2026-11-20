@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_overview.html" import receipt_status %}
+{% macro input(name, label, type='text', attrs='') %}
+<label for="ledger-{{ name }}">{{ label }}</label>
+<div class="row"><input id="ledger-{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ fields.get(name, '') }}" {{ attrs|safe }}></div>
+{% endmacro %}
+{% block title %}单笔成交记账 · 我的组合{% endblock %}
+{% block main %}
+<div class="overview">
+<h1>单笔成交记账</h1>
+{% if not configured %}<p class="notice caution">Web 账户写入未启用</p>{% endif %}
+{% for error in errors %}<p class="notice caution" role="alert">{{ error }}</p>{% endfor %}
+{% if receipt %}
+<div class="notice caution" role="alert"><strong>{{ receipt_status(receipt.status) }}</strong>
+  <ul>{% for problem in receipt.problems %}<li>{{ problem.field }} · 应为 {{ problem.expected }}{% if 'actual' in problem %}，实际为 {{ problem.actual }}{% endif %}</li>{% endfor %}</ul>
+  <a href="/account/receipts/{{ receipt.receipt_id }}">查看回执 #{{ receipt.receipt_id }}</a>
+</div>
+{% endif %}
+{% if restored %}<p class="notice" role="status">已恢复本机草稿。{% if fresh_version is not none and fields.expected_version != fresh_version %}草稿基于旧版本 {{ fields.expected_version }}，当前版本为 {{ fresh_version }}。若上次提交结果未知，请原样重试。{% endif %}</p>{% endif %}
+{% if fields.account_id %}
+<p class="muted">账户 {{ fields.account_id }} · 账本版本 {{ fields.expected_version }} · 成交前现金 {{ fields.opening_cash }} 元</p>
+{% if holdings %}<p class="small">成交前持仓　{% for code, qty in holdings.items() %}{{ code }} · {{ qty }} 股{% if not loop.last %}，{% endif %}{% endfor %}</p>{% endif %}
+{% endif %}
+{% if retry_only %}
+<p class="notice">请求 {{ fields.request_id }} 尚待确认。原单已保留，可重试并查回回执。</p>
+<form id="ledger-retry" method="post" action="/account/ledger/new">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="awaiting_reply" value="1">
+  {% for name, value in fields.multi_items() if name not in ('csrf', 'intent', 'awaiting_reply') %}
+  <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
+  <button class="btn" type="submit"{% if not enabled %} disabled{% endif %}>用原编号和原内容重试</button>
+</form>
+{% endif %}
+<form id="ledger-form" class="account-form search narrow" method="post" action="/account/ledger/new" data-fresh="{{ 'yes' if fresh else 'no' }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% for name in ('request_id','account_id','expected_version','opening_cash','cost_basis') %}<input type="hidden" name="{{ name }}" value="{{ fields.get(name, '') }}">{% endfor %}
+  <fieldset{% if not enabled or retry_only %} disabled{% endif %}>
+    <legend>成交明细</legend>
+    <label for="trade-kind">买卖方向</label>
+    <select id="trade-kind" name="kind"><option value="buy"{% if fields.kind == 'buy' %} selected{% endif %}>买入</option><option value="sell"{% if fields.kind == 'sell' %} selected{% endif %}>卖出</option></select>
+    {{ input('code','证券代码','text','inputmode="numeric" pattern="[0-9]{6}" maxlength="6" list="held-codes" required') }}
+    <datalist id="held-codes">{% for code, qty in holdings.items() %}<option value="{{ code }}">{{ qty }} 股</option>{% endfor %}</datalist>
+    {{ input('occurred_at','成交日期和时间（北京时间）','datetime-local','step="1" required') }}
+    {{ input('shares','成交股数','number','min="1" step="1" inputmode="numeric" required') }}
+    {{ input('price','成交价格（元/股）','number','min="0" step="any" inputmode="decimal" required') }}
+    {{ input('fees','费用合计（含税，元）','number','min="0" step="any" inputmode="decimal" required') }}
+  </fieldset>
+  {% if fields.cost_basis == '1' %}
+  <details id="ledger-entry" class="block" {% if fields.policy_identity %}open{% endif %}>
+    <summary>新开仓的政策归属</summary>
+    <p class="hint">首次买入或清仓后重新买入时，填写该笔成交依据的政策来源。</p>
+    <fieldset{% if not enabled or retry_only %} disabled{% endif %}>
+      {% if profiles %}
+      <label for="entry-profile">开仓采用的政策参数</label>
+      <select id="entry-profile" name="policy_identity">
+        <option value="">请选择已核对的参数版本</option>
+        {% for profile in profiles %}<option value="{{ profile.identity }}"{% if fields.policy_identity == profile.identity %} selected{% endif %}>
+          登记于 {{ profile.created_at|shanghai_minute }} · {{ profile.identity[:15] }}
+        </option>{% endfor %}
+      </select>
+      {% else %}{{ input('policy_identity','政策身份引用') }}{% endif %}
+      {{ input('framework','持仓框架') }}
+    </fieldset>
+  </details>
+  {% endif %}
+  <fieldset{% if not enabled or retry_only %} disabled{% endif %}>
+    <legend>券商期末快照</legend>
+    <p class="hint">请用同一张券商快照核对预填股数，并填写各证券市值。已清仓的证券填 0。</p>
+    {{ input('trade_ending','成交证券期末股数','number','min="0" step="1" inputmode="numeric" required') }}
+    {{ input('trade_value','成交证券期末市值（元）','number','min="0" step="any" inputmode="decimal" required') }}
+    {% for code, qty in holdings.items() %}
+    <div data-holding="{{ code }}">
+      <input type="hidden" name="opening.{{ code }}" value="{{ qty }}">
+      {{ input('ending.' + code,code + ' 期末股数','number','min="0" step="1" inputmode="numeric"') }}
+      {{ input('value.' + code,code + ' 期末市值（元）','number','min="0" step="any" inputmode="decimal"') }}
+    </div>
+    {% endfor %}
+    {{ input('cash','券商现金余额（元）','number','min="0" step="any" inputmode="decimal" required') }}
+    {{ input('total_assets','券商总资产（元）','number','min="0" step="any" inputmode="decimal" required') }}
+    {{ input('as_of','资产估值时点（北京时间）','datetime-local','step="1"') }}
+    <p class="hint">如需用这份快照作 NAV 区间起点或终点，请提供交易日 15:00 收盘估值。</p>
+    <div id="ledger-preview" class="notice" role="status" hidden><p id="cash-preview"></p><p id="market-preview"></p></div>
+  </fieldset>
+  <fieldset{% if not enabled or retry_only %} disabled{% endif %}>
+    <legend>本笔证据</legend>
+    {% for item in recent %}<label class="check"><input type="checkbox" name="evidence_hashes" value="{{ item.sha256 }}"{% if item.sha256 in selected %} checked{% endif %}>
+      <span>{{ item.filename or '已上传证据' }}{% if item.label %} · {{ item.label }}{% endif %} · <bdi>{{ item.sha256[:12] }}</bdi></span></label>
+    {% else %}<p class="hint">暂无可选证据。</p>{% endfor %}
+    <a href="/account/evidence">上传成交和资产凭证</a>
+  </fieldset>
+  {% if fields.request_id %}<p class="hint">请求编号 <bdi>{{ fields.request_id }}</bdi></p>{% endif %}
+  <p class="hint" data-draft-status role="status"></p>
+  <div class="actions">{% if not retry_only %}<button class="btn" type="submit"{% if not enabled %} disabled{% endif %}>提交对账</button>{% endif %}
+    {% if not fresh and not retry_only %}<a data-new-draft href="/account/ledger/new">按当前版本重新填写</a>{% endif %}
+    <a href="/portfolio/overview">返回组合</a>
+  </div>
+</form>
+</div>
+<script src="/static/ledger.js?v={{ asset_version }}" defer></script>
+{% endblock %}
