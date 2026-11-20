@@ -136,6 +136,7 @@ def test_catalog_matches_rest_visibility_schemas_and_operation_semantics(remote,
             assert catalog['research_subscriptions_replace']['annotations']['destructiveHint'] is True
             assert catalog['account_submit']['annotations']['destructiveHint'] is True
             assert catalog['account_evidence']['annotations']['destructiveHint'] is False
+            assert catalog['account_evidence']['annotations']['idempotentHint'] is False
         else:
             denied = rpc(client, token, 'tools/call', {'name': 'account_evidence_recent', 'arguments': {}}).json()
             assert denied.get('error') or denied['result']['isError']
@@ -166,10 +167,13 @@ def test_legacy_initialize_and_call_share_the_registry_result(remote, database):
 def test_recent_evidence_returns_the_hash_from_the_upload_receipt(remote):
     client, tokens = remote
     token = tokens['assistant']
-    receipt = call(client, token, 'account_evidence', {'content_base64': 'YQ=='})['structuredContent']['data']
+    upload = {'content_base64': 'YQ==', 'filename': '持仓.png', 'label': '持仓总览'}
+    receipt = call(client, token, 'account_evidence', upload)['structuredContent']['data']
     recent = call(client, token, 'account_evidence_recent', {'limit': 1})['structuredContent']['data']
     item, = recent['evidence']
-    assert item['sha256'] == receipt['sha256'] and item['size_bytes'] == 1
+    assert datetime.fromisoformat(item['uploaded_at']).utcoffset() is not None
+    assert item == dict(sha256=receipt['sha256'], uploaded_at=item['uploaded_at'], filename='持仓.png',
+                        label='持仓总览', size_bytes=1)
 
 
 @pytest.mark.parametrize('version', [LEGACY, MODERN])

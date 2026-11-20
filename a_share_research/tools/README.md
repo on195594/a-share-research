@@ -62,7 +62,8 @@ Compose 的 `tools` profile 复用 worker 镜像，独立 `.env.tools` 仅放 TU
 
 v14 新增期初与投影、批次回执、事件、作废记录、资产观察五张独立表；不改写旧持仓/成交表，不切换账户事实来源。开发实例须显式设 `create_app(database, account_shadow_enabled=True)`。只有启用账户开关的 assistant 可发现和调用账户工具。带 `account_id` 的工具可省略该字段，服务从 `account_source` 取唯一绑定账本；显式传入时必须一致。绑定缺失、无效或不唯一时，须由所有者核对绑定后重试。
 
-- `account_evidence` 接收 base64 原始证据（解码后最多 20 MiB），返回 SHA-256。文件原子写入数据库同目录下的私有 `account-evidence/`，重传幂等，读取验证哈希并拒绝符号链接路径。
+- `account_evidence` 接收 base64 原始证据（解码后最多 20 MiB），可附 `filename`（1–200 字符）和 `label`（1–80 字符），返回 SHA-256。文件名只保留去除控制字符的基名。相同内容在私有 `account-evidence/` 中只存一份，每次上传都记录调用凭据、上传时间、来源、文件名和标签。
+- 入账前用 `account_evidence_recent` 取哈希。`limit` 默认为 10，可取 1–100。结果按上传时间倒序，每个 SHA-256 只列最近一次的 `uploaded_at`、`filename`、`label` 和对象的 `size_bytes`。仅列有上传记录的对象。列表内对象缺失或不可安全访问时返回 `unavailable`。
 - `account_state` 返回账本版本、持仓股数、现金及显式容差。建立期初目前仅供内部调用，必须提供期初、时点、证据和经确认的容差，不向助手开放猜测期初或修改容差的入口。
 - `account_submit` 接收版本号、事件、原事件作废编号、证据哈希和完整期末快照；按业务身份去重，重新计算有效事件，校验股数、现金和总资产后事务入账。更正用作废加替代事件，保留原始内容。报告依据必须为同公司、不晚于成交日、通过复核的正式报告。
 - `account_events` 按事件编号分页返回原事件及当前是否有效，可据此取得更正所需编号；`account_receipt` 查询不可变批次回执。
