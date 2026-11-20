@@ -58,6 +58,7 @@ services:
       DATA_DIR: /data
       METHOD_CARDS_DIR: /method-cards
       ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED: ${ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED:-0}
+      ASHARE_PUBLIC_MCP_URL: ${ASHARE_PUBLIC_MCP_URL:-}
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
       - ${METHOD_CARDS_SOURCE:-/home/lin/wiki/concepts/company-analysis}:/method-cards:ro

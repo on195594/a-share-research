@@ -11,7 +11,7 @@ import uuid
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError, policy_receipt, save_json, tool
+from ashare_tools import ToolsError, client_identity, policy_receipt, save_json, tool
 
 UNAVAILABLE_GRACE_SECONDS = 600
 STATE = Path(os.environ.get('ASHARE_STOP_ALERT_STATE', Path.home() / '.local/state/ashare-stop-alert/state.json'))
@@ -36,7 +36,7 @@ def load_state():
     value = json.loads(STATE.read_text()) if STATE.exists() else {}
     if isinstance(value, dict) and set(value) <= {'date', 'levels'}:
         value = dict(schema_version=1, state=value, pending=None)
-    if (not isinstance(value, dict) or set(value) != {'schema_version', 'state', 'pending'}
+    if (not isinstance(value, dict) or set(value) - {'binding'} != {'schema_version', 'state', 'pending'}
             or type(value['schema_version']) is not int or value['schema_version'] != 1):
         raise ToolsError('止损任务记录不兼容；未覆盖')
     notification_state(value['state'])
@@ -81,7 +81,8 @@ def check() -> tuple[str, str, int]:
                 raise ToolsError('止损暂不可用记录不兼容；保留原请求供核对') from None
             if (now - first).total_seconds() < UNAVAILABLE_GRACE_SECONDS:
                 return '', '', 0
-            raise ToolsError(f'工具服务暂停或不可达已超过 {UNAVAILABLE_GRACE_SECONDS // 60} 分钟') from None
+            raise ToolsError(f'服务持续未受理已超过 {UNAVAILABLE_GRACE_SECONDS // 60} 分钟。{exc}',
+                             code=exc.code) from None
         since.unlink(missing_ok=True)
         return result
 
@@ -89,15 +90,16 @@ def check() -> tuple[str, str, int]:
 def _check() -> tuple[str, str, int]:
     saved = load_state()
     if saved['pending'] is None:
-        current = tool('policy.current', {})
+        current = tool('policy_current', {})
         activation = current.get('activation') or {}
         if (current.get('installed') is not True or not isinstance(activation, dict)
                 or type(activation.get('id')) is not int or activation['id'] < 1):
-            raise ToolsError('尚无与实装一致的生效政策')
+            raise ToolsError('政策异常，请核对当前实装版本与生效政策')
+        saved['binding'] = client_identity()[0]
         saved['pending'] = dict(request_id='hermes-stop-' + uuid.uuid4().hex,
             expected_activation_id=activation['id'], previous_state=saved['state'])
         save_json(STATE, saved)
-    receipt = policy_receipt('policy.stop_alert', saved, STATE, call=tool)
+    receipt = policy_receipt('policy_stop_alert', saved, STATE, call=tool)
     try:
         if (receipt['mode'] != 'service_stop_alert_capture'
                 or receipt['request_id'] != saved['pending']['request_id']
@@ -133,8 +135,11 @@ def main() -> int:
         return 2
     try:
         output, error, status = check()
-    except (ToolsError, OSError, ValueError):
-        print('止损预警：检查未完成；请核对工具服务、政策、凭据和本地待查请求，原通知状态未确认推进。', file=sys.stderr)
+    except ToolsError as exc:
+        sys.stderr.write(f'止损预警：检查未完成。{exc}\n')
+        return 1
+    except (OSError, ValueError):
+        sys.stderr.write('止损预警：检查未完成，请核对本地待查记录。\n')
         return 1
     if output:
         print(output, end='')

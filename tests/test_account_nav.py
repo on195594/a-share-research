@@ -103,14 +103,14 @@ def collect_nav(book, bind_account, monkeypatch):
     monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', fetch)
     def collect(connection=book['conn'], **changes):
         ctx = Context(connection, book['path'], book['principal'], account_shadow_enabled=True)
-        return invoke(ctx, 'account.nav.evaluate', {'request': args | changes})['data']
+        return invoke(ctx, 'account_nav_evaluate', {'request': args | changes})['data']
 
     return collect, calls
 
 
 def test_collected_index_is_referenced_replayed_and_reused(book, collect_nav):
     collect, calls = collect_nav
-    tool = TOOLS['account.nav.evaluate']
+    tool = TOOLS['account_nav_evaluate']
     assert tool.collects and tool.access == 'write'
     uploaded = evaluate(book)
     first = collect()
@@ -403,20 +403,20 @@ def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account
     bind_account(book['conn'], 'a')
     ctx = Context(book['conn'], book['path'], book['principal'], account_shadow_enabled=True)
     names = {t['name'] for t in discover(book['principal'], account_shadow_enabled=True)}
-    assert {'account.nav.capture', 'account.nav.evaluate', 'account.nav.replay'} <= names
-    captured = invoke(ctx, 'account.nav.capture', {'account_id': 'a'})['data']
+    assert {'account_nav_capture', 'account_nav_evaluate', 'account_nav_replay'} <= names
+    captured = invoke(ctx, 'account_nav_capture', {'account_id': 'a'})['data']
     assert captured == capture(book)
-    result = invoke(ctx, 'account.nav.evaluate', {'account_id': 'a', 'request': request(book).model_dump(mode='json')})['data']
-    assert invoke(ctx, 'account.nav.replay', {'account_id': 'a', 'artifact_sha256': result['artifact_sha256']})['data']['calculation'] == result['calculation']
+    result = invoke(ctx, 'account_nav_evaluate', {'account_id': 'a', 'request': request(book).model_dump(mode='json')})['data']
+    assert invoke(ctx, 'account_nav_replay', {'account_id': 'a', 'artifact_sha256': result['artifact_sha256']})['data']['calculation'] == result['calculation']
     for role in ('research', 'owner'):
         other = api_keys.authenticate(book['conn'], api_keys.create(book['conn'], role, role=role))
-        assert not any(t['name'].startswith('account.nav.') for t in discover(other, account_shadow_enabled=True))
+        assert not any(t['name'].startswith('account_nav_') for t in discover(other, account_shadow_enabled=True))
         with pytest.raises(ToolError) as error:
-            invoke(Context(book['conn'], book['path'], other, account_shadow_enabled=True), 'account.nav.capture', {'account_id': 'a'})
+            invoke(Context(book['conn'], book['path'], other, account_shadow_enabled=True), 'account_nav_capture', {'account_id': 'a'})
         assert error.value.status == 403
     api_keys.revoke(book['conn'], book['principal'].key_id)
     with pytest.raises(ToolError) as error:
-        invoke(ctx, 'account.nav.capture', {'account_id': 'a'})
+        invoke(ctx, 'account_nav_capture', {'account_id': 'a'})
     assert error.value.status == 403
 
 
@@ -426,19 +426,19 @@ def test_http_discovery_capture_evaluate_replay_and_missing_material(book, bind_
     headers = {'Authorization': 'Bearer ' + token}
     value = request(book).model_dump(mode='json')
     with TestClient(create_app(book['path'], account_shadow_enabled=True)) as client:
-        captured = client.post('/tools/account.nav.capture', headers=headers, json={'account_id': 'a'})
+        captured = client.post('/tools/account_nav_capture', headers=headers, json={'account_id': 'a'})
         assert captured.status_code == 200
-        response = client.post('/tools/account.nav.evaluate', headers=headers,
+        response = client.post('/tools/account_nav_evaluate', headers=headers,
             json={'account_id': 'a', 'request': value})
         assert response.status_code == 200, response.text
         result = response.json()['result']['data']
-        response = client.post('/tools/account.nav.replay', headers=headers,
+        response = client.post('/tools/account_nav_replay', headers=headers,
             json={'account_id': 'a', 'artifact_sha256': result['artifact_sha256']})
         assert response.status_code == 200
         assert response.json()['result']['data']['calculation'] == result['calculation']
         value['coverage']['complete_external_flows'] = False
-        response = client.post('/tools/account.nav.evaluate', headers=headers,
+        response = client.post('/tools/account_nav_evaluate', headers=headers,
             json={'account_id': 'a', 'request': value})
         assert response.status_code == 422
     with TestClient(create_app(book['path'])) as client:
-        assert client.post('/tools/account.nav.capture', headers=headers, json={'account_id': 'a'}).status_code == 404
+        assert client.post('/tools/account_nav_capture', headers=headers, json={'account_id': 'a'}).status_code == 404

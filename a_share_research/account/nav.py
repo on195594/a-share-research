@@ -301,7 +301,7 @@ def evaluate(conn, principal, account_id: str, request: Request, directory: Path
         account_inputs = _account_inputs(captured['source'], request, directory)
         if collected:
             if collect_index is None:
-                raise ValueError('请通过 account.nav.evaluate 采集指数，或提供 benchmark_evidence_hash')
+                raise ValueError('请通过 account_nav_evaluate 采集指数，或提供 benchmark_evidence_hash')
             start, end, _ = account_inputs
             response = collect_index(start.as_of.date().isoformat(), end.as_of.date().isoformat())
         with db.transaction(conn):

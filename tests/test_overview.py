@@ -22,7 +22,7 @@ def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(configured)
     cycle_analysis.update(conn, principal, 'a', 'legacy:1', request(book, [rewrite(retire_l3_ids=[])]), directory)
     receipt = save_monitor(configured)
     ctx = Context(conn, path, principal, account_shadow_enabled=True)
-    old = invoke(ctx, 'account.portfolio_overview', {})['data']['holdings'][0]
+    old = invoke(ctx, 'account_portfolio_overview', {})['data']['holdings'][0]
     assert old['research'] is None
     assert old['position']['theses'][0]['l1'] == rewrite()['l1']
     assert old['policy']['id'] == receipt['id']
@@ -43,7 +43,7 @@ def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(configured)
     conn.execute('PRAGMA query_only=ON')
     portfolio = overview.portfolio_overview(conn)
     holding, = portfolio['holdings']
-    current = invoke(ctx, 'research.company_overview', {'code': old['code']})['data']
+    current = invoke(ctx, 'research_company_overview', {'code': old['code']})['data']
     assert holding['position'] == current['position']
     assert holding['position']['cycle_id'] == cycle_id
     assert holding['position']['theses'] == [] and holding['policy'] is None

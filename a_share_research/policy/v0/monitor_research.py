@@ -32,7 +32,10 @@ def fetch_cards(*, skip: bool = False) -> dict:
         }
     except ValueError as exc:
         return {"status": "unavailable", "reason": str(exc)[:700]}
-    return {"status": "ok", "cards": payload["cards"], "missing": payload["missing"]}
+    result = {"status": "ok", "cards": payload["cards"], "missing": payload["missing"]}
+    if payload.get("holdings_available") is False:
+        result["reason"] = "未能核实持仓范围，本次仅读取订阅与冻结 L5 的论点卡"
+    return result
 
 
 def _row(code: str, card: dict | None) -> dict:
@@ -195,8 +198,6 @@ def summarize(
         "missing": [item["code"] for item in missing],
         "opportunity_costs": [],
     }
-    if result.get("reason"):
-        research["reason"] = result["reason"]
     prompts, escalations = [], []
     if result["status"] == "unavailable":
         prompts.append(
@@ -207,7 +208,7 @@ def summarize(
                 "evidence": {},
             }
         )
-    mismatches = []
+    mismatches = [result["reason"]] if result.get("reason") else []
     blocked = [
         c["code"]
         for c in research["candidates"]

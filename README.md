@@ -2,7 +2,7 @@
 
 收盘后的 A 股个股研究助手：输入一家公司和可选问题，AI 自主补读定期报告和临时公告、查询财务与程序计算，通常几分钟后读到带原文出处的研究报告（结论、最强反证、业务、财务），并可按需查看程序计算的价格参考。
 
-本项目生产有出处的公司判断并为判断记分，数据与确定性计算归 `core/`，账户事实归 `account/`，配置与持仓规则归 `policy/`；宿主通过统一 `a-share` Skill 和受控工具访问同一服务，旧账户库只读保留。定时与通知由 Hermes 承担。网页与研究 API 共用任务、原文、计算和追问/纠错；不直接修改账户或投资政策。
+本项目生产有出处的公司判断并为判断记分，数据与确定性计算归 `core/`，账户事实归 `account/`，配置与持仓规则归 `policy/`；宿主通过统一 `a-share` Skill 和受控工具访问同一服务，旧账户库只读保留。人通过 Web 使用服务，外部 Agent、宿主和脚本通过 MCP 接入。两种入口共用研究任务、证据与账户账本，工具按授权开放研究、记账与政策评估。Hermes 负责调度与通知，真实交易和政策切换由所有者决定。
 
 - 产品目标与使用流程：[PRODUCT.md](PRODUCT.md)；领域设计与研究方案：[产品方案](docs/proposal.md)；开发约束：[AGENTS.md](AGENTS.md)。
 - 现行能力与状态归属：[系统架构](ARCHITECTURE.md)；三仓合一的设计决定：[合一方案](docs/consolidation.md)。
@@ -21,7 +21,7 @@
 | `tests/`、`tests/data/`、`tests/support/` | 回归测试、真实采集样本、公共测试支撑；组织与验证范围见 [测试说明](tests/README.md)，样本随代码保留 |
 | `docs/` | 领域方案、路线图、实施与部署状态；产品目标见根目录 `PRODUCT.md`，视觉规范见 `DESIGN.md` |
 | `data/` | 本地运行数据库、PDF 与提取缓存（不进 Git）；生产数据另由 `DATA_DIR` 指定 |
-| `Dockerfile`、`compose.yaml`、`ops/hermes/` | Web / worker 构建部署；Hermes 定时脚本源与安装工具 |
+| `Dockerfile`、`compose.yaml`、`ops/hermes/` | Web / worker / tools 构建部署；Hermes 定时脚本源与安装工具 |
 
 `.pytest_cache/`、`.ruff_cache/` 和应用、测试目录下的 `__pycache__/` 是可重建缓存；`.playwright-mcp/` 是临时浏览器产物，正式验收证据归档后可清理。`data/`、`.env*`、真实测试样本和仓库外评估证据保留。
 
@@ -79,21 +79,30 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 页面只读，不创建 API Key、不触发采集或研究；政策变更仍由所有者的本地入口完成。Bearer Key 不能代替网页所有者会话。功能发布状态见[实施计划](docs/implementation-plan.md)。
 
-## Agent 研究 API
+## Web 与 MCP 接入
 
-Hermes 脚本等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
+Web 面向所有者。登录后打开 `/connections`，复制 MCP 地址、登记网页客户端的 OAuth 回调地址，查看或撤销有效的 assistant 授权。已登记的客户端连接 `https://stock.keyi.win/mcp` 时，由所有者登录并同意授权。
+
+五个本机宿主使用原生 HTTP MCP。CLI 与 Hermes 定时脚本使用独立的 `assistant` PAT。在能访问目标实例数据目录的宿主签发、查看或撤销 PAT，签发时只显示一次明文。
 
 ```bash
-DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create hermes-advisor
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create CLIENT --role assistant
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
-DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编号>
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke 授权编号
 ```
 
-`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_SHARE_RESEARCH_URL` 指向服务，`A_SHARE_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存令牌哈希，`list` 显示编号、名称、创建时间和角色。所有者在本地管理 Key。上例默认创建 `research` 凭据，可调用研究 API 和只读研究工具。其他角色的权限见[工具手册](a_share_research/tools/README.md)。
+`ashare` 是远程 MCP 客户端，默认读取 `~/.config/ashare/client.json`，也可用 `--config` 指定包含 `url` 和 `token` 的私有 JSON 文件。
 
-轮换：创建新 Key → 更新配置并验证读取 → 按编号撤销旧 Key。同名 Key 可并存；环境变量优先于文件，须排除旧值覆盖。Key 不受服务重启或浏览器登录/退出影响。401 后先修复凭据，再沿用原 `request_id` 重试。
+```bash
+ashare tools
+ashare call research_card --json '{"code":"600519"}'
+```
 
-临时验收仍可用 `python -m a_share_research.login_token --agent --minutes 60`（1–480 分钟，不续期）。两种凭据均通过 `Authorization: Bearer ...` 发送，与浏览器 cookie 隔离；`POST /api/session/revoke` 仅撤销当前凭据。API 无需模型或行情凭据。
+退出码 0 表示取得工具结果，写入状态见业务回执。20 表示生效政策已变化，21 表示暂未受理，22 表示结果未知。配置、安装与失败恢复见[客户端手册](ops/clients/README.md#cli-与本机-cron)，业务合同见[工具手册](a_share_research/tools/README.md)，定时任务见 [Hermes 手册](ops/hermes/README.md)。
+
+### 旧 Agent 研究 API
+
+Web `/api` 的 Agent JSON 与 `/tools` 业务 REST 暂作热备，退役条件见[双入口方案](docs/web-mcp-platform.md#5-实施分段)。旧 Agent API 继续接受有效的 research / assistant PAT 与 `python -m a_share_research.login_token --agent --minutes 60` 签发的临时令牌（1–480 分钟）。凭据通过 `Authorization: Bearer ...` 发送。`POST /api/session/revoke` 撤销当前凭据。
 
 请求使用 `Content-Type: application/json`；可带 `X-Research-Version: research-v1`，未知版本返回 400。
 
@@ -106,14 +115,14 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编
 | `GET /api/schema` | 正文 JSON Schema、判断契约版本与各视图字段清单（Bearer 鉴权） |
 | `GET /api/reports?code=600519` | 最近 100 份报告的身份、时间、状态 |
 | `GET /api/companies/{code}/card` | 最新通过复核的非纠错论点卡，含逐条目最新生效版本的披露判定 `checks`；`current.valuation` 按最新收盘日滚动测算 |
-| `GET /api/cards` | `research-v1` 信封：`cards` 为扫描范围（订阅＋最近冻结批次 L5）的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |
+| `GET /api/cards` | `research-v1` 信封：`cards` 为外部订阅与最近冻结批次 L5 的卡片列表，每张含 `origin`（`external`/`l5`）；无卡代码列入 `missing: [{code, origin}]` |
 | `GET /api/search?q=集采&code=&section=&history=&page=` | 跨公司内容检索：空白分隔最多 5 个词（AND、字面匹配），默认只查每家公司最新一份通过复核的非纠错报告，`history=true` 查全部；章节 `risks/checkpoints/answer/business/financial/stance/prior_status`；返回 `items`（`report_id`、`code`、`name`、`created_at`、`period`、`location`、`text`）、`page`、`more`，每页 20 条。结果是待核查线索，不含结论词和事后表现 |
 | `GET /api/reports/{report_id}` | `research-v1` 信封、核验结果、回答、来源页、表格及计算输入；GET 不刷新数据 |
 | `GET /api/reports/{report_id}?compact=true` | 精简正文与来源目录（不含整页原文）、失败 `diagnostics`、`budget`、`continuation`；完整读取保持原合同。通过报告可带 `open_questions: [{id, where, problem}]`：复核认定用户问题尚未答完的部分（同时追加到 `gaps`），不能当作已回答 |
 | `POST /api/research`（追问） | 上述输入加 `parent_report_id`，必须同公司，创建关联新任务 |
 | `POST /api/reports/{id}/feedback` | `{"request_id":"新编号","location":"financial[0]","text":"具体问题与依据"}` → 核查任务 |
 
-request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移；实际部署状态见[实施记录](docs/implementation-plan.md#当前部署)。正文顶层字段、compact / card / failed 各视图的字段清单与判断契约版本以 `GET /api/schema` 为准（定义在 `a_share_research/report.py`）。
+request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 schema 迁移。正文顶层字段、compact / card / failed 各视图的字段清单与判断契约版本以 `GET /api/schema` 为准（定义在 `a_share_research/report.py`）。
 单家与批量卡片共用数据库读取路径，沿用 Bearer 鉴权，不联网取数、不触发研究。订阅与 L5 重叠时 `origin` 为 `external`。
 卡片 `current` 包含 `last_close`、`last_close_date`、`current_zone` 与 `valuation`。其中 `valuation` 按收盘日和收盘价重算，返回 `annual_returns`（保守/中性/乐观，比例值）、`support_below`、`stretched_above`、`inverted`、`zone`、`horizon`（年）、`as_of`、`close`；`current_zone` 与其 `zone` 相同。无收盘价时 `valuation` 为 null；未定价、缺字段、测算错误或收盘日到达/超过退出日时，`valuation` 仍是对象，其中各测算字段为 null 并给出 `reason`；区间倒挂时 `zone` 为 null。报告级 `valuation_calc` 保留原报告口径；带情景概率的报告另有 `valuation_calc.v2`（`rule`、`probabilities`、`annual_return`、`zone`、`support_below`），滚动后的 `current.valuation.v2` 另含 `support_below`/`stretched_above`，旧报告为 null。卡片另带 `stance`（`action` 为 现在分批/等价格/等证据/回避，及理由、出处，等证据另有 `trigger`）与程序冻结的 `stance_calc`（等价格的 `price`、`valid_until`；等证据的 `trigger`），旧报告两者为 null。
 卡片还投影 `open_questions: [{id, where, problem}]`（无记录时为 `[]`，不代表用户全部要求均已完成）。冻结 `valuation_calc` 保留 `close`、`as_of`、`v2.support_below` 和 `boundary`；`current.valuation.boundary` 按滚动后的价格与门槛另行判定。两处 `boundary` 均复用同一 ±5% 规则，值为 true/false/null，null 表示无法定价或缺少依据。它们只在读取时派生，不修改原报告或冻结立场；false 也不代表已证明稳定。旧服务或旧快照缺字段不能当成无风险。边界与未答问题不改变通过状态或自动触发研究。
@@ -126,22 +135,16 @@ request/budget/compact 均沿用研究 API 鉴权，只执行读取，不做 sch
 
 材料与计算可在 `evidence` 中定位；`coverage.periods` 只列本公司财报期间，行情日期另见 `market_date`，`coverage.missing` 包含取证与报告声明的缺口。旧报告缺少的身份不回填。仅覆盖实际读取的披露和已取财务数据；`coverage.announcement_searches` 列出公告标题检索的关键词、日期范围及截断状态，不等于读完全部公告。临时公告沿用 PDF 页码、原文与内容哈希，公告日不冒充财报期间。
 
-统一 `a-share` Skill 与受控客户端通过 `ashare` / MCP 接入本 API 与工具服务，先复用旧报告，再按缺口发起追问；配置与使用见[客户端安装说明](ops/clients/README.md)与[工具目录](a_share_research/tools/README.md)，开关状态见[当前部署](docs/implementation-plan.md#当前部署)。
-
 纠错报告的 `methods` 是已核查的方法线索；`evidence.methods_used` 记录检索召回，不证明实际采用或收益贡献。针对 `methods[i]` 的成功核查可替换该检索项，空列表可撤下；失败不生效、原报告不改写。当前公司事实仍须重新取证，方法不会自动修改 Skill、代码、账户或政策；详见[反馈闭环](docs/roadmap.md#4-反馈如何转化为能力)。
-
-### 外部 Agent 受控取证与提交（2026-11-18 退役）
-
-`external.*` 工具、外部复核与 `external_scoring` 自上线起开关一直为 0、生产无一行数据，已按[实施计划里程碑](docs/implementation-plan.md#固定里程碑)整条删除。迁移 v12/v13/v22 建的五张 `external_*` 空表保留，使库结构版本不变、回退镜像仍可读；没有任何代码写入。外部 Agent 继续经只读研究工具和追问入口使用本系统。
 
 ## 账户净值工具
 
-在启用账户工具的实例，以 assistant 凭据通过现有 `ashare` / HTTP / MCP 调用，参数结构以 `GET /tools` 返回的 schema 为准。以下示例使用唯一绑定的账本；也可显式传入与绑定一致的 account_id。计算口径和边界见[合一方案的量尺](docs/consolidation.md#4-现有代码与知识的去向)，上线状态见[实施计划](docs/implementation-plan.md)。
+在启用账户工具的实例，以 assistant 授权通过 MCP 或 `ashare` 调用，参数结构以工具发现返回的 schema 为准。以下示例使用唯一绑定的账本；也可显式传入与绑定一致的 account_id。计算口径和边界见[合一方案的量尺](docs/consolidation.md#4-现有代码与知识的去向)，上线状态见[实施计划](docs/implementation-plan.md)。
 
-1. `account.nav.capture({})`：读取一致快照，返回 `source` 和 `state_sha256`。从中选起止资产观察/已入账快照及每笔有效出入金的流前观察；`kind` 为 `observation` 或 `batch`，每个引用包含 `id` 与选择理由 `reason`。
-2. 通过 `account.evidence` 保存完整资金流水原件。如已有指数响应，也可保存指数 JSON 并取得其哈希。格式为 `{schema_version:1, code:"H00906.CSI", currency:"CNY", return_type:"total_return", source:"tushare.index_daily", fetched_at:"含时区的实际采集时间", source_as_of:"YYYY-MM-DD", status:"ok", rows:[{date:"YYYY-MM-DD",close:"实际收盘值"},...]}`；保留原响应金额与时点，失败响应不能标记成 ok。
-3. `account.nav.evaluate({request})`：`request` 包含 `expected_state_sha256`、`start/end` 估值引用、`flows:[{event_id,before:估值引用}]` 和 `coverage`。省略 `request.benchmark_evidence_hash` 时，服务端采集并保存 `H00906.CSI` 收盘证据。传入该字段时使用指定证据。两端估值均须为上海时间 15:00:00，指数响应须含两日收盘值。`coverage` 明确 `start/end` 时点、`currency:"CNY"`、`scope:"cash_equity_no_liabilities"`、`complete_external_flows:true`、`no_security_transfers:true`、`evidence_hashes` 与 `explanation`。这些声明必须由原件支持；没有出入金记录不能自动填 true。首次计算时账本资料已变化返回 409，缺项或口径不符返回 422。
-4. 保存返回的 `artifact_sha256`。相同输入重试得到相同哈希；`account.nav.replay({artifact_sha256})` 重放原输入并核对原结果，即使后来发生更正也不改写历史。结果保存在 `account-evidence/`，随正式备份包保留；工具不修改账户、政策或旧双基准报告，不发送通知。重放只读取已保存的证据。
+1. `account_nav_capture({})`：读取一致快照，返回 `source` 和 `state_sha256`。从中选起止资产观察/已入账快照及每笔有效出入金的流前观察；`kind` 为 `observation` 或 `batch`，每个引用包含 `id` 与选择理由 `reason`。
+2. 通过 `account_evidence` 保存完整资金流水原件。如已有指数响应，也可保存指数 JSON 并取得其哈希。格式为 `{schema_version:1, code:"H00906.CSI", currency:"CNY", return_type:"total_return", source:"tushare.index_daily", fetched_at:"含时区的实际采集时间", source_as_of:"YYYY-MM-DD", status:"ok", rows:[{date:"YYYY-MM-DD",close:"实际收盘值"},...]}`；保留原响应金额与时点，失败响应不能标记成 ok。
+3. `account_nav_evaluate({request})`：`request` 包含 `expected_state_sha256`、`start/end` 估值引用、`flows:[{event_id,before:估值引用}]` 和 `coverage`。省略 `request.benchmark_evidence_hash` 时，服务端采集并保存 `H00906.CSI` 收盘证据。传入该字段时使用指定证据。两端估值均须为上海时间 15:00:00，指数响应须含两日收盘值。`coverage` 明确 `start/end` 时点、`currency:"CNY"`、`scope:"cash_equity_no_liabilities"`、`complete_external_flows:true`、`no_security_transfers:true`、`evidence_hashes` 与 `explanation`。这些声明必须由原件支持；没有出入金记录不能自动填 true。首次计算时账本资料已变化返回 409，缺项或口径不符返回 422。
+4. 保存返回的 `artifact_sha256`。相同输入重试得到相同哈希；`account_nav_replay({artifact_sha256})` 重放原输入并核对原结果，即使后来发生更正也不改写历史。结果保存在 `account-evidence/`，凭证引用记录在 `account_nav_refs`，随正式备份包保留；工具不修改账户、政策或旧双基准报告，不发送通知。重放只读取已保存的证据。
 
 `account_return` 与 `benchmark_return` 为小数收益率，`excess_percentage_points` 为百分点；所有计算金额和比率用十进制字符串返回，`flows` 留存逐笔份额变化。完整性是带凭证的调用者声明，重放不是券商/供应商认证，也不是当前账户状态或完整历史验收。请保留回执哈希以便检索，当前不提供净值历史列表或自动日报。
 
@@ -191,7 +194,7 @@ uv run python -m a_share_research.backup restore /absolute/private/new-backup /a
 
 新批次冻结时为 Q20/S10 逐家保存近 90 日卖方覆盖机构数及缓存实际覆盖的交易日数；只读已缓存的按日全市场 `report_rc`，不补查缺失日，页面明确显示无缓存、截断及其他缺口，零机构不能解读为完整覆盖下无人跟踪。SQ3/SL3 与大组同日入场、同费率及期限，另加中证 1000 全收益（`H00852.CSI`）辅助基准，S10 不单独生成模拟组合；旧批次继续原规则与原展示。SL3 先只作模拟，不进入披露扫描或账户换仓候选。
 
-月度自动发起（启用状态与时间/额度记录见[实施计划](docs/implementation-plan.md)）：Bearer API Key 可调用 `POST /api/batches/monthly`（`{"month":"2026-12"}`）入队当月批次，`GET /api/batches/monthly/2026-12` 只读查询当月首批状态。服务端仅接受上海当前自然月自动发起，旧月拒绝；同月已有任意状态批次（含失败）均不另建，网页手动重开不受此限；已入队但跨月仍未开始初筛的自动批次直接失败停止，不使用后来数据补跑。
+月度自动发起通过 `research_batch_monthly_request` 入队，`research_batch_monthly_status` 查询指定月份的首批状态，均传入 `month`（YYYY-MM）。服务端仅接受上海当前自然月自动发起，旧月拒绝；同月已有任意状态批次（含失败）均不另建，网页手动重开不受此限；已入队但跨月仍未开始初筛的自动批次直接失败停止，不使用后来数据补跑。
 
 **额度口径**：自动月批每月最多一批，7 天内已通过报告直接复用，不因研究或比较中断自动重跑付费阶段；按批次关联使用独立的单研究上限，数值与依据见 `a_share_research/limits.py`；取证为写作与复核预留调用，剩余额度不足时不启动新一轮修复（成文、可能的拒绝工具轮及最多两次复核），未解决问题照实保留。核算复用关联研究的 `calls` 与大组比较、小组比较、排序的 `attempts`，单列缺失 usage；usage 中的费用估算不是实际账单。这是应用层调用次数上限，不是美元硬上限或供应商底层请求数上限。
 
@@ -232,9 +235,10 @@ V1 可加 `--html review.html` 导出可直接打开的手机友好静态快照�
 
 - **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%；另有影子规则 `valuation-v2` 按情景概率加权给出期望年化与门槛价，A3 并行记分）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，共享 61 秒间隔与默认每日 8 次预算，按覆盖情况标 `partial` / `unavailable`）。
 - **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
-- **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
-- **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码。Hermes 每次新扫描前将已核实的持仓同步为外部订阅。worker 扫描时从共享库合并订阅、已核实持仓、冻结 L5 和有论点卡的公司，每个代码保留全部来源。`/api/cards` 沿用外部订阅与最近冻结 L5。`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回已保存的完整扫描范围（含 `holding` 来源）、事件、失败与 `notify`。`GET /api/scans/weekly` 的 `scan_scope` 仅按订阅、冻结 L5 与论点卡列举。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
-- **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 客户端的待查状态与整轮预算见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。
+- **论点卡**由 `research_card` 读取最新通过复核的非纠错研究，有新披露且复核未通过时暂停解读区间。
+- **订阅与扫描**经 MCP 维护关注、提交扫描和读取回执。扫描范围与来源见[系统架构](ARCHITECTURE.md#数据与兼容)，工具契约见[工具手册](a_share_research/tools/README.md)。
+- **可恢复的扫描提交**使用 `research_scan_request`，响应丢失后用原身份与原 `request_id` 找回扫描。Hermes 的待查记录与整轮预算见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。热备接口仍提供 `PUT /api/scan-requests/{request_id}`，旧 `POST /api/scans` 仅提交扫描。
+
 - **区间条件收益诊断**（只读，不调模型）：
 
 ```bash
@@ -247,8 +251,10 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 Web、worker 与 tools 共用 SQLite 数据目录（默认 `/home/lin/a-share-research-data`，可由 `DATA_DIR` 指定）。三个服务都将 `METHOD_CARDS_SOURCE`（默认 `/home/lin/wiki/concepts/company-analysis`）只读挂载到 `METHOD_CARDS_DIR=/method-cards`。
 
-- web 的宿主端口绑定 `127.0.0.1:8620`，经 `nginx-network` 对外。可在 `.env.web`（0600）中设置 `ASHARE_TOOLS_URL=http://a-share-research-tools:8621` 与 `ASHARE_TOOLS_TOKEN`，后者存放 Web 专属的 `assistant` grant 令牌。两项均可留空，本段只接入配置。
-- tools 复用 worker 镜像，通过 `nginx-network` 与 web 互通，保留宿主 `127.0.0.1:8621` 供本机客户端与发布就绪检查。首次纳入发布使用 `--with-tools --allow-config` 启用 Compose 的 `tools` profile，此后已有容器自动纳入发布。独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据，CPU 限制为 0.4，无 Pi 挂载。
+- web 的宿主端口绑定 `127.0.0.1:8620`，经 `nginx-network` 对外。可在 `.env.web`（0600）中设置 `ASHARE_TOOLS_URL=http://a-share-research-tools:8621` 与 `ASHARE_TOOLS_TOKEN`，后者存放 Web 专属的 `assistant` grant 令牌。两项同时设置或同时留空。
+- tools 复用 worker 镜像，通过 `nginx-network` 与 web 互通，保留宿主 `127.0.0.1:8621` 供本机客户端直连与发布就绪检查。首次纳入发布使用 `--with-tools --allow-config` 启用 Compose 的 `tools` profile，此后已有容器自动纳入发布。独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据，CPU 限制为 0.4，无 Pi 挂载。
+- 在仓库根目录 `.env` 或发布命令的环境设置 `ASHARE_PUBLIC_MCP_URL=https://stock.keyi.win/mcp`。Compose 将它传入 tools，用于启用 `/mcp`、校验 Host 与 Origin，并限定接受的 OAuth 资源。留空时 tools 不挂载该端点。Web 从 `.env.web` 的 `PUBLIC_BASE_URL` 生成发现文档和资源地址，两者须指向同一个公开 MCP 地址。
+- nginx 通过 `nginx-network` 将 `location = /mcp` 转发到 `http://a-share-research-tools:8621`，保留原路径和公网 Host（含非默认端口），并透传 Authorization。网页与 OAuth 端点及发现文档仍转给 web。路由变更与配置授权见[双入口方案](docs/web-mcp-platform.md#5-实施分段)。
 - worker：`.env`，挂载 `~/.pi`；`PI_RUNTIME` 留空时用 pi 托管安装的 `current-version`；无外部端口，每次推理单独启动 Node。
 
 主模型用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID` 时仅 `review` 阶段改用该模型，`MODEL_REVIEW_REASONING` 缺省继承主模型。当前选择只在[实施计划](docs/implementation-plan.md#当前部署)维护。
@@ -295,10 +301,10 @@ uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目
 uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>"
 ```
 
-只有完整就绪成功后才清理：保留最近 3 份 `backup-pre-*.db` 与同名 `.bundle/`，镜像保留当前与两级回退。暂停只覆盖 tools 受理，独立的 Web/worker 披露扫描照常运行；错过的定时任务不自动补发。
+只有完整就绪成功后才清理：保留最近 3 份 `backup-pre-*.db` 与同名 `.bundle/`，镜像保留当前与两级回退。发布暂停也会暂停经 MCP 受理的 Hermes 扫描与月批，客户端保留待查并等待恢复。已入队的扫描在 worker 内继续。错过的定时任务不自动补发。
 
 ### 服务端与宿主客户端同步顺序
 
-应用发布**不会安装** `ops/hermes/`。顺序：合并并验证 → 发布服务端 → 核对同版本 CLI → 同步 helper 与调用方脚本（`python3 ops/hermes/install.py --check` 只读核对，`--apply` 从已提交版本同步）→ 按原调度观察。新旧版本错配时客户端只保留 pending，不猜错误文案、不清状态。任务与宿主路径见[脚本说明](ops/hermes/README.md)。
+应用发布**不会安装** `ops/hermes/`。顺序：合并并验证 → 发布服务端 → 核对同版本 MCP CLI、确认旧待查请求已完成并配置 Hermes 专属 PAT → 同步 helper 与调用方脚本（`python3 ops/hermes/install.py --check` 只读核对，`--apply` 从已提交版本同步）→ 按原调度观察。新旧版本错配时客户端只保留 pending，不猜错误文案、不清状态。任务与宿主路径见[脚本说明](ops/hermes/README.md)。
 
 页面改动在发布后用真实浏览器验证受影响页面和一个正常案例（沿用私有浏览器会话，公共入口不用 urllib 探测，Cloudflare 曾返回 1010）；例行发布明细由部署工具写入证据目录，仅数据库版本、判断契约、政策激活、模型、配置或宿主任务变化时更新[实施计划](docs/implementation-plan.md#当前部署)。

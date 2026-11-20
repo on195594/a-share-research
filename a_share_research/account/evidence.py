@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import stat
+import unicodedata
 
 MAX_BYTES = 20 * 1024 * 1024
+_SHA = re.compile(r'[0-9a-f]{64}')
 
 
 class EvidenceError(ValueError):
@@ -47,18 +52,21 @@ def _directory(directory: Path, *, create: bool = False) -> int:
 
 
 def _name(sha: str) -> str:
-    if not isinstance(sha, str) or re.fullmatch(r'[0-9a-f]{64}', sha) is None:
+    if not isinstance(sha, str) or _SHA.fullmatch(sha) is None:
         raise EvidenceError('凭证哈希须为64位小写十六进制')
     return sha
+
+
+def _check_file(metadata: os.stat_result) -> None:
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.getuid() or metadata.st_size > MAX_BYTES):
+        raise EvidenceError('凭证文件类型、权限或大小不合规')
 
 
 def _read(fd: int, sha: str) -> bytes:
     handle = os.open(sha, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     with os.fdopen(handle, 'rb') as stream:
-        metadata = os.fstat(stream.fileno())
-        if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
-                or metadata.st_uid != os.getuid() or metadata.st_size > MAX_BYTES):
-            raise EvidenceError('凭证文件类型、权限或大小不合规')
+        _check_file(os.fstat(stream.fileno()))
         content = stream.read(MAX_BYTES + 1)
     if len(content) > MAX_BYTES or hashlib.sha256(content).hexdigest() != sha:
         raise EvidenceError('凭证内容与哈希不符')
@@ -96,6 +104,38 @@ def create_upload_table(conn) -> None:
         conn.execute(f'''CREATE TRIGGER IF NOT EXISTS account_evidence_uploads_no_{operation.lower()}
             BEFORE {operation} ON account_evidence_uploads
             BEGIN SELECT RAISE(ABORT,'evidence uploads are append-only'); END''')
+
+
+def record_upload(conn: sqlite3.Connection, sha: str, key_id: int,
+                  filename: str | None = None, label: str | None = None) -> None:
+    """Append an upload after its content has been stored."""
+    if filename is not None:
+        filename = ''.join(c for c in ntpath.basename(filename) if unicodedata.category(c) != 'Cc') or None
+    conn.execute('''INSERT INTO account_evidence_uploads (sha256, uploaded_at, key_id, filename, label)
+                    VALUES (?, ?, ?, ?, ?)''',
+                 (sha, datetime.now(UTC).isoformat(timespec='microseconds'), key_id, filename, label))
+
+
+def recent_uploads(conn: sqlite3.Connection, directory: Path, limit: int) -> list[dict]:
+    rows = conn.execute('''SELECT sha256, uploaded_at, filename, label FROM (
+        SELECT *, row_number() OVER (PARTITION BY sha256 ORDER BY uploaded_at DESC, id DESC) AS rank
+        FROM account_evidence_uploads
+    ) WHERE rank=1 ORDER BY uploaded_at DESC, id DESC LIMIT ?''', (limit,)).fetchall()
+    if not rows:
+        return []
+    items = []
+    try:
+        fd = _directory(directory)
+        try:
+            for row in rows:
+                metadata = os.stat(_name(row['sha256']), dir_fd=fd, follow_symlinks=False)
+                _check_file(metadata)
+                items.append(dict(row) | {'size_bytes': metadata.st_size})
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise EvidenceError('凭证缺失或路径不可安全访问') from exc
+    return items
 
 
 def store(directory: Path, content: bytes) -> str:

@@ -48,7 +48,7 @@ body {
 .shell-nav a[aria-current="page"] { font-weight: 650; text-decoration: underline; }
 @media (max-width: 540px) {
   .shell { flex-wrap: wrap; }
-  .shell-nav { order: 3; flex-basis: 100%; margin: 0; gap: 20px; }
+  .shell-nav { order: 3; flex-basis: 100%; flex-wrap: wrap; margin: 0; gap: 0 16px; }
 }
 
 .policy-section { margin-top: 28px; }
@@ -63,6 +63,9 @@ body {
 .policy-facts + .small { margin-top: 12px; }
 .policy-identities dd { font-size: 14px; }
 .policy-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
+.oauth-consent h1 { overflow-wrap: anywhere; margin-bottom: 16px; }
+.connections-list > li { display: flex; flex-wrap: wrap; gap: 0 16px; align-items: start; justify-content: space-between; }
+.connections-list > li > div { flex: 1 1 190px; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 540px) {
   .policy-facts > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }

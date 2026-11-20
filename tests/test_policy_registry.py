@@ -103,14 +103,14 @@ def test_no_remote_activation_and_read_tools_require_explicit_shadow_enable(setu
             headers={'Authorization':'Bearer '+tokens[role]}
             listed=client.get('/tools',headers=headers).json()['tools']
             names={t['name'] for t in listed}
-            assert 'policy.activate' not in names and 'policy.register' not in names
-            response=client.post('/tools/policy.current',headers=headers,json={})
+            assert 'policy_activate' not in names and 'policy_register' not in names
+            response=client.post('/tools/policy_current',headers=headers,json={})
             assert response.status_code==(403 if role=='research' else 200)
             if role!='research':
                 assert response.json()['result']['data']['installed'] is True
-            assert client.post('/tools/policy.activate',headers=headers,json={}).status_code==404
+            assert client.post('/tools/policy_activate',headers=headers,json={}).status_code==404
     with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy.current',headers={'Authorization':'Bearer '+tokens['owner']},json={}).status_code==404
+        assert client.post('/tools/policy_current',headers={'Authorization':'Bearer '+tokens['owner']},json={}).status_code==404
 
 
 def test_migration_preserves_legacy_pointer_and_is_reentrant(tmp_path):

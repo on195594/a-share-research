@@ -11,6 +11,13 @@ from a_share_research import db
 
 TokenKind = Literal["access", "refresh"]
 
+# Scope every credential operation to its live grant and registered client in the same statement.
+_ACTIVE_GRANTS = """
+    SELECT g.id, c.client_id, c.redirect_uris FROM api_keys g
+    JOIN oauth_clients c ON c.client_id=g.client
+    WHERE g.kind='oauth' AND g.revoked_at IS NULL AND c.revoked_at IS NULL
+"""
+
 
 def create_tables(conn: sqlite3.Connection) -> None:
     conn.execute("""CREATE TABLE IF NOT EXISTS oauth_clients (
@@ -44,6 +51,23 @@ def get_client(conn: sqlite3.Connection, client_id: str) -> dict | None:
     return dict(client_id=client_id, name=row[0], redirect_uris=json.loads(row[1]))
 
 
+def clients(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("""SELECT client_id,name,redirect_uris FROM oauth_clients
+                           WHERE revoked_at IS NULL ORDER BY created_at DESC,client_id""")
+    return [dict(client_id=row[0], name=row[1], redirect_uris=json.loads(row[2])) for row in rows]
+
+
+def client_grant(conn: sqlite3.Connection, client_id: str) -> int | None:
+    row = conn.execute(f"SELECT id FROM ({_ACTIVE_GRANTS}) WHERE client_id=? ORDER BY id LIMIT 1", (client_id,)).fetchone()
+    return row[0] if row else None
+
+
+def mcp_grants(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(f"""
+        SELECT id,kind,client,name,created_at FROM api_keys WHERE role='assistant' AND revoked_at IS NULL
+        AND (kind='pat' OR id IN (SELECT id FROM ({_ACTIVE_GRANTS}))) ORDER BY id DESC""").fetchall()
+
+
 def create_grant(conn: sqlite3.Connection, client_id: str) -> int:
     row = conn.execute("""
         INSERT INTO api_keys(name,created_at,role,kind,client)
@@ -63,12 +87,8 @@ def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
-# Scope every credential operation to its live grant and registered client in the same statement.
-_ACTIVE_GRANTS = """
-    SELECT g.id, c.client_id, c.redirect_uris FROM api_keys g
-    JOIN oauth_clients c ON c.client_id=g.client
-    WHERE g.kind='oauth' AND g.revoked_at IS NULL AND c.revoked_at IS NULL
-"""
+def code_exists(conn: sqlite3.Connection, code: str) -> bool:
+    return conn.execute("SELECT 1 FROM oauth_codes WHERE code_hash=?", (_digest(code),)).fetchone() is not None
 
 
 def save_code(conn: sqlite3.Connection, code: str, *, grant_id: int, client_id: str, redirect_uri: str,
@@ -110,6 +130,14 @@ def token_grant(conn: sqlite3.Connection, token: str, *, kind: TokenKind, resour
         SELECT t.grant_id FROM oauth_tokens t JOIN ({_ACTIVE_GRANTS}) g ON g.id=t.grant_id
         WHERE t.token_hash=? AND t.kind=? AND t.resource=? AND t.revoked_at IS NULL AND t.expires_at>?""",
         (_digest(token), kind, resource, time.time())).fetchone()
+    return row[0] if row else None
+
+
+def consume_refresh(conn: sqlite3.Connection, token: str, *, client_id: str, resource: str) -> int | None:
+    row = conn.execute(f"""
+        UPDATE oauth_tokens SET revoked_at=? WHERE token_hash=? AND kind='refresh' AND resource=?
+        AND revoked_at IS NULL AND expires_at>? AND grant_id IN (SELECT id FROM ({_ACTIVE_GRANTS}) WHERE client_id=?)
+        RETURNING grant_id""", (db.now(), _digest(token), resource, time.time(), client_id)).fetchone()
     return row[0] if row else None
 
 

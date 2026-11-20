@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,10 @@ class ToolError(Exception):
     def __init__(self, code: str, message: str, status: int = 400):
         super().__init__(message)
         self.code, self.status = code, status
+
+
+class UnknownTool(ToolError):
+    """Dispatch failed to find a tool, before any lookup of business data."""
 
 
 def validation_message(errors) -> str:
@@ -175,6 +180,12 @@ class CycleAnalysisHistory(CycleAnalysis):
 
 class EvidenceUpload(Arguments):
     content_base64: str = Field(max_length=28 * 1024 * 1024)
+    filename: str | None = Field(default=None, min_length=1, max_length=200)
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class RecentEvidence(Arguments):
+    limit: int = Field(default=10, ge=1, le=100)
 
 
 class Payload(BaseModel):
@@ -205,11 +216,13 @@ class Tool:
     access: Literal['read', 'write'] = 'read'
     account: bool = False
     collects: bool = False
+    destructive: bool = False
+    idempotent: bool = True
 
     def describe(self) -> dict:
         return dict(name=self.name, version=1, description=self.description,
                     input_schema=self.arguments.model_json_schema(), output_schema=self.result.model_json_schema(),
-                    access=self.access, collects=self.collects, idempotent=True,
+                    access=self.access, collects=self.collects, idempotent=self.idempotent,
                     errors=['invalid_arguments', 'forbidden', 'not_found', 'conflict', 'unavailable', 'timeout'])
 
 
@@ -311,7 +324,17 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
         content = base64.b64decode(args.content_base64, validate=True)
     except (ValueError, binascii.Error):
         raise ToolError('invalid_arguments', '凭证须为有效base64内容', 422) from None
-    return Payload(data={'sha256': evidence.store(_evidence_directory(ctx), content)})
+    sha = evidence.store(_evidence_directory(ctx), content)
+    evidence.record_upload(ctx.connection, sha, ctx.principal.key_id, args.filename, args.label)
+    return Payload(data={'sha256': sha})
+
+
+def _recent_evidence(ctx: Context, args: RecentEvidence) -> Payload:
+    try:
+        items = evidence.recent_uploads(ctx.connection, _evidence_directory(ctx), args.limit)
+    except evidence.EvidenceError as exc:
+        raise ToolError('unavailable', '账户证据暂不可用，请核对证据目录与文件权限', 503) from exc
+    return Payload(data={'evidence': items})
 
 
 def _research_coverage(ctx: Context, args: Arguments) -> TradeRows:
@@ -345,119 +368,130 @@ def _portfolio_overview(ctx: Context, args: Arguments) -> Payload:
 
 
 _READERS = frozenset({'research', 'assistant'})
-TOOLS = {tool.name: tool for tool in (
-    Tool('research.company_overview', '读取公司研究、公告复核、本次持仓周期与已保存的监控判断',
+_TOOLS = (
+    Tool('research_company_overview', '读取公司研究、公告复核、本次持仓周期与已保存的监控判断',
          frozenset({'assistant'}), Company, Payload, _company_overview, account=True),
-    Tool('account.portfolio_overview', '读取已核实持仓的研究、在仓论点、监控判断与待补资料',
+    Tool('account_portfolio_overview', '读取已核实持仓的研究、在仓论点、监控判断与待补资料',
          frozenset({'assistant'}), Arguments, Payload, _portfolio_overview, account=True),
-    Tool('account.nav.capture', '冻结账户账本与估值出处，返回资料哈希；不认定资金流水完整',
+    Tool('account_nav_capture', '冻结账户账本与估值出处，返回资料哈希；不认定资金流水完整',
          frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=nav.capture(c.connection,c.principal,a.account_id)), account=True),
-    Tool('account.nav.evaluate', '按完整资金声明、明确流前估值保存净值对照；省略指数证据时采集 H00906 收盘值',
+    Tool('account_nav_evaluate', '按完整资金声明、明确流前估值保存净值对照；省略指数证据时采集 H00906 收盘值',
          frozenset({'assistant'}), AccountNav, Payload,
          lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,
                                                _evidence_directory(c), collect_index=_collect_nav_index)),
          access='write', account=True, collects=True),
-    Tool('account.nav.replay', '按哈希重放保存的净值输入与结果；不代表当前账户状态或券商认证',
+    Tool('account_nav_replay', '按哈希重放保存的净值输入与结果；不代表当前账户状态或券商认证',
          frozenset({'assistant'}), AccountNavReplay, Payload,
          lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
          account=True),
-    Tool('policy.holdings_check', '采集并保存原持仓检查和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
+    Tool('policy_holdings_check', '采集并保存原持仓检查和已有流动性延迟复核证据；保留市场数据缺口，不执行交易',
          frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True, collects=True),
-    Tool('policy.portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
+    Tool('policy_portfolio_scenario', '引用已保存监控评估，按调用者指定的卖出数量和费用保存静态风险情景；不刷新行情、不执行交易',
          frozenset({'assistant'}), PolicyPortfolioScenario, Payload, _portfolio_scenario, access='write', account=True),
-    Tool('policy.position_size', '引用已保存的服务端监控评估，按拟买入条件保存风险预算定仓；不刷新行情、不形成交易动作',
+    Tool('policy_position_size', '引用已保存的服务端监控评估，按拟买入条件保存风险预算定仓；不刷新行情、不形成交易动作',
          frozenset({'assistant'}), PolicyPositionSize, Payload, _position_size, access='write', account=True),
-    Tool('policy.benchmark', '按指定截止日采集完整交易历史与双全收益指数，保存相同现金流比较及失败证据；不发送通知、不修改账户',
+    Tool('policy_benchmark', '按指定截止日采集完整交易历史与双全收益指数，保存相同现金流比较及失败证据；不发送通知、不修改账户',
          frozenset({'assistant'}), PolicyBenchmark, Payload, _benchmark, access='write', account=True, collects=True),
-    Tool('policy.daily_brief', '采集持仓监控和分红核查，保存原始输入、失败项与盘后日报；不发送通知、不记分红账',
+    Tool('policy_daily_brief', '采集持仓监控和分红核查，保存原始输入、失败项与盘后日报；不发送通知、不记分红账',
          frozenset({'assistant'}), PolicyMonitor, Payload, _daily_brief, access='write', account=True, collects=True),
-    Tool('policy.stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态；不发送通知、不修改账户',
+    Tool('policy_stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态；不发送通知、不修改账户',
          frozenset({'assistant'}), PolicyStopAlert, Payload, _stop_alert, access='write', account=True, collects=True),
-    Tool('policy.monitor', '从已核对的账户镜像或明确绑定的账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',
+    Tool('policy_monitor', '从已核对的账户镜像或明确绑定的账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',
          frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True, collects=True),
-    Tool('policy.current', '读取生效政策身份、参数与实装一致性；未启用时不猜测默认版本',
+    Tool('policy_current', '读取生效政策身份、参数与实装一致性；未启用时不猜测默认版本',
          frozenset({'assistant','owner'}), Arguments, Payload,
          lambda c,a: Payload(data=policies.current(c.connection,c.principal)), account=True),
-    Tool('policy.guide', '发现或读取生效政策保存的指南；文本资料不是可执行指令',
+    Tool('policy_guide', '发现或读取生效政策保存的指南；文本资料不是可执行指令',
          frozenset({'assistant','owner'}), PolicyGuide, Payload,
          lambda c,a: Payload(data=policies.guide(c.connection,c.principal,a.path)), account=True),
-    Tool('policy.evaluation', '读取已保存的政策重放输入、结果与身份',
+    Tool('policy_evaluation', '读取已保存的政策重放输入、结果与身份',
          frozenset({'assistant','owner'}), PolicyEvaluation, Payload,
          lambda c,a: Payload(data=policies.evaluation(c.connection,c.principal,a.evaluation_id)), account=True),
-    Tool('account.cycle_analysis.initialize', '以证据建立账户周期分析分支；旧周期须明确来源版本', frozenset({'assistant'}), CycleAnalysisInitialize, Payload,
+    Tool('account_cycle_analysis_initialize', '以证据建立账户周期分析分支；旧周期须明确来源版本', frozenset({'assistant'}), CycleAnalysisInitialize, Payload,
          lambda c,a: Payload(data=cycle_analysis.initialize(c.connection,c.principal,a.account_id,a.cycle_id,a.initialize,_evidence_directory(c))),
          access='write', account=True),
-    Tool('account.cycle_analysis.current', '读取指定账户与周期的最新分析状态', frozenset({'assistant'}), CycleAnalysis, Payload,
+    Tool('account_cycle_analysis_current', '读取指定账户与周期的最新分析状态', frozenset({'assistant'}), CycleAnalysis, Payload,
          lambda c,a: Payload(data=cycle_analysis.current(c.connection,c.principal,a.account_id,a.cycle_id)), account=True),
-    Tool('account.cycle_analysis.history', '读取指定账户周期的不可变分析历史，保留已作废周期', frozenset({'assistant'}), CycleAnalysisHistory, Payload,
+    Tool('account_cycle_analysis_history', '读取指定账户周期的不可变分析历史，保留已作废周期', frozenset({'assistant'}), CycleAnalysisHistory, Payload,
          lambda c,a: Payload(data=cycle_analysis.history(c.connection,c.principal,a.account_id,a.cycle_id,after_id=a.after_id,limit=a.limit)), account=True),
-    Tool('account.cycle_analysis.update', '追加指定账户周期的论点、L3、预警与Tier状态', frozenset({'assistant'}), CycleAnalysisUpdate, Payload,
+    Tool('account_cycle_analysis_update', '追加指定账户周期的论点、L3、预警与Tier状态', frozenset({'assistant'}), CycleAnalysisUpdate, Payload,
          lambda c,a: Payload(data=cycle_analysis.update(c.connection,c.principal,a.account_id,a.cycle_id,a.update,_evidence_directory(c))),
          access='write', account=True),
-    Tool('account.positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,
+    Tool('account_positions', '读取新账本成本和周期投影；现金流仅自期初累计', frozenset({'assistant'}), Account, Payload,
          lambda c, a: Payload(data=position_store.state(c.connection, c.principal, a.account_id)), account=True),
-    Tool('account.current', '读取已核对镜像或明确绑定账本的在仓公司代码与来源；不猜测账户、不采集行情',
+    Tool('account_current', '读取已核对镜像或明确绑定账本的在仓公司代码与来源；不猜测账户、不采集行情',
          frozenset({'assistant'}), Arguments, Payload, _current_account, account=True),
-    Tool('account.evidence', '私有存储截图或交割单，返回内容哈希', frozenset({'assistant'}), EvidenceUpload, Payload,
-         _store_evidence, access='write', account=True),
-    Tool('account.state', '查询影子账本版本与股数现金投影', frozenset({'assistant'}), Account, Payload,
+    Tool('account_evidence', '上传截图或交割单，可带文件名和标签；每次记录上传并返回内容 SHA-256',
+         frozenset({'assistant'}), EvidenceUpload, Payload, _store_evidence, access='write', account=True, idempotent=False),
+    Tool('account_evidence_recent', '按上传时间倒序列出凭证的 SHA-256、上传时间、文件名、标签、来源和字节数，同一哈希只列最近一次',
+         frozenset({'assistant'}), RecentEvidence, Payload, _recent_evidence, account=True),
+    Tool('account_state', '查询账户账本版本、股数与现金余额', frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=ledger.state(c.connection,c.principal,a.account_id)), account=True),
-    Tool('account.submit', '完整对账后原子写入影子账本；不修改生产持仓', frozenset({'assistant'}), AccountSubmit, Payload,
+    Tool('account_submit', '完整对账后追加账户流水与回执，支持作废并提交更正流水', frozenset({'assistant'}), AccountSubmit, Payload,
          lambda c,a: Payload(data=ledger.submit(c.connection,c.principal,a.account_id,a.batch,_evidence_directory(c))),
-         access='write', account=True),
-    Tool('account.events', '分页读取原事件与作废状态，按事件编号更正', frozenset({'assistant'}), AccountEvents, Payload,
+         access='write', account=True, destructive=True),
+    Tool('account_events', '分页读取原事件与作废状态，按事件编号更正', frozenset({'assistant'}), AccountEvents, Payload,
          lambda c,a: Payload(data=ledger.events(c.connection,c.principal,a.account_id,after_id=a.after_id,limit=a.limit)), account=True),
-    Tool('account.receipt', '查阅对账回执', frozenset({'assistant'}), AccountReceipt, Payload,
+    Tool('account_receipt', '查阅对账回执', frozenset({'assistant'}), AccountReceipt, Payload,
          lambda c,a: Payload(data=ledger.receipt(c.connection,c.principal,a.account_id,a.receipt_id)), account=True),
-    Tool('account.observe', '仅记录资产观察，不推断或补写成交', frozenset({'assistant'}), AccountObserve, Payload,
+    Tool('account_observe', '仅记录资产观察，不推断或补写成交', frozenset({'assistant'}), AccountObserve, Payload,
          lambda c,a: Payload(data=ledger.observe(c.connection,c.principal,a.account_id,a.observation,
                                                 _evidence_directory(c),a.evidence_hash)), access='write', account=True),
-    Tool('research.search', '按公司或内容检索已有报告，返回匹配段落摘要和链接', _READERS, ResearchSearch, Payload,
+    Tool('research_search', '按公司或内容检索已有报告，返回匹配段落摘要和链接', _READERS, ResearchSearch, Payload,
          lambda c, a: Payload(data=service.research_search(c.connection, **a.model_dump(), library=True))),
-    Tool('research.cards', '读取论点卡', _READERS, Arguments, Payload,
+    Tool('research_cards', '读取论点卡', _READERS, Arguments, Payload,
          lambda c, a: Payload(data=service.company_cards(c.connection))),
-    Tool('research.request', '提交单股研究，立即返回任务编号、状态和进度页', _READERS,
+    Tool('research_request', '提交单股研究，立即返回任务编号、状态和进度页', _READERS,
          service.ResearchRequest, Payload, _queue_research, access='write', collects=True),
-    Tool('research.status', '按任务编号或原凭据的请求编号查询研究状态，compact=false 展开诊断与预算', _READERS,
+    Tool('research_status', '按任务编号或原凭据的请求编号查询研究状态，compact=false 展开诊断与预算', _READERS,
          ResearchStatus, Payload, _research_status),
-    Tool('research.feedback', '按报告段落提交纠错，返回核查任务编号、状态和进度页', _READERS,
+    Tool('research_feedback', '按报告段落提交纠错，返回核查任务编号、状态和进度页', _READERS,
          ReportFeedback, Payload, _queue_research, access='write'),
-    Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,
+    Tool('research_card', '读取指定公司论点卡', _READERS, Company, Payload,
          lambda c, a: Payload(data=service.company_card(c.connection, a.code))),
-    Tool('research.methods', '按空格分隔的关键词检索最多五张已审核方法卡，返回标题、含适用条件的正文、来源链接与目录哈希',
+    Tool('research_methods', '按空格分隔的关键词检索最多五张已审核方法卡，返回标题、含适用条件的正文、来源链接与目录哈希',
          _READERS, MethodQuery, Payload, _research_methods),
-    Tool('research.report', '读取报告及证据', _READERS, Report, Payload,
+    Tool('research_report', '读取报告及证据', _READERS, Report, Payload,
          lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
-    Tool('research.scan.request', '按原凭据与请求编号提交或找回扫描，采集由 worker 执行', frozenset({'assistant'}),
+    Tool('research_scan_request', '按原凭据与请求编号提交或找回扫描，采集由 worker 执行', frozenset({'assistant'}),
          ScanRequest, Payload, _request_scan, access='write', account=True),
-    Tool('research.scan.read', '读取扫描状态、事件数和缺口，compact=false 展开事件及通知', frozenset({'assistant'}),
+    Tool('research_scan_read', '读取扫描状态、事件数和缺口，compact=false 展开事件及通知', frozenset({'assistant'}),
          ScanRead, Payload, lambda c, a: Payload(data=scans.view(c.connection, a.scan_id, compact=a.compact)), account=True),
-    Tool('research.scan.weekly', '读取近七日扫描分布和覆盖缺口，compact=false 展开周报', frozenset({'assistant'}),
+    Tool('research_scan_weekly', '读取近七日扫描分布和覆盖缺口，compact=false 展开周报', frozenset({'assistant'}),
          ScanView, Payload, lambda c, a: Payload(data=scans.weekly(c.connection, compact=a.compact, account_sources=True)),
          account=True),
-    Tool('research.subscriptions', '读取显式订阅和冻结候选及最近收盘时点', frozenset({'assistant'}), Arguments, Payload,
+    Tool('research_subscriptions', '读取显式订阅和冻结候选及最近收盘时点', frozenset({'assistant'}), Arguments, Payload,
          lambda c, a: Payload(data=scans.subscription_view(scans.subscriptions(c.connection))), account=True),
-    Tool('research.subscriptions.replace', '按公司代码完整替换外部订阅，提交空列表清空外部订阅', frozenset({'assistant'}),
+    Tool('research_subscriptions_replace', '按公司代码完整替换外部订阅，提交空列表清空外部订阅', frozenset({'assistant'}),
          SubscriptionCodes, Payload, lambda c,a: Payload(data=scans.subscription_view(
-             scans.replace_subscriptions(c.connection, a.codes))), access='write', collects=True, account=True),
-    Tool('research.batch.monthly.request', '受理上海当月的候选批次，已有批次返回原编号和状态',
+             scans.replace_subscriptions(c.connection, a.codes))), access='write', collects=True, account=True,
+         destructive=True),
+    Tool('research_batch_monthly_request', '受理上海当月的候选批次，已有批次返回原编号和状态',
          _READERS, MonthlyBatch, Payload, lambda c, a: _monthly_batch(c, a.month, submit=True), access='write'),
-    Tool('research.batch.monthly.status', '按月查询候选批次状态和缺口，可展开冻结名单与失败详情',
+    Tool('research_batch_monthly_status', '按月查询候选批次状态和缺口，可展开冻结名单与失败详情',
          _READERS, MonthlyBatchStatus, Payload, lambda c, a: _monthly_batch(c, a.month, compact=a.compact)),
-    Tool('account.research_coverage', '分开读取成交明确采用的报告与成交时可查的报告',
+    Tool('account_research_coverage', '分开读取成交明确采用的报告与成交时可查的报告',
          frozenset({'assistant'}), Arguments, TradeRows, _research_coverage, account=True),
-)}
+)
+TOOLS = {tool.name: tool for tool in _TOOLS}
+assert len(TOOLS) == len(_TOOLS), 'Duplicate tool names in registry'
+for _name in TOOLS:
+    assert re.fullmatch(r'[a-z][a-z0-9_]*', _name), f'Invalid tool name: {_name!r}'
+
+
+def visible_tools(principal: api_keys.Principal, *, account_shadow_enabled: bool = False) -> list[Tool]:
+    return [tool for tool in TOOLS.values()
+            if principal.role in tool.roles and (not tool.account or account_shadow_enabled)]
 
 
 def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = False) -> list[dict]:
-    return [tool.describe() for tool in TOOLS.values()
-            if principal.role in tool.roles and (not tool.account or account_shadow_enabled)]
+    return [tool.describe() for tool in visible_tools(principal, account_shadow_enabled=account_shadow_enabled)]
 
 
 def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
     if tool is None or (tool.account and not ctx.account_shadow_enabled):
-        raise ToolError('not_found', '工具不存在', 404)
+        raise UnknownTool('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
     # Rechecked on each connection the call uses, so a grant revoked mid-request stops at the write.

@@ -337,7 +337,7 @@ def submit_request(conn, requester: str, request_id: str) -> int:
     Identity comes from the API authenticator, never a client body. Invalid keys
     fail before writing; scan creation and the mapping commit together.
     """
-    if (not isinstance(requester, str) or re.fullmatch(r'(key|agent):[0-9a-f]{64}', requester) is None
+    if (not isinstance(requester, str) or re.fullmatch(r'(?:key|agent):[0-9a-f]{64}|grant:[1-9][0-9]*', requester) is None
             or not isinstance(request_id, str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', request_id) is None):
         raise service.RequestError('扫描请求身份或编号格式无效', 400)
     with db.transaction(conn):

@@ -30,15 +30,15 @@ a-stock-tracker 已归档，需参考时只读查 GitHub，不导入其源码。
 
 ## 3 架构
 
-一个 Python 包、一个 SQLite 文件，PDF 与账户证据分别保存；web、worker 与只听本机的 `tools` 三个服务共用受控数据层。`core/`、`account/`、`policy/` 与工具注册表的职责见[系统架构](../ARCHITECTURE.md)，生产开关状态见[当前部署](implementation-plan.md#当前部署)。
+一个 Python 包、一个 SQLite 文件，PDF 与账户证据分别保存；web、worker 与 `tools` 三个服务共用受控数据层。`core/`、`account/`、`policy/` 与工具注册表的职责见[系统架构](../ARCHITECTURE.md)，生产开关状态见[当前部署](implementation-plan.md#当前部署)。
 
 | 进程 | 做什么 | 持有 |
 |---|---|---|
 | web | FastAPI + Jinja 服务端 HTML；认证、提交、展示 | 会话密钥；读写 SQLite；**不持**模型和行情凭据 |
 | worker | 从 SQLite 取 `queued` 任务，一次一个；取资料、调模型、写结果 | 模型与 TuShare 凭据 |
-| tools | 向宿主提供受控 HTTP 工具，执行取证与确定性账户/政策操作；按凭据角色和开关隔离 | 独立行情凭据，不持模型凭据 |
+| tools | 向宿主提供 MCP 工具，执行取证与确定性账户/政策操作；按凭据角色和开关隔离 | 独立行情凭据，不持模型凭据 |
 
-- web 和 worker 通过 SQLite 的任务表交流；tools 接受受控 HTTP 请求，CLI 与 MCP 复用该入口。浏览器会话与研究 API 凭据见第 7 节。
+- web 和 worker 通过 SQLite 的任务表交流；CLI 经 MCP 调用 tools。浏览器与 MCP 授权见第 7 节。
 - 部署用本仓库的 docker compose：web、worker、tools 各一个容器；web 只注入 `.env.web`，worker 持模型与行情凭据，tools 的独立 `.env.tools` 只含行情凭据。worker 挂载宿主 `~/.pi`，按 pi 托管安装的 `current-version` 找运行时，pi 升级后无需改配置。
 - SQLite 存全部结构化数据：公司、任务、模型调用记录、报告（结构化正文 JSON 字段）、事实与引文。PDF 按内容哈希存文件目录，库里记来源 URL、哈希和取得时间。
 - 页面：首页、已有研究检索、任务进度、报告、公司档案、价格参考、候选批次列表与详情。纯服务端 HTML（原生表单、链接与 `<details>`），无前端框架；`static/app.js` 只做渐进增强，关闭脚本时功能不变。
@@ -99,7 +99,7 @@ a-stock-tracker 已归档，需参考时只读查 GitHub，不导入其源码。
 
 - GitHub OAuth，只放行本人的数字 ID；会话由服务端登记，`HttpOnly`、`Secure`、`SameSite=Lax`，8 小时到期，可退出。
 - AI/脚本验收用 `python -m a_share_research.login_token` 在宿主或容器内直接签发短期会话（1–480 分钟），不经 HTTP；能执行它已等同于有数据目录权限。
-- 长期调用方（Hermes 脚本等）使用独立的具名研究 API Key：只存哈希，持续有效直到撤销，由 owner 本地 CLI 创建/列出/撤销；兼容临时 Agent 令牌，管理与轮换见 [README](../README.md#agent-研究-api)。
+- 外部客户端持有独立可撤销的 MCP 授权，配置与轮换见 [README](../README.md#web-与-mcp-接入)。
 - POST 校验 CSRF 令牌和同源；Host 校验；CSP `default-src 'self'`；私有页 `no-store`。
 - Jinja 自动转义；模型文本、引文、来源 URL 只作纯文本。
 - web 进程不持模型和行情凭据；凭据只在 `.env`（不进 Git、不进镜像）。

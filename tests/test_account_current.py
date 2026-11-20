@@ -67,17 +67,17 @@ def test_unconvertible_mirror_code_is_explicit_failure(bound_book):
 def test_research_revoked_keys_and_disabled_gate_rejected(bound_book):
     path, conn, principal, _, _ = bound_book
     context = Context(conn, path, principal, account_shadow_enabled=True)
-    assert invoke(context, 'account.current', {})['data']['codes'] == ['600001']
+    assert invoke(context, 'account_current', {})['data']['codes'] == ['600001']
     with pytest.raises(ToolError) as denied:
-        invoke(Context(conn, path, principal), 'account.current', {})
+        invoke(Context(conn, path, principal), 'account_current', {})
     assert denied.value.status == 404
     research = api_keys.authenticate(conn, api_keys.create(conn, 'current-research', role='research'))
     with pytest.raises(ToolError) as denied:
-        invoke(Context(conn, path, research, account_shadow_enabled=True), 'account.current', {})
+        invoke(Context(conn, path, research, account_shadow_enabled=True), 'account_current', {})
     assert denied.value.status == 403
     conn.execute('DELETE FROM api_keys WHERE id=?', (principal.key_id,))
     with pytest.raises(ToolError) as denied:
-        invoke(context, 'account.current', {})
+        invoke(context, 'account_current', {})
     assert denied.value.status == 403
 
 

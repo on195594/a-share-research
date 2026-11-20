@@ -1004,10 +1004,10 @@ def test_bound_holding_and_public_scan_sources_merge_without_changing_subscripti
     conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
                  (AT, json.dumps({'codes': [code + '.SH']}), AT))
     scan = run_scan(conn, CapturedSources([]))
-    read = invoke(ctx, 'research.scan.read', {'scan_id': scan['id'], 'compact': False})['data']
+    read = invoke(ctx, 'research_scan_read', {'scan_id': scan['id'], 'compact': False})['data']
     [item] = read['summary']['scope']
     assert (item['code'], item['origin'], item['origins']) == (code, 'external', ['external', 'l5', 'holding'])
-    weekly = invoke(ctx, 'research.scan.weekly', {'compact': False})['data']
+    weekly = invoke(ctx, 'research_scan_weekly', {'compact': False})['data']
     assert weekly['scan_scope'] == [dict(code=code, origin='external', origins=item['origins'])]
     assert scans.subscriptions(conn)[0]['origins'] == ['external', 'l5']
 

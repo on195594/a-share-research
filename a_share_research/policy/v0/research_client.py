@@ -1,4 +1,4 @@
-"""Reads research results in process from the application database; touches no account table."""
+"""Read research results in the policy process, including cards for verified holdings."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _reports(conn, match, params) -> dict:
 
 # The read routes of the research-v1 interface, answered by the functions the web service itself calls.
 _ROUTES = (
-    (re.compile(r"/api/cards"), lambda conn, match, params: service.company_cards(conn)),
+    (re.compile(r"/api/cards"), lambda conn, match, params: service.company_cards(conn, holdings=True)),
     (re.compile(r"/api/companies/([0-9]{6})/card"), lambda conn, match, params: service.company_card(conn, match[1])),
     (re.compile(r"/api/reports"), _reports),
     (re.compile(r"/api/reports/([0-9]+)"), lambda conn, match, params: service.report_view(

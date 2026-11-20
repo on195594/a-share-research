@@ -4,13 +4,18 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
+from urllib.parse import urlsplit
 
 
 ROOT=Path(__file__).resolve().parents[2]
 HOSTS=('claude','codex','hermes','pi','agy')
 
 
-def prepare(output: Path, home: Path, role: str='assistant') -> dict:
+def prepare(output: Path, home: Path, mcp_url: str, role: str='assistant') -> dict:
+    if (not re.fullmatch(r'https://(?:[A-Za-z0-9.-]+|\[[a-fA-F0-9:.]+\])(?::[0-9]+)?/mcp', mcp_url)
+            or urlsplit(mcp_url).port == 0):
+        raise ValueError('--mcp-url 须为完整的 HTTPS /mcp 地址')
     if role not in ('research','assistant'):
         raise ValueError('宿主客户端只准备 research 或 assistant，不分发 owner 凭据')
     if not home.is_absolute() or not output.is_absolute():
@@ -22,7 +27,6 @@ def prepare(output: Path, home: Path, role: str='assistant') -> dict:
         raise ValueError('准备目录不能位于宿主自动加载或客户端安装目录')
     output.mkdir(mode=0o700,parents=False,exist_ok=False)
     client=home/'.local/bin/ashare'
-    profiles={host:home/f'.config/ashare/{host}-{role}.json' for host in HOSTS}
     hashes={}
     def write(relative, content, executable=False):
         path=output/relative
@@ -33,26 +37,30 @@ def prepare(output: Path, home: Path, role: str='assistant') -> dict:
         hashes[relative]=hashlib.sha256(data).hexdigest()
     def dump(relative,value):
         write(relative,json.dumps(value,ensure_ascii=False,indent=2)+'\n')
-    def stdio(host):
-        args=['--config',str(profiles[host]),'mcp']
-        if host=='agy':args.append('--portable-names')
-        return dict(command=str(client),args=args)
+    token_vars = {host: f'ASHARE_{host.upper()}_{role.upper()}_TOKEN' for host in HOSTS}
+
+    def http(host, **options):
+        return dict(url=mcp_url, headers={'Authorization': 'Bearer ${' + token_vars[host] + '}'}, **options)
+
     write('bin/ashare',(ROOT/'scripts/ashare.py').read_bytes(),executable=True)
     write('skill/a-share/SKILL.md',(ROOT/'skill/a-share/SKILL.md').read_bytes())
-    # Claude's per-project disabled state is in ~/.claude.json, not a supported
-    # per-server stdio field. This standalone file is deliberately not installed.
-    dump('configs/claude.mcp.json',{'mcpServers':{'ashare':dict(type='stdio',**stdio('claude'))}})
-    settings=stdio('codex')
+    dump('configs/claude.mcp.json', {'mcpServers': {'ashare': http('claude', type='http')}})
     write('configs/codex.config.toml','[mcp_servers.ashare]\n'
-          f'command = {json.dumps(settings["command"],ensure_ascii=False)}\n'
-          f'args = {json.dumps(settings["args"],ensure_ascii=False)}\n'
+          f'url = "{mcp_url}"\n'
+          f'bearer_token_env_var = "{token_vars["codex"]}"\n'
           'enabled = false\nstartup_timeout_sec = 10\ntool_timeout_sec = 40\n')
-    dump('configs/hermes.config.json',{'mcp_servers':{'ashare':dict(**stdio('hermes'),enabled=False,connect_timeout=10,timeout=40)}})
-    dump('configs/pi.mcp.json',{'mcpServers':{'ashare':dict(**stdio('pi'),enabled=False,timeout=40,exposure='direct')}})
-    dump('configs/agy.mcp_config.json',{'mcpServers':{'ashare':dict(**stdio('agy'),disabled=True)}})
-    dump('credentials.example.json',{'url':'http://127.0.0.1:8621','token':''})
+    dump('configs/hermes.config.json', {'mcp_servers': {'ashare': http('hermes', enabled=False, connect_timeout=10, timeout=40)}})
+    dump('configs/pi.mcp.json', {'mcpServers': {'ashare': http('pi', enabled=False, timeout=40, exposure='direct')}})
+    # AGY substitutes plugin setup variables in headers, not process environment variables.
+    dump('configs/agy/ashare/plugin.json', {
+        'name': 'ashare', 'displayName': 'A 股研究', 'version': '1.0.0', 'description': '连接 A 股研究 MCP 服务。',
+    })
+    dump('configs/agy/ashare/mcp_config.json', {'mcpServers': {'ashare': http('agy', variables=[{
+        'name': token_vars['agy'], 'title': 'A 股研究 PAT', 'description': '为 AGY 单独签发的访问令牌。',
+    }])}})
+    dump('credentials.example.json', {'url': mcp_url, 'token': ''})
     manifest=dict(schema_version=1,status='prepared-only',role=role,client_destination=str(client),
-        credential_destinations={host:str(path) for host,path in profiles.items()},
+        cli_config_destination=str(home/f'.config/ashare/hermes-{role}.json'),
         skill_destinations={
             'claude':str(home/'.claude/skills/a-share'),
             'codex':str(home/'.agents/skills/a-share'),
@@ -66,12 +74,13 @@ def prepare(output: Path, home: Path, role: str='assistant') -> dict:
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mcp-url',required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--home',type=Path,default=Path.home())
     parser.add_argument('--role',choices=('assistant','research'),default='assistant')
     args=parser.parse_args()
     try:
-        result=prepare(args.output,args.home,args.role)
+        result=prepare(args.output,args.home,args.mcp_url,args.role)
     except (OSError,ValueError) as exc:
         parser.exit(1,f'准备失败：{exc}\n')
     print(json.dumps(dict(status=result['status'],output=str(args.output),role=args.role),ensure_ascii=False))
