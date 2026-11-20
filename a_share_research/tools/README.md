@@ -9,6 +9,8 @@ ASHARE_PUBLIC_MCP_URL=https://stock.keyi.win/mcp DATA_DIR=/absolute/private/copy
   --control-socket /absolute/private/control/control.sock
 ```
 
+控制 socket 所在目录须为当前用户所有、权限 0700；进程退出后若残留 socket 文件，须删除后再启动。dev web 经 `ASHARE_TOOLS_URL` 调用该实例时，ToolsClient 会把 web 的 `PUBLIC_BASE_URL` 作为 Host 发送，因此 dev tools 的 `ASHARE_PUBLIC_MCP_URL` 必须等于 `<PUBLIC_BASE_URL>/mcp`（如 `http://127.0.0.1:8610/mcp`），否则返回 421。
+
 CLI 通过 HTTPS `/mcp` 调用工具。新接入为每个宿主或脚本单独签发 `assistant` PAT，本机入口为 `python -m a_share_research.api_keys create NAME --role assistant`，令牌仅显示一次。开发时指定副本的 `DATA_DIR`。私有 JSON 配置包含完整 `url` 与 `token`，可选 `connect` 指定本机直连地址，例如 `http://127.0.0.1:8621`。本机直连仍发送公网 Host，`url` 应与服务端的 `ASHARE_PUBLIC_MCP_URL` 一致。配置权限与五宿主安装步骤见[客户端准备手册](../../ops/clients/README.md)。
 
 ```sh

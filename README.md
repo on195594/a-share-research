@@ -265,7 +265,7 @@ Web、worker 与 tools 共用 SQLite 数据目录（默认 `/home/lin/a-share-re
 - web 的宿主端口绑定 `127.0.0.1:8620`，经 `nginx-network` 对外。Web 专属账户授权与 tools 内网地址见[运行配置](#运行)。
 - tools 复用 worker 镜像，通过 `nginx-network` 与 web 互通，保留宿主 `127.0.0.1:8621` 供本机客户端直连与发布就绪检查。首次纳入发布使用 `--with-tools --allow-config` 启用 Compose 的 `tools` profile，此后已有容器自动纳入发布。独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据，CPU 限制为 0.4，无 Pi 挂载。
 - 在仓库根目录 `.env` 或发布命令的环境设置 `ASHARE_PUBLIC_MCP_URL=https://stock.keyi.win/mcp`。Compose 将它传入 tools，用于启用 `/mcp`、校验 Host 与 Origin，并限定接受的 OAuth 资源。留空时 tools 不挂载该端点。Web 从 `.env.web` 的 `PUBLIC_BASE_URL` 生成发现文档和资源地址，两者须指向同一个公开 MCP 地址。
-- nginx 通过 `nginx-network` 将 `location = /mcp` 转发到 `http://a-share-research-tools:8621`，保留原路径和公网 Host（含非默认端口），并透传 Authorization。网页与 OAuth 端点及发现文档仍转给 web。路由变更与配置授权见[双入口方案](docs/web-mcp-platform.md#5-实施分段)。
+- nginx 通过 `nginx-network` 将 `location = /mcp` 转发到 `http://a-share-research-tools:8621`，保留原路径和公网 Host（含非默认端口），并透传 Authorization。网页与 OAuth 端点及发现文档仍转给 web。`/mcp` 的请求体上限为 28m，与 tools 一致。server 级不另加 CSP：应用对每个响应自带 CSP，OAuth 同意页的 `form-action` 还包含客户端来源；双份 CSP 会拦截授权跳转。Cloudflare 在边缘拒绝默认的 `Python-urllib` UA，因此 `ashare` CLI 显式发送自己的 UA。路由变更与配置授权见[双入口方案](docs/web-mcp-platform.md#5-实施分段)。
 - worker：`.env`，挂载 `~/.pi`；`PI_RUNTIME` 留空时用 pi 托管安装的 `current-version`；无外部端口，每次推理单独启动 Node。
 
 主模型用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID` 时仅 `review` 阶段改用该模型，`MODEL_REVIEW_REASONING` 缺省继承主模型。当前选择只在[实施计划](docs/implementation-plan.md#当前部署)维护。
