@@ -523,15 +523,29 @@ def describe(service: str) -> dict:
     # Docker can list --tmpfs only in HostConfig, omitting it from Mounts even while running.
     for target, options in (container['HostConfig'].get('Tmpfs') or {}).items():
         mounts.setdefault(target, ['tmpfs', 'ro' not in options.split(',')])
+    networks = (container.get('NetworkSettings') or {}).get('Networks') or {}
     return {"image": container["Image"], "running": container["State"]["Running"],
             "config_hash": container["Config"]["Labels"].get("com.docker.compose.config-hash"),
             "cpus": container["HostConfig"]["NanoCpus"], "ports": container["HostConfig"]["PortBindings"],
-            "mounts": mounts}
+            "mounts": mounts, "networks": sorted(networks)}
 
 
-def declared_mounts(service: str) -> dict:
+def _compose_config() -> dict:
+    return json.loads(run('docker', 'compose', '--profile', 'tools', 'config', '--format', 'json'))
+
+
+def declared_config_hash(service: str, *, with_tools: bool) -> str:
+    profile = ('--profile', 'tools') if with_tools else ()
+    fields = run('docker', 'compose', *profile, 'config', '--hash', service).split()
+    if len(fields) != 2 or fields[0] != service:
+        raise RuntimeError(f'{service} 的 Compose 配置哈希无效')
+    return fields[1]
+
+
+def declared_mounts(service: str, configured: dict | None = None) -> dict:
     """Mounts the committed Compose file declares for a service, in `describe` shape."""
-    configured = json.loads(run('docker', 'compose', '--profile', 'tools', 'config', '--format', 'json'))
+    if configured is None:
+        configured = _compose_config()
     spec = configured['services'][service]
     mounts = {v['target']: [v['source'], not v.get('read_only', False)] for v in spec.get('volumes') or []}
     for entry in spec.get('tmpfs') or []:
@@ -597,7 +611,9 @@ def wait_tools_ready(*, paused=False) -> dict:
                 response = exc
             with response:
                 result = json.load(response)
-            if (result.get('database_ready') is True and result.get('schema_version') == len(db.MIGRATIONS)
+            # tools itself reports ready only when the database matches its own image's migrations,
+            # so a pre-migration restart of the previous image passes without pinning this tool's version.
+            if (result.get('database_ready') is True
                     and result.get('paused') is paused and (not paused or result.get('in_flight') == 0)):
                 return result
         except HTTPError:
@@ -610,10 +626,13 @@ def wait_tools_ready(*, paused=False) -> dict:
 
 
 def _tools_config():
-    configured = json.loads(run('docker','compose','--profile','tools','config','--format','json'))['services']['tools']
-    allowed = {'DATA_DIR','TUSHARE_TOKEN','ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'}
-    if set(configured.get('environment',{})) - allowed:
-        raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录和显式功能开关')
+    configured = _compose_config()['services']['tools']
+    environment = configured.get('environment') or {}
+    allowed = {'DATA_DIR', 'METHOD_CARDS_DIR', 'TUSHARE_TOKEN', 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED'}
+    if environment.keys() - allowed:
+        raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录、方法卡目录和显式功能开关')
+    if environment.get('METHOD_CARDS_DIR') != '/method-cards':
+        raise RuntimeError('tools 的 METHOD_CARDS_DIR 须指向 /method-cards')
     return configured
 
 
@@ -626,19 +645,31 @@ def _verify_release(images, before, services, *, allow_config, save, tools_pause
                             'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'))
     save('worker-preflight.json', runtime)
     after = {service: describe(service) for service in services}
-    for service in before:
-        expected = before[service] | {'image': images[service]}
-        if allow_config:
-            # An authorized config change may add or drop mounts; the committed Compose file is the reference.
-            expected['config_hash'] = after[service]['config_hash']
-            expected['mounts'] = declared_mounts(service)
-        if after[service] != expected:
+    configured = _compose_config() if allow_config else None
+    for service in ('web', 'tools'):
+        if service not in after:
+            continue
+        cards = after[service]['mounts'].get('/method-cards')
+        if cards is not None and (cards[1] or cards != after['worker']['mounts'].get('/method-cards')):
+            raise RuntimeError(f'{service} 的 /method-cards 须只读且与 worker 同源')
+    for service, actual in after.items():
+        if configured is None:
+            expected = before[service] | {'image': images[service]}
+        else:
+            spec = configured['services'][service]
+            # Inspect reports Engine network names, while service declarations use Compose keys.
+            networks = sorted(configured['networks'][key]['name'] for key in spec.get('networks', {}))
+            expected = before.get(service, {}) | {
+                'image': images[service], 'running': True, 'mounts': declared_mounts(service, configured),
+                'networks': networks, 'config_hash': declared_config_hash(service, with_tools='tools' in services),
+            }
+        if any(actual[key] != value for key, value in expected.items()):
             raise RuntimeError(f'{service} 镜像、运行状态或部署配置不一致')
     if 'tools' in services:
         tool = after['tools']
         if (not tool['running'] or tool['image'] != images['worker']
-                or tool['mounts'].get('/data') != before['web']['mounts']['/data']
-                or set(tool['mounts']) != {'/data', '/run/ashare-tools'}
+                or tool['mounts'].get('/data') != after['web']['mounts']['/data']
+                or not set(tool['mounts']) <= {'/data', '/run/ashare-tools', '/method-cards'}
                 or tool['mounts'].get('/run/ashare-tools') != ['tmpfs', True]
                 or tool['cpus'] != 400_000_000
                 or tool['ports'] != {'8621/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8621'}]}):
@@ -678,10 +709,12 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
     before = {service: describe(service) for service in existing}
     if not all(item["running"] for item in before.values()):
         raise RuntimeError("现有服务未同时运行，请先查明状态")
+    config_matches = True
     for service in existing:
-        if not allow_config and run("docker", "compose", *(('--profile','tools') if include_tools else ()),
-                                    "config", "--hash", service).split() != [service, before[service]["config_hash"]]:
-            raise RuntimeError(f"{service} 的 Compose 或环境配置发生变化；须另行准备配置回退")
+        if declared_config_hash(service, with_tools=include_tools) != before[service]['config_hash']:
+            config_matches = False
+            if not allow_config:
+                raise RuntimeError(f"{service} 的 Compose 或环境配置发生变化；须另行准备配置回退")
     if has_tools:
         if before['tools']['image'] != before['worker']['image']:
             raise RuntimeError('现有 tools 与 worker 不同镜像，须先核对部分发布状态')
@@ -728,7 +761,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             state['actual'] = None
         save('release-state.json', state)
     record('prepared')
-    if set(existing) == set(services) and all(before[s]['image'] == images[s] for s in existing):
+    if config_matches and set(existing) == set(services) and all(before[s]['image'] == images[s] for s in existing):
         # No activation append without pause, even when the image need not change.
         if frozen.get('intent') is None:
             _verify_release(images, before, services, allow_config=allow_config, save=save,
@@ -891,7 +924,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bo
             compose("start", *existing)
         # Ordinary rollback and pre-switch restart use the same full gate as release.
         old_images = {s: before[s]['image'] for s in existing}
-        state.update(images=old_images, services=list(existing), restoring=True)
+        state.update(images=old_images, services=list(existing), restoring=True, allow_config=False)
         record('rollback-policy-gate')
         _verify_release(old_images, before, existing, allow_config=False, save=save)
         policy_state = policy_gate(old_images, frozen, approval=approval, restoring=True, save=save)
@@ -946,11 +979,12 @@ def complete_held(evidence: Path, *, approval_path: Path | None = None):
         raise RuntimeError('实际服务已偏离 held 证据；不得自动接管')
     if 'tools' not in services or tools_control('status') != {'paused': True, 'in_flight': 0}:
         raise RuntimeError('完成入口要求 tools paused=true 且 in_flight=0')
-    _tools_config()
-    for service in services:
-        if run('docker', 'compose', '--profile', 'tools', 'config', '--hash', service).split() != [
-                service, state['actual'][service]['config_hash']]:
-            raise RuntimeError('完成入口的 Compose/环境配置偏离 held 目标')
+    # A held restore of the pre-release services is checked against their snapshot below, not the new Compose.
+    if state['allow_config'] or not state.get('restoring'):
+        _tools_config()
+        for service in services:
+            if declared_config_hash(service, with_tools=True) != state['actual'][service]['config_hash']:
+                raise RuntimeError('完成入口的 Compose/环境配置偏离 held 目标')
     def save(name, value):
         save_evidence(evidence, 'completion-' + name, value)
         if name in ('policy-observed.json', 'policy-gate.json'):

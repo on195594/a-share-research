@@ -14,6 +14,7 @@ DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
 ```sh
 python scripts/ashare.py tools
 python scripts/ashare.py call research.card --json '{"code":"600519"}'
+python scripts/ashare.py call research.methods --json '{"query":"低PE"}'
 python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具并绑定账本
 ```
 
@@ -31,13 +32,15 @@ python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具
 
 桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
 
-- `research`：通过 `research.cards`、`research.card`、`research.report` 读取研究卡片及报告；看不到也不能调用账户和政策工具。
+- `research`：通过 `research.cards`、`research.card`、`research.report` 读取研究卡片及报告，通过 `research.methods` 检索已审核方法卡。此角色看不到也不能调用账户和政策工具。
 - `assistant`：可读取研究。账户开关启用后，可调用账户、政策工具及两项只读总览。
   - `research.company_overview` 与 `account.portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
   - `account.research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
 - `owner`：本地政策登记与切换；影子开关启用时可读取政策身份、指南和保存的评估；没有 HTTP 切换工具，也不允许调用旧研究 API。
 
 旧 Key 迁移后仍为 research。角色不可原地更改；更换角色须创建新 Key 并撤销旧 Key。assistant 可通过研究 API 发起请求，由隔离的 worker 执行研究。
+
+`research` 和 `assistant` 均可调用 `research.methods` 按关键词检索已审核方法卡。结果包含适用条件原文、来源链接和完整卡片目录的 `catalog_sha256`。目录不可用时，`gaps` 说明原因。
 
 `GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 

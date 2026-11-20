@@ -121,11 +121,14 @@ def test_describe_preserves_readonly_tmpfs_and_normalizes_both_docker_shapes(mon
     assert deploy.describe('tools')['mounts']['/run/ashare-tools'] == ['tmpfs', False]
 
 
-def test_describe_accepts_null_tmpfs_on_containers_without_it(monkeypatch):
+@pytest.mark.parametrize('network_settings', [None, {'Networks': None}])
+def test_describe_accepts_null_tmpfs_and_networks(monkeypatch, network_settings):
     captured = json.loads((Path(__file__).parent / 'data/deploy-tools-inspect-20261111.json').read_text())
     captured['HostConfig']['Tmpfs'] = None
+    captured['NetworkSettings'] = network_settings
     monkeypatch.setattr(deploy, 'run', lambda *args: json.dumps([captured]))
-    assert deploy.describe('web')['mounts'] == {'/data': ['/private/rehearsal-data', True]}
+    info = deploy.describe('web')
+    assert info['mounts'] == {'/data': ['/private/rehearsal-data', True]} and info['networks'] == []
 
 
 # Captured from `docker compose --profile tools config --format json` on the production host (2026-11-14).
@@ -159,12 +162,14 @@ def test_declared_mounts_match_describe_shape_on_the_captured_compose_config(mon
 def test_verify_release_checks_mounts_against_compose_only_for_authorized_config(
         monkeypatch, allow_config, actual, accepted):
     def run(*args):
+        if '--hash' in args:
+            return 'worker h2'
         if 'config' in args:
             return json.dumps(_COMPOSE_CONFIG)
         return json.dumps({'ok': True, 'ready': True})
 
     before = {'worker': {'image': 'old', 'running': True, 'config_hash': 'h1', 'cpus': 600_000_000,
-                         'ports': {}, 'mounts': _WORKER_BEFORE}}
+                         'ports': {}, 'mounts': _WORKER_BEFORE, 'networks': []}}
     monkeypatch.setattr(deploy, 'run', run)
     monkeypatch.setattr(deploy, 'wait_ready', lambda: None)
     monkeypatch.setattr(deploy, 'describe', lambda service: before['worker'] | {

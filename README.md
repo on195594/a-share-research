@@ -245,10 +245,10 @@ DATA_DIR=$TMP uv run --env-file .env python -m a_share_research.zones --database
 
 `db.connect()` 以 `PRAGMA user_version` 逐版本迁移（各版本内容见 `db.py`，当前版本见[实施计划](docs/implementation-plan.md#当前部署)）。迁移须另获授权并备份；日常发布要求旧镜像能跑在新结构上，须用最终结构和实际回退镜像读写实测，做不到就单独设计回退（见[数据层治理方案](docs/data-foundation.md)）。
 
-Web/worker 由 `compose.yaml` 编排，共用 SQLite 数据目录（默认 `/home/lin/a-share-research-data`，可由 `DATA_DIR` 指定）：
+Web、worker 与 tools 共用 SQLite 数据目录（默认 `/home/lin/a-share-research-data`，可由 `DATA_DIR` 指定）。三个服务都将 `METHOD_CARDS_SOURCE`（默认 `/home/lin/wiki/concepts/company-analysis`）只读挂载到 `METHOD_CARDS_DIR=/method-cards`。
 
-- web：`.env.web`，只监听 `127.0.0.1:8620`，经 `nginx-network` 对外；无模型和行情凭据。
-- tools（Compose `tools` profile，开关见[当前部署](docs/implementation-plan.md#当前部署)）：复用 worker 镜像，独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据；仅 `127.0.0.1:8621`，0.4 CPU，无 Pi 挂载。
+- web 的宿主端口绑定 `127.0.0.1:8620`，经 `nginx-network` 对外。可在 `.env.web`（0600）中设置 `ASHARE_TOOLS_URL=http://a-share-research-tools:8621` 与 `ASHARE_TOOLS_TOKEN`，后者存放 Web 专属的 `assistant` grant 令牌。两项均可留空，本段只接入配置。
+- tools 复用 worker 镜像，通过 `nginx-network` 与 web 互通，保留宿主 `127.0.0.1:8621` 供本机客户端与发布就绪检查。首次纳入发布使用 `--with-tools --allow-config` 启用 Compose 的 `tools` profile，此后已有容器自动纳入发布。独立 `.env.tools`（模板 `.env.tools.example`，0600）只含行情凭据，CPU 限制为 0.4，无 Pi 挂载。
 - worker：`.env`，挂载 `~/.pi`；`PI_RUNTIME` 留空时用 pi 托管安装的 `current-version`；无外部端口，每次推理单独启动 Node。
 
 主模型用 `MODEL_PROVIDER`、`MODEL_ID`、`MODEL_REASONING`；同时设置 `MODEL_REVIEW_PROVIDER` 与 `MODEL_REVIEW_ID` 时仅 `review` 阶段改用该模型，`MODEL_REVIEW_REASONING` 缺省继承主模型。当前选择只在[实施计划](docs/implementation-plan.md#当前部署)维护。

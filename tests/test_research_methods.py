@@ -5,17 +5,19 @@ import json
 import os
 import re
 import subprocess
+from contextlib import closing
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
-from a_share_research import db, service
+from a_share_research import api_keys, db, service
 from a_share_research.checking import check
 from a_share_research.research import _research_context
 from a_share_research.research_tools import (
     ResearchTools, active_methods_digest, method_cards, method_catalog, research_methods, run_method_catalog,
 )
+from a_share_research.tools.registry import Context, discover, invoke
 from support.reports import MATERIAL, report
 
 CARDS = Path(__file__).parent / "data/method-cards"  # real card copied from the shared wiki, 2026-11-14
@@ -105,6 +107,35 @@ def test_method_cards_join_only_single_stock_catalogs_and_carry_no_evidence_iden
     (tmp_path / "plain.md").write_text("# no frontmatter")
     assert method_cards(tmp_path) == []
     assert "draft.md" in caplog.text and "plain.md" in caplog.text
+
+
+@pytest.mark.parametrize("role", ["research", "assistant"])
+def test_registry_method_search_returns_the_catalog_or_directory_gap(tmp_path, monkeypatch, role):
+    path = tmp_path / "app.db"
+    with closing(db.connect(path)) as conn:
+        token = api_keys.create(conn, "method-reader", role=role)
+        conn.execute("PRAGMA query_only=ON")
+        ctx = Context(conn, path, api_keys.authenticate(conn, token))
+        assert next(tool for tool in discover(ctx.principal) if tool["name"] == "research.methods")["access"] == "read"
+
+        def search(query):
+            return invoke(ctx, "research.methods", {"query": query})["data"]
+
+        monkeypatch.setenv("METHOD_CARDS_DIR", str(CARDS))
+        catalog = method_cards(CARDS)
+        version = active_methods_digest(conn, catalog=catalog)
+        found = search("低PE")
+        assert found == {"cards": catalog, "catalog_sha256": version, "gaps": []}
+        assert "不因行业标签就认定周期性" in found["cards"][0]["method"]["text"]
+        assert search("应收保理") == {"cards": [], "catalog_sha256": version, "gaps": []}
+
+        empty = tmp_path / "method-cards"
+        empty.mkdir()
+        for root, reason in ((empty / "missing", "目录未挂载"), (empty, "没有可用卡片")):
+            monkeypatch.setenv("METHOD_CARDS_DIR", str(root))
+            result = search("低PE")
+            assert result["cards"] == [] and result["catalog_sha256"] is None
+            assert reason in result["gaps"][0]
 
 
 def test_actual_wiki_cards_when_explicitly_requested(tmp_path):
