@@ -1,6 +1,6 @@
 # Web 与 MCP 双入口平台方案
 
-更新：2026-11-20。本文件维护 Web 与 MCP 双一等入口的目标架构、关键取舍与验收口径；工作包状态与部署见[实施计划](implementation-plan.md#工作包与状态)。方案经 Claude 与 Codex 四轮对抗审查定稿，再经 agy 一轮可实施性与易用性审查修订（`agy-r1.md`），审查原文、各版草稿与提示词存于仓库外证据目录 `mcp-remote-plan-20261120/`。**本文为规划，尚未实施**；现行能力以[系统架构](../ARCHITECTURE.md)与 [tools 手册](../a_share_research/tools/README.md)为准。
+更新：2026-11-20。本文件维护 Web 与 MCP 双一等入口的目标架构、关键取舍与验收口径；工作包状态与部署见[实施计划](implementation-plan.md#工作包与状态)。方案经 Claude 与 Codex 四轮对抗审查定稿，再经 agy 一轮可实施性与易用性审查修订（`agy-r1.md`），审查原文、各版草稿与提示词存于仓库外证据目录 `mcp-remote-plan-20261120/`。所有者 2026-11-20 授权按本方案长程自主实施，授权边界与分工见 [AGENTS.md](../AGENTS.md#授权)，各段进度见实施计划；现行能力仍以[系统架构](../ARCHITECTURE.md)与 [tools 手册](../a_share_research/tools/README.md)为准。
 
 ## 1. 定位与前提
 
@@ -142,8 +142,8 @@ registry 的规范名直接用 MCP 安全的下划线名（如 `research_card`�
 | 段 | 内容 | 上线条件 | 回退 |
 |---|---|---|---|
 | 0 能力与修复 | 研究受理移入 service；写连接按 `access` 选择；`RequestError` 映射与字段级参数错误；补研究、检索、反馈、扫描、订阅、月批操作与两个总览；扫描范围合并；`research_coverage` 改读新账本；Gate 只给写与采集占名额；`account_id` 可选；删除已取代工具 | 不迁移、不改配置；确定性测试加受影响的真实路径；可在 11-29 前发布 | 回退上一镜像，不涉数据 |
-| 1 迁移与配置 | 一次数据库迁移：grant 列与软撤销、OAuth 令牌表、NAV 区间引用表；共用有效性检查接入账本与政策写事务；服务端 H00906 取证；compose 与 `deploy.py` 同步（tools 入网、方法卡挂载、web 专属 grant）；锁定 `mcp` 2.x | 生产库副本预演迁移与完整性检查；所有者当次授权迁移与配置变更；本段不开放公网 `/mcp` | 旧镜像精确比较 schema 版本，迁移后不能回到旧镜像；故障时前向修复，或在无写入时按发布备份恢复。本段成为后续各段的回退基线 |
-| 2 公网 `/mcp` 与切换 | tools 上线 `/mcp`，规范名改下划线，`account_evidence_recent`；web 上线发现文档、OAuth 与授权管理页；nginx `location = /mcp`；`ashare` CLI 改为 MCP 客户端；确认无未完成扫描后切换 Hermes 与本机宿主 | 所有者当次授权 nginx 路由；Gemini 与 Claude.ai 走通第 6 节第 4 项；Hermes 与 CLI 全部经 MCP 跑通；旧 `/api`、`/tools` 暂留作热备 | 撤掉 nginx 路由，回退段 1 镜像，Hermes 恢复旧脚本与凭据 |
+| 1 迁移与配置 | 一次数据库迁移：grant 列与软撤销、OAuth 令牌表、NAV 区间引用表；共用有效性检查接入账本与政策写事务；服务端 H00906 取证；compose 与 `deploy.py` 同步（tools 入网、方法卡挂载、web 专属 grant）；锁定 `mcp` 2.x | 生产库副本预演迁移与完整性检查；迁移与配置变更按常设授权执行；本段不开放公网 `/mcp` | 旧镜像精确比较 schema 版本，迁移后不能回到旧镜像；故障时前向修复，或在无写入时按发布备份恢复。本段成为后续各段的回退基线 |
+| 2 公网 `/mcp` 与切换 | tools 上线 `/mcp`，规范名改下划线，`account_evidence_recent`；web 上线发现文档、OAuth 与授权管理页；nginx `location = /mcp`；`ashare` CLI 改为 MCP 客户端；确认无未完成扫描后切换 Hermes 与本机宿主 | nginx 路由按常设授权添加；Gemini 与 Claude.ai（所有者本人完成网页端登录与授权点击） 走通第 6 节第 4 项；Hermes 与 CLI 全部经 MCP 跑通；旧 `/api`、`/tools` 暂留作热备 | 撤掉 nginx 路由，回退段 1 镜像，Hermes 恢复旧脚本与凭据 |
 | 3 Web 账户体验 | 手机组合页与公司页接入两个总览、多图上传页、预填记账表单、NAV 区间入口 | 手机尺寸真实浏览器与 Gemini 各走通第 6 节第 1 项 | 回退段 2 镜像 |
 | 4a 退役旧入口 | 删除 stdio 桥、`/tools` 业务 REST、`/api` Agent JSON 与 `agent:` 会话，撤销旧 `research` key，同步第 9 节文档 | 段 2 稳定运行至少一周，日志中已无旧路径调用 | 回退段 3 镜像 |
 | 4b 知仓研究 | 第 4.3 节 `holdings_context` 全部内容与契约 8 | 12-04 月批验收之后、冻结窗口外；按 D 类完成第 6 节第 3 项 | 回退段 4a 镜像；契约 8 报告的记分需新镜像 |
@@ -172,7 +172,7 @@ registry 的规范名直接用 MCP 安全的下划线名（如 `research_card`�
 
 本方案改变了若干现行规则，实施对应部分时在各 owner 文档中同步修订，不提前改写：
 
-- [AGENTS.md](../AGENTS.md)：不变量“研究 AI 看不到持仓与账户”改为“默认盲、按请求读取冻结快照”；授权一节加入新端点、nginx 路由与迁移的授权边界。
+- [AGENTS.md](../AGENTS.md)：不变量“研究 AI 看不到持仓与账户”在段 4b 改为“默认盲、按请求读取冻结快照”；新端点、nginx 路由与迁移的授权边界已于 2026-11-20 写入授权一节。
 - [PRODUCT.md](../PRODUCT.md)：用户与入口表改为 Web 与 MCP 双入口，删除“不因使用 API 获得真实账户权限”。
 - [ARCHITECTURE.md](../ARCHITECTURE.md)、[README](../README.md)、[tools 手册](../a_share_research/tools/README.md)、[客户端手册](../ops/clients/README.md)、[Hermes 手册](../ops/hermes/README.md)、[统一 Skill](../skill/a-share/SKILL.md)：入口、身份、命名与退役后的调用方式。
 - [判断验证方案](judgment-validation.md)：契约版本记录与按输入模式分组的记分口径。
