@@ -18,8 +18,8 @@ class PolicyError(ValueError):
 
 
 def _authorize(conn, principal, *, owner=False):
-    row = conn.execute('SELECT role FROM api_keys WHERE id=?',(principal.key_id,)).fetchone()
-    if not row or row[0] != principal.role or principal.role not in ({'owner'} if owner else {'assistant','owner'}):
+    roles = ('owner',) if owner else ('assistant', 'owner')
+    if principal.role not in roles or not api_keys.is_active(conn, principal.key_id, principal.role):
         raise PolicyError('需要有效的 owner 凭据' if owner else '此凭据不能读取政策与账户评估',403)
 
 

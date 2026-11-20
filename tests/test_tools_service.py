@@ -111,7 +111,8 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     assert client.get('/tools').status_code == 401
     for role, token in tokens.items():
         names = {t['name'] for t in client.get('/tools', headers=header(token)).json()['tools']}
-        assert ('research.cards' in names) == (role != 'owner')
+        for name in ('research.cards', 'research.methods'):
+            assert (name in names) == (role != 'owner')
         for name in ('account.research_coverage', 'account.portfolio_overview', 'research.company_overview'):
             assert (name in names) == (account_enabled and role == 'assistant')
         for name in ('research.scan.request', 'research.scan.read', 'research.scan.weekly',
@@ -130,6 +131,15 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
     conn.execute('DELETE FROM api_keys WHERE role=?', ('research',))
     conn.close()
     assert client.get('/tools', headers=header(tokens['research'])).status_code == 401
+
+
+def test_method_search_refuses_owner_and_blank_query(setup):
+    _, tokens, client = setup
+    endpoint = '/tools/research.methods'
+    assert client.post(endpoint, json={'query': '低PE'}, headers=header(tokens['owner'])).status_code == 403
+    invalid = client.post(endpoint, json={'query': '  '}, headers=header(tokens['research']))
+    assert invalid.status_code == 422
+    assert 'query' in invalid.json()['error']['message']
 
 
 def test_validation_errors_identify_field_and_reason(setup):
@@ -198,3 +208,16 @@ def test_upstream_failure_is_retryable(setup, monkeypatch, error):
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'unavailable'
     assert '重试' in response.json()['error']['message']
+
+
+def test_invoke_rechecks_grant_revoked_after_authentication(setup):
+    path, tokens, _ = setup
+    conn = db.connect(path)
+    try:
+        principal = api_keys.authenticate(conn, tokens['research'])
+        api_keys.revoke(conn, principal.key_id)
+        with pytest.raises(ToolError, match='撤销') as error:
+            invoke(Context(conn, path, principal), 'research.cards', {})
+        assert error.value.status == 403
+    finally:
+        conn.close()

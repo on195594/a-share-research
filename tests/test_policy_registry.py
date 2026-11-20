@@ -88,9 +88,11 @@ def test_owner_gate_and_revocation(setup):
             registry.activate(conn,principals[role],manifest['identity'],expected_id=0,request_id=role,reason='no')
     with pytest.raises(registry.PolicyError):
         registry.current(conn,principals['research'])
-    conn.execute('DELETE FROM api_keys WHERE id=?',(principals['owner'].key_id,))
-    with pytest.raises(registry.PolicyError):
+    api_keys.revoke(conn, principals['owner'].key_id)
+    with pytest.raises(registry.PolicyError) as error:
         activate(setup)
+    assert error.value.status == 403
+    assert conn.execute('SELECT COUNT(*) FROM policy_activations').fetchone()[0] == 0
 
 
 def test_no_remote_activation_and_read_tools_require_explicit_shadow_enable(setup):

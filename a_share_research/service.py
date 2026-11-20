@@ -42,11 +42,11 @@ class FeedbackRequest(BaseModel):
 
 def requester(conn: sqlite3.Connection, principal: api_keys.Principal) -> str:
     """The existing web/scan identity for a persistent credential."""
-    row = conn.execute("SELECT token_hash FROM api_keys WHERE id=? AND role=?",
-                       (principal.key_id, principal.role)).fetchone()
-    if row is None:
+    if not api_keys.is_active(conn, principal.key_id, principal.role):
         raise RequestError("研究凭据无效或已撤销", 403)
-    return "key:" + row[0]
+    token_hash = conn.execute("SELECT token_hash FROM api_keys WHERE id=?", (principal.key_id,)).fetchone()[0]
+    # PATs keep the pre-v25 digest identity so earlier requests still replay; OAuth grants hold no PAT.
+    return "key:" + token_hash if token_hash else f"grant:{principal.key_id}"
 
 
 def _request_key(requester: str, request_id: str) -> str:

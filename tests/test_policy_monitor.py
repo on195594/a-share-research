@@ -133,7 +133,7 @@ def test_changes_during_capture_reject_without_receipt(setup,monkeypatch,change)
             if change in ('mirror', 'both'):
                 other.execute("UPDATE account_source SET updated_at='changed-during-capture'")
             elif change == 'revocation':
-                other.execute('DELETE FROM api_keys WHERE id=?',(principals['assistant'].key_id,))
+                api_keys.revoke(other, principals['assistant'].key_id)
         finally: other.close()
         return deepcopy(bundle)
     monkeypatch.setattr(monitor,'capture',capture)

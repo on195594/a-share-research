@@ -3,18 +3,22 @@
 The captured TuShare rows are real; the account numbers and evidence strings are
 explicit structural fixtures and never establish real account performance.
 """
+from contextlib import closing
 from datetime import datetime
 from decimal import Decimal
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from a_share_research import api_keys, db, gate
+from a_share_research import api_keys, db, gate, integrity
 from a_share_research.account import evidence, ledger, nav
 from a_share_research.account.reconciliation import Event, Opening, Snapshot
-from a_share_research.tools.registry import Context, ToolError, discover, invoke
+from a_share_research.core.market_data import MarketDataResult
+from a_share_research.core.providers import TushareMarketDataProvider
+from a_share_research.tools.registry import TOOLS, Context, ToolError, discover, invoke
 from a_share_research.tools.server import create_app
 
 
@@ -81,6 +85,140 @@ def test_no_flow_real_index_endpoints_and_idempotent_artifact(book):
     replay = nav.replay(book['conn'], book['principal'], 'a', result['artifact_sha256'], book['directory'])
     assert replay['calculation'] == result['calculation']
     assert replay['mode'] == 'saved_input_replay'
+
+
+@pytest.fixture
+def collect_nav(book, bind_account, monkeypatch):
+    bind_account(book['conn'], 'a')
+    args = request(book).model_dump(mode='json', exclude={'benchmark_evidence_hash'})
+    index = book['index']
+    calls = []
+
+    def fetch(provider, code, start, end):
+        calls.append((code, start, end))
+        rows = [row for row in index['rows'] if start <= row['date'] <= end]
+        return MarketDataResult(pd.DataFrame(rows), 'ok', index['source'], index['fetched_at'],
+                                source_as_of=max(row['date'] for row in rows), freshness_days=0)
+
+    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', fetch)
+    def collect(connection=book['conn'], **changes):
+        ctx = Context(connection, book['path'], book['principal'], account_shadow_enabled=True)
+        return invoke(ctx, 'account.nav.evaluate', {'request': args | changes})['data']
+
+    return collect, calls
+
+
+def test_collected_index_is_referenced_replayed_and_reused(book, collect_nav):
+    collect, calls = collect_nav
+    tool = TOOLS['account.nav.evaluate']
+    assert tool.collects and tool.access == 'write'
+    uploaded = evaluate(book)
+    first = collect()
+    assert first['calculation'] == uploaded['calculation']
+    assert first['basis']['benchmark_provenance'] == 'tools_collected_evidence'
+    assert uploaded['basis']['benchmark_provenance'] == 'supplied_evidence_not_live_collection'
+    artifact = json.loads(evidence.read(book['directory'], first['artifact_sha256']))
+    sha = artifact['request']['benchmark_evidence_hash']
+    ref = book['conn'].execute('SELECT evidence_hashes FROM account_nav_refs WHERE artifact_sha256=?',
+                               (first['artifact_sha256'],)).fetchone()
+    assert sha in json.loads(ref[0])
+    response = json.loads(evidence.read(book['directory'], sha))
+    assert response['code'] == 'H00906.CSI' and response['source'] == 'tushare.index_daily'
+    assert response['rows'] == book['index']['rows'][:4]
+    assert response['fetched_at'] == book['index']['fetched_at']
+    assert collect() == first
+    replay = nav.replay(book['conn'], book['principal'], 'a', first['artifact_sha256'], book['directory'])
+    assert replay['calculation'] == first['calculation'] and replay['basis'] == first['basis']
+    assert calls == [('H00906.CSI', '2026-01-05', '2026-01-08')]
+    assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 2
+    # The same dates with a different valuation selection are a distinct request.
+    other = observe(book, '2026-01-08T15:00:00+08:00', '1200')
+    changed = collect(end=other, expected_state_sha256=capture(book)['state_sha256'])
+    assert changed['calculation']['account_return'] != first['calculation']['account_return']
+    assert collect() == first and len(calls) == 2
+
+
+def test_collected_index_reuses_request_committed_during_fetch(book, collect_nav, monkeypatch):
+    collect, _ = collect_nav
+    with closing(db.connect(book['path'])) as other, monkeypatch.context() as patch:
+        def finish_other_request(*args):
+            nonlocal first
+            patch.undo()
+            first = collect(connection=other)
+            # Only the concurrent caller has usable data.
+            raise TimeoutError()
+
+        first = None
+        patch.setattr(TushareMarketDataProvider, 'fetch_index_bars', finish_other_request)
+        outer = collect()
+    assert outer['artifact_sha256'] == first['artifact_sha256']
+    assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(('endpoint', 'stamp'), [
+    ('start', '2026-01-05T14:59:59+08:00'),
+    ('end', '2026-01-08T15:00:00.000001+08:00'),
+])
+def test_non_close_endpoint_rejected_before_collection(book, collect_nav, endpoint, stamp):
+    collect, calls = collect_nav
+    ref = observe(book, stamp, '1000')
+    value = request(book).model_dump(mode='json')
+    value['coverage'][endpoint] = stamp
+    with pytest.raises(ToolError, match='15:00:00') as error:
+        collect(**{endpoint: ref}, coverage=value['coverage'], expected_state_sha256=value['expected_state_sha256'])
+    assert (error.value.status, error.value.code) == (422, 'invalid_arguments')
+    assert calls == []
+
+
+@pytest.mark.parametrize('missing', ['2026-01-05', '2026-01-08'])
+def test_collected_index_requires_both_exact_closes(book, collect_nav, missing):
+    collect, _ = collect_nav
+    # Remove only the endpoint from the captured rows, leaving adjacent trading days.
+    book['index']['rows'] = [r for r in book['index']['rows'] if r['date'] != missing]
+    with pytest.raises(ToolError, match=f'{missing}.*另选') as error:
+        collect()
+    assert (error.value.status, error.value.code) == (422, 'invalid_arguments')
+    response = json.loads(evidence.read(book['directory'], str(error.value).split()[-1]))
+    assert response['status'] == 'ok' and missing not in [row['date'] for row in response['rows']]
+    assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 0
+
+
+def test_index_collection_exception_saves_failure_and_allows_retry(book, collect_nav, monkeypatch):
+    collect, _ = collect_nav
+
+    def interrupted(*args):
+        raise TimeoutError('private upstream details')
+
+    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', interrupted)
+    with pytest.raises(ToolError, match='行情暂不可用，稍后用原请求重试') as error:
+        collect()
+    assert (error.value.status, error.value.code) == (503, 'unavailable')
+    sha = str(error.value).split()[-1]
+    raw = evidence.read(book['directory'], sha)
+    response = json.loads(raw)
+    assert response['requested_dates'] == ['2026-01-05', '2026-01-08']
+    assert response['source'] == 'tushare.index_daily' and response['status'] == 'failed'
+    assert response['error_type'] == 'TimeoutError' and response['rows'] is None
+    assert b'private upstream details' not in raw
+    assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(('code', 'status', 'tool_code', 'message'), [
+    ('TIMEOUT', 503, 'unavailable', '行情暂不可用，稍后用原请求重试'),
+    ('EMPTY_RESPONSE', 422, 'invalid_arguments', '2026-01-05 至 2026-01-08.*另选区间'),
+])
+def test_failed_index_response_reports_recovery_and_evidence(book, collect_nav, monkeypatch,
+                                                            code, status, tool_code, message):
+    collect, _ = collect_nav
+    index = book['index']
+    failed = MarketDataResult(None, 'failed', index['source'], index['fetched_at'], error_code=code)
+    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', lambda *args: failed)
+    with pytest.raises(ToolError, match=message) as error:
+        collect()
+    assert (error.value.status, error.value.code) == (status, tool_code)
+    response = json.loads(evidence.read(book['directory'], str(error.value).split()[-1]))
+    assert response['status'] == 'failed' and response['error_code'] == code
+    assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 0
 
 
 def test_index_json_decimal_amount_is_not_rounded_through_binary_float(book):
@@ -219,9 +357,21 @@ def test_tampered_saved_result_rejected_and_cross_account_denied(book):
 
 def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path):
     from a_share_research import backup
-    result = evaluate(book)
+    value = request(book)
+    coverage = evidence.store(book['directory'], b'Structural NAV coverage declaration')
+    value.coverage.evidence_hashes = [coverage]
+    result = evaluate(book, value)
+    assert evaluate(book, value) == result
+    sha = result['artifact_sha256']
+    hashes = sorted([coverage, book['sha'], value.benchmark_evidence_hash])
+    ref, = book['conn'].execute('SELECT * FROM account_nav_refs')
+    assert (ref['artifact_sha256'], ref['account_id'], ref['start_date'], ref['end_date'],
+            ref['benchmark_code'], ref['key_id']) == (
+                sha, 'a', '2026-01-05', '2026-01-08', 'H00906.CSI', book['principal'].key_id)
+    assert json.loads(ref['evidence_hashes']) == hashes
     bundle, restored = tmp_path / 'bundle', tmp_path / 'restored'
-    backup.create(book['path'], bundle)
+    manifest = backup.create(book['path'], bundle)
+    assert manifest['required']['account_evidence'] == sorted([sha, *hashes])
     backup.verify(bundle)
     backup.restore(bundle, restored)
     conn = db.connect(restored / 'app.db')
@@ -231,6 +381,22 @@ def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path)
         assert capture(book)['state_sha256'] == nav.capture(conn, book['principal'], 'a')['state_sha256']
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize('damage', ['artifact', 'index', 'dates', 'references'])
+def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, damage):
+    value = request(book)
+    sha = evaluate(book, value)['artifact_sha256']
+    if damage in ('artifact', 'index'):
+        (book['directory'] / (sha if damage == 'artifact' else value.benchmark_evidence_hash)).unlink()
+    else:
+        book['conn'].execute('DROP TRIGGER account_nav_refs_no_update')
+        if damage == 'dates':
+            book['conn'].execute("UPDATE account_nav_refs SET start_date='2026-01-06'")
+        else:
+            book['conn'].execute("UPDATE account_nav_refs SET evidence_hashes='[]'")
+    problems, _ = integrity.check(book['path'], book['path'].parent / 'pdf')
+    assert len(problems) == 1 and f'净值引用 {sha}' in problems[0]
 
 
 def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account):
@@ -248,7 +414,7 @@ def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account
         with pytest.raises(ToolError) as error:
             invoke(Context(book['conn'], book['path'], other, account_shadow_enabled=True), 'account.nav.capture', {'account_id': 'a'})
         assert error.value.status == 403
-    book['conn'].execute('DELETE FROM api_keys WHERE id=?', (book['principal'].key_id,))
+    api_keys.revoke(book['conn'], book['principal'].key_id)
     with pytest.raises(ToolError) as error:
         invoke(ctx, 'account.nav.capture', {'account_id': 'a'})
     assert error.value.status == 403

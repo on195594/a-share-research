@@ -83,6 +83,21 @@ def verify(directory: Path, sha: str) -> bool:
     return True
 
 
+def create_upload_table(conn) -> None:
+    """Which grant uploaded which immutable object under what name; NAV artifacts are not uploads."""
+    conn.execute('''CREATE TABLE IF NOT EXISTS account_evidence_uploads (
+        id INTEGER PRIMARY KEY,
+        sha256 TEXT NOT NULL CHECK(length(sha256)=64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+        uploaded_at TEXT NOT NULL, key_id INTEGER NOT NULL REFERENCES api_keys(id),
+        filename TEXT CHECK(filename IS NULL OR length(filename) BETWEEN 1 AND 200),
+        label TEXT CHECK(label IS NULL OR length(label) BETWEEN 1 AND 80))''')
+    conn.execute('CREATE INDEX IF NOT EXISTS account_evidence_uploads_by_key ON account_evidence_uploads(key_id, id)')
+    for operation in ('UPDATE', 'DELETE'):
+        conn.execute(f'''CREATE TRIGGER IF NOT EXISTS account_evidence_uploads_no_{operation.lower()}
+            BEFORE {operation} ON account_evidence_uploads
+            BEGIN SELECT RAISE(ABORT,'evidence uploads are append-only'); END''')
+
+
 def store(directory: Path, content: bytes) -> str:
     """Atomically install immutable bytes without replacing an existing object."""
     if not isinstance(content, bytes) or not content or len(content) > MAX_BYTES:

@@ -195,15 +195,17 @@ def test_readable_scan_request_table_requires_compatible_runtime(source, tmp_pat
     rollback.snapshot(source[0] / 'app.db', target)
     before = database_rows(target / 'bundle/app.db')
     if older == 'schema':
-        monkeypatch.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:20])
+        monkeypatch.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:24])
+        reason = 'schema_version_mismatch'
     else:
         monkeypatch.delattr(scans, 'submit_request')
-    assert rollback_probe.probe(target) == dict(ok=False, reason='scan_requests_unsupported')
+        reason = 'scan_requests_unsupported'
+    assert rollback_probe.probe(target) == dict(ok=False, reason=reason)
     assert database_rows(target / 'bundle/app.db') == before
 
 
-def test_protocol_incompatibility_is_a_valid_rejection(tmp_path, monkeypatch):
-    reason = 'scan_requests_unsupported'
+@pytest.mark.parametrize('reason', ['scan_requests_unsupported', 'schema_version_mismatch'])
+def test_protocol_incompatibility_is_a_valid_rejection(tmp_path, monkeypatch, reason):
     def run(command, **kwargs):
         if command[1] == 'rm':
             return subprocess.CompletedProcess(command, 0, '', '')

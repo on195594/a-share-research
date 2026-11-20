@@ -1,6 +1,7 @@
 """Evidence-bound NAV replay, independent of investment policies and live market access."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 import json
@@ -10,11 +11,12 @@ from typing import Annotated, Literal
 from pydantic import Field, StrictBool, StrictInt, field_validator
 
 from a_share_research import db, gate
-from a_share_research.account import evidence, ledger
+from a_share_research.account import evidence, ledger, nav_refs
 from a_share_research.account.reconciliation import (
     Event, Money, Opening, Value, ValuationTime, identity, project, valuation_time,
 )
 from a_share_research.core import account_nav
+from a_share_research.core.market_data import EMPTY_RESPONSE
 
 Hash = Annotated[str, Field(pattern=r'^[0-9a-f]{64}$')]
 Id = Annotated[StrictInt, Field(gt=0)]
@@ -49,7 +51,7 @@ class Request(Value):
     end: ValuationRef
     flows: list[FlowRef]
     coverage: Coverage
-    benchmark_evidence_hash: Hash
+    benchmark_evidence_hash: Hash | None = None
 
 
 class IndexRow(Value):
@@ -73,7 +75,13 @@ class IndexEvidence(Value):
     fetched_at: ValuationTime
     source_as_of: str
     status: Literal['ok']
-    rows: list[IndexRow] = Field(min_length=2, max_length=10000)
+    rows: list[IndexRow] = Field(max_length=10000)
+    # Server captures retain the request interval and the provider's response metadata.
+    requested_dates: tuple[date, date] | None = None
+    error_code: None = None
+    error_type: None = None
+    fallback_reason: None = None
+    freshness_days: StrictInt | None = None
 
     @field_validator('schema_version', mode='before')
     @classmethod
@@ -202,7 +210,7 @@ def _valuation(source, ref, directory):
     return account_nav.Valuation(as_of=value['portfolio_value_as_of'], total_assets=value['total_assets'])
 
 
-def _compute(source, request, directory):
+def _account_inputs(source, request, directory):
     if gate.digest(source) != request.expected_state_sha256:
         raise ledger.LedgerError('账户资料已变化，请重新捕获并核对资金覆盖声明', 409)
     active = _active(source)
@@ -212,6 +220,7 @@ def _compute(source, request, directory):
         raise ValueError('缺完整外部资金流水声明，或含暂不支持的证券转入转出')
     if (coverage.start, coverage.end) != (start.as_of, end.as_of):
         raise ValueError('资金流水覆盖声明须精确匹配起止估值时点')
+    account_nav.validate_endpoints(start, end)
     for sha in coverage.evidence_hashes:
         evidence.verify(directory, sha)
     flows = {key: e for key, e in active.items() if e.kind in ('deposit', 'withdrawal')
@@ -233,34 +242,88 @@ def _compute(source, request, directory):
         values.append(account_nav.Flow(event_id=ref.event_id, occurred_at=event.occurred_at,
             cash=event.cash if event.kind == 'deposit' else event.cash.copy_negate(),
             before=_valuation(source, ref.before, directory)))
-    index = IndexEvidence.model_validate(_json(evidence.read(directory, request.benchmark_evidence_hash), decimal_numbers=True))
+    return start, end, values
+
+
+def _index_closes(raw, start, end, sha):
+    index = IndexEvidence.model_validate(raw)
     closes = {row.date: row.close for row in index.rows}
     if len(closes) != len(index.rows):
         raise ValueError('指数日期重复，不能静默覆盖')
-    if (start.as_of.date() not in closes or end.as_of.date() not in closes
-            or date.fromisoformat(index.source_as_of) < end.as_of.date()
-            or any(day > date.fromisoformat(index.source_as_of) for day in closes)
-            or index.fetched_at < end.as_of):
-        raise ValueError('H00906 收盘端点缺失或指数时点不一致，不能用最近交易日替代')
-    inputs = account_nav.Inputs(start=start, end=end, flows=values,
-        benchmark_start=closes[start.as_of.date()], benchmark_end=closes[end.as_of.date()])
+    missing = [str(day) for day in (start.date(), end.date()) if day not in closes]
+    if missing:
+        raise ValueError(f'H00906 缺少 {"、".join(missing)} 的收盘值，请另选两端均有收盘证据的区间。证据 {sha}')
+    as_of = date.fromisoformat(index.source_as_of)
+    if any(day > as_of for day in closes) or index.fetched_at < end:
+        raise ValueError('H00906 指数时点不一致，请核对采集时点或另选区间')
+    return closes[start.date()], closes[end.date()]
+
+
+def _compute(account_inputs, request, directory, *, collected):
+    start, end, values = account_inputs
+    sha = request.benchmark_evidence_hash
+    raw = _json(evidence.read(directory, sha), decimal_numbers=True)
+    first, last = _index_closes(raw, start.as_of, end.as_of, sha)
+    inputs = account_nav.Inputs(start=start, end=end, flows=values, benchmark_start=first, benchmark_end=last)
     return {'inputs': inputs.model_dump(mode='json'), 'calculation': account_nav.evaluate(inputs),
-            'basis': {'currency': 'CNY', 'scope': coverage.scope, 'benchmark': 'H00906.CSI',
+            'basis': {'currency': 'CNY', 'scope': request.coverage.scope, 'benchmark': 'H00906.CSI',
                 'coverage': 'caller_declared_with_evidence', 'trade_history_acceptance': 'not_assessed',
-                'benchmark_provenance': 'supplied_evidence_not_live_collection',
+                'benchmark_provenance': 'tools_collected_evidence' if collected else 'supplied_evidence_not_live_collection',
                 'costs': 'account_observed_after_actual_costs_vs_index_total_return',
                 'valuation_selection': 'explicit_refs_not_latest_record'}}
 
 
-def evaluate(conn, principal, account_id: str, request: Request, directory: Path) -> dict:
-    """Save immutable inputs/results; no account, policy or original report is modified."""
+def _saved_collection(conn, account_id, request, request_hash, directory):
+    rows = conn.execute('SELECT artifact_sha256 FROM account_nav_refs '
+                        'WHERE account_id=? AND start_date=? AND end_date=?',
+                        (account_id, request.coverage.start.date().isoformat(), request.coverage.end.date().isoformat()))
+    for row in rows:
+        sha = row['artifact_sha256']
+        artifact = _json(evidence.read(directory, sha))
+        if artifact.get('collection_request_sha256') == request_hash:
+            return {'artifact_sha256': sha, 'state_sha256': request.expected_state_sha256, **artifact['result']}
+    return None
+
+
+def evaluate(conn, principal, account_id: str, request: Request, directory: Path, *,
+             collect_index: Callable[[str, str], dict] | None = None) -> dict:
+    """Record the evidence-backed interval and return its immutable calculation."""
     try:
         request = Request.model_validate(request)
+        account_id = ledger._account(account_id)
+        collected = request.benchmark_evidence_hash is None
+        if collected:
+            ledger.authorize(conn, principal)
+            request_hash = gate.digest(request.model_dump(mode='json'))
+            if saved := _saved_collection(conn, account_id, request, request_hash, directory):
+                return saved
         captured = capture(conn, principal, account_id)
-        result = _compute(captured['source'], request, directory)
-        artifact = {'schema': 'account_nav_v1', 'account_id': account_id, 'source': captured['source'],
-                    'request': request.model_dump(mode='json'), 'result': result}
-        sha = evidence.store(directory, gate.canonical(artifact).encode())
+        account_inputs = _account_inputs(captured['source'], request, directory)
+        if collected:
+            if collect_index is None:
+                raise ValueError('请通过 account.nav.evaluate 采集指数，或提供 benchmark_evidence_hash')
+            start, end, _ = account_inputs
+            response = collect_index(start.as_of.date().isoformat(), end.as_of.date().isoformat())
+        with db.transaction(conn):
+            ledger.authorize(conn, principal)
+            if collected:
+                # A concurrent caller may have committed while we were fetching the index.
+                if saved := _saved_collection(conn, account_id, request, request_hash, directory):
+                    return saved
+                index_sha = evidence.store(directory, gate.canonical(response).encode())
+                if response['status'] != 'ok':
+                    if response['error_code'] == EMPTY_RESPONSE:
+                        raise ledger.LedgerError(f'H00906 在 {start.as_of.date()} 至 {end.as_of.date()} '
+                                                 f'无交易日收盘数据，请另选区间。证据 {index_sha}', 422)
+                    raise ledger.LedgerError(f'H00906 行情暂不可用，稍后用原请求重试。证据 {index_sha}', 503)
+                request = request.model_copy(update={'benchmark_evidence_hash': index_sha})
+            result = _compute(account_inputs, request, directory, collected=collected)
+            artifact = {'schema': 'account_nav_v1', 'account_id': account_id, 'source': captured['source'],
+                        'request': request.model_dump(mode='json'), 'result': result}
+            if collected:
+                artifact['collection_request_sha256'] = request_hash
+            sha = evidence.store(directory, gate.canonical(artifact).encode())
+            nav_refs.record(conn, artifact, sha, principal.key_id)
         return {'artifact_sha256': sha, 'state_sha256': captured['state_sha256'], **result}
     except (ValueError, KeyError, TypeError) as exc:
         if isinstance(exc, (ledger.LedgerError, evidence.EvidenceError)):
@@ -271,13 +334,19 @@ def evaluate(conn, principal, account_id: str, request: Request, directory: Path
 def replay(conn, principal, account_id: str, artifact_sha256: str, directory: Path) -> dict:
     """Recompute saved inputs, not current account truth; uploaded hashes are not authentication."""
     ledger.authorize(conn, principal)
+    account_id = ledger._account(account_id)
     try:
         artifact = _json(evidence.read(directory, artifact_sha256))
-        if (set(artifact) != {'schema', 'account_id', 'source', 'request', 'result'}
+        collected = 'collection_request_sha256' in artifact
+        if (set(artifact) - {'collection_request_sha256'} != {'schema', 'account_id', 'source', 'request', 'result'}
                 or artifact['schema'] != 'account_nav_v1' or artifact['account_id'] != account_id
                 or artifact['source']['account_id'] != account_id):
             raise ValueError('净值输入包格式或账户不一致')
-        result = _compute(artifact['source'], Request.model_validate(artifact['request']), directory)
+        request = Request.model_validate(artifact['request'])
+        if collected and artifact['collection_request_sha256'] != gate.digest(
+                request.model_dump(mode='json') | {'benchmark_evidence_hash': None}):
+            raise ValueError('净值采集请求与保存凭证不一致')
+        result = _compute(_account_inputs(artifact['source'], request, directory), request, directory, collected=collected)
         if result != artifact['result']:
             raise ValueError('保存结果与固定输入重放不一致')
         return {'artifact_sha256': artifact_sha256, 'mode': 'saved_input_replay', **result}

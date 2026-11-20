@@ -1,5 +1,7 @@
 """Release-order simulations only: no Docker, live service or production acceptance."""
+import io
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -14,11 +16,13 @@ local_policy = _local_policy
 @pytest.fixture
 def operations(monkeypatch,tmp_path):
     """Model container images and local admission without mocking release decisions."""
-    def setup(*, existing=True, failure=None, paused=False, compatible=True):
+    def setup(*, existing=True, failure=None, paused=False, compatible=True, previous_config=False):
         data=tmp_path/'data'
         data.mkdir(exist_ok=True)
+        cards = str(tmp_path / 'method-cards')
         state=SimpleNamespace(events=[], existing=existing, failure=failure, paused=paused,
             in_flight=0, data=data, env={'DATA_DIR':'/data','TUSHARE_TOKEN':'private-test-value',
+                'METHOD_CARDS_DIR':'/method-cards',
                 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED':'0'},
             tags={'web':'old-web','worker':'old-worker'},
             containers={'web':'old-web','worker':'old-worker'},
@@ -26,19 +30,30 @@ def operations(monkeypatch,tmp_path):
         if existing:
             state.containers['tools']='old-worker'
             state.running['tools']=True
+        state.declared_hashes = {s: f'config-{s}' for s in ('web', 'worker', 'tools')}
+        running_hashes = state.declared_hashes.copy()
+        previous_services = {'web', 'tools'} if previous_config else set()
+        for service in previous_services:
+            running_hashes[service] = 'previous-' + service
 
         def record(name,*args):
             state.events.append((name,*args))
 
         def describe(service):
             record('describe',service,state.containers[service])
-            return {'image':state.containers[service],'running':state.running[service],
-                    'config_hash':f'config-{service}','cpus':0,'ports':{},
-                    'mounts':{'/data':[str(data),True]}} if service!='tools' else {
-                    'image':state.containers[service],'running':state.running[service],
-                    'config_hash':'config-tools','cpus':400_000_000,
-                    'ports':{'8621/tcp':[{'HostIp':'127.0.0.1','HostPort':'8621'}]},
-                    'mounts':{'/data':[str(data),True],'/run/ashare-tools':['tmpfs',True]}}
+            info = {'image': state.containers[service], 'running': state.running[service],
+                    'config_hash': running_hashes[service], 'cpus': 0, 'ports': {},
+                    'networks': ['nginx-network'] if service != 'worker' else ['a-share-research_default'],
+                    'mounts': {'/data': [str(data), True], '/method-cards': [cards, False]}}
+            if service in previous_services:
+                del info['mounts']['/method-cards']
+                if service == 'tools':
+                    info['networks'] = ['a-share-research_default']
+            if service == 'tools':
+                info['cpus'] = 400_000_000
+                info['ports'] = {'8621/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8621'}]}
+                info['mounts']['/run/ashare-tools'] = ['tmpfs', True]
+            return info
 
         def run(*args):
             if args[:2]==('docker','compose') and '--hash' in args and args[-1]=='tools':
@@ -61,10 +76,15 @@ def operations(monkeypatch,tmp_path):
                 return ''
             if args[:3]==('docker','compose','config'):
                 if '--hash' in args:
-                    return f'{args[-1]} config-{args[-1]}'
-                volume={'source':str(data),'target':'/data','type':'bind'}
-                return json.dumps({'services':{'web':{'volumes':[volume]},'worker':{'volumes':[volume]},
-                    'tools':{'image':'a-share-research-worker','environment':state.env,'volumes':[volume],
+                    return f'{args[-1]} {state.declared_hashes[args[-1]]}'
+                volumes = [{'source': str(data), 'target': '/data', 'type': 'bind'},
+                           {'source': cards, 'target': '/method-cards', 'type': 'bind', 'read_only': True}]
+                return json.dumps({'networks': {'nginx-network': {'name': 'nginx-network'},
+                                                'default': {'name': 'a-share-research_default'}},
+                    'services':{'web':{'volumes':volumes, 'networks': {'nginx-network': None}},
+                                'worker':{'volumes':volumes, 'networks': {'default': None}},
+                    'tools':{'image':'a-share-research-worker','environment':state.env,'volumes':volumes,
+                             'networks': {'nginx-network': None},
                              'tmpfs':['/run/ashare-tools:uid=1000,gid=1000,mode=0700']}}})
             if args[:3]==('docker','compose','stop'):
                 for service in args[5:]:
@@ -75,6 +95,8 @@ def operations(monkeypatch,tmp_path):
                 for service in services:
                     state.containers[service]=state.tags['worker' if service=='tools' else service]
                     state.running[service]=True
+                    running_hashes[service] = state.declared_hashes[service]
+                    previous_services.discard(service)
                 if 'tools' in services and not existing:
                     state.paused=Gate(state.data/'.tools-paused').status()['paused']
                     record('first_start_marker',state.paused)
@@ -145,6 +167,8 @@ def operations(monkeypatch,tmp_path):
                 service:{'ok':compatible,'error':None if compatible else 'incompatible_records'}
                 for service in images}}
 
+        # Host locking has a separate test; simulated releases never lock the checkout.
+        monkeypatch.setattr(deploy, 'release_lock', nullcontext)
         monkeypatch.setattr(deploy,'run',run)
         monkeypatch.setattr(deploy,'describe',describe)
         monkeypatch.setattr(deploy,'verify_images',lambda code:{'web':'new-web','worker':'new-worker'})
@@ -266,13 +290,24 @@ def test_existing_tools_must_share_old_worker_image(operations):
     assert ('control','pause') not in state.events
 
 
-def test_tools_configuration_refuses_model_credentials_without_printing_values(operations,caplog,capsys):
+@pytest.mark.parametrize('allow_config', [False, True])
+def test_tools_configuration_refuses_model_credentials_without_printing_values(operations,caplog,capsys,allow_config):
     state=operations()
     state.env['MODEL_API_KEY']='do-not-expose-private-value'
     with pytest.raises(RuntimeError) as error:
-        deploy.deploy('revision',state.evidence)
+        deploy.deploy('revision',state.evidence,allow_config=allow_config)
     assert not commands(state,'stop')
     assert 'do-not-expose-private-value' not in str(error.value)+caplog.text+capsys.readouterr().out
+
+
+@pytest.mark.parametrize('environment', [None, {'METHOD_CARDS_DIR': '/wrong-directory'}])
+def test_tools_requires_the_configured_method_cards_directory_before_pause(operations, environment):
+    state = operations()
+    state.env = environment
+    with pytest.raises(RuntimeError, match='METHOD_CARDS_DIR'):
+        deploy.deploy('revision', state.evidence, allow_config=True)
+    assert ('control', 'pause') not in state.events
+    assert not commands(state, 'stop')
 
 
 def test_lost_resume_reply_drains_again_before_rolling_back(operations):
@@ -307,14 +342,16 @@ def test_failed_redrain_after_lost_resume_never_replaces_or_removes_running_tool
 
 
 def test_backup_failure_restarts_existing_services_without_retagging(operations):
-    state=operations(failure='backup')
+    state=operations(failure='backup', previous_config=True)
     with pytest.raises(RuntimeError,match='backup failure'):
-        deploy.deploy('revision',state.evidence)
+        deploy.deploy('revision',state.evidence,allow_config=True)
     assert commands(state,'start')[-1][-3:]==('web','worker','tools')
     assert not commands(state,'up')
     assert all(state.running.values()) and not state.paused
     assert state.tags=={'web':'old-web','worker':'old-worker'}
     assert not any(event[0]=='rollback_probe' for event in state.events)
+    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
+    assert checkpoint['status'] == 'recovered' and checkpoint['actual'] == checkpoint['before']
 
 
 def test_first_tools_backup_failure_cleans_marker_without_removing_any_container(operations):
@@ -397,6 +434,90 @@ def test_first_tools_starts_paused_and_only_resumes_after_checks(operations):
     assert index(state,('describe','tools','new-worker'))<index(state,('control','resume'))
     assert ('control','pause') not in state.events
     assert commands(state,'up')[-1][-3:]==('web','worker','tools')
+
+
+@pytest.mark.parametrize('allow_config', [False, True])
+def test_rollout_from_previous_mounts_and_network_requires_authorization(operations, allow_config):
+    state = operations(previous_config=True)
+    if allow_config:
+        deploy.deploy('revision', state.evidence, allow_config=True)
+        assert not state.paused and state.containers['tools'] == 'new-worker'
+    else:
+        with pytest.raises(RuntimeError, match='Compose 或环境配置发生变化'):
+            deploy.deploy('revision', state.evidence)
+        assert not commands(state, 'stop')
+
+
+def test_completion_of_ordinary_rollback_refuses_old_images_with_new_configuration(operations):
+    state = operations(failure='preflight', previous_config=True)
+    with pytest.raises(RuntimeError, match='web 镜像、运行状态或部署配置不一致'):
+        deploy.deploy('revision', state.evidence, allow_config=True)
+    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
+    assert checkpoint['phase'] == 'rollback-policy-gate' and checkpoint['status'] == 'held'
+    assert checkpoint['allow_config'] is False
+    assert state.containers == {s: info['image'] for s, info in checkpoint['before'].items()}
+    assert checkpoint['actual']['tools']['config_hash'] == state.declared_hashes['tools']
+    with pytest.raises(RuntimeError, match='web 镜像、运行状态或部署配置不一致'):
+        deploy.complete_held(state.evidence)
+    assert state.paused and ('control', 'resume') not in state.events
+
+
+def test_same_image_with_only_a_changed_service_hash_recreates_before_resuming(operations, monkeypatch):
+    state = operations()
+    monkeypatch.setattr(deploy, 'verify_images', lambda _: dict(state.tags))
+    state.declared_hashes['tools'] = 'changed-env'
+    deploy.deploy('revision', state.evidence, allow_config=True)
+    assert index(state, ('control', 'pause')) < index(state, ('run', 'docker', 'compose', 'up'))
+    assert index(state, ('run', 'docker', 'compose', 'up')) < index(state, ('control', 'resume'))
+    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
+    assert checkpoint['phase'] == 'ready' and checkpoint['actual']['tools']['config_hash'] == 'changed-env'
+
+
+@pytest.mark.parametrize('service, drift', [('tools', 'missing'), ('tools', 'extra-network'),
+                                           ('tools', 'hash'), ('worker', 'hash')])
+def test_authorized_release_checks_declared_config_including_first_tools(operations, monkeypatch, service, drift):
+    state = operations(existing=False)
+    inspect = deploy.describe
+
+    def describe(name):
+        info = inspect(name)
+        if name == service and info['image'].startswith('new-'):
+            if drift == 'missing':
+                del info['mounts']['/method-cards']
+            elif drift == 'extra-network':
+                info['networks'].append('a-share-research_default')
+            else:
+                info['config_hash'] = 'different-from-declaration'
+        return info
+
+    monkeypatch.setattr(deploy, 'describe', describe)
+    with pytest.raises(RuntimeError, match=service + ' 镜像、运行状态或部署配置不一致'):
+        deploy.deploy('revision', state.evidence, allow_config=True, with_tools=True)
+    assert ('rollback_probe',) in state.events
+    assert 'tools' not in state.containers and ('control', 'resume') not in state.events
+
+
+@pytest.mark.parametrize('service, drift', [('tools', 'writable'), ('web', 'source'), ('tools', 'public-port')])
+def test_rollback_enforces_mount_and_loopback_requirements_even_if_present_before(operations, monkeypatch, service, drift):
+    state = operations()
+    inspect = deploy.describe
+
+    def describe(name):
+        info = inspect(name)
+        if name == service:
+            if drift == 'writable':
+                info['mounts']['/method-cards'][1] = True
+            elif drift == 'source':
+                info['mounts']['/method-cards'][0] += '-other'
+            else:
+                info['ports']['8621/tcp'][0]['HostIp'] = '0.0.0.0'
+        return info
+
+    monkeypatch.setattr(deploy, 'describe', describe)
+    with pytest.raises(RuntimeError, match='回环端口' if drift == 'public-port' else '/method-cards'):
+        deploy.deploy('revision', state.evidence)
+    assert ('rollback_probe',) in state.events
+    assert state.paused and ('control', 'resume') not in state.events
 
 
 @pytest.mark.parametrize('control_mount', [['tmpfs', False], ['/private/bind-control', True]])
@@ -621,3 +742,30 @@ def test_completion_evidence_failure_redrains_before_any_recording(operations, m
     resumed_at = [i for i, e in enumerate(state.events) if e == ('control', 'resume')][-1]
     assert ('control', 'pause') in state.events[resumed_at+1:]
     assert not any(e[:3] == ('run', 'docker', 'compose') for e in state.events[resumed_at+1:])
+
+
+def test_tools_ready_trusts_the_running_image_schema_check(monkeypatch):
+    # A pre-migration restart runs the previous image on the previous schema; tools itself vouches for the match.
+    answers = [dict(database_ready=False, schema_version=24, paused=True, in_flight=0),
+               dict(database_ready=True, schema_version=24, paused=True, in_flight=0)]
+
+    class Opener:
+        def open(self, url, timeout):
+            return io.BytesIO(json.dumps(answers.pop(0)).encode())
+    monkeypatch.setattr(deploy, 'build_opener', lambda *a: Opener())
+    monkeypatch.setattr(deploy.time, 'sleep', lambda s: None)
+    assert deploy.wait_tools_ready(paused=True)['schema_version'] == 24
+    assert not answers
+
+
+def test_previous_config_held_before_switch_completes_against_its_snapshot(operations):
+    state = operations(failure='drain_timeout', previous_config=True)
+    with pytest.raises(RuntimeError):
+        deploy.deploy('revision', state.evidence, allow_config=True)
+    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
+    assert checkpoint['status'] == 'held' and checkpoint['actual'] == checkpoint['before']
+    state.in_flight = 0
+    state.failure = None
+    deploy.complete_held(state.evidence)
+    assert not state.paused
+    assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'recovered'

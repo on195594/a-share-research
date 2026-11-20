@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Self
@@ -60,9 +60,12 @@ class Settings:
     github_client_id: str
     github_client_secret: str
     github_user_id: str
+    tools_url: str = ""
+    tools_token: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls) -> Self:
+        tools_url = os.environ.get("ASHARE_TOOLS_URL", "").strip()
         settings = cls(
             base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
             session_secret=os.environ.get("SESSION_SECRET", ""),
@@ -70,10 +73,21 @@ class Settings:
             github_client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
             github_client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
             github_user_id=os.environ.get("GITHUB_USER_ID", ""),
+            tools_url=tools_url.rstrip("/"),
+            tools_token=os.environ.get("ASHARE_TOOLS_TOKEN", "").strip(),
         )
         url = urlparse(settings.base_url)
         if url.scheme not in ("http", "https") or not url.hostname:
             raise SystemExit("PUBLIC_BASE_URL must be an absolute http(s) URL")
+        if bool(tools_url) != bool(settings.tools_token):
+            raise SystemExit("ASHARE_TOOLS_URL and ASHARE_TOOLS_TOKEN must be configured together")
+        if tools_url:
+            try:
+                endpoint = urlparse(tools_url)
+            except ValueError:
+                raise SystemExit("ASHARE_TOOLS_URL is malformed") from None
+            if endpoint.scheme not in ("http", "https") or not endpoint.hostname or endpoint.username is not None:
+                raise SystemExit("ASHARE_TOOLS_URL must be an absolute http(s) URL without userinfo")
         if len(settings.session_secret) < 32:
             raise SystemExit("SESSION_SECRET must be at least 32 characters")
         if settings.dev_login and url.hostname not in ("127.0.0.1", "localhost"):
@@ -597,7 +611,7 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
 
 
 # JSON clients accept persistent API keys and legacy agent sessions, never cookies.
-def api_session(request: Request) -> str:
+def _api_credential(request: Request) -> tuple[str, api_keys.Principal | None]:
     header = request.headers.get("authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(401, "需要研究 API bearer token")
@@ -612,7 +626,12 @@ def api_session(request: Request) -> str:
             raise HTTPException(401, "研究凭据无效、已撤销或临时令牌已过期")
     if request.headers.get("x-research-version", service.VERSION) != service.VERSION:
         raise HTTPException(400, "不支持的研究合同版本")
-    return key
+    return key, principal
+
+
+def api_session(request: Request) -> str:
+    requester, _ = _api_credential(request)
+    return requester
 
 
 @app.exception_handler(service.RequestError)
@@ -778,9 +797,9 @@ def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
 
 @app.post("/api/session/revoke")
 def api_revoke(request: Request):
-    key = api_session(request)
-    if key.startswith("key:"):
-        conn.execute("DELETE FROM api_keys WHERE token_hash = ?", (key[4:],))
+    key, principal = _api_credential(request)
+    if principal:
+        api_keys.revoke(conn, principal.key_id)
     else:
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (key,))
     return {"version": service.VERSION, "revoked": True}

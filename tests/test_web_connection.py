@@ -10,6 +10,29 @@ from a_share_research import db
 from support.continuation import RECORDS
 
 
+def test_internal_tools_settings_accept_a_trimmed_pair_or_two_empty_values(web, monkeypatch):
+    monkeypatch.setenv("ASHARE_TOOLS_URL", "  http://a-share-research-tools:8621/  ")
+    monkeypatch.setenv("ASHARE_TOOLS_TOKEN", "  web-test-token  ")
+    settings = web.Settings.from_env()
+    assert (settings.tools_url, settings.tools_token) == ("http://a-share-research-tools:8621", "web-test-token")
+    monkeypatch.setenv("ASHARE_TOOLS_URL", " ")
+    monkeypatch.setenv("ASHARE_TOOLS_TOKEN", " ")
+    settings = web.Settings.from_env()
+    assert (settings.tools_url, settings.tools_token) == ("", "")
+
+
+@pytest.mark.parametrize(("url", "token"), [
+    (" ", "web-test-token"), ("https://tools", " "),
+    ("ftp://tools", "web-test-token"), ("http:///tools", "web-test-token"),
+    ("https://user:secret@tools", "web-test-token"), ("https://@tools", "web-test-token"),
+])
+def test_internal_tools_settings_reject_an_incomplete_pair_or_invalid_address(web, monkeypatch, url, token):
+    monkeypatch.setenv("ASHARE_TOOLS_URL", url)
+    monkeypatch.setenv("ASHARE_TOOLS_TOKEN", token)
+    with pytest.raises(SystemExit, match="ASHARE_TOOLS_URL"):
+        web.Settings.from_env()
+
+
 def test_connections_are_reused_per_thread_and_close_independently(web):
     conn = web.conn
     main_connection = conn.execute("SELECT 1").connection

@@ -14,6 +14,7 @@ DATA_DIR=/absolute/private/copy uv run python -m a_share_research.tools.server \
 ```sh
 python scripts/ashare.py tools
 python scripts/ashare.py call research.card --json '{"code":"600519"}'
+python scripts/ashare.py call research.methods --json '{"query":"低PE"}'
 python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具并绑定账本
 ```
 
@@ -31,7 +32,7 @@ python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具
 
 桥接串行处理请求，HTTP 超时 30 秒，不缓存权限、不重试写入，不提供资源、提示词、采样或后台任务。取消通知不承诺撤回已受理请求；连接断开/超时后应查询原回执，再按原请求标识重提。服务端仍按实时凭据、功能开关和暂停 Gate 受理，因此长期存活的宿主连接不能绕过撤销或发布排空。
 
-- `research` 与 `assistant` 均可检索和读取研究、提交研究与反馈、查询进度和操作月批。
+- `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research.methods`）、提交研究与反馈、查询进度和操作月批。
 - 扫描范围含已核实持仓，外部订阅含 Hermes 同步的持仓镜像。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
   - `research.company_overview` 与 `account.portfolio_overview` 分别对应所有者会话下的 `GET /stock/{code}/overview` 与 `GET /portfolio/overview`。组合逐项展示已核实持仓、当前周期论点、研究与公告复核，监控结果随附保存时的政策身份、启用编号和评估时点。会话可按返回的相对路径打开绑定账户的监控原件和最近一份已入账回执。
   - `account.research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
@@ -50,6 +51,8 @@ python scripts/ashare.py call account.state --json '{}'  # 需启用账户工具
 | `research.batch.monthly.request`、`research.batch.monthly.status` | 按上海自然月 `month`（YYYY-MM）提交或查状态。提交仅限当月，已存在的批次返回原编号；状态可传 `compact=false` 查看冻结名单和候选失败详情。 |
 
 研究和反馈受理后立即向用户给出 `run_id` 和 `path`（如 `/runs/42`，相对于 Web 站点），结束本轮等待。研究由 worker 执行，不在一轮里轮询。用户稍后询问进展时调用 `research.status`。响应丢失时保留原凭据和请求编号；同号改问题、公司或父报告会返回 409。旧版受理的研究没有保存调用身份，仍可用原编号找回。
+
+`research` 和 `assistant` 均可调用 `research.methods` 按关键词检索已审核方法卡。结果包含适用条件原文、来源链接和完整卡片目录的 `catalog_sha256`。目录不可用时，`gaps` 说明原因。
 
 `GET /tools` 按角色返回注册表及输入/输出 JSON Schema。`POST /tools/{name}` 接收 JSON 对象，成功为 `{ok:true,result:...}`，错误为 `{ok:false,error:{code,message}}` 与对应非 200 状态码。业务载荷保留现行 research-v1 数据结构。进程内入口为 `registry.invoke(Context, name, arguments)`，执行相同角色和参数检查；调用者须提供与该凭据对应的 Context。
 
@@ -75,7 +78,7 @@ v14 新增期初与投影、批次回执、事件、作废记录、资产观察�
 - `account.state` 返回账本版本、持仓股数、现金及显式容差。建立期初目前仅供内部调用，必须提供期初、时点、证据和经确认的容差，不向助手开放猜测期初或修改容差的入口。
 - `account.submit` 接收版本号、事件、原事件作废编号、证据哈希和完整期末快照；按业务身份去重，重新计算有效事件，校验股数、现金和总资产后事务入账。更正用作废加替代事件，保留原始内容。报告依据必须为同公司、不晚于成交日、通过复核的正式报告。
 - `account.events` 按事件编号分页返回原事件及当前是否有效，可据此取得更正所需编号；`account.receipt` 查询不可变批次回执。
-- `account.nav.capture`、`account.nav.evaluate`、`account.nav.replay` 分别捕获账本、计算区间净值、重放已有凭证。[净值工具手册](../../README.md#账户净值工具)
+- `account.nav.capture`、`account.nav.evaluate`、`account.nav.replay` 分别捕获账本、计算区间净值、重放已有凭证。计算时可省略 `request.benchmark_evidence_hash`，由服务端采集并保存 `H00906.CSI` 的 `tushare.index_daily` 响应。也可传入已保存的指数证据哈希。起止估值均须为上海时间 15:00:00。区间无交易日数据或缺任一端点收盘值时返回 422 / `invalid_arguments`，请另选区间。行情采集故障返回 503 / `unavailable`，稍后用原请求重试。两类错误均附指数响应的证据哈希。[净值工具手册](../../README.md#账户净值工具)
 - `account.observe` 将不完整截图保存为资产观察，只记录明确提供的金额，不推断缺失交易；重复提交复用观察编号。
 
 观察和完整快照均可提供 `portfolio_value_as_of`，只在原始证据明确给出估值时点时填写。须为完整、带时区的日期时间，程序统一为上海时区；日期、无时区时间和数字时间戳均拒绝。观察同时须有 total_assets，且 observed_at 明确时区、不早于估值时点；快照的时点不得早于期初或本次有效事件。未来估值拒绝：观察返回 422，快照返回 conflict 回执且不写交易。记录时间保留必要的微秒精度。

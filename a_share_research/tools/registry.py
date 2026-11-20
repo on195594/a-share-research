@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Annotated, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from requests import RequestException
 
 from a_share_research import api_keys, db, scans, service
@@ -46,6 +47,10 @@ class Company(Arguments):
 class Report(Arguments):
     report_id: int = Field(gt=0)
     compact: bool = True
+
+
+class MethodQuery(Arguments):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 
 
 class ResearchSearch(Arguments):
@@ -291,6 +296,16 @@ def _evidence_directory(ctx: Context) -> Path:
     return ctx.database.resolve().parent / 'account-evidence'
 
 
+def _collect_nav_index(start: str, end: str) -> dict:
+    from a_share_research.core.providers import TushareMarketDataProvider
+    from a_share_research.policy.benchmark import _response
+
+    response = _response(lambda: TushareMarketDataProvider().fetch_index_bars('H00906.CSI', start, end),
+                         kind='index', source='tushare.index_daily')
+    return dict(schema_version=1, code='H00906.CSI', currency='CNY', return_type='total_return',
+                requested_dates=[start, end], **response)
+
+
 def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
     try:
         content = base64.b64decode(args.content_base64, validate=True)
@@ -302,6 +317,19 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
 def _research_coverage(ctx: Context, args: Arguments) -> TradeRows:
     ledger.authorize(ctx.connection, ctx.principal)
     return TradeRows(rows=trades.research_available_at_trade(ctx.connection))
+
+
+def _research_methods(ctx: Context, args: MethodQuery) -> Payload:
+    from a_share_research.research_tools import active_methods_digest, method_cards, research_methods
+
+    root = os.environ.get('METHOD_CARDS_DIR')
+    if not root or not Path(root).is_dir():
+        return Payload(data=dict(cards=[], catalog_sha256=None, gaps=['方法卡目录未挂载，请检查 METHOD_CARDS_DIR']))
+    catalog = method_cards(root)
+    if not catalog:
+        return Payload(data=dict(cards=[], catalog_sha256=None, gaps=['方法卡目录没有可用卡片，请检查已审核卡的 stable 状态']))
+    return Payload(data=dict(cards=research_methods(ctx.connection, args.query, catalog=catalog),
+                             catalog_sha256=active_methods_digest(ctx.connection, catalog=catalog), gaps=[]))
 
 
 def _company_overview(ctx: Context, args: Company) -> Payload:
@@ -325,10 +353,11 @@ TOOLS = {tool.name: tool for tool in (
     Tool('account.nav.capture', '冻结账户账本与估值出处，返回资料哈希；不认定资金流水完整',
          frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=nav.capture(c.connection,c.principal,a.account_id)), account=True),
-    Tool('account.nav.evaluate', '按完整资金声明、明确流前估值和H00906收盘证据保存精确单位净值对照；缺项拒绝',
+    Tool('account.nav.evaluate', '按完整资金声明、明确流前估值保存净值对照；省略指数证据时采集 H00906 收盘值',
          frozenset({'assistant'}), AccountNav, Payload,
-         lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,_evidence_directory(c))),
-         access='write', account=True),
+         lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,
+                                               _evidence_directory(c), collect_index=_collect_nav_index)),
+         access='write', account=True, collects=True),
     Tool('account.nav.replay', '按哈希重放保存的净值输入与结果；不代表当前账户状态或券商认证',
          frozenset({'assistant'}), AccountNavReplay, Payload,
          lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
@@ -396,6 +425,8 @@ TOOLS = {tool.name: tool for tool in (
          ReportFeedback, Payload, _queue_research, access='write'),
     Tool('research.card', '读取指定公司论点卡', _READERS, Company, Payload,
          lambda c, a: Payload(data=service.company_card(c.connection, a.code))),
+    Tool('research.methods', '按空格分隔的关键词检索最多五张已审核方法卡，返回标题、含适用条件的正文、来源链接与目录哈希',
+         _READERS, MethodQuery, Payload, _research_methods),
     Tool('research.report', '读取报告及证据', _READERS, Report, Payload,
          lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
     Tool('research.scan.request', '按原凭据与请求编号提交或找回扫描，采集由 worker 执行', frozenset({'assistant'}),
@@ -429,6 +460,9 @@ def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
         raise ToolError('not_found', '工具不存在', 404)
     if ctx.principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
+    # Rechecked on each connection the call uses, so a grant revoked mid-request stops at the write.
+    if not api_keys.is_active(ctx.connection, ctx.principal.key_id, ctx.principal.role):
+        raise ToolError('forbidden', '凭据已撤销或角色已变更', 403)
     return tool
 
 
