@@ -4,9 +4,16 @@ import hashlib
 import json
 
 import pytest
+from fastapi import Request
 
-from a_share_research import db as app_db, reading, service
-from a_share_research.policy.v0 import cache, research_client
+from a_share_research import api_keys, db as app_db, reading, service
+from a_share_research.account import cycle_analysis, ledger, mirror, position_store
+from a_share_research.account.positions import PositionEntry
+from a_share_research.account.reconciliation import identity
+from a_share_research.policy.v0 import account_store, cache, monitor_research, research_client
+from a_share_research.tools.registry import Context, invoke
+from test_account import source_database
+from test_account_ledger import batch, book as book
 from test_service_delivery import SUCCESS, saved
 
 
@@ -43,9 +50,69 @@ def test_every_read_returns_what_the_service_returns_and_changes_nothing(researc
         json.dumps(service.run_view(conn, request_id=request_id)))
     assert _output(capsys, "budget") == {"version": service.VERSION, "budget": service.run_budget(conn)}
     assert _output(capsys, "card", code) == json.loads(json.dumps(service.company_card(conn, code)))
-    assert _output(capsys, "cards") == json.loads(json.dumps(service.company_cards(conn)))
+    assert _output(capsys, "cards") == {**service.company_cards(conn), "holdings_available": False}
 
     assert hashlib.sha256(isolated_cache_database.read_bytes()).hexdigest() == before
+
+
+def test_verified_holdings_expand_only_monitor_cards(research, isolated_cache_database, tmp_path):
+    conn, _, report = research
+    (tmp_path / "old").mkdir()
+    mirror.mirror(conn, source_database(tmp_path / "old" / "cache.db"))
+    principal = api_keys.authenticate(conn, api_keys.create(conn, "cards-test", role="research"))
+    public = invoke(Context(conn, isolated_cache_database, principal), "research_cards", {})["data"]
+    assert public == {"version": service.VERSION, "cards": [], "missing": []}
+
+    monitored = monitor_research.fetch_cards()
+    assert monitored["status"] == "ok"
+    [card] = monitored["cards"]
+    assert (card["code"], card["origin"], card["report_id"]) == ("600519", "external", report)
+    assert monitored["missing"] == [{"code": "000858", "origin": "external"}]
+
+    conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
+                 (app_db.now(), json.dumps({"codes": ["000858.SZ"]}), app_db.now()))
+    assert monitor_research.fetch_cards()["missing"] == [{"code": "000858", "origin": "l5"}]
+    # A missing piece of mirror evidence invalidates the holding scope, while L5 stays available.
+    (tmp_path / "account-snapshot.json").unlink()
+    degraded = monitor_research.fetch_cards()
+    assert degraded["status"] == "ok" and "未能核实持仓范围" in degraded["reason"]
+    assert degraded["cards"] == [] and degraded["missing"] == [{"code": "000858", "origin": "l5"}]
+
+
+def test_ledger_holding_card_is_only_visible_to_monitor(book, web, bind_account, tmp_path, monkeypatch):  # noqa: F811
+    conn, assistant, evidence, sha = book
+    directory = evidence.rename(tmp_path / "account-evidence")
+    database = tmp_path / "app.db"
+    monkeypatch.setenv("POLICY_V0_DB", str(database))
+
+    position_store.initialize(conn, assistant, "a", [], directory, [sha])
+    opening = account_store.initialize(conn, assistant, "a", directory, [sha])
+    purchase = batch(book)
+    purchase.position_entries["0"] = PositionEntry(policy_identity=opening["profile_identity"],
+                                                   name=SUCCESS["name"], framework="E消费")
+    receipt = ledger.submit(conn, assistant, "a", purchase, directory)
+    assert receipt["status"] == "posted"
+    cycle_analysis.initialize(conn, assistant, "a", "event:" + identity(purchase.events[0], "a"),
+                              dict(expected_account_version=receipt["version"], evidence_hashes=[sha]), directory)
+    bind_account(conn, "a")
+
+    code = purchase.events[0].code
+    with app_db.transaction(conn, immediate=False):
+        view = service.company_cards(conn, holdings=True)
+        assert conn.in_transaction and view["holdings_available"]
+        assert [card["code"] for card in view["cards"]] == [code]
+    monitored = monitor_research.fetch_cards()
+    assert monitored["status"] == "ok"
+    assert [(card["code"], card["origin"]) for card in monitored["cards"]] == [(code, "external")]
+
+    token = api_keys.create(conn, "cards-test", role="research")
+    principal = api_keys.authenticate(conn, token)
+    public = invoke(Context(conn, database, principal), "research_cards", {})["data"]
+    assert public == {"version": service.VERSION, "cards": [], "missing": []}
+    request = Request({"type": "http", "method": "GET", "path": "/api/cards",
+                       "headers": [(b"authorization", f"Bearer {token}".encode())]})
+    route = next(r for r in web.app.routes if r.path == request.scope["path"] and "GET" in r.methods)
+    assert route.endpoint(request) == public
 
 
 def test_missing_database_is_reported_and_not_created(isolated_cache_database, capsys):

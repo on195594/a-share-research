@@ -12,7 +12,7 @@ from test_stop_evaluation import bundle
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, ashare_cli):
     module = load('a-share-stop-alert')
     monkeypatch.setattr(module, 'STATE', tmp_path / 'state.json')
     class Clock(datetime):
@@ -52,26 +52,22 @@ def test_old_state_import_preserves_daily_upgrade_semantics(client, monkeypatch)
     assert '已跌破第二档' in client.check()[0]
 
 
-def test_ambiguous_response_reuses_original_request_then_advances_state(client, monkeypatch):
-    call, calls = transport(client, monkeypatch)
-    stored = {}
-    def lost(name, args):
-        receipt = call(name, args)
-        if name == 'policy_stop_alert':
-            stored['receipt'] = receipt
-            raise client.ToolsError('ambiguous')
-        return receipt
-    monkeypatch.setattr(client, 'tool', lost)
-    with pytest.raises(client.ToolsError): client.check()
+def test_ambiguous_response_reuses_original_request_then_advances_state(client, ashare_cli):
+    ashare_cli.reply('policy_current', {'installed': True, 'activation': {'id': 7}})
+    ashare_cli.reply('policy_stop_alert', code=22)
+    with pytest.raises(client.ToolsError, match='结果未知'):
+        client.check()
     pending = client.load_state()['pending']
     assert client.load_state()['state'] == {}
-    def recover(name, args):
-        assert name == 'policy_stop_alert' and args == pending
-        return stored['receipt']
-    monkeypatch.setattr(client, 'tool', recover)
-    assert '第一档' in client.check()[0]
-    assert client.load_state()['pending'] is None
-    assert len(calls) == 2
+    captured = bundle(state=pending['previous_state'])
+    ashare_cli.reply('policy_stop_alert', dict(
+        mode='service_stop_alert_capture', request_id='$request_id', activation_id='$expected_activation_id',
+        input=captured, result=stop_evaluation.evaluate(captured, captured['risk_policy'])))
+    output, error, status = client.check()
+    assert '第一档' in output and error == '' and status == 0
+    assert client.load_state() == dict(schema_version=1, pending=None,
+                                      state={'date': '2026-10-22', 'levels': {'000963': 'stop1'}})
+    assert ashare_cli.calls == [('policy_current', {}), ('policy_stop_alert', pending), ('policy_stop_alert', pending)]
 
 
 def test_expired_receipt_does_not_advance_levels_or_emit_alert(client, monkeypatch):
@@ -142,7 +138,8 @@ def test_failed_state_commit_does_not_print_or_lose_pending(client, monkeypatch,
 def test_certain_activation_change_preserves_levels_and_uses_durable_replacement(client, monkeypatch):
     original = dict(request_id='before-release', expected_activation_id=3,
                     previous_state=dict(date='2026-11-04', levels={'600519': 'near'}))
-    client.STATE.write_text(json.dumps(dict(schema_version=1, state=original['previous_state'], pending=original)))
+    client.STATE.write_text(json.dumps(dict(schema_version=1, state=original['previous_state'], pending=original,
+        binding=client.client_identity()[0])))
     calls = []
     def tool(name, args):
         calls.append((name, deepcopy(args)))

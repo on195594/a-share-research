@@ -17,7 +17,7 @@ def source(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, ashare_cli):
     module = load('a-share-daily-brief')
     monkeypatch.setattr(module, 'STATE', tmp_path / 'daily-state.json')
     class Clock(datetime):
@@ -124,7 +124,8 @@ def test_state_write_failure_does_not_send_brief(client, source, monkeypatch, ca
 
 def test_certain_activation_change_recollects_with_new_durable_uuid(client, source, monkeypatch):
     original = dict(request_id='daily-before-release', expected_activation_id=3)
-    client.STATE.write_text(json.dumps(dict(schema_version=1, pending=original)))
+    client.STATE.write_text(json.dumps(dict(schema_version=1, pending=original,
+        binding=client.client_identity()[0])))
     calls = []
     def tool(name, args):
         calls.append((name, deepcopy(args)))

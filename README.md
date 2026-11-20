@@ -81,17 +81,17 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 ## Agent 研究 API
 
-Hermes 脚本等长期调用方使用具名研究 API Key，持续有效直到撤销。owner 在目标实例的数据目录管理（容器内使用同样的 Python 模块）：
+Hermes 业务脚本通过 `ashare` 调用 MCP，共用专属的 `assistant` PAT。所有者在目标实例管理凭据，`create` 只输出一次明文：
 
 ```bash
-DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create hermes-advisor
+DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys create hermes-assistant --role assistant
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke <Key编号>
 ```
 
-`create` 只输出一次明文，存入调用方 0600 的私有 `runtime.env`：`A_SHARE_RESEARCH_URL` 指向服务，`A_SHARE_RESEARCH_TOKEN` 保存 Key；不进入聊天、日志、命令参数或 Git。服务端只存令牌哈希，`list` 显示编号、名称、创建时间和角色。所有者在本地管理 Key。上例默认创建 `research` 凭据，可调用研究 API 和只读研究工具。其他角色的权限见[工具手册](a_share_research/tools/README.md)。
+将 MCP 地址和令牌存入 0600 的 `~/.config/ashare/hermes-assistant.json`，字段为 `url` 和 `token`。切换前在非扫描时段确认旧 `scan.json` 的 `pending` 为空。已有政策评估待查时也须先用原 assistant 身份查回。切换验证后，旧 `runtime.env` 中的 research key 由所有者按退役流程撤销。历史 grant 编号保留供审计。角色权限见[工具手册](a_share_research/tools/README.md)。
 
-轮换：创建新 Key → 更新配置并验证读取 → 按编号撤销旧 Key。同名 Key 可并存；环境变量优先于文件，须排除旧值覆盖。Key 不受服务重启或浏览器登录/退出影响。401 后先修复凭据，再沿用原 `request_id` 重试。
+以下 HTTP 路由在段 2 保留作热备。已有 research key 可继续读取公开研究范围。
 
 临时验收仍可用 `python -m a_share_research.login_token --agent --minutes 60`（1–480 分钟，不续期）。两种凭据均通过 `Authorization: Bearer ...` 发送，与浏览器 cookie 隔离；`POST /api/session/revoke` 仅撤销当前凭据。API 无需模型或行情凭据。
 
@@ -233,7 +233,7 @@ V1 可加 `--html review.html` 导出可直接打开的手机友好静态快照�
 - **情景测算**：通过报告带 `valuation_calc`（规则 `valuation-v1`，默认回报门槛 10%/3%；另有影子规则 `valuation-v2` 按情景概率加权给出期望年化与门槛价，A3 并行记分）：各情景年化回报、测算支持区/中性区/测算透支区、隐含盈利要求、敏感性、价格桥、5 年 PE 分位参照，以及测算完成后才取的卖方预测对照（TuShare `report_rc`，共享 61 秒间隔与默认每日 8 次预算，按覆盖情况标 `partial` / `unavailable`）。
 - **卖方覆盖恢复**：worker 空闲时每次补一个缺失交易日，冷却与进度跨重启保存，不新增服务或 cron。成功空表与未抓取分列，空表定期复查；不会改写旧报告或冻结批次。查看最近续补进度及当前预算（不请求上游）：`docker exec a-share-research-worker python -m a_share_research.consensus_backfill`。字段含覆盖/缺失/空结果/可能截断日、最近检查与下次续补时间；首次完整回补须在现有预算内跨日积累。
 - **论点卡**：`GET /api/companies/{code}/card`，最新一份通过复核的非纠错研究；有卡片之后的新披露且复核未通过时为 `待复核`，区间暂停解读。
-- **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码。Hermes 每次新扫描前将已核实的持仓同步为外部订阅。worker 扫描时从共享库合并订阅、已核实持仓、冻结 L5 和有论点卡的公司，每个代码保留全部来源。`/api/cards` 沿用外部订阅与最近冻结 L5。`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回已保存的完整扫描范围（含 `holding` 来源）、事件、失败与 `notify`。`GET /api/scans/weekly` 的 `scan_scope` 仅按订阅、冻结 L5 与论点卡列举。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`scan`/`weekly`，凭据在其 0600 `runtime.env`）负责。
+- **订阅与扫描**（迁移 v7）：`PUT/GET /api/subscriptions` 维护外部订阅代码。Hermes 保留显式关注；政策监控在进程内按已核实持仓补取研究卡。worker 扫描时从共享库合并订阅、已核实持仓、冻结 L5 和有论点卡的公司，每个代码保留全部来源。`/api/cards` 沿用外部订阅与最近冻结 L5。`POST /api/scans` 排队一次扫描（同一时刻只有一个），`GET /api/scans/{id}` 返回已保存的完整扫描范围（含 `holding` 来源）、事件、失败与 `notify`。`GET /api/scans/weekly` 的 `scan_scope` 仅按订阅、冻结 L5 与论点卡列举。worker 只识别定期报告、业绩预告/快报与重大风险披露，按公告身份去重；公告日早于卡片完成日的标为已覆盖，其余触发接续研究（每个上海自然日最多 5 家，超出积压）。通知投递由 Hermes 脚本 `~/.hermes/scripts/cron/a-share-advisor.py`（`research_scan_request`、`research_scan_read`、`research_scan_weekly`）负责。
 - **可恢复的扫描提交**（迁移 v21）：`PUT /api/scan-requests/{request_id}` 返回 `{version, request_id, scan_id}`（202）。请求键须为 1–128 个 ASCII 字母、数字或 `._:-`，首字符为字母或数字；客户端须在发送前持久化该键。同一 Bearer 身份和键永久对应原扫描，即使扫描已完成或失败；不同新请求仍复用当前活动扫描。映射与扫描创建在同一事务提交，凭据只保存认证哈希身份。旧 `POST /api/scans` 保持原语义，不支持提交回执丢失后的幂等恢复；新客户端遇到旧服务 404 应保留待查请求，不能回退 POST。Hermes 客户端的待查状态与整轮预算见[客户端恢复协议](ops/hermes/README.md#顾问请求恢复与执行预算)。
 - **区间条件收益诊断**（只读，不调模型）：
 
@@ -295,10 +295,10 @@ uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目
 uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>"
 ```
 
-只有完整就绪成功后才清理：保留最近 3 份 `backup-pre-*.db` 与同名 `.bundle/`，镜像保留当前与两级回退。暂停只覆盖 tools 受理，独立的 Web/worker 披露扫描照常运行；错过的定时任务不自动补发。
+只有完整就绪成功后才清理：保留最近 3 份 `backup-pre-*.db` 与同名 `.bundle/`，镜像保留当前与两级回退。发布暂停也会暂停经 MCP 受理的 Hermes 扫描与月批，客户端保留待查并等待恢复。已入队的扫描在 worker 内继续。错过的定时任务不自动补发。
 
 ### 服务端与宿主客户端同步顺序
 
-应用发布**不会安装** `ops/hermes/`。顺序：合并并验证 → 发布服务端 → 核对同版本 CLI → 同步 helper 与调用方脚本（`python3 ops/hermes/install.py --check` 只读核对，`--apply` 从已提交版本同步）→ 按原调度观察。新旧版本错配时客户端只保留 pending，不猜错误文案、不清状态。任务与宿主路径见[脚本说明](ops/hermes/README.md)。
+应用发布**不会安装** `ops/hermes/`。顺序：合并并验证 → 发布服务端 → 核对同版本 MCP CLI、确认旧待查请求已完成并配置 Hermes 专属 PAT → 同步 helper 与调用方脚本（`python3 ops/hermes/install.py --check` 只读核对，`--apply` 从已提交版本同步）→ 按原调度观察。新旧版本错配时客户端只保留 pending，不猜错误文案、不清状态。任务与宿主路径见[脚本说明](ops/hermes/README.md)。
 
 页面改动在发布后用真实浏览器验证受影响页面和一个正常案例（沿用私有浏览器会话，公共入口不用 urllib 探测，Cloudflare 曾返回 1010）；例行发布明细由部署工具写入证据目录，仅数据库版本、判断契约、政策激活、模型、配置或宿主任务变化时更新[实施计划](docs/implementation-plan.md#当前部署)。

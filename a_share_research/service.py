@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import logging
 import re
 import sqlite3
+from contextlib import nullcontext
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -388,17 +390,35 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "open_questions": body.get("open_questions", [])}
 
 
-def company_cards(conn: sqlite3.Connection) -> dict:
-    """Use the single-card read path for the subscription and frozen L5 scope."""
+def company_cards(conn: sqlite3.Connection, *, holdings: bool = False) -> dict:
+    """Read subscription and frozen L5 cards, optionally including verified holdings for policy monitoring."""
     from a_share_research import scans
+
+    scope = {item['code']: item['origin'] for item in scans.subscriptions(conn)}
+    result = {'version': VERSION}
+    if holdings:
+        from a_share_research.account import mirror
+        from a_share_research.policy import account_view, registry
+
+        with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
+            try:
+                current = account_view.verified_current(conn, mirror.target_directory(conn))
+            except (registry.PolicyError, sqlite3.Error, OSError) as exc:
+                logging.getLogger(__name__).warning('Could not verify holdings for policy research cards: %s', exc)
+                result['holdings_available'] = False
+            else:
+                result['holdings_available'] = True
+                for code in current['codes']:
+                    # Keep the monitor contract's external/l5 origins and preserve existing L5 candidates.
+                    scope.setdefault(code, 'external')
     cards, missing = [], []
-    for item in scans.subscriptions(conn):
-        card = scans.card_or_none(conn, item['code'])
+    for code, origin in scope.items():
+        card = scans.card_or_none(conn, code)
         if card is None:
-            missing.append({'code': item['code'], 'origin': item['origin']})
+            missing.append({'code': code, 'origin': origin})
         else:
-            cards.append(card | {'origin': item['origin']})
-    return {'version': VERSION, 'cards': cards, 'missing': missing}
+            cards.append(card | {'origin': origin})
+    return result | {'cards': cards, 'missing': missing}
 
 
 def is_monthly_research(conn, run_id: int | None) -> bool:
