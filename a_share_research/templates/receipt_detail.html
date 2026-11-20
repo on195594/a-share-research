@@ -3,7 +3,7 @@
 {% block heading %}对账回执 #{{ view.receipt_id }}{% endblock %}
 {% block record %}
 {% if view.status == 'posted' and request is defined and request.query_params.get('request') %}
-<span hidden id="ledger-posted" data-account="{{ view.account_id }}" data-request="{{ request.query_params.get('request') }}"></span>
+<span hidden id="ledger-posted" data-account="{{ view.account_id }}" data-version="{{ view.version }}" data-request="{{ request.query_params.get('request') }}"></span>
 <script src="/static/ledger.js?v={{ asset_version }}" defer></script>
 {% endif %}
 <p><strong>{{ receipt_status(view.status) }}</strong> · 账户 {{ view.account_id }} · 版本 {{ view.version }}{% if view.key_id is defined %} · 写入授权 #{{ view.key_id }}{% endif %}</p>

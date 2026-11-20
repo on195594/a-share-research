@@ -22,13 +22,15 @@ def test_freeze_and_evaluate_selected_interval(web, book, collect_nav, monkeypat
         before = observe(book, '2026-01-06T10:00:00+08:00', '1000')
     ctx = Context(book['conn'], book['path'], book['principal'], account_shadow_enabled=True)
     attempts = []
+    calls = []
 
     class BoundTools:
         async def call(self, name, arguments, *, request_id=None):
+            calls.append(name)
             try:
                 result = invoke(ctx, name, arguments)['data']
             except ToolError as exc:
-                raise ToolCallError('business', str(exc)) from exc
+                raise ToolCallError('business', str(exc), exc.code) from exc
             if name == 'account_nav_evaluate':
                 attempts.append((request_id, arguments))
                 if len(attempts) == 1:
@@ -64,6 +66,12 @@ def test_freeze_and_evaluate_selected_interval(web, book, collect_nav, monkeypat
             assert '用原区间与声明重试' in incomplete.text and attempts[0][0] in incomplete.text
             response = await browser.post(path, data=form)
             assert response.status_code == 303
+            if not with_flow:
+                post(book)
+                calls.clear()
+                stale = await browser.post(path, data=form | {'explanation': '新增流水后复核原区间。'})
+                assert calls == ['account_nav_evaluate']
+                assert stale.text.count('role="alert"') == 1 and '账户资料已变化' in stale.text
             return response.headers['location']
 
     location = asyncio.run(visit())

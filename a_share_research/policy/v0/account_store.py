@@ -9,7 +9,7 @@ from pathlib import Path
 from a_share_research import db, gate
 from a_share_research.account import evidence, ledger, positions, position_store, projection_ids
 from a_share_research.account.mirror import MANIFEST
-from a_share_research.account.reconciliation import Event
+from a_share_research.account.reconciliation import Event, identity
 from a_share_research.policy.v0 import account_projection, domain
 
 
@@ -72,8 +72,15 @@ def initialize(conn, principal, account_id, evidence_directory: Path, evidence_h
     return read(conn,principal,account_id)
 
 
-def project(conn, account_id):
-    """Project from one caller-owned read transaction. This function never creates identities or metadata."""
+def validate_submission(conn, account_id, batch):
+    if conn.execute('SELECT 1 FROM policy_v0_account_openings WHERE account_id=?', (account_id,)).fetchone():
+        fields = {identity(batch.events[int(i)], account_id): f'position_entries.{i}.framework'
+                  for i in batch.position_entries}
+        project(conn, account_id, framework_fields=fields)
+
+
+def project(conn, account_id, *, framework_fields=None):
+    """Project within the caller's transaction without creating identities or metadata."""
     opening = _rows(conn,'SELECT * FROM main.policy_v0_account_openings WHERE account_id=?',(account_id,))
     costs = _rows(conn,'SELECT * FROM main.account_position_books WHERE account_id=?',(account_id,))
     if not opening or not costs:
@@ -107,6 +114,9 @@ def project(conn, account_id):
             projection_ids.lookup(conn,account_id,'cycle'),projection_ids.lookup(conn,account_id,'event'),
             position_store.distributions_for(conn,account_id,rows))
     except (ValueError, KeyError) as exc:
+        if isinstance(exc, account_projection.OpeningFrameworkError) and framework_fields:
+            if field := framework_fields.get(exc.business_id):
+                raise ledger.LedgerError(f'{field}: {exc}', 422) from None
         raise ledger.LedgerError(f'政策投影缺口：{exc}') from None
     seed_ids = {s.legacy_holding_id for s in seeds}
     for row in projected['holdings']:

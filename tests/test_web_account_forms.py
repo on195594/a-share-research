@@ -13,6 +13,8 @@ from a_share_research import api_keys, skill_bundle
 from a_share_research.tools import registry
 from a_share_research.tools_client import ToolCallError
 from test_overview import owner_request, page_request  # noqa: F401
+from test_tools_remote_mcp import rpc
+from test_web_tools_client import mcp_http  # noqa: F401
 
 
 @pytest.fixture
@@ -88,7 +90,7 @@ def test_expired_ledger_session_returns_to_the_draft_after_login(web):
     assert resumed.headers["location"] == "/account/ledger/new"
 
 
-def test_skill_download_matches_the_mcp_version_and_repository_contents(web, owner_request):  # noqa: F811
+def test_skill_download_matches_the_mcp_version_and_repository_contents(web, owner_request, mcp_http):  # noqa: F811
     assert web.download_skill(page_request("/connections/skill.zip")).headers["location"] == "/login"
     assert '/connections/skill.zip' in web.connections(owner_request("/connections")).body.decode()
     reply = web.download_skill(owner_request("/connections/skill.zip"))
@@ -99,3 +101,7 @@ def test_skill_download_matches_the_mcp_version_and_repository_contents(web, own
         version = hashlib.sha256(package.read("a-share/SKILL.md")).hexdigest()[:12]
     assert reply.media_type == "application/zip"
     assert reply.headers["content-disposition"] == f'attachment; filename="a-share-{version}.zip"'
+    server, _ = mcp_http
+    token = api_keys.create(web.conn, "web-owner-proxy", role="assistant")
+    instructions = rpc(server, token, "server/discover").json()["result"]["instructions"]
+    assert f"a-share Skill 版本 {version}。" in instructions

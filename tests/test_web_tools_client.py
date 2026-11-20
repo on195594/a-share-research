@@ -1,11 +1,20 @@
-"""Wire contract with an in-process HTTP stand-in. No sockets or bearer credentials leave the test."""
+"""Web proxy contracts with the in-process MCP endpoint and transport failures."""
+import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
+import httpx
 import pytest
 import requests
 
+from a_share_research import api_keys
+from a_share_research.tools import remote_mcp
+from a_share_research.tools.control import Gate
+from a_share_research.tools.server import create_app
 from a_share_research.tools_client import ToolCallError, ToolsClient
+from test_account_ledger import batch, book  # noqa: F401
+from test_tools_remote_mcp import ORIGIN, RESOURCE
 
 
 def response(body, status=200):
@@ -77,3 +86,67 @@ def test_page_recovery_depends_on_the_receipt(call, reply, kind, message):
     with pytest.raises(ToolCallError) as error:
         call(reply)
     assert error.value.kind == kind and message in str(error.value)
+
+
+@pytest.fixture
+def mcp_http(tmp_path, monkeypatch):
+    monkeypatch.setenv("ASHARE_PUBLIC_MCP_URL", RESOURCE)
+    gate = Gate(limit=1)
+
+    # Keep ASGI dispatch on the test thread; all handlers and database calls are real.
+    async def inline(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(remote_mcp, "run_in_threadpool", inline)
+
+    async def request(url, *, headers, content):
+        app = create_app(tmp_path / "app.db", gate=gate, account_shadow_enabled=True)
+        async with app.router.lifespan_context(app), httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url=ORIGIN
+        ) as server:
+            return await server.post(url, headers=headers, content=content)
+
+    def post(url, *, headers, content):
+        return asyncio.run(request(url, headers=headers, content=content))
+
+    return SimpleNamespace(post=post), gate
+
+
+def test_web_grant_and_gate_against_mcp(book, bind_account, tmp_path, monkeypatch, mcp_http):  # noqa: F811
+    conn, _, directory, _ = book
+    directory.rename(tmp_path / "account-evidence")
+    bind_account(conn, "a")
+    token = api_keys.create(conn, "web-owner-proxy", role="assistant")
+    key_id = api_keys.authenticate(conn, token).key_id
+    endpoint = "http://a-share-research-tools:8621"
+    proxy = ToolsClient.from_settings(SimpleNamespace(tools_url=endpoint, base_url=ORIGIN, tools_token=token))
+    server, gate = mcp_http
+
+    def send(session, request, **kwargs):
+        assert request.url == endpoint + "/mcp"
+        return server.post(request.url, headers=dict(request.headers), content=request.body)
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    for client, message in [(replace(proxy, host="a-share-research-tools:8621"), "HTTP 421"),
+                            (replace(proxy, token="invalid"), "授权已失效")]:
+        with pytest.raises(ToolCallError, match=message) as error:
+            client._call("account_state", {}, REQUEST_ID)
+        assert error.value.kind == "business"
+
+    with pytest.raises(ToolCallError, match="account_id") as error:
+        proxy._call("account_state", {"account_id": "other"}, REQUEST_ID)
+    assert (error.value.kind, error.value.code) == ("business", "conflict")
+
+    args = {"batch": batch(book).model_dump(mode="json")}
+    with gate.slot(), pytest.raises(ToolCallError, match="名额已满") as busy:
+        proxy._call("account_submit", args, REQUEST_ID)
+    assert busy.value.kind == "unavailable"
+    gate.pause()
+    with pytest.raises(ToolCallError, match="发布中") as paused:
+        proxy._call("account_submit", args, REQUEST_ID)
+    assert paused.value.kind == "unavailable"
+    gate.resume()
+    assert proxy._call("account_state", {}, REQUEST_ID)["version"] == 0
+    receipt = proxy._call("account_submit", args, REQUEST_ID)
+    assert receipt["status"] == "posted" and receipt["key_id"] == key_id
+    assert proxy._call("account_receipt", {"receipt_id": receipt["receipt_id"]}, REQUEST_ID) == receipt

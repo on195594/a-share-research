@@ -100,7 +100,7 @@ v16 新增 `account_position_books`。内部 `position_store.initialize` 在首�
 
 配置后，`account_submit` 同事务重建所有有效事件的成本与周期、核对股数，并更新现金/股数/成本版本；作废更正一起重放。成功回执带 position_before/position_after。加仓费用税费进入加权成本，部分卖出保留每股成本并累计已实现盈亏，全部卖出关闭周期，下次买入创建由业务身份确定的新周期。失败批次不改变这些投影，SQL 故障沿用回滚和可查询失败回执。
 
-新开仓须在 batch.position_entries 中，以本批买入事件的字符串下标提供 policy_identity（可选 name），例如 `{"0":{"policy_identity":"已核对的政策来源引用"}}`。缺少上下文返回 missing_material。已有周期的上下文不能通过重复成交覆盖，须作废更正；空扩展字段不改变旧请求哈希。
+新开仓须在 batch.position_entries 中，以本批买入事件的字符串下标提供 policy_identity（可选 name）。已绑定 v0 政策期初的账户还须填写下节所述的 framework。缺少整个开仓上下文返回 missing_material。已有周期的上下文不能通过重复成交覆盖，须作废更正；空扩展字段不改变旧请求哈希。
 
 分红可以用 batch.position_dividends 将本批事件下标绑定明确 cycle_id。同股票已有多个周期或没有活动周期时必须绑定；允许向已关闭周期记分红，周期须匹配公司且已在付款前存在。股数和退出日期保持原值。业务身份、周期和元数据均保留在不可变批次，重复请求不会重复计入收益。
 
@@ -112,7 +112,7 @@ v17 新增不可变周期/事件整数编号、政策投影参数和期初快照
 
 本机政策适配层按账户投影 holdings/holding_events、账本版本、期初哈希和 profile_identity，供采集与巡检复算。
 
-新开仓的 position_entries 除 policy_identity 外，须明确 framework，可提供 framework_confident 和 name。policy_identity 须引用已登记 profile；金融事实可独立入账，但缺少这些政策条件时政策读取明确报缺口。旧周期先保留保存的止损线，买入或除权触发参考成本变动时才按绑定参数重算。
+已绑定 v0 政策期初的账户在 `account_submit` 写事务提交前校验政策投影。新开仓的 `policy_identity` 须引用已登记的参数版本，`framework` 须选自该版本的 `stops`，可另提供 `framework_confident` 和 `name`。遗漏框架或选值无效会回滚整批，返回 `position_entries.<i>.framework` 及可用框架。旧周期先保留保存的止损线，买入或除权触发参考成本变动时才按绑定参数重算。
 
 `batch.position_distributions` 以事件下标提供每股现金除权金额，仅绑定分红或送转事件。到账现金与每股除权是独立事实，不能彼此反推；没有每股信息的分红只计收入。已有元数据不能通过重复事件补加或覆盖，须作废更正；同批同业务事件的元数据冲突会被拒绝。新增可选字段为空时保留旧请求哈希。
 

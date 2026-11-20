@@ -21,9 +21,10 @@ _PAUSED = "发布中，约 1 分钟后用原请求重试。"
 
 
 class ToolCallError(Exception):
-    def __init__(self, kind: Literal["unavailable", "unknown", "business"], message: str):
+    def __init__(self, kind: Literal["unavailable", "unknown", "business"], message: str, code: str | None = None):
         super().__init__(message)
         self.kind = kind
+        self.code = code
 
 
 def _reply(response: requests.Response, request_id: str) -> dict:
@@ -54,8 +55,6 @@ def _reply(response: requests.Response, request_id: str) -> dict:
             raise ValueError("invalid JSON-RPC envelope")
         if "error" in rpc:
             detail = rpc["error"]
-            if detail.get("code") == -32603 and detail.get("data") == {"code": "paused"}:
-                raise ToolCallError("unavailable", _PAUSED)
             if detail.get("code") in (-32601, -32602) and isinstance(detail.get("message"), str):
                 raise ToolCallError("business", detail["message"])
             raise ValueError("no tool receipt")
@@ -74,7 +73,7 @@ def _reply(response: requests.Response, request_id: str) -> dict:
                 raise ToolCallError("unavailable", message)
             if code in ("unavailable", "service_failure", "timeout"):
                 raise ToolCallError("unknown", f"{message}。{_UNKNOWN}")
-            raise ToolCallError("business", message)
+            raise ToolCallError("business", message, code)
         if result.get("isError", False) is not False:
             raise ValueError("invalid tool result")
         data = result["structuredContent"]["data"]

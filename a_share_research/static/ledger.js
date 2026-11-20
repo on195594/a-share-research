@@ -8,17 +8,38 @@
 
   const prefix = `a-share:ledger:${encodeURIComponent(account)}:`;
   const draftKey = (version) => prefix + version;
+  const discardKey = prefix + "discard";
   function storedDrafts() {
-    return Object.keys(localStorage).filter((key) => key.startsWith(prefix))
-      .map((key) => ({ key, ...JSON.parse(localStorage.getItem(key)) }));
+    const drafts = [];
+    for (const key of Object.keys(localStorage).filter((key) => key.startsWith(prefix))) {
+      const raw = localStorage.getItem(key);
+      try {
+        const draft = JSON.parse(raw);
+        if (!draft?.request || !Number.isFinite(draft.updated) ||
+            !Array.isArray(draft.values) || !draft.values.every((pair) =>
+          Array.isArray(pair) && pair.length === 2 && pair.every((value) => typeof value === "string"))) {
+          throw new TypeError("Invalid ledger draft fields");
+        }
+        drafts.push({ ...draft, key });
+      } catch {
+        localStorage.removeItem(key);
+      }
+    }
+    return drafts;
+  }
+
+  function clearDrafts(version, request) {
+    for (const draft of storedDrafts()) {
+      if (draft.request === request || Number(draft.key.slice(prefix.length)) < version) {
+        localStorage.removeItem(draft.key);
+      }
+    }
   }
 
   if (posted) {
     if (posted.dataset.request) {
       try {
-        for (const draft of storedDrafts()) {
-          if (draft.request === posted.dataset.request) localStorage.removeItem(draft.key);
-        }
+        clearDrafts(Number(posted.dataset.version), posted.dataset.request);
       } catch (error) {
         console.warn("Ledger draft cleanup failed", error.name);
       }
@@ -43,7 +64,13 @@
 
   if (form.dataset.fresh === "yes" && !form.querySelector("fieldset").disabled) {
     try {
-      const draft = storedDrafts().sort((a, b) => b.updated - a.updated)[0];
+      // A discard belongs to this tab. Use the fresh ledger version to preserve newer drafts in other tabs.
+      const discard = sessionStorage.getItem(discardKey);
+      if (discard) {
+        clearDrafts(Number(field("expected_version").value), discard);
+        sessionStorage.removeItem(discardKey);
+      }
+      const draft = !discard && storedDrafts().sort((a, b) => b.updated - a.updated)[0];
       if (draft) {
         // Restore through the read-only form action so old holdings and evidence survive version changes.
         const restore = document.createElement("form");
@@ -67,17 +94,18 @@
     }
   }
 
+  document.querySelector("[data-new-draft]")?.addEventListener("click", (event) => {
+    try {
+      sessionStorage.setItem(discardKey, field("request_id").value);
+    } catch {
+      event.preventDefault();
+      draftStatus.textContent = "当前浏览器无法清除草稿。";
+    }
+  });
   if (retry) {
     saveDraft(true);
     return;
   }
-  form.querySelector("[data-new-draft]")?.addEventListener("click", () => {
-    try {
-      localStorage.removeItem(draftKey(field("expected_version").value));
-    } catch {
-      draftStatus.textContent = "当前浏览器无法清除草稿。";
-    }
-  });
 
   const rows = [...form.querySelectorAll("[data-holding]")];
   const cashPreview = document.getElementById("cash-preview");
@@ -94,7 +122,21 @@
     const old = rows.find((row) => row.dataset.holding === code);
     for (const row of rows) row.hidden = row === old;
     const context = document.getElementById("ledger-entry");
-    if (context) context.hidden = Boolean(old) || sign < 0;
+    if (context) {
+      context.hidden = Boolean(old) || sign < 0;
+      context.querySelector("fieldset").disabled = context.hidden;
+      if (!context.hidden && code.length === 6 && changed === "code") context.open = true;
+    }
+    const profile = field("policy_identity");
+    const framework = field("framework");
+    if (framework && (!changed || changed === "policy_identity")) {
+      for (const group of framework.querySelectorAll("optgroup")) {
+        group.hidden = group.disabled = group.dataset.profile !== profile.value;
+      }
+      if (framework.selectedOptions[0]?.parentElement.disabled) framework.value = "";
+      framework.required = Boolean(profile.value);
+      framework.disabled = !profile.value;
+    }
     if (["code", "shares", "kind"].includes(changed)) {
       const ending = (old ? number("opening." + code) : 0) + sign * shares;
       field("trade_ending").value = Number.isInteger(ending) && ending >= 0 ? ending : "";

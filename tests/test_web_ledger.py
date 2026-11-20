@@ -81,6 +81,7 @@ def test_trade_prefill_and_lost_result_replay_after_ledger_version_changes(web, 
     restored = show(web, client, FormData(pending | {'intent': 'restore'}))
     assert '基于旧版本 1，当前版本为 2' in restored.body.decode()
     assert '用原编号和原内容重试' in restored.body.decode()
+    assert '我已核对回执，放弃草稿并按当前版本重填' in restored.body.decode()
     assert len(client.submissions) == 1
 
     retry = show(web, client, FormData(pending))
@@ -118,6 +119,8 @@ def test_reopened_position_uses_selected_registered_profile(web, policy_book):
     page = show(web, client)
     profile = conn.execute('SELECT profile_identity FROM policy_v0_account_openings').fetchone()[0]
     assert f'<option value="{profile}"' in page.body.decode()
+    assert f'data-profile="{profile}"' in page.body.decode()
+    assert '<option value="A通用"' in page.body.decode()
     event = position_event(price='10', occurred_at='2026-11-03T10:00:00+08:00')
     fields = dict(page.context['fields']) | {
         'kind': event.kind, 'code': event.code, 'occurred_at': event.occurred_at.isoformat(),
@@ -125,5 +128,7 @@ def test_reopened_position_uses_selected_registered_profile(web, policy_book):
         'cash': '10200', 'total_assets': '11200', 'evidence_hashes': sha,
         'policy_identity': profile, 'framework': 'A通用',
     }
+    restored = show(web, client, FormData(fields | {'intent': 'restore'})).body.decode()
+    assert 'name="framework" required' in restored and '<option value="A通用" selected>' in restored
     assert show(web, client, FormData(fields)).status_code == 303
     assert client.submissions[0][1]['batch']['position_entries'] == {'0': {'policy_identity': profile, 'framework': 'A通用'}}

@@ -1,4 +1,5 @@
 """Invented account/policy contracts; fixtures are not broker acceptance evidence."""
+import json
 import sqlite3
 
 import pytest
@@ -7,6 +8,7 @@ from a_share_research import api_keys
 from a_share_research.account import analysis, evidence, ledger, position_store
 from a_share_research.account.mirror import MANIFEST
 from a_share_research.policy.v0 import account_store, db as policy_db
+from a_share_research.tools import registry
 from test_position_store import book as cost_book, seed, event, batch, submit
 from test_v0_account_projection import opening
 
@@ -99,7 +101,7 @@ def test_future_buy_sell_stable_mapping_keeps_history_and_main_untouched(book):
 
 
 @pytest.mark.parametrize('missing', ['profile', 'framework'])
-def test_financial_posting_does_not_invent_missing_policy_context(book, missing):
+def test_inspection_detects_historical_financial_posting_with_missing_policy_context(book, missing):
     profile = initialize(book)['profile_identity']
     assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
     metadata = dict(policy_identity='unknown-structural-profile' if missing == 'profile' else profile,
@@ -129,6 +131,34 @@ def test_new_cycle_explicit_context_gets_fresh_stable_identity(book):
     assert new['framework'] == 'A通用' and new['framework_confident'] == 1
     assert result['holdings'][0]['exit_date'] == '2026-11-02'
     assert result['holding_events'][-1]['holding_id'] == new['id']
+
+
+def test_account_submit_rolls_back_invalid_opening_framework_then_projects_valid_entry(book, tmp_path, bind_account):
+    conn, principal, directory, _ = book
+    profile = initialize(book)['profile_identity']
+    directory.rename(tmp_path / 'account-evidence')
+    bind_account(conn, 'a')
+    ctx = registry.Context(conn, tmp_path / 'app.db', principal, account_shadow_enabled=True)
+    parameters, = conn.execute('SELECT parameters FROM policy_v0_profiles WHERE identity=?', (profile,)).fetchone()
+    close = event('sell')
+    reopen = event(price='10', broker_id='structural-reopen', occurred_at='2026-11-03T10:00:00+08:00')
+    def post(entry):
+        value = batch(book, [close, reopen], shares=100, cash='10200', entries={'1': entry})
+        return registry.invoke(ctx, 'account_submit', {'batch': value.model_dump(mode='json')})['data']
+
+    for invalid in ({}, {'framework': 'A'}):
+        with pytest.raises(registry.ToolError, match=r'position_entries\.1\.framework') as rejected:
+            post({'policy_identity': profile, **invalid})
+        assert rejected.value.code == 'invalid_arguments'
+        assert all(option in str(rejected.value) for option in json.loads(parameters)['stops'])
+        assert ledger.state(conn, principal, 'a')['version'] == 0
+        assert account_store.project(conn, 'a')['version'] == 0
+        assert conn.execute('SELECT count(*) FROM account_batches').fetchone()[0] == 0
+    receipt = post({'policy_identity': profile, 'framework': 'A通用'})
+    assert receipt['status'] == 'posted' and receipt['version'] == 1
+    projected = account_store.project(conn, 'a')
+    assert projected['holdings'][-1]['framework'] == 'A通用'
+    assert account_store.inspect(conn) == []
 
 
 @pytest.mark.parametrize('invalid', ['empty_evidence', 'absent_evidence', 'shares', 'late'])

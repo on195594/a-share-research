@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Callable
 
 from pydantic import Field, StrictInt, model_serializer, model_validator
 
@@ -209,12 +209,13 @@ def _basis_problems(conn, event):
     return []
 
 
-def submit(conn: sqlite3.Connection, principal, account_id: str, batch: Batch, evidence_directory: Path) -> dict:
+def submit(conn: sqlite3.Connection, principal, account_id: str, batch: Batch, evidence_directory: Path,
+           *, validate_projection: Callable[[sqlite3.Connection, str, Batch], None] | None = None) -> dict:
     """Return a durable failure receipt when storage can recover after rolling back the batch."""
     account_id = _account(account_id)
     batch = Batch.model_validate(batch)
     try:
-        return _submit_atomic(conn, principal, account_id, batch, evidence_directory)
+        return _submit_atomic(conn, principal, account_id, batch, evidence_directory, validate_projection)
     except sqlite3.Error as exc:
         logging.getLogger(__name__).error('Account batch rolled back (%s)', type(exc).__name__)
         # This transaction only records the failure. It never retries a financial mutation.
@@ -232,7 +233,8 @@ def submit(conn: sqlite3.Connection, principal, account_id: str, batch: Batch, e
                      problems=[{'field':'service','expected':'入账事务已回滚，可用原请求重试'}]), request)
 
 
-def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: Batch, evidence_directory: Path) -> dict:
+def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: Batch,
+                   evidence_directory: Path, validate_projection) -> dict:
     """Persist all journal changes only after quantity, cash and total-assets reconciliation succeeds."""
     account_id = _account(account_id)
     batch = Batch.model_validate(batch)
@@ -360,6 +362,8 @@ def _submit_atomic(conn: sqlite3.Connection, principal, account_id: str, batch: 
                          (version,gate.canonical(cost_projection),account_id))
             from a_share_research.account.projection_ids import sync
             sync(conn, account_id, cost_projection)
+            if validate_projection is not None:
+                validate_projection(conn, account_id, batch)
         return result
 
 

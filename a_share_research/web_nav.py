@@ -108,6 +108,8 @@ async def page(request, session, client, render, form=None):
                     raise ToolCallError('unknown', '未取得完整的 NAV 凭证编号，请用原区间与声明重试。')
             except ToolCallError as exc:
                 context['errors'].append(str(exc))
+                if exc.code == 'conflict':
+                    return show()
                 if exc.kind != 'business':
                     context['retry'] = request_id
                     return show()

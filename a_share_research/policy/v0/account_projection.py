@@ -22,11 +22,20 @@ def _mapped(mapping, key, label):
     return value
 
 
-def _parameters(profiles, identity, framework):
+class OpeningFrameworkError(ValueError):
+    def __init__(self, business_id, identity, frameworks):
+        self.business_id = business_id
+        super().__init__(f'新开仓须明确框架，参数版本 {identity} 可选：{"、".join(sorted(frameworks))}')
+
+
+def _parameters(profiles, identity, framework, *, opening_event=None):
     profile = profiles.get(identity)
     if not isinstance(profile, dict):
         raise ValueError(f'缺少已绑定政策：{identity}')
-    pair = profile.get('stops', {}).get(framework)
+    stops = profile.get('stops', {})
+    if opening_event is not None and framework not in stops:
+        raise OpeningFrameworkError(opening_event, identity, stops)
+    pair = stops.get(framework)
     if not isinstance(pair, (list, tuple)) or len(pair) != 2:
         raise ValueError(f'政策 {identity} 未定义框架 {framework} 的止损参数')
     first, second = map(money, pair)
@@ -78,25 +87,23 @@ def _project(openings, economic, records, entries, profiles, default_profile, cy
         if step['kind'] != event.kind:
             raise ValueError('经济步骤与事件类型不一致')
         before, after = step['before_shares'], step['after_shares']
-        if cycle not in states:
+        opening = cycle not in states
+        if opening:
             entry = entries.get(key)
             if event.kind != 'buy' or before != 0 or entry is None:
                 raise ValueError('新周期缺少开仓上下文')
-            framework = getattr(entry, 'framework', None)
-            if not framework:
-                raise ValueError('新开仓须明确框架，不能推断历史决策')
-            _parameters(profiles, entry.policy_identity, framework)
             selected[cycle] = entry.policy_identity
             states[cycle] = dict.fromkeys(MANIFEST['holdings'])
             states[cycle].update(id=_mapped(cycle_ids,cycle,'周期'),code=event.code,name=entry.name,
-                framework=framework,framework_confident=int(getattr(entry,'framework_confident',False)),
+                framework=entry.framework,framework_confident=int(entry.framework_confident),
                 initial_shares=event.shares,buy_date=event.occurred_at.date().isoformat(),
                 additions_since_main=0,shares=0)
         row = states[cycle]
         if row['code'] != event.code or row['shares'] != before:
             raise ValueError('周期公司或步骤前股数不一致')
         reference_changed = event.kind in ('buy','adjustment') or key in distributions
-        parameters = _parameters(profiles,selected[cycle],row['framework']) if reference_changed else None
+        parameters = (_parameters(profiles, selected[cycle], row['framework'], opening_event=key if opening else None)
+                      if reference_changed else None)
         reference = money(row['reference_cost']) if row['reference_cost'] is not None else None
         notes = None
         if event.kind == 'buy':

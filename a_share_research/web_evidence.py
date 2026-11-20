@@ -17,6 +17,7 @@ async def _upload(client, file, label):
         return row | {"message": "文件为空或超过单份大小上限，请重新选择。"}
     sha = hashlib.sha256(content).hexdigest()
     args = {"filename": file.filename, "content_base64": base64.b64encode(content).decode("ascii")}
+    del content
     if label:
         args["label"] = label
     row["sha256"] = sha

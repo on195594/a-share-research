@@ -31,6 +31,7 @@
   {% endfor %}
   <button class="btn" type="submit"{% if not enabled %} disabled{% endif %}>用原编号和原内容重试</button>
 </form>
+<p><a data-new-draft href="/account/ledger/new">我已核对回执，放弃草稿并按当前版本重填</a></p>
 {% endif %}
 <form id="ledger-form" class="account-form search narrow" method="post" action="/account/ledger/new" data-fresh="{{ 'yes' if fresh else 'no' }}">
   <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -59,8 +60,18 @@
           登记于 {{ profile.created_at|shanghai_minute }} · {{ profile.identity[:15] }}
         </option>{% endfor %}
       </select>
+      <label for="entry-framework">持仓框架</label>
+      <select id="entry-framework" name="framework"{% if fields.policy_identity %} required{% endif %}>
+        <option value="">请选择所选参数版本的框架</option>
+        {% for profile in profiles %}
+        <optgroup label="{{ profile.identity[:15] }}" data-profile="{{ profile.identity }}">
+          {% for framework in profile.frameworks %}
+          <option value="{{ framework }}"{% if fields.policy_identity == profile.identity and fields.framework == framework %} selected{% endif %}>{{ framework }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
       {% else %}{{ input('policy_identity','政策身份引用') }}{% endif %}
-      {{ input('framework','持仓框架') }}
     </fieldset>
   </details>
   {% endif %}
