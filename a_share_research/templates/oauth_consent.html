@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}授权客户端 · 个股研究{% endblock %}
+{% block device_preferences %}{% endblock %}
+{% block main %}
+<section class="narrow oauth-consent">
+  <h1>授权给 {{ client.name }}？</h1>
+  <p>同意后，此客户端可读账户、追加账本、发起付费研究。</p>
+  <dl class="policy-facts">
+    <div><dt>客户端 ID</dt><dd>{{ client.client_id }}</dd></div>
+    <div><dt>回调地址</dt><dd>{{ redirect_uri }}</dd></div>
+  </dl>
+  <form class="actions" method="post" action="/oauth/authorize">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="consent_id" value="{{ consent_id }}">
+    <button class="btn" type="submit" name="decision" value="approve">同意授权</button>
+    <button class="btn secondary" type="submit" name="decision" value="deny">拒绝</button>
+  </form>
+</section>
+{% endblock %}

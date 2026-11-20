@@ -1,6 +1,23 @@
 // Progressive enhancement only: every page works without this script.
 "use strict";
 
+const copyMcp = document.getElementById("copy-mcp");
+if (copyMcp && navigator.clipboard?.writeText) {
+  copyMcp.hidden = false;
+  copyMcp.querySelector("button").addEventListener("click", async () => {
+    const address = document.getElementById("mcp-address");
+    const status = document.getElementById("copy-status");
+    try {
+      await navigator.clipboard.writeText(address.value);
+      status.textContent = "已复制 MCP 地址";
+    } catch {
+      address.focus();
+      address.select();
+      status.textContent = "请手动复制已选中的 MCP 地址";
+    }
+  });
+}
+
 function release(button) {
   button.disabled = false;
   button.removeAttribute("aria-busy");

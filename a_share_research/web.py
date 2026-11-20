@@ -26,10 +26,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import QueryParams
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
-from a_share_research import stock_codes, api_keys
+from a_share_research import stock_codes, api_keys, oauth, oauth_store
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 from a_share_research.service import FeedbackRequest, ResearchRequest
@@ -37,15 +40,13 @@ from a_share_research.service import FeedbackRequest, ResearchRequest
 HERE = Path(__file__).parent
 SESSION_COOKIE = "session"
 STATE_COOKIE = "oauth_state"
+PENDING_COOKIE = "mcp_authorization"
 SESSION_SECONDS = 8 * 3600
 DEVICE_COOKIE = "remember_device"
 DEVICE_SECONDS = 30 * 24 * 3600
 STEPS = {"gather": "取资料", "explore": "补读披露与计算", "compose": "撰写报告", "review": "独立复核", "repair": "按复核意见修改",
          "price": "计算价格参考"}
-CSP = ("default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; "
-       "object-src 'none'; img-src 'self'")
 SECURITY_HEADERS = {
-    "content-security-policy": CSP,
     "x-content-type-options": "nosniff",
     "referrer-policy": "same-origin",
     "x-frame-options": "DENY",
@@ -135,23 +136,37 @@ conn = ThreadLocalConnectionProxy()
 
 # ---------- security ----------
 
+def _csp(form_action_extra: str | None = None) -> str:
+    form_action = "form-action 'self' https://github.com"
+    if form_action_extra:
+        form_action += " " + form_action_extra
+    return (f"default-src 'self'; {form_action}; base-uri 'none'; frame-ancestors 'none'; "
+            "object-src 'none'; img-src 'self'")
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
     if request.headers.get("host", "").lower() != urlparse(settings.base_url).netloc.lower():
         return Response("Invalid Host header", status_code=403, media_type="text/plain")
-    if request.method not in ("GET", "HEAD") and not request.url.path.startswith("/api/") and not same_origin(request):
+    path = request.url.path
+    machine = path.startswith(("/api/", "/.well-known/")) or path == "/oauth/token"
+    if request.method not in ("GET", "HEAD") and not machine and not same_origin(request):
         return Response("Cross-origin request refused", status_code=403, media_type="text/plain")
     # Restore only safe page reads, never use a device cookie as API/write authorization.
     restored = None
-    if (request.method in ("GET", "HEAD") and not request.url.path.startswith(("/api/", "/static/", "/auth/"))
-            and request.url.path != "/oauth_callback" and not current_session(request)):
+    if (not machine and request.method in ("GET", "HEAD") and not path.startswith(("/static/", "/auth/"))
+            and path not in ("/oauth_callback", "/mcp") and not current_session(request)):
         restored = restore_device(request)
     response = await call_next(request)
     if restored:
         token, age = restored
         set_cookie(response, SESSION_COOKIE, token, age)
     response.headers.update(SECURITY_HEADERS)
-    if not request.url.path.startswith("/static/"):
+    response.headers["content-security-policy"] = _csp(form_action_extra=getattr(request.state, "consent_origin", None))
+    if path == "/oauth/token":
+        response.headers["cache-control"] = "no-store"
+        response.headers["pragma"] = "no-cache"
+    elif not path.startswith("/static/"):
         response.headers["cache-control"] = "no-store, no-transform"
     elif request.query_params.get("v") == ASSET_VERSION:
         response.headers["cache-control"] = "public, max-age=31536000, immutable"
@@ -230,11 +245,33 @@ def set_cookie(response: Response, name: str, value: str, age: int) -> None:
     response.set_cookie(name, value, max_age=age, path="/", httponly=True, samesite="lax", secure=settings.secure)
 
 
-def start_session() -> RedirectResponse:
+def pending_query(request: Request, state: str) -> str | None:
+    ticket = request.cookies.get(PENDING_COOKIE)
+    if state and ticket:
+        return oauth.read_consent(ticket, "login:" + state, settings.session_secret)
+    return None
+
+
+def after_login(request: Request | None, state: str) -> RedirectResponse:
+    target = "/"
+    if request and (query := pending_query(request, state)):
+        try:
+            auth = registered_authorization(query)
+        except oauth.OAuthError as exc:
+            logging.getLogger(__name__).info("Discarding pending authorization: %s", exc)
+        else:
+            target = "/oauth/authorize?" + auth.query()
+    response = RedirectResponse(target, status_code=303)
+    if request and PENDING_COOKIE in request.cookies:
+        response.delete_cookie(PENDING_COOKIE, path="/")
+    return response
+
+
+def start_session(request: Request | None = None, state: str = "") -> RedirectResponse:
     token = secrets.token_urlsafe(32)
     conn.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
     conn.execute("INSERT INTO sessions VALUES (?, ?)", (_hash(token), time.time() + SESSION_SECONDS))
-    response = RedirectResponse("/", status_code=303)
+    response = after_login(request, state)
     set_cookie(response, SESSION_COOKIE, token, SESSION_SECONDS)
     return response
 
@@ -261,10 +298,10 @@ def login_required() -> RedirectResponse:
 # ---------- login ----------
 
 @app.get("/login")
-def login(request: Request):
+def login(request: Request, resume: str = ""):
     if current_session(request):
-        return RedirectResponse("/", status_code=303)
-    return render(request, "login.html", None, dev_login=settings.dev_login)
+        return after_login(request, resume)
+    return render(request, "login.html", None, dev_login=settings.dev_login, resume=resume)
 
 
 def _sign(message: str) -> str:
@@ -285,8 +322,8 @@ def state_ok(state: str, bound: str) -> bool:
 
 
 @app.get("/auth/github")
-def github_start():
-    state = new_state()
+def github_start(request: Request, resume: str = ""):
+    state = resume if pending_query(request, resume) else new_state()
     response = RedirectResponse("https://github.com/login/oauth/authorize?" + urlencode({
         "client_id": settings.github_client_id, "redirect_uri": settings.base_url + "/oauth_callback",
         "state": state, "allow_signup": "false",
@@ -311,16 +348,16 @@ def github_callback(request: Request, code: str = "", state: str = ""):
         return message(request, None, "GitHub 登录失败", "暂时无法连接 GitHub，请稍后回到首页重试。", 502)
     if str(user.get("id")) != settings.github_user_id:
         return message(request, None, "该账号无权访问", "这是个人使用的站点，只允许所有者的 GitHub 账号登录。", 403)
-    response = start_session()
+    response = start_session(request, state)
     response.delete_cookie(STATE_COOKIE, path="/")
     return response
 
 
 @app.post("/auth/dev")
-def dev_login():
+def dev_login(request: Request, resume: str = Form("")):
     if not settings.dev_login:
         return Response("Not Found", status_code=404, media_type="text/plain")
-    return start_session()
+    return start_session(request, resume)
 
 
 @app.post("/auth/remember-device")
@@ -372,7 +409,168 @@ def logout(request: Request, csrf: str = Form("")):
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/")
     response.delete_cookie(DEVICE_COOKIE, path="/")
+    response.delete_cookie(PENDING_COOKIE, path="/")
+    response.delete_cookie(STATE_COOKIE, path="/")
     return response
+
+
+# ---------- MCP OAuth ----------
+
+@app.get("/.well-known/oauth-protected-resource/mcp")
+def protected_resource():
+    return {"resource": settings.base_url + "/mcp", "authorization_servers": [settings.base_url]}
+
+
+@app.get("/.well-known/oauth-authorization-server")
+def authorization_server():
+    return {"issuer": settings.base_url, "authorization_endpoint": settings.base_url + "/oauth/authorize",
+            "token_endpoint": settings.base_url + "/oauth/token", "grant_types_supported": ["authorization_code", "refresh_token"],
+            "response_types_supported": ["code"], "code_challenge_methods_supported": ["S256"],
+            "token_endpoint_auth_methods_supported": ["none"]}
+
+
+def owner_form_error(request: Request, session: str | None, csrf: str):
+    if not session:
+        return login_required()
+    if not csrf_ok(session, csrf):
+        return message(request, session, "页面已过期", "请刷新页面后重试。", 403)
+    return None
+
+
+@app.get("/oauth/authorize")
+def authorize(request: Request):
+    session = current_session(request)
+    params = request.query_params
+    client = oauth_store.get_client(conn, params.get("client_id", ""))
+    uri = params.get("redirect_uri", "")
+    if (len(params.getlist("client_id")) != 1 or len(params.getlist("redirect_uri")) != 1
+            or not client or uri not in client["redirect_uris"]):
+        return message(request, session, "无法授权", "客户端或回调地址未登记，或客户端已撤销。", 400)
+    try:
+        origin = oauth.redirect_origin(uri)
+    except ValueError as exc:
+        return message(request, session, "无法授权", str(exc), 400)
+    try:
+        if len(params) != len(params.multi_items()):
+            raise oauth.OAuthError("invalid_request", "授权参数重复。")
+        auth = oauth.Authorization.parse(params, settings.base_url + "/mcp")
+    except oauth.OAuthError as exc:
+        state = params.get("state") if len(params.getlist("state")) == 1 else None
+        return RedirectResponse(oauth.callback(uri, state, error=exc.error), status_code=302)
+
+    if not session:
+        state = new_state()
+        ticket = oauth.consent_form(auth, "login:" + state, settings.session_secret)
+        if len(ticket) > 3800:  # Leave room for cookie attributes in the browser's 4 KiB limit.
+            return message(request, None, "无法保存待授权请求", "请先登录，再从客户端重新连接。", 400)
+        response = RedirectResponse("/login?" + urlencode({"resume": state}), status_code=303)
+        set_cookie(response, PENDING_COOKIE, ticket, oauth.CONSENT_SECONDS)
+        return response
+    request.state.consent_origin = origin
+    return render(request, "oauth_consent.html", session, client=client, redirect_uri=uri,
+                  consent_id=oauth.consent_form(auth, session, settings.session_secret))
+
+
+def registered_authorization(query: str) -> oauth.Authorization:
+    auth = oauth.Authorization.parse(QueryParams(query), settings.base_url + "/mcp")
+    client = oauth_store.get_client(conn, auth.client_id)
+    if not client or auth.redirect_uri not in client["redirect_uris"]:
+        raise oauth.OAuthError("invalid_request", "客户端或回调地址已失效，请从客户端重新连接。")
+    return auth
+
+
+@app.post("/oauth/authorize")
+def consent(request: Request, csrf: str = Form(""), consent_id: str = Form(""), decision: str = Form("")):
+    session = current_session(request)
+    if error := owner_form_error(request, session, csrf):
+        return error
+    query = oauth.read_consent(consent_id, session, settings.session_secret)
+    if not query or decision not in ("approve", "deny"):
+        return message(request, session, "无法授权", "同意页已失效，请从客户端重新连接。", 400)
+    try:
+        auth = registered_authorization(query)
+    except oauth.OAuthError as exc:
+        return message(request, session, "无法授权", str(exc), 400)
+    if decision == "deny":
+        target = oauth.callback(auth.redirect_uri, auth.state, error="access_denied")
+    else:
+        try:
+            code = oauth.approve(conn, auth, consent_id, settings.session_secret)
+        except oauth.OAuthError as exc:
+            return message(request, session, "无法授权", str(exc), 400)
+        target = oauth.callback(auth.redirect_uri, auth.state, code=code)
+    return RedirectResponse(target, status_code=302)
+
+
+@app.post("/oauth/token")
+async def oauth_token(request: Request):
+    try:
+        if "authorization" in request.headers:
+            raise oauth.OAuthError("invalid_client", "public clients use token_endpoint_auth_method none")
+        if request.headers.get("content-type", "").partition(";")[0].strip().lower() != "application/x-www-form-urlencoded":
+            raise oauth.OAuthError("invalid_request", "use application/x-www-form-urlencoded")
+        try:
+            form = await request.form()
+        except StarletteHTTPException as exc:
+            raise oauth.OAuthError("invalid_request", "invalid form body") from exc
+        if len(form) != len(form.multi_items()):
+            raise oauth.OAuthError("invalid_request", "duplicate token request parameter")
+        if form.get("client_secret") or form.get("client_assertion"):
+            raise oauth.OAuthError("invalid_client", "public clients use token_endpoint_auth_method none")
+        return await run_in_threadpool(oauth.exchange, conn, form, settings.base_url + "/mcp")
+    except oauth.OAuthError as exc:
+        return JSONResponse({"error": exc.error, "error_description": str(exc)}, status_code=400)
+
+
+def connections_page(request: Request, session: str, status: int = 200, **fields):
+    return render(request, "connections.html", session, status, clients=oauth_store.clients(conn),
+                  grants=oauth_store.mcp_grants(conn), resource=settings.base_url + "/mcp", **fields)
+
+
+@app.get("/connections")
+def connections(request: Request):
+    session = current_session(request)
+    return connections_page(request, session) if session else login_required()
+
+
+@app.post("/connections/clients")
+def register_client(request: Request, csrf: str = Form(""), name: str = Form(""), redirect_uris: str = Form("")):
+    session = current_session(request)
+    if error := owner_form_error(request, session, csrf):
+        return error
+    name = name.strip()
+    uris = list(dict.fromkeys(line.strip() for line in redirect_uris.splitlines() if line.strip()))
+    try:
+        if not 1 <= len(name) <= 80 or not name.isprintable():
+            raise ValueError("客户端名称须为 1–80 个可打印字符。")
+        if not uris:
+            raise ValueError("请填写至少一个回调地址。")
+        for uri in uris:
+            oauth.redirect_origin(uri)
+    except ValueError as exc:
+        return connections_page(request, session, 400, error=str(exc), client_name=name, redirect_uris=redirect_uris)
+    with db.transaction(conn):
+        if not any(client["name"] == name and set(client["redirect_uris"]) == set(uris) for client in oauth_store.clients(conn)):
+            oauth_store.register_client(conn, secrets.token_urlsafe(18), name, uris)
+    return RedirectResponse("/connections", status_code=303)
+
+
+@app.post("/connections/clients/revoke")
+def disconnect_client(request: Request, client_id: str = Form(...), csrf: str = Form("")):
+    if error := owner_form_error(request, current_session(request), csrf):
+        return error
+    oauth_store.revoke_client(conn, client_id)
+    return RedirectResponse("/connections", status_code=303)
+
+
+@app.post("/connections/grants/{grant_id}/revoke")
+def disconnect_grant(request: Request, grant_id: int, csrf: str = Form("")):
+    if error := owner_form_error(request, current_session(request), csrf):
+        return error
+    with db.transaction(conn):
+        if api_keys.is_active(conn, grant_id, "assistant"):
+            api_keys.revoke(conn, grant_id)
+    return RedirectResponse("/connections", status_code=303)
 
 
 # ---------- pages ----------

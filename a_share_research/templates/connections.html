@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}授权管理 · 个股研究{% endblock %}
+{% block main %}
+<h1>授权管理</h1>
+<section aria-labelledby="mcp-address-label">
+  <h2 id="mcp-address-label"><label for="mcp-address">MCP 地址</label></h2>
+  <div class="search">
+    <div class="row">
+      <input id="mcp-address" type="text" value="{{ resource }}" readonly dir="ltr">
+      <span id="copy-mcp" hidden><button class="btn secondary" type="button">复制地址</button></span>
+    </div>
+    <p class="hint" id="copy-status" role="status"></p>
+  </div>
+</section>
+
+<section aria-labelledby="clients-heading">
+  <h2 id="clients-heading">预注册客户端</h2>
+  {% if clients %}
+  <ul class="list connections-list">
+    {% for client in clients %}
+    <li>
+      <div>
+        <strong>{{ client.name }}</strong>
+        <p class="small">客户端 ID <bdi>{{ client.client_id }}</bdi></p>
+        {% for uri in client.redirect_uris %}<p class="small muted">回调地址 <bdi>{{ uri }}</bdi></p>{% endfor %}
+      </div>
+      <form method="post" action="/connections/clients/revoke">
+        <input type="hidden" name="client_id" value="{{ client.client_id }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="link" type="submit" aria-label="撤销客户端 {{ client.name }}">撤销客户端</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <details class="block" {% if not clients or error %}open{% endif %}>
+    <summary>登记客户端</summary>
+    <form method="post" action="/connections/clients" class="search narrow">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if error %}<p class="notice caution" role="alert">{{ error }}</p>{% endif %}
+      <label for="client-name">客户端名称</label>
+      <div class="row"><input id="client-name" name="name" value="{{ client_name|default('') }}" required></div>
+      <label for="redirect-uris">回调地址（每行一个）</label>
+      <textarea id="redirect-uris" name="redirect_uris" rows="2" dir="ltr" spellcheck="false" autocomplete="off" required aria-describedby="redirect-help">{{ redirect_uris|default('') }}</textarea>
+      <p class="hint" id="redirect-help">从客户端的 OAuth 设置复制完整回调地址。</p>
+      <div class="actions"><button class="btn" type="submit">登记客户端</button></div>
+    </form>
+  </details>
+</section>
+
+<section aria-labelledby="grants-heading">
+  <h2 id="grants-heading">有效授权</h2>
+  {% if grants %}
+  <ul class="list connections-list">
+    {% for grant in grants %}
+    <li>
+      <div>
+        <strong>{{ grant.name }}</strong>
+        {% if grant.kind == 'oauth' %}<p class="small">OAuth 客户端 <bdi>{{ grant.client }}</bdi></p>
+        {% else %}<p class="small">个人访问令牌（PAT）</p>{% endif %}
+        <p class="small muted">授权 #{{ grant.id }} · <time datetime="{{ grant.created_at }}">{{ grant.created_at[:16]|replace('T', ' ') }}</time></p>
+      </div>
+      <form method="post" action="/connections/grants/{{ grant.id }}/revoke">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="link" type="submit" aria-label="撤销 {{ grant.name }} 的授权 #{{ grant.id }}">撤销授权</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">暂无有效授权。从已登记的客户端连接 MCP，登录并同意后，授权会显示在这里。</p>{% endif %}
+</section>
+
+<section aria-labelledby="skill-heading">
+  <h2 id="skill-heading">a-share Skill 下载</h2>
+  <p class="muted">适用于远程客户端的安装包将在双入口方案第 3 阶段提供。</p>
+</section>
+{% endblock %}
