@@ -28,6 +28,8 @@ python3 ops/clients/prepare.py \
 
 将包内 `skill/a-share/SKILL.md` 更新到上表目录，检查符号链接指向，共享目录只需更新一次。重载宿主后，用该宿主列举工具并调用 `research_card` 核对权限与回执。Pi 的 `pi mcp list` 会连接已启用的服务。AGY 的 `agy plugin validate /absolute/private/client-bundle/configs/agy/ashare --strict` 可离线核对插件格式。
 
+本机宿主由同一个用户长驻启动，没有逐个进程注入环境变量的入口，因此 11-20 切换时令牌直接写在各宿主自己的 0600 配置里，取自该宿主的 `~/.config/ashare/<host>-assistant.json`，不经 shell 历史，也不打印。具体为：Claude 是 `~/.claude.json` 的 `headers`；Codex 是 `config.toml` 的 `http_headers`；Pi 和 AGY 的全局 `mcp_config.json` 用 `headers`；Hermes 的 `config.yaml` 也用 `headers`。AGY 原有的全局条目改成 HTTP（`serverUrl`），不另装插件。换发 PAT 时同步更新这些配置和对应的 CLI JSON。
+
 上述字段已按本机的 `claude mcp add --help` 和 Claude Code 官方插件随附的 MCP HTTP 示例、`codex mcp add --help`、Hermes 的 `tools/mcp_tool_config.py` 与 `tools/mcp_tool_transport.py`、Pi 1.5.2 的 `extensions/mcp/config.d.ts`、`agy mcp add --help` 及 AGY 随附的 `migrate-agent-settings` 说明核对。AGY 需要声明插件变量，并在插件设置页填写，直接导出同名 shell 环境变量无效。
 
 ## CLI 与本机 cron
