@@ -153,6 +153,33 @@ def test_a_proposed_draft_left_by_a_restart_is_frozen_by_the_worker(tmp_path):
     assert conn.execute("SELECT status FROM batches").fetchone()["status"] == "frozen"
 
 
+@pytest.mark.parametrize("auto", [True, False], ids=["auto", "owner"])
+def test_dual_pool_freeze_reads_coverage_once(tmp_path, monkeypatch, auto):
+    from a_share_research import db, sources
+    from test_batch_c import cache_partial_window, proposed
+
+    cache_partial_window(monkeypatch)
+    with db.connect(tmp_path / "batches.db") as conn:
+        q20, _ = proposed(conn, status="selecting" if auto else "proposed")
+        selection = batches.load(conn.execute("SELECT * FROM batches").fetchone())["selection"]
+        in_transaction = []
+        batch_coverage = sources.batch_coverage
+
+        def record_read(batch):
+            in_transaction.append(conn.in_transaction)
+            return batch_coverage(batch)
+
+        monkeypatch.setattr(sources, "batch_coverage", record_read)
+        if auto:
+            assert screening._auto_freeze(conn, 1, selection)
+        else:
+            with db.transaction(conn):
+                screening.freeze(conn, 1, [q20[0]["code"]], "")
+        assert in_transaction == [not auto]
+        coverage = json.loads(conn.execute("SELECT coverage FROM batches").fetchone()["coverage"])
+        assert coverage[q20[0]["code"]]["covered_days"] == 1
+
+
 # TuShare income for 002102.SZ FY2023, captured 2026-10-25: the restatement keeps the original ann_date,
 # both rows carry update_flag 1, and only f_ann_date tells them apart.
 RESTATED = pd.DataFrame([

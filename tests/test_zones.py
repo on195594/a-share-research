@@ -6,9 +6,10 @@ history is used to make the 250-session PE requirement pass.
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from a_share_research import validation, zones
@@ -38,6 +39,33 @@ def report(report_id=29, **changes):
 def scored():
     rows = zones.observations([report()], CAL, RAW, {})
     return zones.score_observations(rows, CAL, ADJUSTED, V0["benchmark"])
+
+
+def test_load_market_shares_daily_bars_and_requires_matching_factors(monkeypatch):
+    code = report()["code"]
+    candidates = json.loads((DATA / "batch-candidate-matrix.json").read_text())["rows"]
+    pe = next(row["pe"] for row in candidates if row["code"] == code)
+    frames = {
+        "daily": pd.DataFrame(RAW.items(), columns=["trade_date", "close"]),
+        "adj_factor": pd.DataFrame(V0["adj_factor"].items(), columns=["trade_date", "adj_factor"]),
+        "daily_basic": pd.DataFrame([("20261023", pe)], columns=["trade_date", "pe_ttm"]),
+        "index_daily": pd.DataFrame(V0["benchmark"].items(), columns=["trade_date", "close"]),
+    }
+    calls = []
+
+    def query(pro, api, **params):
+        calls.append(api)
+        return frames[api]
+
+    monkeypatch.setattr(zones.market_gateway, "trade_days", lambda *args: [d for d in CAL if d <= "20261030"])
+    monkeypatch.setattr(zones.screening, "_query", query)
+    _, by_code, _ = zones.load_market(None, [report()], date(2026, 10, 30))
+    assert calls.count("daily") == calls.count("adj_factor") == 1
+    assert by_code[code]["close"] == RAW and by_code[code]["adjusted"] == ADJUSTED
+
+    frames["adj_factor"] = frames["adj_factor"].iloc[1:]  # Drop the captured 20261030 factor.
+    with pytest.raises(zones.screening.ScreenError, match=rf"{code} 20261030 收盘价或复权因子无效"):
+        zones.load_market(None, [report()], date(2026, 10, 30))
 
 
 def test_unadjusted_boundaries_and_segment_starts():

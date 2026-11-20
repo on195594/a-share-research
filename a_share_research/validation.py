@@ -10,6 +10,7 @@ import json
 import logging
 import sqlite3
 import statistics
+from collections.abc import Iterator
 from contextlib import closing
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -414,25 +415,25 @@ def score_forecasts(items: list[dict], today: date | None = None) -> list[dict]:
 
 def _load_eligible_reports(database: str, contract: int | None = None) -> list[dict]:
     """Passed, non-replay, non-feedback research reports from a read-only connection, before monthly dedup."""
+    reports = []
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, "
-            "r.body FROM reports r "
+            "json_extract(r.body, '$.judgment.contract', '$.stance_calc', '$.stance.trigger', '$.valuation_calc') "
+            "FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL"
-        ).fetchall()
-    reports = []
-    for report_id, code, name, verdict, created, request, body in rows:
-        src = source(json.loads(request) if request else {})
-        if src is None:
-            continue
-        body = report_body.load(body)
-        calc = body.get("stance_calc")
-        reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
-                        "completed": datetime.fromisoformat(created), "contract": judgment_contract(body),
-                        "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
-                        "trigger": calc.get("trigger", (body.get("stance") or {}).get("trigger")) if calc else None,
-                        "add_trigger": calc.get("add_trigger") if calc else None,
-                        "boundary": stances.on_boundary(body.get("valuation_calc"))})
+        )
+        for report_id, code, name, verdict, created, request, fields in rows:
+            src = source(json.loads(request) if request else {})
+            if src is None:
+                continue
+            contract_id, calc, trigger, valuation_calc = json.loads(fields)
+            reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
+                            "completed": datetime.fromisoformat(created), "contract": contract_id,
+                            "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
+                            "trigger": calc.get("trigger", trigger) if calc else None,
+                            "add_trigger": calc.get("add_trigger") if calc else None,
+                            "boundary": stances.on_boundary(valuation_calc)})
     return filter_contract(reports, contract)
 
 
@@ -441,9 +442,13 @@ def load_reports(database: str, contract: int | None = None) -> list[dict]:
     return first_per_month(_load_eligible_reports(database, contract))
 
 
+def _first_stance_per_month(reports: list[dict]) -> list[dict]:
+    return first_per_month([r for r in reports if r["stance"] != "未记录"])
+
+
 def load_stance_reports(database: str, contract: int | None = None) -> list[dict]:
     """First report with a recorded stance per (source, code, natural month); unrecorded reports do not take slots."""
-    return first_per_month([r for r in _load_eligible_reports(database, contract) if r["stance"] != "未记录"])
+    return _first_stance_per_month(_load_eligible_reports(database, contract))
 
 
 def load_agenda(database: str, contract: int | None = None) -> list[dict]:
@@ -500,16 +505,20 @@ def agenda_lines(result: dict) -> list[str]:
     return lines
 
 
-def _adjusted_closes(pro, code: str, start: str, end: str) -> dict[str, float]:
+def _closing_prices(pro, code: str, start: str, end: str) -> Iterator[tuple[str, float, float]]:
+    """Yield each trading day's raw and factor-adjusted close."""
     bars = screening._query(pro, "daily", ts_code=code, start_date=start, end_date=end, fields="trade_date,close")
     factors = screening._query(pro, "adj_factor", ts_code=code, start_date=start, end_date=end)
     factor = dict(zip(factors["trade_date"].astype(str), factors["adj_factor"]))
-    out = {}
     for day, close in zip(bars["trade_date"].astype(str), bars["close"]):
         if not screening._positive(close) or not screening._positive(factor.get(day)):
             raise screening.ScreenError(f"{code} {day} 收盘价或复权因子无效")
-        out[day] = float(close) * float(factor[day])
-    return out
+        raw = float(close)
+        yield day, raw, raw * float(factor[day])
+
+
+def _adjusted_closes(pro, code: str, start: str, end: str) -> dict[str, float]:
+    return {day: adjusted for day, _, adjusted in _closing_prices(pro, code, start, end)}
 
 
 def score(pro, reports: list[dict], today: date) -> list[dict]:
@@ -669,8 +678,10 @@ def main() -> None:
                 json.dump(result, fh, ensure_ascii=False, indent=1, default=str)
         return
     pro, today = market.client(), datetime.now(SHANGHAI).date()
+    eligible = _load_eligible_reports(args.database, args.contract)
+    stance_reports = _first_stance_per_month(eligible)
     if args.stances:
-        rows = score_stances(pro, score(pro, load_stance_reports(args.database, args.contract), today), today)
+        rows = score_stances(pro, score(pro, stance_reports, today), today)
         summary = summarize_stances(rows)
         lines = [f"V4 研究立场记分（{len(rows)} 份带立场报告；超额为入场至今相对 {BENCHMARK}）"]
         lines.append(contract_line(rows))
@@ -693,8 +704,7 @@ def main() -> None:
             with open(args.json, "w", encoding="utf-8") as fh:
                 json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
         return
-    rows = score(pro, load_reports(args.database, args.contract), today)
-    stance_reports = load_stance_reports(args.database, args.contract)
+    rows = score(pro, first_per_month(eligible), today)
     by_id = {row["id"]: row for row in rows}
     extra = [r for r in stance_reports if r["id"] not in by_id]
     scored_extra = {row["id"]: row for row in score(pro, extra, today)} if extra else {}

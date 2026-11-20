@@ -255,10 +255,12 @@ def load_market(pro, reports: list[dict], today: date) -> tuple[list[str], dict,
         since = screening._compact(min(r["completed"] for r in reports if r["code"] == code).date())
         prior = [d for d in calendar if d < since]
         pe_start = prior[-PE_WINDOW] if len(prior) >= PE_WINDOW else calendar[0] if calendar else since
-        adjusted = {}
+        closes, adjusted = {}, {}
         for year in range(int(since[:4]), today.year + 1):
-            adjusted.update(validation._adjusted_closes(pro, code, max(since, f"{year}0101"), min(end, f"{year}1231")))
-        market[code] = {"close": series("daily", code, since, "close"), "adjusted": adjusted,
+            lo, hi = max(since, f"{year}0101"), min(end, f"{year}1231")
+            for day, raw, adj in validation._closing_prices(pro, code, lo, hi):
+                closes[day], adjusted[day] = raw, adj
+        market[code] = {"close": closes, "adjusted": adjusted,
                         "pe": series("daily_basic", code, pe_start, "pe_ttm")}
     return calendar, market, benchmark
 
