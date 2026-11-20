@@ -89,7 +89,7 @@ def create_upload_table(conn) -> None:
         id INTEGER PRIMARY KEY,
         sha256 TEXT NOT NULL CHECK(length(sha256)=64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
         uploaded_at TEXT NOT NULL, key_id INTEGER NOT NULL REFERENCES api_keys(id),
-        source TEXT NOT NULL CHECK(source IN ('web','mcp','cli')),
+        source TEXT NOT NULL CHECK(source IN ('web','mcp')),
         filename TEXT CHECK(filename IS NULL OR length(filename) BETWEEN 1 AND 200),
         label TEXT CHECK(label IS NULL OR length(label) BETWEEN 1 AND 80))''')
     conn.execute('CREATE INDEX IF NOT EXISTS account_evidence_uploads_by_key ON account_evidence_uploads(key_id, id)')
