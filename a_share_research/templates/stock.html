@@ -12,7 +12,7 @@
   <li><a href="#price">价格参考</a></li>
 </ul></nav>
 <p class="actions"><a class="btn" href="/reports/{{ card.id }}">阅读 {{ card.name or card.code }} 的完整报告</a></p>
-{{ stock_overview_link(company_overview) }}
+{% if company_overview %}{{ stock_overview_link(company_overview) }}{% endif %}
 <div>
   {{ full_card(card, due) }}
   <div class="actions card-actions">
@@ -34,7 +34,7 @@
   <ul class="list">
   {% for r in reports %}
     <li>
-      <a href="/reports/{{ r.id }}">{{ r.created_at[:16].replace("T", " ") }}</a>
+      <a href="/reports/{{ r.id }}">{{ r.created_at|shanghai_minute }}</a>
       {{ research_context(r.question, r.parent_report_id, r.feedback_text, r.prior_report_id) }}
       {% if r.replay_of %}<span class="flag">材料重放 · 来源任务 {{ r.replay_of }}</span>{% endif %}
       <p>{% if r.passed %}{{ verdict_pips(r.verdict) }}{{ r.verdict }}{% else %}<span class="flag">复核未通过</span>{% endif %}

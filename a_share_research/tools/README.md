@@ -23,6 +23,7 @@ ashare --config /absolute/private/client.json call research_card --json '{"code"
 - `research` 与 `assistant` 均可检索和读取研究、检索已审核方法卡（`research_methods`）、提交研究与反馈、查询进度和操作月批。
 - 扫描范围与政策监控的取卡方式见[系统架构](../../ARCHITECTURE.md#数据与兼容)。扫描与订阅工具只对启用账户开关的 `assistant` 开放，该凭据也可调用账户、政策工具及两项只读总览。
   - `research_company_overview` 与 `account_portfolio_overview` 直接读取与手机公司总览、组合总览相同的数据。所有者会话访问 `GET /stock/{code}/overview` 或 `GET /portfolio/overview` 可阅读 HTML，显式请求 `Accept: application/json` 可取结构化结果。持仓逐项给出当前周期论点、研究结论与公告复核，`evidence_path` 定位该公司的缺口与原文。`policy.path` 打开已保存的评估，政策身份、启用编号、账本版本与时点均取自该次评估。
+  - 公司总览的 `gaps` 列公司缺口，`account_gaps` 列绑定、评估或 NAV 凭证等账户缺口。`announcements[].unresolved` 标明公告是否仍需复核。组合总览的顶层 `gaps` 对应账户缺口，`holdings[].gaps` 对应各持仓公司的缺口。
   - `account.latest_receipt` 是最近一次对账的状态与回执链接，`account.last_receipt` 指向最近一次已入账回执。两个总览的顶层 `nav_interval` 给出绑定账户最近保存的区间起止日、基准、创建时间、凭证 SHA-256 与 `path`。打开链接可核对扣费后单位净值、账户与 H00906 的区间收益及超额百分点。没有引用时返回 `null` 并列出缺口。
   - `account_research_coverage` 返回绑定账本的有效成交，`stated_report_id` 来自成交声明，`available_report_id` 表示成交时已发布的最近一份同公司正式报告。
 - `owner` 用于本机政策登记与切换，远程 `/mcp` 拒绝该凭据。

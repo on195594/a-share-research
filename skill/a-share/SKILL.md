@@ -28,7 +28,7 @@ description: 通过统一 A 股服务读取研究、处理账户证据与监控�
 
 截图、成交和原始材料用 `account_evidence` 上传，可附文件名和标签（如“交割单”“持仓总览”）。入账前用 `account_evidence_recent` 按上传时间、文件名和标签找到对应材料，取其 SHA-256 调用对账、观察或追加工具。同一内容重传沿用原哈希，每次都记录上传。对账通过按回执报告；缺材料或冲突保留具体缺口，不反推、编造成交和现金流水。截图只有资产汇总时，不把它补成完整交易历史。保持来源模式和范围：影子入账、用户输入重放、历史行情重放都不能说成生产账户已更新或当前市场事实。生产账户写入沿用已验收并启用的入口；工具可发现本身不代表已经完成账户切换。
 
-查看组合待办用 `account_portfolio_overview`，查看单家公司用 `research_company_overview`。按返回的时点和原文转述缺口，`evidence_path` 定位公司待补证据。可把已保存监控评估、最近一次对账回执（`account.latest_receipt`）和 NAV 区间的相对路径接到 Web 站点。两个总览的 `nav_interval` 给出绑定账户最近保存的区间、基准、创建时间和凭证哈希；为空时说明缺口。
+查看组合待办用 `account_portfolio_overview`，顶层 `gaps` 是账户缺口。查看单家公司用 `research_company_overview`，公司缺口见 `gaps`，持仓监控的缺口和升级项见 `policy.data_gaps`、`policy.escalations`。用 `announcements[].unresolved` 识别未闭环公告，`evidence_path` 定位原文。按 `account_gaps` 单独说明账户缺口。可把已保存监控评估、最近一次对账回执（`account.latest_receipt`）和 NAV 区间的相对路径接到 Web 站点。两个总览的 `nav_interval` 给出绑定账户最近保存的区间、基准、创建时间和凭证哈希。
 
 调用 `account_nav_evaluate` 时可省略 `request.benchmark_evidence_hash`，由服务端采集并保存 `H00906.CSI` 收盘证据。已有指数证据时也可传入其哈希。选择上海时间 15:00:00 的起止估值。区间无交易日数据或缺任一端点收盘值（`invalid_arguments`）时，指出缺失日期或区间并建议另选区间。行情采集故障（`unavailable`）时，稍后用原请求重试。两种情况均可用错误末尾的哈希核对指数响应。
 

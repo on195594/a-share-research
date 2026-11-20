@@ -1,5 +1,5 @@
   {% if comparison.old %}
-  <p><a href="/reports/{{ comparison.old.id }}">原报告 {{ comparison.old.created_at[:16].replace('T', ' ') }}</a> → <a href="/reports/{{ comparison.new.id }}">本次报告 {{ comparison.new.created_at[:16].replace('T', ' ') }}</a></p>
+  <p><a href="/reports/{{ comparison.old.id }}">原报告 {{ comparison.old.created_at|shanghai_minute }}</a> → <a href="/reports/{{ comparison.new.id }}">本次报告 {{ comparison.new.created_at|shanghai_minute }}</a></p>
   <p class="hint">只对照明确关联的报告。</p>
   <details>
     <summary>研究问题与结论{% if comparison.old_question and comparison.new_question %} · {{ '问题相同' if comparison.old_question == comparison.new_question else '问题不同' }}{% else %} · 问题记录不完整{% endif %}</summary>

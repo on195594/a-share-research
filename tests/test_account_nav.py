@@ -92,8 +92,10 @@ def test_overviews_share_latest_bound_reference_and_detail_reads_saved_result(bo
     bind_account(conn, 'a')
     gap = '暂无可查询的 NAV 区间凭证'
     company_code = '600519'
-    for data in (overview.portfolio_overview(conn), overview.company_overview(conn, company_code)):
-        assert data['nav_interval'] is None and gap in data['gaps']
+    portfolio = overview.portfolio_overview(conn)
+    company = overview.company_overview(conn, company_code)
+    assert portfolio['nav_interval'] is None and company['nav_interval'] is None
+    assert gap in portfolio['gaps'] and gap in company['account_gaps'] and gap not in company['gaps']
 
     original = evaluate(book)
     # Two saved valuations for the same interval retain independently readable results.
@@ -104,7 +106,7 @@ def test_overviews_share_latest_bound_reference_and_detail_reads_saved_result(bo
     portfolio = overview.portfolio_overview(conn)
     company = overview.company_overview(conn, company_code)
     ref = portfolio['nav_interval']
-    assert ref == company['nav_interval'] and gap not in portfolio['gaps'] and gap not in company['gaps']
+    assert ref == company['nav_interval'] and gap not in portfolio['gaps'] and gap not in company['account_gaps']
     assert (ref['artifact_sha256'], ref['start_date'], ref['end_date'], ref['benchmark_code'], ref['path']) == (
         sha, '2026-01-05', '2026-01-08', 'H00906.CSI', '/account/nav/' + sha)
     assert ref['created_at']

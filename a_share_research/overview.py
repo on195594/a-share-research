@@ -128,7 +128,7 @@ def _announcements(conn, code, path):
     for index, event in enumerate(events):
         review = reviews.get(event['id'])
         # A no-card disclosure has no review that could close it.
-        unresolved = event['action'] == 'no_card' or (review and review['state'] not in scans.RESOLVED)
+        unresolved = event['action'] == 'no_card' or (review is not None and review['state'] not in scans.RESOLVED)
         if index and not unresolved:
             continue
         event_path = path
@@ -138,7 +138,7 @@ def _announcements(conn, code, path):
             event_path = f"/runs/{event['run_id']}"
         announcements.append({k: event[k] for k in ('id', 'scan_id', 'title', 'kind', 'announced', 'action')} | {
             'review': {k: review[k] for k in ('state', 'label', 'report_id')} if review else None,
-            'path': event_path, 'source_url': safe_url(event['url'])})
+            'unresolved': unresolved, 'path': event_path, 'source_url': safe_url(event['url'])})
     return announcements
 
 
@@ -155,7 +155,7 @@ def _company(conn, code, held, position, saved):
                         zone_note=card['current'].get('note'), path=f"/reports/{card['report_id']}")
         if card['check_failure']:
             gaps.append(card['check_failure']['reason'])
-    else:
+    elif held:
         gaps.append('暂无通过复核的研究报告')
     if failure := scans.announcement_failure(conn, code):
         gaps.append(failure['reason'])
@@ -172,7 +172,7 @@ def _company(conn, code, held, position, saved):
 
 
 def _overview(conn, code=None):
-    gaps = []
+    account_gaps = []
     with db.transaction(conn, immediate=False):
         # An unverified account is unknown, including when public company research exists.
         try:
@@ -181,7 +181,7 @@ def _overview(conn, code=None):
             if exc.status != 409:
                 raise
             current = None
-            gaps.append(str(exc))
+            account_gaps.append(str(exc))
         source = current['source'] if current else None
         account = None
         account_id = None
@@ -198,18 +198,18 @@ def _overview(conn, code=None):
                 try:
                     saved = _saved_monitor(conn)
                 except policies.PolicyError as exc:
-                    gaps.append(str(exc))
+                    account_gaps.append(str(exc))
                 else:
-                    if saved is None and code is None:
-                        gaps.append('暂无绑定账户的已保存监控评估')
+                    if saved is None:
+                        account_gaps.append('暂无绑定账户的已保存监控评估')
             else:
-                gaps.append('当前来源为已核实镜像，缺少绑定账本的持仓周期')
+                account_gaps.append('当前来源为已核实镜像，缺少绑定账本的持仓周期')
         elif conn.execute("SELECT 1 FROM account_source WHERE id=1 AND mode='ledger'").fetchone():
             # A committed interval survives gaps in the current position projection.
             try:
                 account_id = account_view.bound_account_id(conn)
             except policies.PolicyError as exc:
-                gaps.append(str(exc))
+                account_gaps.append(str(exc))
         nav_interval = None
         if account_id is not None:
             row = conn.execute('SELECT artifact_sha256,start_date,end_date,benchmark_code,created_at '
@@ -218,13 +218,12 @@ def _overview(conn, code=None):
             if row:
                 nav_interval = _nav_summary(row)
         if nav_interval is None:
-            gaps.append('暂无可查询的 NAV 区间凭证')
+            account_gaps.append('暂无可查询的 NAV 区间凭证')
         if code is not None:
             held = code in current['codes'] if current else None
             result = _company(conn, code, held, positions.get(code), saved)
-            result['gaps'].extend(gaps)
-            return result | {'account': account, 'nav_interval': nav_interval}
-        return dict(account=account, policy=_policy(saved), nav_interval=nav_interval, gaps=gaps,
+            return result | {'account': account, 'nav_interval': nav_interval, 'account_gaps': account_gaps}
+        return dict(account=account, policy=_policy(saved), nav_interval=nav_interval, gaps=account_gaps,
                     holdings=[_company(conn, key, True, positions.get(key), saved)
                               for key in current['codes']] if current else None)
 

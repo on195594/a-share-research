@@ -16,7 +16,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlencode, urlparse
@@ -33,7 +32,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
-from a_share_research import stock_codes, api_keys, oauth, oauth_store
+from a_share_research import stock_codes, api_keys, oauth, oauth_store, template_filters
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 from a_share_research.service import FeedbackRequest, ResearchRequest
@@ -126,7 +125,7 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["record_json"] = lambda value: json.dumps(value, ensure_ascii=False, indent=2)
-templates.env.filters["decimal_format"] = lambda value, spec: format(Decimal(value), spec)
+templates.env.filters.update(template_filters.FILTERS)
 # Busts browser caches of the stylesheet and script on each deploy that changes them.
 ASSET_VERSION = hashlib.sha256(b"".join((HERE / "static" / name).read_bytes() for name in ("app.css", "app.js"))).hexdigest()[:12]
 templates.env.globals["asset_version"] = ASSET_VERSION
@@ -594,7 +593,7 @@ def _prefers_json(request: Request) -> bool:
 def _owner_read(request, template, read, *args):
     if not (session := current_session(request)):
         return login_required()
-    as_json = _prefers_json(request)
+    as_json = template is None or _prefers_json(request)
     try:
         view = read(conn, *args)
     except service.RequestError as exc:
@@ -602,7 +601,8 @@ def _owner_read(request, template, read, *args):
                     message(request, session, "无法读取记录", str(exc), exc.status))
     else:
         response = JSONResponse(view) if as_json else render(request, template, session, view=view)
-    response.headers["Vary"] = "Accept"
+    if template is not None:
+        response.headers["Vary"] = "Accept"
     return response
 
 
@@ -993,19 +993,19 @@ def api_scan(request: Request, scan_id: int):
 @app.get('/subscriptions')
 def subscription_detail(request: Request):
     from a_share_research import scans
-    return _owner_read(request, scans.subscriptions)
+    return _owner_read(request, None, scans.subscriptions)
 
 
 @app.get('/scans/weekly')
 def weekly_scan_detail(request: Request):
     from a_share_research import scans
-    return _owner_read(request, lambda conn: scans.weekly(conn, account_sources=True))
+    return _owner_read(request, None, scans.weekly)
 
 
 @app.get('/scans/{scan_id}')
 def scan_detail(request: Request, scan_id: int):
     from a_share_research import scans
-    return _owner_read(request, scans.view, scan_id)
+    return _owner_read(request, None, scans.view, scan_id)
 
 
 @app.get("/api/reports/{report_id}")

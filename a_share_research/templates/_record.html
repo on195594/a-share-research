@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ self.heading() }} · 我的组合{% endblock %}
 {% block main %}
+<div class="record-detail">
 <h1>{% block heading %}{% endblock %}</h1>
 {% block record %}{% endblock %}
 <details class="block policy-details">
@@ -8,4 +9,5 @@
   <pre class="policy-json">{{ view|record_json }}</pre>
 </details>
 <p class="actions"><a class="link" href="/portfolio/overview">返回组合总览</a></p>
+</div>
 {% endblock %}

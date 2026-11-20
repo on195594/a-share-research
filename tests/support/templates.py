@@ -4,11 +4,12 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.requests import Request
 
-from a_share_research import reading
+from a_share_research import reading, template_filters
 from a_share_research.evidence import report_source_view, citation_link
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "a_share_research/templates"
 ENV = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape())
+ENV.filters.update(template_filters.FILTERS)
 ENV.globals["asset_version"] = "test"
 # web.py renders through TemplateResponse, which always supplies request to base.html.
 ENV.globals["request"] = Request({"type": "http", "path": "/", "query_string": b"", "headers": []})

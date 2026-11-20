@@ -6,18 +6,19 @@ from html import unescape
 import pytest
 from fastapi import Request
 
-from a_share_research import overview, scans, service
+from a_share_research import overview, scans, service, template_filters
 from a_share_research.account import cycle_analysis
 from a_share_research.tools.registry import Context, invoke
 from test_account_analysis import request
 from test_account_nav import book as nav_book_fixture, evaluate as save_nav
 from test_analysis_transitions import rewrite
-from test_policy_ledger_monitor import bound_book, configured as monitor_fixture, run as save_monitor  # noqa: F401
+from test_policy_ledger_monitor import bound_book as bound_book_fixture, configured as monitor_fixture, run as save_monitor
 from test_position_store import batch, event, state, submit
 from test_scans import CATALOG, priced, run_scan
 
 
 configured = monitor_fixture
+bound_book = bound_book_fixture
 nav_book = nav_book_fixture
 
 
@@ -36,6 +37,32 @@ def owner_request(web):
 def html(response, status=200):
     assert response.status_code == status and response.media_type == "text/html"
     return unescape(response.body.decode())
+
+
+@pytest.mark.wide_scan_scope
+def test_owner_subscription_and_scan_routes_return_json_to_browser(web, owner_request, bound_book):
+    subscriptions = scans.replace_subscriptions(web.conn, ['603606'], catalog=CATALOG)
+    scan_id = scans.submit(web.conn)
+    listing = web.subscription_detail(owner_request('/subscriptions'))
+    weekly = web.weekly_scan_detail(owner_request('/scans/weekly'))
+    scan = web.scan_detail(owner_request(f'/scans/{scan_id}'), scan_id)
+    for response in (listing, weekly, scan):
+        assert response.status_code == 200 and response.media_type == 'application/json'
+    assert json.loads(listing.body) == subscriptions
+    scope = json.loads(weekly.body)['scan_scope']
+    assert {item['code'] for item in scope if 'holding' in item['origins']} == {'600001'}
+    assert json.loads(scan.body) == scans.view(web.conn, scan_id)
+
+
+def test_overview_display_formats():
+    assert template_filters.shanghai_minute('2026-11-20 11:43:49.601366+08:00') == '2026-11-20 11:43'
+    assert template_filters.shanghai_minute('2026-11-19T16:01:49Z') == '2026-11-20 00:01'
+    assert template_filters.shanghai_minute('2026-11-01') == '2026-11-01'
+    assert template_filters.decimal_format(1.266986874755609, '.2f') == '1.27'
+    assert template_filters.decimal_format(0, '.2f') == '0.00'
+    gap = {'field': 'industry_change_pct', 'minimum_action': 'supply a same-day industry comparison'}
+    assert template_filters.monitor_gap(gap) == '行业涨跌幅 · 补充同一交易日的行业涨跌幅'
+    assert template_filters.monitor_gap(dict(field='new_field', minimum_action='new hint')) == 'new_field · new hint'
 
 
 def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(configured):
@@ -92,8 +119,10 @@ def test_corrupt_monitor_is_a_gap_in_overviews_and_a_conflict_on_its_deep_link(c
     holding, = portfolio['holdings']
     company = overview.company_overview(conn, holding['code'])
     assert company['held'] and company['position'] == holding['position']
-    for result in (portfolio, company):
-        assert result['policy'] is None and '政策采集来源哈希不一致' in result['gaps']
+    assert portfolio['policy'] is None and company['policy'] is None
+    assert company['account_gaps'] == portfolio['gaps']
+    assert '政策采集来源哈希不一致' in company['account_gaps']
+    assert '政策采集来源哈希不一致' not in company['gaps']
 
     path = f"/policy/evaluations/{receipt['id']}"
     assert '政策采集来源哈希不一致' in html(web.monitor_detail(owner_request(path), receipt['id']), 409)
@@ -109,7 +138,8 @@ def test_public_research_and_open_disclosures_survive_an_unavailable_account(web
     scan = run_scan(conn)
     conn.execute('PRAGMA query_only=ON')
     company = overview.company_overview(conn, code)
-    assert company['held'] is None and company['gaps']
+    assert company['held'] is None and company['account_gaps'] == overview.portfolio_overview(conn)['gaps']
+    assert not company['gaps'] and company['account_gaps']
     assert company['research']['path'] == f"/reports/{company['research']['report_id']}"
     current = service.company_card(conn, code)['current']
     assert current['last_close_date'] and current['current_zone']
@@ -127,10 +157,28 @@ def test_public_research_and_open_disclosures_survive_an_unavailable_account(web
     announcement = company['announcements'][0]
     for value in (research['verdict'], research['summary'], research['current']['current_zone'],
                   research['current']['last_close_date'], research['zone_note'], research['period'], research['path'],
-                  announcement['title'], announcement['source_url'], *company['gaps']):
+                  announcement['title'], announcement['source_url'], *company['account_gaps']):
         assert value in page
     assert f'href="{path}"' in html(web.stock_page(owner_request(f'/stock/{code}'), code))
     assert 'href="/portfolio/overview"' in html(web.home(owner_request('/')))
+
+
+def test_account_gaps_do_not_flag_an_unheld_company_or_its_missing_report(bound_book, web, owner_request):
+    database, conn, principal, _, _ = bound_book
+    ctx = Context(conn, database, principal, account_shadow_enabled=True)
+    for code, status in (('603606', 200), ('000963', 404)):
+        data = invoke(ctx, 'research_company_overview', {'code': code})['data']
+        assert data['held'] is False and data['gaps'] == []
+        assert '暂无可查询的 NAV 区间凭证' in data['account_gaps']
+        page = html(web.stock_page(owner_request(f'/stock/{code}'), code), status)
+        assert f'href="/stock/{code}/overview"' not in page
+
+    # A captured disclosure without a research card still needs review.
+    code = '000963'
+    scans.replace_subscriptions(conn, [code], catalog=CATALOG)
+    run_scan(conn)
+    stock = html(web.stock_page(owner_request(f'/stock/{code}'), code), 404)
+    assert f'href="/stock/{code}/overview"' in stock and '总览有待核对项' in stock
 
 
 def test_held_company_without_research_links_to_saved_records_and_evidence(configured, web, owner_request):
@@ -173,8 +221,7 @@ def test_held_company_without_research_links_to_saved_records_and_evidence(confi
         for value in (code, evaluation_path, receipt_path, latest['path'], *holding['gaps']):
             assert value in page
     assert evaluation['identity'] in portfolio and evaluation['result']['as_of'][:10] in portfolio
-    for gap in holding['policy']['data_gaps']:
-        assert gap['minimum_action'] in company
+    assert '前收盘价 · 补充有效的前收盘价' in company
     stock = html(web.stock_page(owner_request(f'/stock/{code}'), code), 404)
     assert f'href="{company_path}"' in stock
     monitor = html(web.monitor_detail(owner_request(evaluation_path), evaluation['id']))

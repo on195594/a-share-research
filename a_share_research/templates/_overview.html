@@ -1,8 +1,9 @@
 {% from "_card.html" import badge %}
 
 {% macro stock_overview_link(company) %}
-{% set needs_review = company and (company.gaps or (company.policy and company.policy.data_gaps) or (company.research and company.research.status == '待复核')) %}
-{% if company and (company.held or needs_review) %}
+{% set needs_review = company.gaps or company.announcements|selectattr('unresolved')|first
+    or (company.policy and (company.policy.data_gaps or company.policy.escalations)) %}
+{% if company.held or needs_review %}
 <p class="notice">{% if company.held %}当前持仓{% if company.position %} · {{ company.position.shares }} 股{% endif %}。{% endif %}
   {% if needs_review %}总览有待核对项。{% endif %}
   <a href="/stock/{{ company.code }}/overview">查看公司总览</a></p>
@@ -23,7 +24,7 @@
 {% if policy and (policy.escalations or policy.data_gaps) %}
 <ul class="facts">
   {% for item in policy.escalations %}<li>{% if item.code %}{{ item.code }} · {% endif %}{{ item.detail }}</li>{% endfor %}
-  {% for gap in policy.data_gaps %}<li>{% if gap.code %}{{ gap.code }} · {% endif %}{{ gap.field }} · {{ gap.minimum_action }}</li>{% endfor %}
+  {% for gap in policy.data_gaps %}<li>{% if gap.code %}{{ gap.code }} · {% endif %}{{ gap|monitor_gap }}</li>{% endfor %}
 </ul>
 {% endif %}
 {% endmacro %}
@@ -33,10 +34,10 @@
 {% if account %}
 <p><a href="{{ account.path }}">{{ '绑定账本' if account.mode == 'ledger' else '已核实镜像' }}</a>
   {% if account.mode == 'ledger' %}{{ account.account_id }} · 账户版本 {{ account.version }}{% endif %}
-  <span class="small muted">来源登记于 {{ account.source_updated_at|replace('T', ' ') }}</span></p>
+  <span class="small muted">来源登记于 {{ account.source_updated_at|shanghai_minute }}</span></p>
 {% if account.latest_receipt %}
 <p>最近对账 · <a href="{{ account.latest_receipt.path }}">{{ receipt_status(account.latest_receipt.status) }}回执 #{{ account.latest_receipt.id }}</a>
-  <time class="small muted">{{ account.latest_receipt.created_at|replace('T', ' ') }}</time>
+  <time class="small muted">{{ account.latest_receipt.created_at|shanghai_minute }}</time>
   {% if account.last_receipt and account.last_receipt.id != account.latest_receipt.id %}
   · <a href="{{ account.last_receipt.path }}">上次已入账 #{{ account.last_receipt.id }}</a>{% endif %}</p>
 {% elif account.mode == 'ledger' %}<p class="muted">暂无对账回执</p>{% endif %}
@@ -44,12 +45,12 @@
 {% endif %}
 {% if view.nav_interval %}{% set nav = view.nav_interval %}
 <p><a href="{{ nav.path }}">NAV 区间 {{ nav.start_date }} 至 {{ nav.end_date }}</a> · {{ nav.benchmark_code }}
-  <span class="muted small">保存于 {{ nav.created_at|replace('T', ' ') }}</span></p>
+  <span class="muted small">保存于 {{ nav.created_at|shanghai_minute }}</span></p>
 {% endif %}
 {% endmacro %}
 
 {% macro policy_link(policy) %}
-<p><a href="{{ policy.path }}">监控评估 #{{ policy.id }}</a> · 评估于 {{ policy.as_of|replace('T', ' ') }}
+<p><a href="{{ policy.path }}">监控评估 #{{ policy.id }}</a> · 评估于 {{ policy.as_of|shanghai_minute }}
   <span class="small muted">账户版本 {{ policy.account_version }}</span></p>
 <p class="small muted">评估采用的政策身份 {{ policy.identity }} · 启用编号 {{ policy.activation_id }}</p>
 {% endmacro %}
@@ -58,24 +59,32 @@
 {% set r = company.research %}
 {% if r %}
 <p>{% if r.verdict %}{{ badge(r.verdict) }}{% endif %} {{ r.summary or '' }}</p>
-<p class="small"><a href="{{ r.path }}">研究报告 #{{ r.report_id }}</a> · {{ r.status }} · 研究于 {{ r.completed_at[:10] }} · 资料至 {{ r.period }}</p>
+<p class="small"><a href="{{ r.path }}">研究报告 #{{ r.report_id }}</a> · {{ r.status }} · 研究于 {{ r.completed_at|shanghai_minute }} · 资料至 {{ r.period }}</p>
 <p>报告立场 · {% if r.stance %}<strong>{{ r.stance.action }}</strong> {{ r.stance.text }}
   {% if r.stance.hurdle is not none %} · 门槛价 {{ r.stance.hurdle }} 元{% endif %}
   {% if r.stance.valid_until %} · 有效至 {{ r.stance.valid_until }}{% endif %}
   {% else %}未记录{% endif %}</p>
 <p>估值区间 · {{ r.current.current_zone or '暂无测算' }}{% if r.current.last_close_date %} · {{ r.current.last_close_date }} 收盘{% endif %}
   {% if r.zone_note %}<strong class="flag">{{ r.zone_note }}</strong>{% endif %}</p>
+{% elif not company.held %}
+<p class="muted">暂无通过复核的研究报告</p>
 {% endif %}
-{% if not portfolio %}{{ account_header(company) }}{% endif %}
+{% if not portfolio %}
+{{ account_header(company) }}
+{% if company.account_gaps %}
+<h3>账户待核对项</h3>
+<ul class="facts">{% for gap in company.account_gaps %}<li>{{ gap }}</li>{% endfor %}</ul>
+{% endif %}
+{% endif %}
 {% if company.position and company.position.theses %}
 <details class="block"><summary>本次持仓周期的在仓论点</summary>
-{% for thesis in company.position.theses %}<p>版本 {{ thesis.version }} · {{ thesis.created_at|replace('T', ' ') }}</p>
+{% for thesis in company.position.theses %}<p>版本 {{ thesis.version }} · {{ thesis.created_at|shanghai_minute }}</p>
   <p>{{ thesis.l1 }}</p><p>{{ thesis.l2 }}</p>{% endfor %}</details>
 {% endif %}
 {% if company.policy %}
-{% if portfolio %}<p><a href="{{ company.policy.path }}">持仓监控 #{{ company.policy.id }}</a> · {{ company.policy.as_of|replace('T', ' ') }}</p>
+{% if portfolio %}<p><a href="{{ company.policy.path }}">持仓监控 #{{ company.policy.id }}</a> · {{ company.policy.as_of|shanghai_minute }}</p>
 {% else %}{{ policy_link(company.policy) }}{% endif %}
-{% if company.policy.stop_risk_pct is not none %}<p>止损参考风险占组合 {{ company.policy.stop_risk_pct }}%</p>{% endif %}
+{% if company.policy.stop_risk_pct is not none %}<p>止损参考风险占组合 {{ company.policy.stop_risk_pct|decimal_format('.2f') }}%</p>{% endif %}
 {% endif %}
 {% set has_evidence = company.gaps or (company.policy and (company.policy.data_gaps or company.policy.escalations)) or company.announcements %}
 <div id="evidence-{{ company.code }}">

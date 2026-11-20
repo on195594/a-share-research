@@ -63,7 +63,7 @@ body {
 .policy-facts + .small { margin-top: 12px; }
 .policy-identities dd { font-size: 14px; }
 .policy-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
-.overview { overflow-wrap: anywhere; }
+.overview, .record-detail { overflow-wrap: anywhere; }
 .overview .policy-section { padding-top: 16px; border-top: 1px solid var(--line); }
 .oauth-consent h1 { overflow-wrap: anywhere; margin-bottom: 16px; }
 .connections-list > li { display: flex; flex-wrap: wrap; gap: 0 16px; align-items: start; justify-content: space-between; }
