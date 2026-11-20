@@ -45,16 +45,16 @@
 | T0.2 总览与范围 | `company_overview`、`portfolio_overview`；扫描范围合并已核实持仓、显式关注与冻结候选并保留来源；`research_coverage` 改读当前账本 | — | 已合入 `649786e` |
 | T0.3 研究受理与操作 | 研究受理移入 service（先按 `request_id` 重放、再查巨潮）；研究、检索、反馈、扫描、订阅、月批 registry 操作；扫描与订阅属账户数据，只开放给启用账户的 assistant | T0.1 | 已合入 `bc9f3f6` |
 
-段 1 任务（11-20 派发，分支 `wm/t11`，段 0 发布后合入 main）：
+段 1 任务（11-20 派发，合入 main `5d1d8dc`，11-20 16:52 发布：迁移 v25、`--allow-config`）：
 
 | 任务 | 范围 | 状态 |
 |---|---|---|
 | T1.1 迁移 v25 | grant 列与软撤销、共用有效性检查（认证、账本、政策、每次工具调用）、OAuth 存储（OAuth grant 只能是 assistant 且无 PAT）、NAV 区间引用表；生产库副本预演通过（行、自增高水位、触发器、外键守恒，重跑空操作） | 已提交 `62b220e` |
-| T1.2 服务端 H00906 取证 | `account.nav.evaluate` 可省略指数证据，由 tools 采集存证；采集占 Gate 名额 | 审查中 |
-| T1.3 配置与方法卡 | tools 入 `nginx-network`；web/tools 方法卡只读挂载；`deploy.py` 白名单与挂载检查；web 专属 grant 的 `.env.web` 变量；`research.methods` | 审查中 |
+| T1.2 服务端 H00906 取证 | `account.nav.evaluate` 可省略指数证据，由 tools 采集存证；采集占 Gate 名额 | 已提交 `6de6a23` |
+| T1.3 配置与方法卡 | tools 入 `nginx-network`；web/tools 方法卡只读挂载；`deploy.py` 白名单与挂载检查；web 专属 grant 的 `.env.web` 变量；`research.methods` | 已提交 `9b6a3ee` |
 | `mcp` 锁定 | `mcp` 2.3.0（与 FastAPI 0.156.4、Starlette 1.9.0、Pydantic 2.14.1 同锁） | 已提交 `e42e86f` |
 
-段 1 合入时须处理：v25 后 OAuth grant 无 PAT 摘要、撤销清空摘要，研究与扫描的调用身份改为“有 PAT 摘要沿用 `key:`，否则 `grant:<id>`”。段 2 清空 Hermes `external` 持仓镜像时，一并核对 `research.cards` 对 research 角色返回的订阅来源。
+段 1 已处理：v25 后 OAuth grant 无 PAT 摘要、撤销清空摘要，研究与扫描的调用身份为“有 PAT 摘要沿用 `key:`，否则 `grant:<id>`”（`service.py`）。v25 同时追加只追加的 `account_evidence_uploads`（上传 grant、文件名、标签）；发布前以最终代码在生产库副本重做预演：迁移 0.1 秒，原表与 `api_keys` 不变，触发器无丢失，外键与完整性通过，重跑仍为 v25。段 2 清空 Hermes `external` 持仓镜像时，一并核对 `research.cards` 对 research 角色返回的订阅来源。
 
 ### 合一重构收尾
 
@@ -113,7 +113,7 @@ Codex 只读审查 `a5cee3f..c642481` 发现并确认 3 项（1 P1、2 P2）：�
 
 ## 当前部署
 
-入口 [stock.keyi.win](https://stock.keyi.win)。例行发布不逐次更新本节：当前应用版本与两级回退镜像标签看 `docker images 'a-share-research-*'`（运行中容器镜像 ID 对照提交号标签，也可由 `ops/hermes/a-share-milestones.py` 核对），发布明细、只读计划、身份差异与备份见证据目录最新的 `deploy-<sha>-<时间>/`、`plan-<sha>-<时间>/`。本节只记基线：**数据库 v24，判断契约 7，生效政策激活记录 24**（11-20 `38da1ab` 双入口段 0 发布时按所有者常设授权激活 `policy:58944022...d501`。前驱为记录 23 `policy:22f829ad...48b4`（`b6b8eda`）。发布证据 `deploy-38da1ab-20261120-160017/release-state.json` 的身份差异仅含段 0 改动的账户分析、对账、公司、账户视图、政策注册、读取、扫描与服务模块，参数、规则与指南沿用前驱；宿主 `a-share-advisor.py` 同日 `install.py --apply` 同步）；数据库、契约、政策激活、模型、配置或宿主任务变化时再更新。前版 `8b0d3ec` 扩大的首次真实披露扫描及之后约 7 个工作日的三季报接续复核积压继续作为非阻塞观察。逐次发布的历史记录见本文件 git 历史（最后一份为 `git show 0125860:docs/implementation-plan.md`）。
+入口 [stock.keyi.win](https://stock.keyi.win)。例行发布不逐次更新本节：当前应用版本与两级回退镜像标签看 `docker images 'a-share-research-*'`（运行中容器镜像 ID 对照提交号标签，也可由 `ops/hermes/a-share-milestones.py` 核对），发布明细、只读计划、身份差异与备份见证据目录最新的 `deploy-<sha>-<时间>/`、`plan-<sha>-<时间>/`。本节只记基线：**数据库 v25，判断契约 7，生效政策激活记录 25**（11-20 16:52 `5d1d8dc` 双入口段 1 发布：v25 迁移与 `--allow-config` 配置变更——tools 加入 `nginx-network`、web/tools 只读挂载方法卡，公网 `/mcp` 尚未开放；按所有者常设授权激活 `policy:dc6287ff...c389`，前驱为记录 24 `policy:58944022...d501`（同日 16:00 段 0 `38da1ab`）。只读计划 `plan-5d1d8dc-20261120-165225/` 与发布证据 `deploy-5d1d8dc-20261120-165239/` 的身份差异仅含 v25 相关的 db、api_keys、oauth_store、账户证据/账本/NAV 引用、政策注册、服务模块与运行时锁，参数、规则与指南沿用前驱。**v25 之后不能用 v24 镜像回退**，故障前向修复或在无写入时按发布备份 `backup-pre-5d1d8dc-20261120-165255` 恢复，本版即后续各段的回退基线）；数据库、契约、政策激活、模型、配置或宿主任务变化时再更新。前版 `8b0d3ec` 扩大的首次真实披露扫描及之后约 7 个工作日的三季报接续复核积压继续作为非阻塞观察。逐次发布的历史记录见本文件 git 历史（最后一份为 `git show 0125860:docs/implementation-plan.md`）。
 
 生产 `tools` 仍仅监听 `127.0.0.1:8621`，独立 `.env.tools` 仅有行情凭据；账户开关为 1，外部研究开关已随代码删除。11-12 16:41:39 新账本成为唯一账户写入来源，旧库已持久封锁且只读保留。五宿主统一入口与 Hermes 替代脚本已安装，原账户定时任务已恢复。研究主模型于 11-18 切换为 `openai-codex / gpt-6.2-sol / medium`，`review` 阶段独立使用 `openai-codex / gpt-6.1-sol / high`。切换当日未跑 E 类验证，11-19 以 `50727d7` 同日补做评估集对照（证据 `eval-50727d7-20261119/`）：新配置非金融 10/10 通过，旧配置（`gpt-6.1-sol / high` 作者兼复核）9/10（比亚迪一次供应商错误）；单份费用约 0.57 美元，两者持平，复核耗时 +56%。新配置 10 家立场全部为“等价格”，旧配置有 2 家“现在分批”（万华、东方电缆）；9 对中有 7 对新配置的门槛价更低，中位数低 4.5%（−14.8%～+6.5%），幅度落在同材料噪声内，方向偏保守。没有证据表明哪一方更赚钱，12-01 月批沿用新配置，前后报告按模型分开记分。
 
