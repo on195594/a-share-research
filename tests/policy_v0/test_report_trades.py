@@ -105,7 +105,7 @@ def test_ledger_cli_rejects_noncanonical_dates_before_io(
 
     monkeypatch.setattr(db, "get_db", forbidden)
     monkeypatch.setattr(db, "read_only_db_session", forbidden)
-    monkeypatch.setattr(research_client, "request_json", forbidden)
+    monkeypatch.setattr(research_client, "_read", forbidden)
     assert cache.main([command, *arguments, day]) == 1
     assert "日期必须为 YYYY-MM-DD" in capsys.readouterr().err
     assert not isolated_cache_database.exists()

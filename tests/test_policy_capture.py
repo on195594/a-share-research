@@ -149,18 +149,18 @@ def test_cli_strict_input_and_safe_failure(collector,monkeypatch,capsys,raw):
 
 
 def test_cli_does_not_echo_exception_or_vendor_output(collector,monkeypatch,capsys):
-    def bad(_):
+    def bad(_, source=None):
         print('private-vendor-text')
         print('private-provider-body',file=sys.stderr)
         raise ValueError('private-secret-value')
     monkeypatch.setattr(capture,'collect',bad)
-    assert run_main(monkeypatch,b'{}')==1
+    assert run_main(monkeypatch,b'{"parameters":{},"source":null}')==1
     output=capsys.readouterr()
     assert output.out=='' and 'private' not in output.err and 'ValueError' in output.err
 
 
 def test_cli_only_returns_json_bundle(collector,monkeypatch,capsys):
-    assert run_main(monkeypatch,json.dumps(risk_budget.policy()).encode())==0
+    assert run_main(monkeypatch,json.dumps({'parameters':risk_budget.policy(),'source':None}).encode())==0
     output=capsys.readouterr()
     assert output.err==''
     evaluation.Bundle.model_validate(json.loads(output.out))

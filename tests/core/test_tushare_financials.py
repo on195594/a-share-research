@@ -111,7 +111,7 @@ def test_indicator_history_keeps_unavailable_common_keys_null() -> None:
             "end_date": "20260720",
             "fields": (
                 "ts_code,ann_date,end_date,update_flag,roe_waa,netprofit_yoy,"
-                "debt_to_assets,grossprofit_margin,bps,or_yoy,dt_netprofit_yoy"
+                "debt_to_assets,grossprofit_margin,bps,or_yoy,dt_netprofit_yoy,profit_dedt"
             ),
         },
     )

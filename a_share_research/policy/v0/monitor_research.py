@@ -16,7 +16,7 @@ def fetch_cards(*, skip: bool = False) -> dict:
         return {"status": "skipped"}
     try:
         # Optional research must fail promptly so core risk checks can continue.
-        payload = research_client.request_json("/api/cards")
+        payload = research_client.read_cards()
         monitor_contract.validate_research_cards(payload)
     except research_client.ResearchNotConfigured:
         return {"status": "not_configured"}

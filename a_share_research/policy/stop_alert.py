@@ -1,11 +1,5 @@
 """Isolated v0 stop input capture and immutable, identity-bound alert receipts."""
-from contextlib import redirect_stderr, redirect_stdout
-import io
-import json
-import sqlite3
-import sys
 
-from a_share_research import gate
 from a_share_research.policy import monitor
 from a_share_research.policy.stop_state import validate_state
 
@@ -51,27 +45,7 @@ def run(conn, principal, database, request_id: str, expected_activation_id: int,
 
 
 def main() -> int:
-    from a_share_research.policy.v0 import risk_policy
-    try:
-        if len(sys.argv) != 1:
-            raise ValueError('collector takes no arguments')
-        raw = sys.stdin.buffer.read(1024 * 1024 + 1)
-        if len(raw) > 1024 * 1024:
-            raise ValueError('input too large')
-        value = json.loads(raw.decode('utf-8'), object_pairs_hook=risk_policy._unique_object,
-                           parse_constant=risk_policy._reject_constant, parse_float=risk_policy._json_float)
-        if not isinstance(value, dict) or set(value) != {'parameters', 'previous_state', 'source'}:
-            raise ValueError('invalid capture fields')
-        source = value['source']
-        if source is not None and (not isinstance(source, dict) or source.get('mode') != 'ledger'):
-            raise ValueError('explicit source must be a ledger binding')
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            bundle = collect(value['parameters'], value['previous_state'], source=source)
-        print(gate.canonical(bundle))
-        return 0
-    except (ValueError, TypeError, KeyError, RuntimeError, OSError, sqlite3.Error, RecursionError) as exc:
-        print(f'stop capture failed ({type(exc).__name__}); check policy and source readiness', file=sys.stderr)
-        return 1
+    return monitor.collector_main('stop', collect, 'previous_state')
 
 
 if __name__ == '__main__':

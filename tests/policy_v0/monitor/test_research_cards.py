@@ -57,15 +57,15 @@ def http(monkeypatch, cards):
     calls = []
     state = {"status": 200, "body": cards}
 
-    def read(path, params):
-        calls.append(("GET", path, {"params": params}))
+    def read():
+        calls.append("cards")
         if "exception" in state:
             raise state["exception"]
         if state["status"] != 200:
             raise ValueError(f"Research {state['status']}")
         return json.loads(json.dumps(state["body"], ensure_ascii=False))
 
-    monkeypatch.setattr(research_client, "_read", read)
+    monkeypatch.setattr(research_client, "read_cards", read)
     return state, calls
 
 
@@ -154,7 +154,7 @@ def test_real_cards_one_call_projection_and_prompts_do_not_enter_escalations(
     )
     horizon = card(cards, "600309")["current"]["valuation"]["horizon"]
     assert evidence["annual_switch_cost"] == pytest.approx(0.001 / horizon)
-    assert http[1] == [("GET", "/api/cards", {"params": {}})]
+    assert http[1] == ["cards"]
 
 
 def test_pending_card_escalates_only_review_and_keeps_returns(run_snapshot, cards):

@@ -152,8 +152,16 @@ def fingerprints(database: Path) -> dict:
         conn.execute("BEGIN")
         existing = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         tables = (*TABLES, *(name for name in OPTIONAL_TABLES if name in existing))
-        return {table: hashlib.sha256(json.dumps(conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall(),
-                                                 ensure_ascii=False).encode()).hexdigest() for table in tables}
+        return {table: _table_digest(conn, table) for table in tables}
+
+
+def _table_digest(conn, table: str) -> str:
+    # Streams rows into the hash; the bytes equal json.dumps(fetchall()) so recorded digests stay comparable.
+    digest = hashlib.sha256(b'[')
+    for index, row in enumerate(conn.execute(f"SELECT * FROM {table} ORDER BY 1")):
+        digest.update(((', ' if index else '') + json.dumps(row, ensure_ascii=False)).encode())
+    digest.update(b']')
+    return digest.hexdigest()
 
 
 def _source_version(database: Path) -> int:

@@ -3,16 +3,14 @@
 The caller owns authentication, policy activation and source consistency checks.
 This module never selects another policy, writes account state or accepts paths.
 """
-from contextlib import closing, contextmanager, redirect_stderr, redirect_stdout
+from contextlib import closing, contextmanager
 from datetime import datetime
-import io
 import json
 import os
 import sqlite3
-import sys
 
 from a_share_research import gate
-from a_share_research.policy import evaluation
+from a_share_research.policy import evaluation, monitor
 from a_share_research.policy.v0 import commands_holdings, commands_monitor, db, domain, monitor_research, paths, risk_policy
 
 
@@ -119,29 +117,7 @@ def collect(parameters: dict, *, source: dict | None = None, include_research: b
 
 
 def main() -> int:
-    """One bounded stdin JSON request and one JSON response; diagnostics never echo inputs."""
-    try:
-        if len(sys.argv) != 1:
-            raise CaptureError('capture does not accept command arguments')
-        raw = sys.stdin.buffer.read(1024 * 1024 + 1)
-        if len(raw) > 1024 * 1024:
-            raise CaptureError('capture parameter input too large')
-        parameters = json.loads(raw.decode('utf-8'), object_pairs_hook=risk_policy._unique_object,
-                                parse_constant=risk_policy._reject_constant, parse_float=risk_policy._json_float)
-        source=None
-        if isinstance(parameters,dict) and set(parameters)=={'parameters','source'}:
-            source=parameters['source']
-            parameters=parameters['parameters']
-            if not isinstance(source,dict) or source.get('mode')!='ledger':
-                raise CaptureError('explicit collection source must be a ledger binding')
-        # Vendor/legacy diagnostics are not protocol messages and may contain private input.
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            bundle = collect(parameters) if source is None else collect(parameters,source=source)
-        print(gate.canonical(bundle))
-        return 0
-    except (ValueError, TypeError, KeyError, RuntimeError, OSError, sqlite3.Error, RecursionError) as exc:
-        print(f'policy capture failed ({type(exc).__name__}); check policy validity and local source readiness', file=sys.stderr)
-        return 1
+    return monitor.collector_main('policy', collect)
 
 
 if __name__ == '__main__':

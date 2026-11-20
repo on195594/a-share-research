@@ -851,11 +851,13 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                 summary['failures'].append({'code': code, 'stage': 'valuation', 'reason': str(exc)})
         # Make L5 closes available to the same read-only card projection as explicit subscriptions.
         conn.execute('UPDATE scans SET summary=? WHERE id=?', (json.dumps(summary, ensure_ascii=False), scan_id))
+        # Scan rows stay unchanged until the next summary write, so one snapshot serves the loop.
+        observations = ScanHistory(conn, scan_id)
         for subscription in scope:
             code = subscription['code']
             check_card = None
             try:
-                check_card = card_or_none(conn, code, scan_id=scan_id)
+                check_card = card_or_none(conn, code, scan_id=scan_id, history=observations)
                 checked = _check_disclosures(conn, source, code, check_card, scan_id, fixed_at or db.now())
                 summary['checks'][code] = checked or []
                 if checked is not None:
@@ -873,8 +875,9 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
         new_events = [e for e in events(conn) if e['scan_id'] > (previous['id'] if previous else 0)
                       and not (e['kind'] == 'major_risk' and e['id'] in notified_risks)]
         candidates = []
+        observations = ScanHistory(conn, scan_id)
         for code in {s['code'] for s in scope} | {stock_codes.normalize_key(r['code']) for r in completed}:
-            card = card_or_none(conn, code, scan_id=scan_id)
+            card = card_or_none(conn, code, scan_id=scan_id, history=observations)
             summary['cards'][code] = card
             before = (previous['summary'].get('cards', {}).get(code) if previous else None) or summary['before'].get(code)
             if before and summary['before'].get(code) and before['report_id'] != summary['before'][code]['report_id']:

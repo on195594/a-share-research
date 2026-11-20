@@ -252,23 +252,17 @@ def _frame(result) -> pd.DataFrame:
 def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
-    try:
-        deducted = market.client().fina_indicator(
-            ts_code=to_tushare_stock_code(code), start_date=start.replace("-", ""),
-            fields="ts_code,ann_date,end_date,update_flag,profit_dedt")
-        if not isinstance(deducted, pd.DataFrame) or not {"ann_date", "end_date", "profit_dedt"} <= set(deducted.columns):
-            raise ValueError("返回数据缺少必要列")
-        for column in ("ann_date", "end_date"):
-            deducted[column] = pd.to_datetime(deducted[column], format="%Y%m%d").dt.strftime("%Y-%m-%d")
-    except Exception as exc:
-        raise SourceError(f"TuShare fina_indicator: {exc}") from exc
     provider = TushareFinancialProvider()
+    indicator = _frame(provider.fetch_indicator_history(code, start_date=start))
+    if "profit_dedt" not in indicator.columns:
+        raise SourceError("TuShare fina_indicator: 返回数据缺少必要列 profit_dedt")
     return {
         "income": _frame(provider.fetch_income_history(code, start_date=start)),
         "cashflow": _frame(provider.fetch_cashflow_history(code, start_date=start)),
         "balance": _frame(provider.fetch_balance_history(code, start_date=start)),
-        "deducted": deducted,
-        "indicator": _frame(provider.fetch_indicator_history(code, start_date=start)),
+        # The same indicator rows, projected to the columns the deducted-profit series has always stored.
+        "deducted": indicator[["ts_code", "ann_date", "end_date", "update_flag", "profit_dedt"]].copy(),
+        "indicator": indicator,
     }
 
 

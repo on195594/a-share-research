@@ -203,7 +203,7 @@ def test_yoy_source_missing_and_nonpositive_bases_are_not_replaced_or_hidden():
 
 def test_missing_financial_token_is_a_source_error(monkeypatch):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
-    with pytest.raises(sources.SourceError, match="TuShare fina_indicator.*TUSHARE_TOKEN"):
+    with pytest.raises(sources.SourceError, match="fina_indicator.*TUSHARE_TOKEN"):
         sources.financials("002648.SZ")
 
 

@@ -48,55 +48,34 @@ class ResearchNotConfigured(ValueError):
     """There is no application database to read research from."""
 
 
-def _run(conn, match, params) -> dict:
-    row = reading.api_run(conn, int(match[1]))
+def _run(conn, run_id: int) -> dict:
+    row = reading.api_run(conn, run_id)
     if row is None:
         raise service.RequestError("任务不存在", 404)
     return {"version": service.VERSION, **dict(row)}
 
 
-def _reports(conn, match, params) -> dict:
-    return {"version": service.VERSION,
-            "reports": [dict(row) for row in reading.api_reports(conn, params["code"])]}
-
-
-# The read routes of the research-v1 interface, answered by the functions the web service itself calls.
-_ROUTES = (
-    (re.compile(r"/api/cards"), lambda conn, match, params: service.company_cards(conn, holdings=True)),
-    (re.compile(r"/api/companies/([0-9]{6})/card"), lambda conn, match, params: service.company_card(conn, match[1])),
-    (re.compile(r"/api/reports"), _reports),
-    (re.compile(r"/api/reports/([0-9]+)"), lambda conn, match, params: service.report_view(
-        conn, int(match[1]), compact=params.get("compact") == "true")),
-    (re.compile(r"/api/research/budget"),
-     lambda conn, match, params: {"version": service.VERSION, "budget": service.run_budget(conn)}),
-    (re.compile(r"/api/runs/([0-9]+)"), _run),
-)
-
-
-def _read(path: str, params: dict) -> dict:
+def _read(handler) -> dict:
+    """Answer one research-v1 read in process with the function the web service itself calls."""
     database = paths.cache_db_path()
     if not database.exists():
         raise ResearchNotConfigured(f"研究库不存在：{database}")
     conn = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
-        for pattern, handler in _ROUTES:
-            match = pattern.fullmatch(path)
-            if match:
-                return handler(conn, match, params)
-        raise ValueError(f"政策运行时只读取研究结果，没有 {path} 这项读取")
+        payload = handler(conn)
     except service.RequestError as exc:
         raise ValueError(f"Research {exc.status}：{exc}") from None
     finally:
         conn.close()
-
-
-def request_json(path: str, *, params: dict | None = None) -> dict:
-    """One read of the research-v1 interface; raises ValueError with a message that is safe to show."""
-    payload = _read(path, params or {})
     if not isinstance(payload, dict) or payload.get("version") != "research-v1":
         raise ValueError("Research 响应版本不兼容")
     return payload
+
+
+def read_cards() -> dict:
+    """Subscription, frozen L5 and verified-holding cards; raises ValueError with a message that is safe to show."""
+    return _read(lambda conn: service.company_cards(conn, holdings=True))
 
 
 def cmd_research(argv: list[str]) -> int:
@@ -105,24 +84,19 @@ def cmd_research(argv: list[str]) -> int:
     configure_parser(parser)
     args = parser.parse_args(argv)
     try:
-        params = None
-        if args.action == "cards":
-            path = "/api/cards"
-        elif args.action == "card":
-            path = f"/api/companies/{args.code}/card"
-        elif args.action == "reports":
-            path, params = "/api/reports", {"code": args.code}
-        elif args.action == "report":
-            path = f"/api/reports/{args.id}"
-            if args.compact:
-                params = {"compact": "true"}
-        elif args.action == "resume":
+        if args.action == "resume":
             raise ValueError(_RESUME_HELP)
-        elif args.action == "budget":
-            path = "/api/research/budget"
+        if args.action == "cards":
+            payload = read_cards()
         else:
-            path = f"/api/runs/{args.id}"
-        payload = request_json(path, params=params)
+            payload = _read({
+                "card": lambda conn: service.company_card(conn, args.code),
+                "reports": lambda conn: {"version": service.VERSION,
+                                         "reports": [dict(row) for row in reading.api_reports(conn, args.code)]},
+                "report": lambda conn: service.report_view(conn, args.id, compact=args.compact),
+                "budget": lambda conn: {"version": service.VERSION, "budget": service.run_budget(conn)},
+                "status": lambda conn: _run(conn, args.id),
+            }[args.action])
     except sqlite3.Error as exc:
         print(f"Research 读取失败：{type(exc).__name__}；不会自动重提研究", file=sys.stderr)
         return 1

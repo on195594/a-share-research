@@ -58,8 +58,36 @@ def _existing(conn, principal, request_id, request):
 
 
 def capture(database: Path, parameters: dict, *, source: dict | None = None) -> dict:
-    payload = parameters if source is None else dict(parameters=parameters, source=source)
-    return _capture(database, 'a_share_research.policy.capture', payload, market_token=True)
+    return _capture(database, 'a_share_research.policy.capture', dict(parameters=parameters, source=source),
+                    market_token=True)
+
+
+def collector_main(label: str, collect, *fields: str) -> int:
+    """Child side of _capture: one bounded stdin JSON object in, one canonical bundle out; errors never echo inputs."""
+    from contextlib import redirect_stderr, redirect_stdout
+    import io
+    from a_share_research.policy.v0 import risk_policy
+    try:
+        if len(sys.argv) != 1:
+            raise ValueError('collector takes no arguments')
+        raw = sys.stdin.buffer.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError('input too large')
+        value = json.loads(raw.decode('utf-8'), object_pairs_hook=risk_policy._unique_object,
+                           parse_constant=risk_policy._reject_constant, parse_float=risk_policy._json_float)
+        if not isinstance(value, dict) or set(value) != {'parameters', 'source', *fields}:
+            raise ValueError('invalid capture fields')
+        source = value['source']
+        if source is not None and (not isinstance(source, dict) or source.get('mode') != 'ledger'):
+            raise ValueError('explicit source must be a ledger binding')
+        # Vendor/legacy diagnostics are not protocol messages and may contain private input.
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            bundle = collect(value['parameters'], *(value[field] for field in fields), source=source)
+        print(gate.canonical(bundle))
+        return 0
+    except (ValueError, TypeError, KeyError, RuntimeError, OSError, sqlite3.Error, RecursionError) as exc:
+        print(f'{label} capture failed ({type(exc).__name__}); check policy and source readiness', file=sys.stderr)
+        return 1
 
 
 def _capture(database: Path, module: str, payload: dict, *, market_token: bool = False) -> dict:

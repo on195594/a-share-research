@@ -10,7 +10,7 @@ from a_share_research import api_keys, db as app_db, reading, service
 from a_share_research.account import cycle_analysis, ledger, mirror, position_store
 from a_share_research.account.positions import PositionEntry
 from a_share_research.account.reconciliation import identity
-from a_share_research.policy.v0 import account_store, cache, monitor_research, research_client
+from a_share_research.policy.v0 import account_store, cache, monitor_research
 from a_share_research.tools.registry import Context, invoke
 from test_account import source_database
 from test_account_ledger import batch, book as book
@@ -152,6 +152,3 @@ def test_policy_runtime_cannot_submit_research(research, args):
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == runs
 
 
-def test_reader_refuses_a_route_it_does_not_serve(research):
-    with pytest.raises(ValueError, match="只读取研究结果"):
-        research_client.request_json("/api/research")
