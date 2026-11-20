@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, gate
-from a_share_research.account import ledger, mirror, trades
+from a_share_research.account import ledger, mirror
 from a_share_research.account.reconciliation import Opening
+from a_share_research.tools.registry import Context, ToolError, invoke
 from test_account_ledger import batch, book as book, buy, submit
 from test_service_delivery import SUCCESS, saved
 
@@ -196,7 +197,8 @@ def test_research_coverage_uses_only_effective_bound_trades_at_their_execution_t
     binding = dict(schema_version=1, account_id='a', account_scope='structural-scope', mirror_watermark={})
     conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)',
                  ('ledger', 'a' * 64, db.now(), gate.canonical(binding)))
-    assert trades.research_available_at_trade(conn) == []
+    ctx = Context(conn, directory.parent / 'app.db', principal, account_shadow_enabled=True)
+    assert invoke(ctx, 'account_research_coverage', {})['rows'] == []
     with monkeypatch.context() as published:
         published.setattr(db, 'now', lambda: SUCCESS['created_at'])
         _, report_id = saved(conn)
@@ -209,7 +211,7 @@ def test_research_coverage_uses_only_effective_bound_trades_at_their_execution_t
     early = buy(occurred_at='2026-10-27T10:00:00+08:00')
     late = buy(kind='sell', broker_id='sale', occurred_at='2026-10-27T14:00:00+08:00', report_id=report_id)
     assert submit(book, batch(book, events=[early, late], cash='200000', positions={}))['status'] == 'posted'
-    morning, afternoon = trades.research_available_at_trade(conn)
+    morning, afternoon = invoke(ctx, 'account_research_coverage', {})['rows']
     assert (morning['event_type'], morning['available_report_id'], morning['stated_report_id']) == ('buy', None, None)
     assert (afternoon['event_type'], afternoon['available_report_id'], afternoon['stated_report_id']) == (
         'sell', report_id, report_id)
@@ -221,7 +223,7 @@ def test_research_coverage_uses_only_effective_bound_trades_at_their_execution_t
     corrected = batch(book, version=1, events=[correction, dividend, other], voids=[afternoon['event_id']],
                       cash='190500', positions={'000858': 100})
     assert submit(book, corrected)['status'] == 'posted'
-    first, second, third = trades.research_available_at_trade(conn)
+    first, second, third = invoke(ctx, 'account_research_coverage', {})['rows']
     assert first == morning and second['event_id'] != afternoon['event_id']
     assert (second['available_report_id'], second['same_day'], second['stated_report_id']) == (report_id, 1, None)
     assert (third['company_key'], third['available_report_id']) == ('000858', None)
@@ -230,11 +232,14 @@ def test_research_coverage_uses_only_effective_bound_trades_at_their_execution_t
 @pytest.mark.parametrize(('mode', 'watermark'), [
     ('mirror', '{}'),
     ('ledger', '{'),
+    ('ledger', gate.canonical(dict(schema_version=1, account_id='a', account_scope='structural-scope',
+                                   mirror_watermark={}, extra=True))),
     ('ledger', gate.canonical(dict(schema_version=1, account_id='missing', account_scope='structural-scope', mirror_watermark={}))),
 ])
 def test_research_coverage_refuses_an_unbound_source(book, mode, watermark):  # noqa: F811
     conn = book[0]
     conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)', (mode, 'a' * 64, db.now(), watermark))
-    with pytest.raises(ledger.LedgerError, match='绑定') as error:
-        trades.research_available_at_trade(conn)
+    ctx = Context(conn, book[2].parent / 'app.db', book[1], account_shadow_enabled=True)
+    with pytest.raises(ToolError, match='绑定') as error:
+        invoke(ctx, 'account_research_coverage', {})
     assert error.value.status == 409

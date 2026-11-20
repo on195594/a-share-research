@@ -85,9 +85,9 @@ def is_active(conn: sqlite3.Connection, key_id: int, role: Role) -> bool:
 
 def authenticate(conn: sqlite3.Connection, token: str) -> Principal | None:
     """Look up a persistent token without writes; revoked/unknown tokens return None."""
-    row = conn.execute("SELECT id, role FROM api_keys WHERE kind='pat' AND token_hash = ?",
+    row = conn.execute("SELECT id, role FROM api_keys WHERE kind='pat' AND revoked_at IS NULL AND token_hash = ?",
                        (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
-    if row is None or not is_active(conn, row[0], row[1]):
+    if row is None:
         return None
     return Principal(key_id=row[0], role=row[1])
 

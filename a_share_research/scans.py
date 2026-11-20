@@ -1,6 +1,7 @@
 """Narrow disclosure discovery and K2 review scheduling; no account or notification writes."""
 
-from collections import Counter
+from collections import Counter, defaultdict
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import json
@@ -130,24 +131,31 @@ def event_evidence(body: dict, event: dict) -> dict:
     return {'state': state, 'label': REVIEW_LABELS[state], 'sources': sorted(keys), 'items': [ref for ref, _ in refs]}
 
 
-def event_reviews(conn, code: str) -> list[dict]:
+def event_reviews(conn, code: str, *, company_events=None, include_no_card=False) -> list[dict]:
     """Every dispatchable event of a company with its handling state; read-only."""
     code = stock_codes.normalize_key(code)
-    items = [e for e in events(conn, code=code)
-             if e['severity'] >= 2 and e['action'] in ('deferred', 'queued_review', 'covered')]
+    if company_events is None:
+        company_events = events(conn, code=code)
+    actions = {'deferred', 'queued_review', 'covered'}
+    if include_no_card:
+        actions.add('no_card')
+    items = [e for e in company_events if e['severity'] >= 2 and e['action'] in actions]
     if not items:
         return []
     first = min(instant(e['announced']).date() for e in items)
+    fields = ('document', 'sources', 'open_questions', *CITED_SECTIONS)
+    paths = ','.join(f"'$.{field}'" for field in fields)
+    # The coarse SQL date bound includes offset timestamps; compare Shanghai dates below.
     reports = [dict(r) for r in conn.execute(
-        'SELECT r.id, r.run_id, COALESCE(u.finished_at, r.created_at) AS completed_at, r.body FROM reports r '
-        f'JOIN runs u ON u.id=r.run_id WHERE r.company_key=? AND {db.FORMAL_REPORT} ORDER BY r.id DESC', (code,))
-        if instant(r['completed_at']).date() >= first]
-    bodies = {}
+        'SELECT r.id, r.run_id, COALESCE(u.finished_at, r.created_at) AS completed_at, '
+        f'json_extract(r.body,{paths}) AS sections FROM reports r '
+        f'JOIN runs u ON u.id=r.run_id WHERE r.company_key=? AND {db.FORMAL_REPORT} '
+        'AND completed_at >= ? ORDER BY r.id DESC', (code, (first - timedelta(days=2)).isoformat()))]
 
     def evidence(report, event):
-        if report['id'] not in bodies:
-            bodies[report['id']] = report_body.load(report['body'])
-        return event_evidence(bodies[report['id']], event)
+        if 'body' not in report:
+            report['body'] = dict(zip(fields, json.loads(report.pop('sections'))))
+        return event_evidence(report['body'], event)
 
     result = []
     for event in items:
@@ -156,6 +164,9 @@ def event_reviews(conn, code: str) -> list[dict]:
         own = next((r for r in candidates if r['run_id'] == event['run_id']), None)
         if found:
             report, review = found
+        elif event['action'] == 'no_card':
+            # Preserve the discovery-time record until a formal report actually settles it.
+            continue
         elif event['action'] == 'deferred':
             report, review = None, {'state': 'awaiting_research'}
         elif event['run_status'] in ('queued', 'running'):
@@ -252,44 +263,64 @@ def allow_notification(item: dict, history: list[dict], at: str, trade_days: lis
     return sum(start < date.fromisoformat(day) <= end for day in trade_days) >= 5
 
 
-def _add_origin(conn, items, code, origin):
+def _add_origin(items, code, origin):
     code = stock_codes.normalize_key(code)
-    if code not in items:
-        items[code] = {'code': code, 'origin': origin, 'origins': [], **latest_close(conn, code)}
-    if origin not in items[code]['origins']:
-        items[code]['origins'].append(origin)
+    item = items.setdefault(code, {'code': code, 'origin': origin, 'origins': []})
+    if origin not in item['origins']:
+        item['origins'].append(origin)
 
 
-def subscriptions(conn) -> list[dict]:
+def subscription_scope(conn):
     items = {r['code']: dict(r, origins=[r['origin']]) for r in conn.execute(
         'SELECT code,origin,added_at,last_close,last_close_date FROM subscriptions ORDER BY code')}
     batch = conn.execute('SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL '
                          'ORDER BY frozen_at DESC, id DESC LIMIT 1').fetchone()
     if batch:
         for code in json.loads(batch['l5'])['codes']:
-            _add_origin(conn, items, code, 'l5')
+            _add_origin(items, code, 'l5')
+    return items
+
+
+def _with_closes(conn, items, history=None):
+    missing = [s for s in items.values() if 'last_close' not in s]
+    if missing:
+        closes = history.closes if history is not None else _closing_prices(conn)
+        for item in missing:
+            item.update(closes.get(item['code'], {'last_close': None, 'last_close_date': None}))
     return list(items.values())
+
+
+def subscriptions(conn) -> list[dict]:
+    return _with_closes(conn, subscription_scope(conn))
+
+
+def _holding_codes(conn):
+    from a_share_research.account import mirror
+    from a_share_research.policy import account_view
+
+    if conn.execute('SELECT 1 FROM account_source WHERE id=1').fetchone():
+        return account_view.verified_current(conn, mirror.target_directory(conn))['codes']
+    return []
+
+
+def _extend_scope(conn, items, holdings):
+    for batch in conn.execute("SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL "
+                              "AND status='tracking' ORDER BY frozen_at DESC, id DESC"):
+        for code in json.loads(batch['l5'])['codes']:
+            _add_origin(items, code, 'l5')
+    for row in conn.execute(f"SELECT DISTINCT r.company_key FROM reports r JOIN runs u ON u.id = r.run_id "
+                            f"WHERE {db.FORMAL_REPORT} ORDER BY r.company_key"):
+        _add_origin(items, row['company_key'], 'card')
+    for code in holdings:
+        _add_origin(items, code, 'holding')
 
 
 def scan_scope(conn, *, account_sources: bool = True) -> list[dict]:
     """Keep every source for a code, while preserving the primary origin for older clients."""
-    from a_share_research.account import mirror
-    from a_share_research.policy import account_view
-
     with db.transaction(conn, immediate=False):
-        items = {s['code']: s for s in subscriptions(conn)}
-        for batch in conn.execute("SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL "
-                                  "AND status='tracking' ORDER BY frozen_at DESC, id DESC"):
-            for code in json.loads(batch['l5'])['codes']:
-                _add_origin(conn, items, code, 'l5')
-        for row in conn.execute(f"SELECT DISTINCT r.company_key FROM reports r JOIN runs u ON u.id = r.run_id "
-                                f"WHERE {db.FORMAL_REPORT} ORDER BY r.company_key"):
-            _add_origin(conn, items, row['company_key'], 'card')
-        if account_sources and conn.execute('SELECT 1 FROM account_source WHERE id=1').fetchone():
-            current = account_view.verified_current(conn, mirror.target_directory(conn))
-            for code in current['codes']:
-                _add_origin(conn, items, code, 'holding')
-        return list(items.values())
+        items = subscription_scope(conn)
+        _extend_scope(conn, items, _holding_codes(conn) if account_sources else [])
+        return _with_closes(conn, items)
 
 
 def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None) -> list[dict]:
@@ -384,57 +415,87 @@ def latency(event: dict, at: str) -> dict:
             'announcement_precision': 'date'}
 
 
-def card_or_none(conn, code: str, *, scan_id: int | None = None) -> dict | None:
+def card_or_none(conn, code: str, *, scan_id: int | None = None, history=None, reviews=None) -> dict | None:
     try:
-        return service.company_card(conn, code, scan_id=scan_id)
+        return service.company_card(conn, code, scan_id=scan_id, history=history, reviews=reviews)
     except service.RequestError as exc:
         if exc.status != 404:
             raise
         return None
 
 
+def _closing_prices(conn, closes=None):
+    if closes is None:
+        closes = {}
+        for row in conn.execute("SELECT json_extract(summary,'$.closes') FROM scans ORDER BY id"):
+            if row[0]:
+                closes.update(json.loads(row[0]))
+    for row in conn.execute('SELECT company_key,last_close,last_close_date FROM subscriptions WHERE last_close IS NOT NULL'):
+        previous = closes.get(row['company_key'])
+        if not previous or row['last_close_date'] >= previous['last_close_date']:
+            closes[row['company_key']] = {k: row[k] for k in ('last_close', 'last_close_date')}
+    return closes
+
+
+class ScanHistory:
+    """Current observations indexed from one snapshot, including legacy report-bound check failures."""
+
+    def __init__(self, conn, scan_id=None, *, fields=('closes', 'failures', 'check_failures', 'coverage_gaps',
+                                                      'scope', 'announcements_succeeded', 'checks_succeeded')):
+        self.rows = []
+        self.announcements = {}
+        self.checks = {}
+        closes = {}
+        paths = ','.join(f"'$.{key}'" for key in fields)
+        # Only old check failures need the report identity in the before/cards snapshots.
+        for row in conn.execute(f"""
+            SELECT id,status,requested_at,started_at,finished_at,error,json_extract(summary,{paths}) AS observations,
+                   (SELECT json_group_object(f.value ->> '$.code', coalesce(
+                        json_extract(summary, '$.before.' || (f.value ->> '$.code') || '.report_id'),
+                        json_extract(summary, '$.cards.' || (f.value ->> '$.code') || '.report_id')))
+                    FROM json_each(summary,'$.check_failures') f WHERE (f.value ->> '$.report_id') IS NULL) AS legacy_ids
+            FROM scans ORDER BY id
+        """):
+            values = json.loads(row['observations']) if row['observations'] else []
+            summary = {k: v for k, v in zip(fields, values) if v is not None}
+            self.rows.append({k: row[k] for k in ('id', 'status', 'requested_at', 'started_at', 'finished_at', 'error')}
+                             | {'summary': summary})
+            closes.update(summary.get('closes', {}))
+            if row['status'] not in ('done', 'failed') and row['id'] != scan_id:
+                continue
+            for code in summary.get('announcements_succeeded', []):
+                self.announcements.pop(code, None)
+            if row['status'] == 'done':
+                for item in summary.get('scope', []):
+                    self.announcements.pop(item['code'], None)
+            for failure in reversed(summary.get('failures', [])):
+                if failure['stage'] == 'announcements':
+                    self.announcements[failure['code']] = {'kind': 'scan_failure', 'scan_id': row['id'], **failure}
+            for item in summary.get('checks_succeeded', []):
+                self.checks.pop((item['code'], item['report_id']), None)
+            legacy_ids = json.loads(row['legacy_ids'])
+            for failure in reversed(summary.get('check_failures', [])):
+                code = failure['code']
+                report = failure.get('report_id') or legacy_ids.get(code)
+                self.checks[code, report] = {'kind': 'check_failure', **failure, 'report_id': report, 'scan_id': row['id']}
+        self.closes = _closing_prices(conn, closes) if 'closes' in fields else {}
+
+    def close(self, code):
+        return dict(self.closes.get(code, {'last_close': None, 'last_close_date': None}))
+
+
 def latest_close(conn, code: str) -> dict:
-    code = stock_codes.normalize_key(code)
-    row = conn.execute('SELECT last_close,last_close_date FROM subscriptions WHERE company_key=?', (code,)).fetchone()
-    candidates = [dict(row)] if row and row['last_close'] is not None else []
-    for scan in conn.execute('SELECT summary FROM scans WHERE summary IS NOT NULL ORDER BY id DESC'):
-        close = json.loads(scan['summary']).get('closes', {}).get(code)
-        if close:
-            candidates.append(close)
-            break
-    return max(candidates, key=lambda x: x['last_close_date']) if candidates else {'last_close': None, 'last_close_date': None}
+    return _closing_prices(conn).get(stock_codes.normalize_key(code), {'last_close': None, 'last_close_date': None})
 
 
 def announcement_failure(conn, code: str, *, scan_id: int | None = None) -> dict | None:
-    # During execute, the fully collected current summary is projected before the scan is finalized.
-    for row in conn.execute("SELECT id,status,summary FROM scans WHERE summary IS NOT NULL "
-                            "AND (status IN ('done','failed') OR id=?) ORDER BY id DESC", (scan_id,)):
-        summary = json.loads(row['summary'])
-        failure = next((f for f in summary.get('failures', [])
-                        if f['code'] == code and f['stage'] == 'announcements'), None)
-        if failure:
-            return {'kind': 'scan_failure', 'scan_id': row['id'], **failure}
-        if (code in summary.get('announcements_succeeded', [])
-                or row['status'] == 'done' and any(s['code'] == code for s in summary.get('scope', []))):
-            return None
-    return None
+    history = ScanHistory(conn, scan_id, fields=('failures', 'scope', 'announcements_succeeded'))
+    return history.announcements.get(code)
 
 
 def mechanical_failure(conn, code: str, report_id: int, *, scan_id: int | None = None) -> dict | None:
-    """Only an explicit successful check clears the current report's failure."""
-    code = stock_codes.normalize_key(code)
-    for row in conn.execute("SELECT id,summary FROM scans WHERE summary IS NOT NULL "
-                            "AND (status IN ('done','failed') OR id=?) ORDER BY id DESC", (scan_id,)):
-        summary = json.loads(row['summary'])
-        failure = next((f for f in summary.get('check_failures', [])
-                        if f['code'] == code and (f.get('report_id') or
-                            (summary.get('before', {}).get(code) or {}).get('report_id') or
-                            (summary.get('cards', {}).get(code) or {}).get('report_id')) == report_id), None)
-        if failure:
-            return {'kind': 'check_failure', **failure, 'report_id': report_id, 'scan_id': row['id']}
-        if {'code': code, 'report_id': report_id} in summary.get('checks_succeeded', []):
-            return None
-    return None
+    history = ScanHistory(conn, scan_id, fields=('check_failures', 'checks_succeeded'))
+    return history.checks.get((stock_codes.normalize_key(code), report_id))
 
 
 def last_extreme_zones(history: list[dict]) -> dict[str, str]:
@@ -599,7 +660,7 @@ def check_detail(check: dict, item: dict, body: dict) -> str:
 def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int, at: str) -> list[dict] | None:
     if card is None:
         return None
-    pending = [e for e in open_events(conn, code)
+    pending = [e for e in card['pending_events']
                if e['kind'] in ('forecast', 'periodic') and after_card(e, card['completed_at'])]
     if not pending:
         return None
@@ -654,29 +715,31 @@ def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int,
 def _dispatch(conn, scan_id: int, at: str, scope: set[str], *, history: list[dict] | None = None) -> list[int]:
     scope = {stock_codes.normalize_key(code) for code in scope}
     with db.transaction(conn):
-        pending = [e for e in events(conn) if e['action'] == 'deferred' and e['code'] in scope]
+        pending = defaultdict(list)
+        for event in events(conn):
+            if event['action'] == 'deferred' and event['code'] in scope:
+                pending[event['code']].append(event)
         eligible = []
         priority = set()
-        reviews = {}
-        for event in pending:
-            card = card_or_none(conn, event['code'])
-            if card is None:
-                conn.execute("UPDATE scan_events SET action='no_card' WHERE id=?", (event['id'],))
+        for code, items in pending.items():
+            report = conn.execute(service.LATEST_FORMAL_REPORT_ID, (code,)).fetchone()
+            if report is None:
+                conn.executemany("UPDATE scan_events SET action='no_card' WHERE id=?", [(e['id'],) for e in items])
                 continue
-            if event['code'] not in reviews:
-                reviews[event['code']] = {e['id']: e['review'] for e in event_reviews(conn, event['code'])}
-            if reviews[event['code']][event['id']]['state'] in RESOLVED:
-                # A published report already read and cited it; a newer date alone is not enough.
-                conn.execute("UPDATE scan_events SET action='covered' WHERE id=?", (event['id'],))
-            elif conn.execute("SELECT 1 FROM runs WHERE company_key=? AND kind='research' AND batch_id IS NULL "
-                              "AND status IN ('queued','running')", (event['code'],)).fetchone():
-                # Stays deferred: that run picks up open events when it starts, or the next scan decides.
+            unresolved = []
+            for event in event_reviews(conn, code, company_events=items):
+                if event['review']['state'] in RESOLVED:
+                    conn.execute("UPDATE scan_events SET action='covered' WHERE id=?", (event['id'],))
+                else:
+                    unresolved.append(event)
+            if not unresolved or conn.execute(
+                "SELECT 1 FROM runs WHERE company_key=? AND kind='research' AND batch_id IS NULL "
+                "AND status IN ('queued','running')", (code,)
+            ).fetchone():
                 continue
-            else:
-                eligible.append(event)
-                if any(c['outcome'] in ('deviated', 'missed') for c in
-                       disclosure_checks.latest(stored_checks(conn, card['report_id']))):
-                    priority.add(event['code'])
+            eligible.extend(unresolved)
+            if any(c['outcome'] in ('deviated', 'missed') for c in disclosure_checks.latest(stored_checks(conn, report[0]))):
+                priority.add(code)
         # Runs, rather than events, count toward the Shanghai calendar-day budget.
         used = sum(instant(r['created_at']).date() == instant(at).date() for r in conn.execute(
             'SELECT DISTINCT u.id,u.created_at FROM runs u JOIN scan_events e ON e.run_id=u.id'))
@@ -752,7 +815,9 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
             for n in json.loads(row['summary'] or '{}').get('notify', [])]
         summary['last_extreme_zones'] = last_extreme_zones(history)
         summary['scope'] = scope
-        summary['before'] = {s['code']: card_or_none(conn, s['code']) for s in scope}
+        with db.transaction(conn, immediate=False):
+            observations = ScanHistory(conn)
+            summary['before'] = {s['code']: card_or_none(conn, s['code'], history=observations) for s in scope}
         for subscription in scope:
             code = subscription['code']
             successful = last_success(history, code)
@@ -887,23 +952,31 @@ def view(conn, scan_id: int, *, compact: bool = False) -> dict:
 
 
 def weekly(conn, *, at: str | None = None, account_sources: bool = True, compact: bool = False) -> dict:
+    with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
+        return _weekly(conn, at or db.now(), account_sources, compact)
+
+
+def _weekly(conn, at, account_sources, compact):
     from a_share_research.policy.registry import PolicyError
 
-    at = at or db.now()
     since = instant(at) - timedelta(days=7)
-    items = [s | {'card': card_or_none(conn, s['code'])} for s in subscriptions(conn)]
+    history = ScanHistory(conn)
+    subscriptions = subscription_scope(conn)
     all_events = events(conn)
+    by_company = defaultdict(list)
+    for event in all_events:
+        by_company[stock_codes.normalize_key(event['code'])].append(event)
+    items = []
+    pending = []
+    for item in _with_closes(conn, subscriptions, history):
+        code = item['code']
+        reviews = event_reviews(conn, code, company_events=by_company[code])
+        if not compact:
+            pending.extend(e for e in reviews if e['review']['state'] not in RESOLVED)
+        items.append(item | {'card': card_or_none(conn, code, history=history, reviews=reviews)})
     recent = [dict(e, **latency(e, at)) for e in all_events if instant(e['detected_at']) >= since]
     failures, gaps = [], []
-    # Weekly coverage and failures need only these observations from historical scans.
-    rows = [dict(r) | {'summary': json.loads(r['summary'])} for r in conn.execute("""
-        SELECT id,status,requested_at,started_at,finished_at,error,
-               json_object('closes', COALESCE(json_extract(summary,'$.closes'),json('{}')),
-                           'failures', COALESCE(json_extract(summary,'$.failures'),json('[]')),
-                           'check_failures', COALESCE(json_extract(summary,'$.check_failures'),json('[]')),
-                           'coverage_gaps', COALESCE(json_extract(summary,'$.coverage_gaps'),json('[]'))) AS summary
-        FROM scans ORDER BY id
-    """)]
+    rows = history.rows
     for row in rows:
         if instant(row['requested_at']) >= since:
             failures.extend({'scan_id': row['id'], 'kind': 'check_failure' if key == 'check_failures' else 'scan_failure', **f}
@@ -920,11 +993,11 @@ def weekly(conn, *, at: str | None = None, account_sources: bool = True, compact
     failed_reviews = [e for e in all_events if e['run_status'] == 'failed'
                       and e['judgment_completed_at'] and instant(e['judgment_completed_at']) >= since]
     try:
-        scope = scan_scope(conn, account_sources=account_sources)
+        holdings = _holding_codes(conn) if account_sources else []
     except PolicyError as exc:
         log.warning('weekly scan report could not verify the holding scope: %s', exc)
         failures.append({'code': None, 'stage': 'holding_scope', 'reason': '本次周报未能核实账户持仓范围'})
-        scope = scan_scope(conn, account_sources=False)
+        holdings = []
     result = {'version': service.VERSION, 'since': since.isoformat(), 'as_of': at,
             'status_distribution': dict(Counter((s['card'] or {}).get('status', '无论点卡') for s in items)),
             'zone_distribution': dict(Counter(((s['card'] or {}).get('current') or {}).get('current_zone') or '未测算' for s in items)),
@@ -939,8 +1012,10 @@ def weekly(conn, *, at: str | None = None, account_sources: bool = True, compact
         return result | {'scan_id': latest['id'] if latest else None, 'status': latest['status'] if latest else 'no_scans',
                          'event_count': len(recent), 'backlog_count': sum(e['action'] == 'deferred' for e in all_events),
                          'review_failure_count': len(failed_reviews), 'path': '/scans/weekly'}
-    return result | {'subscriptions': items, 'scan_scope': [{k: s[k] for k in ('code', 'origin', 'origins')} for s in scope],
+    scope = {s['code']: dict(code=s['code'], origin=s['origin'], origins=s['origins'].copy()) for s in items}
+    _extend_scope(conn, scope, holdings)
+    return result | {'subscriptions': items, 'scan_scope': list(scope.values()),
             'coverage': current, 'events': recent, 'checkpoints': checkpoints,
             'backlog': [dict(e, **latency(e, at)) for e in all_events if e['action'] == 'deferred'],
-            'open_events': [dict(e, **latency(e, at)) for s in items for e in open_events(conn, s['code'])],
+            'open_events': [dict(e, **latency(e, at)) for e in pending],
             'review_failures': [dict(e, **latency(e, at)) for e in failed_reviews]}

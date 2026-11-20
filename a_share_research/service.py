@@ -334,18 +334,27 @@ def card_checks(conn: sqlite3.Connection, report_id: int) -> list[dict]:
             for check in disclosure_checks.latest(scans.stored_checks(conn, report_id))]
 
 
-def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = None) -> dict:
+# Resolve the winning row before projecting JSON, even when several reports match.
+LATEST_FORMAL_REPORT_ID = (
+    "SELECT r.id FROM reports r JOIN runs u ON u.id=r.run_id "
+    f"WHERE r.company_key=? AND {db.FORMAL_REPORT} ORDER BY r.created_at DESC,r.id DESC LIMIT 1"
+)
+
+
+def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = None, history=None, reviews=None) -> dict:
     """A2 read-only projection of the latest reviewed, non-feedback company research."""
     if not stock_codes.KEY_RE.fullmatch(code):
         raise RequestError("公司代码必须为六位数字")
+    keys = ",".join(f"'{key}'" for key in report_body.CARD_FIELDS)
     row = conn.execute(
-        "SELECT r.id, r.name, r.created_at, COALESCE(u.finished_at,r.created_at) AS completed_at, r.period, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
-        f"WHERE r.company_key = ? AND {db.FORMAL_REPORT} "
-        "ORDER BY r.created_at DESC, r.id DESC LIMIT 1", (code,),
+        "SELECT r.id, r.name, r.created_at, COALESCE(u.finished_at,r.created_at) AS completed_at, r.period, "
+        f"(SELECT json_group_object(key, r.body -> fullkey) FROM json_each(r.body) WHERE key IN ({keys})) AS body "
+        "FROM reports r JOIN runs u ON u.id = r.run_id "
+        f"WHERE r.id=({LATEST_FORMAL_REPORT_ID})", (code,),
     ).fetchone()
     if row is None:
         raise RequestError("暂无通过复核的非纠错研究报告", 404)
-    body = report_body.load(row["body"])
+    body = json.loads(row["body"])
     calc = body.get("valuation_calc")
     summary = None
     if isinstance(calc, dict):
@@ -359,11 +368,14 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
         summary["boundary"] = stances.on_boundary(calc)
         summary["flip_distance"] = stances.flip_distance(calc)
     from a_share_research import scans, valuation
-    pending = scans.open_events(conn, code)
-    failure = scans.announcement_failure(conn, code, scan_id=scan_id)
+    history = history or scans.ScanHistory(conn, scan_id)
+    if reviews is None:
+        reviews = scans.event_reviews(conn, code)
+    pending = [e for e in reviews if e['review']['state'] not in scans.RESOLVED]
+    failure = history.announcements.get(code)
     if failure:
         pending.append(failure)
-    current = scans.latest_close(conn, code)
+    current = history.close(code)
     current['valuation'] = (valuation.at(calc, current['last_close'], current['last_close_date'])
                             if current['last_close'] is not None else None)
     if current['valuation'] is not None:
@@ -380,7 +392,7 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "created_at": row['created_at'], "completed_at": row['completed_at'], "pending_events": pending, "current": current,
             "status": "待复核" if pending else "有效",
             "checks": card_checks(conn, row["id"]),
-            "check_failure": scans.mechanical_failure(conn, code, row["id"], scan_id=scan_id),
+            "check_failure": history.checks.get((code, row["id"])),
             **{key: body.get(key) for key in report_body.CARD_FIELDS},
             # Four card fields are reshaped rather than copied from the stored body.
             "risks": [item["text"] for item in body.get("risks", [])[:3]],
@@ -392,28 +404,33 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
 
 def company_cards(conn: sqlite3.Connection, *, holdings: bool = False) -> dict:
     """Read subscription and frozen L5 cards, optionally including verified holdings for policy monitoring."""
+    with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
+        return _company_cards(conn, holdings)
+
+
+def _company_cards(conn, holdings):
     from a_share_research import scans
 
-    scope = {item['code']: item['origin'] for item in scans.subscriptions(conn)}
+    scope = {s['code']: s['origin'] for s in scans.subscription_scope(conn).values()}
     result = {'version': VERSION}
     if holdings:
         from a_share_research.account import mirror
         from a_share_research.policy import account_view, registry
 
-        with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
-            try:
-                current = account_view.verified_current(conn, mirror.target_directory(conn))
-            except (registry.PolicyError, sqlite3.Error, OSError) as exc:
-                logging.getLogger(__name__).warning('Could not verify holdings for policy research cards: %s', exc)
-                result['holdings_available'] = False
-            else:
-                result['holdings_available'] = True
-                for code in current['codes']:
-                    # Keep the monitor contract's external/l5 origins and preserve existing L5 candidates.
-                    scope.setdefault(code, 'external')
+        try:
+            current = account_view.verified_current(conn, mirror.target_directory(conn))
+        except (registry.PolicyError, sqlite3.Error, OSError) as exc:
+            logging.getLogger(__name__).warning('Could not verify holdings for policy research cards: %s', exc)
+            result['holdings_available'] = False
+        else:
+            result['holdings_available'] = True
+            for code in current['codes']:
+                # Keep the monitor contract's external/l5 origins and preserve existing L5 candidates.
+                scope.setdefault(code, 'external')
     cards, missing = [], []
+    history = scans.ScanHistory(conn) if scope else None
     for code, origin in scope.items():
-        card = scans.card_or_none(conn, code)
+        card = scans.card_or_none(conn, code, history=history)
         if card is None:
             missing.append({'code': code, 'origin': origin})
         else:
