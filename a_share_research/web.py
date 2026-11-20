@@ -362,6 +362,41 @@ def logout(request: Request, csrf: str = Form("")):
 
 # ---------- pages ----------
 
+def _owner_read(request, read, *args):
+    if not current_session(request):
+        return login_required()
+    try:
+        return read(conn, *args)
+    except service.RequestError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+def _overview():
+    # Policy-backed views load lazily so the web process stays free of market dependencies.
+    from a_share_research import overview
+    return overview
+
+
+@app.get("/portfolio/overview")
+def portfolio_overview(request: Request):
+    return _owner_read(request, _overview().portfolio_overview)
+
+
+@app.get("/stock/{code}/overview")
+def company_overview(request: Request, code: str):
+    return _owner_read(request, _overview().company_overview, code)
+
+
+@app.get("/policy/evaluations/{evaluation_id}")
+def monitor_detail(request: Request, evaluation_id: int):
+    return _owner_read(request, _overview().monitor_detail, evaluation_id)
+
+
+@app.get("/account/receipts/{receipt_id}")
+def receipt_detail(request: Request, receipt_id: int):
+    return _owner_read(request, _overview().receipt_detail, receipt_id)
+
+
 @app.get("/policy")
 def policy_page(request: Request):
     if not (session := current_session(request)):
@@ -763,7 +798,7 @@ def api_submit_scan_request(request: Request, request_id: str):
 def api_weekly_scan(request: Request):
     api_session(request)
     from a_share_research import scans
-    return scans.weekly(conn)
+    return scans.weekly(conn, account_sources=False)
 
 
 @app.get('/api/scans/{scan_id}')

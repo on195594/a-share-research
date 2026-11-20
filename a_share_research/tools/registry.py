@@ -220,8 +220,29 @@ def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
     return Payload(data={'sha256': evidence.store(_evidence_directory(ctx), content)})
 
 
+def _research_coverage(ctx: Context, args: Arguments) -> TradeRows:
+    ledger.authorize(ctx.connection, ctx.principal)
+    return TradeRows(rows=trades.research_available_at_trade(ctx.connection))
+
+
+def _company_overview(ctx: Context, args: Company) -> Payload:
+    from a_share_research.overview import company_overview
+    ledger.authorize(ctx.connection, ctx.principal)
+    return Payload(data=company_overview(ctx.connection, args.code))
+
+
+def _portfolio_overview(ctx: Context, args: Arguments) -> Payload:
+    from a_share_research.overview import portfolio_overview
+    ledger.authorize(ctx.connection, ctx.principal)
+    return Payload(data=portfolio_overview(ctx.connection))
+
+
 _READERS = frozenset({'research', 'assistant'})
 TOOLS = {tool.name: tool for tool in (
+    Tool('research.company_overview', '读取公司研究、公告复核、本次持仓周期与已保存的监控判断',
+         frozenset({'assistant'}), Company, Payload, _company_overview, account=True),
+    Tool('account.portfolio_overview', '读取已核实持仓的研究、在仓论点、监控判断与待补资料',
+         frozenset({'assistant'}), Arguments, Payload, _portfolio_overview, account=True),
     Tool('account.nav.capture', '冻结账户账本与估值出处，返回资料哈希；不认定资金流水完整',
          frozenset({'assistant'}), Account, Payload,
          lambda c,a: Payload(data=nav.capture(c.connection,c.principal,a.account_id)), account=True),
@@ -290,9 +311,8 @@ TOOLS = {tool.name: tool for tool in (
          lambda c, a: Payload(data=service.company_card(c.connection, a.code))),
     Tool('research.report', '读取报告及证据', _READERS, Report, Payload,
          lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
-    Tool('account.research_coverage', '成交时可用研究；不作为显式依据或收益归因',
-         frozenset({'assistant'}), Arguments, TradeRows,
-         lambda c, a: TradeRows(rows=trades.research_available_at_trade(c.connection)), account=True),
+    Tool('account.research_coverage', '分开读取成交明确采用的报告与成交时可查的报告',
+         frozenset({'assistant'}), Arguments, TradeRows, _research_coverage, account=True),
 )}
 
 

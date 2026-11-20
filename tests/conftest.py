@@ -15,7 +15,7 @@ def bind_account():
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "wide_scan_scope: scan beyond subscriptions (tracking L5 and card companies)")
+    config.addinivalue_line("markers", "wide_scan_scope: scan beyond subscriptions (holdings, tracking L5 and card companies)")
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +24,7 @@ def narrow_scan_scope(request, monkeypatch):
     # subscriptions keep that scope unless a test opts into the wide production scope.
     if request.node.get_closest_marker("wide_scan_scope") is None:
         from a_share_research import scans
-        monkeypatch.setattr(scans, "scan_scope", scans.subscriptions)
+        monkeypatch.setattr(scans, "scan_scope", lambda conn, **_: scans.subscriptions(conn))
 
 
 @pytest.fixture
