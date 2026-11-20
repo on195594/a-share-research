@@ -16,6 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlencode, urlparse
@@ -124,6 +125,8 @@ settings = Settings.from_env()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+templates.env.filters["record_json"] = lambda value: json.dumps(value, ensure_ascii=False, indent=2)
+templates.env.filters["decimal_format"] = lambda value, spec: format(Decimal(value), spec)
 # Busts browser caches of the stylesheet and script on each deploy that changes them.
 ASSET_VERSION = hashlib.sha256(b"".join((HERE / "static" / name).read_bytes() for name in ("app.css", "app.js"))).hexdigest()[:12]
 templates.env.globals["asset_version"] = ASSET_VERSION
@@ -575,13 +578,32 @@ def disconnect_grant(request: Request, grant_id: int, csrf: str = Form("")):
 
 # ---------- pages ----------
 
-def _owner_read(request, read, *args):
-    if not current_session(request):
+def _prefers_json(request: Request) -> bool:
+    # These owner pages default to HTML. Clients may explicitly prefer the original JSON view.
+    weights = {}
+    for item in request.headers.get("accept", "").lower().split(","):
+        media_type, *params = (part.strip() for part in item.split(";"))
+        if media_type not in ("text/html", "application/json"):
+            continue
+        quality = next((p[2:] for p in params if p.startswith("q=")), "1")
+        if re.fullmatch(r"(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)", quality):
+            weights[media_type] = float(quality)
+    return weights.get("application/json", 0) > weights.get("text/html", 0)
+
+
+def _owner_read(request, template, read, *args):
+    if not (session := current_session(request)):
         return login_required()
+    as_json = _prefers_json(request)
     try:
-        return read(conn, *args)
+        view = read(conn, *args)
     except service.RequestError as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
+        response = (JSONResponse({"detail": str(exc)}, status_code=exc.status) if as_json else
+                    message(request, session, "无法读取记录", str(exc), exc.status))
+    else:
+        response = JSONResponse(view) if as_json else render(request, template, session, view=view)
+    response.headers["Vary"] = "Accept"
+    return response
 
 
 def _overview():
@@ -592,22 +614,27 @@ def _overview():
 
 @app.get("/portfolio/overview")
 def portfolio_overview(request: Request):
-    return _owner_read(request, _overview().portfolio_overview)
+    return _owner_read(request, "overview.html", _overview().portfolio_overview)
 
 
 @app.get("/stock/{code}/overview")
 def company_overview(request: Request, code: str):
-    return _owner_read(request, _overview().company_overview, code)
+    return _owner_read(request, "overview.html", _overview().company_overview, code)
 
 
 @app.get("/policy/evaluations/{evaluation_id}")
 def monitor_detail(request: Request, evaluation_id: int):
-    return _owner_read(request, _overview().monitor_detail, evaluation_id)
+    return _owner_read(request, "monitor_detail.html", _overview().monitor_detail, evaluation_id)
 
 
 @app.get("/account/receipts/{receipt_id}")
 def receipt_detail(request: Request, receipt_id: int):
-    return _owner_read(request, _overview().receipt_detail, receipt_id)
+    return _owner_read(request, "receipt_detail.html", _overview().receipt_detail, receipt_id)
+
+
+@app.get("/account/nav/{artifact_sha256}")
+def nav_detail(request: Request, artifact_sha256: str):
+    return _owner_read(request, "nav_detail.html", _overview().nav_detail, artifact_sha256)
 
 
 @app.get("/policy")
@@ -1012,8 +1039,10 @@ def stock_page(request: Request, code: str, report: int | None = None):
     except ValueError:
         return not_found(request, session, "公司代码不存在。")
     reports = reading.stock_reports(conn, code, summaries=True)
+    overview = _overview().company_overview(conn, code)
     if not reports:
-        return not_found(request, session, "还没有研究过这家公司。")
+        return render(request, "message.html", session, 404, title="还没有研究过这家公司", text=code,
+                      company_overview=overview)
     # Formal research heads the page; a feedback check or replay leads only when nothing else exists.
     ordered = sorted(reports, key=lambda r: (bool(r["replay_of"]), bool(r["feedback_text"])))
     head = ordered[0]
@@ -1046,6 +1075,7 @@ def stock_page(request: Request, code: str, report: int | None = None):
         "coverage": head["coverage"],
         "created_at": head["created_at"]}
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex, card=card,
+                  company_overview=overview,
                   due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   vitals=latest[1], vitals_report=latest[0],
                   price=reading.latest_price(conn, code), comparison=reading.comparison(conn, full(selected)[0]),

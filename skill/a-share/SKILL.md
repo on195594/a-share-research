@@ -28,6 +28,8 @@ description: 通过统一 A 股服务读取研究、处理账户证据与监控�
 
 截图、成交和原始材料先通过服务保存证据，再调用发现的对账、观察或追加工具。对账通过按回执报告；缺材料或冲突保留具体缺口，不反推、编造成交和现金流水。截图只有资产汇总时，不把它补成完整交易历史。保持来源模式和范围：影子入账、用户输入重放、历史行情重放都不能说成生产账户已更新或当前市场事实。生产账户写入沿用已验收并启用的入口；工具可发现本身不代表已经完成账户切换。
 
+查看组合待办用 `account_portfolio_overview`，查看单家公司用 `research_company_overview`。按返回的时点和原文转述缺口，`evidence_path` 定位公司待补证据。可把已保存监控评估、最近一次对账回执（`account.latest_receipt`）和 NAV 区间的相对路径接到 Web 站点。两个总览的 `nav_interval` 给出绑定账户最近保存的区间、基准、创建时间和凭证哈希；为空时说明缺口。
+
 调用 `account_nav_evaluate` 时可省略 `request.benchmark_evidence_hash`，由服务端采集并保存 `H00906.CSI` 收盘证据。已有指数证据时也可传入其哈希。选择上海时间 15:00:00 的起止估值。区间无交易日数据或缺任一端点收盘值（422 / `invalid_arguments`）时，指出缺失日期或区间并建议另选区间。行情采集故障（503 / `unavailable`）时，稍后用原请求重试。两种情况均可用错误末尾的哈希核对指数响应。
 
 用 `account_cycle_analysis_current` 或 `account_cycle_analysis_history` 查询指定周期；通过 `account_cycle_analysis_initialize`、`account_cycle_analysis_update` 按版本和证据追加分析、论点与证伪条件。真实账户政策切换交由所有者的本地入口，不把普通 assistant 凭据当作 owner。监控采集成功后仍读取时点、data_status 和逐项缺口，不能用“调用成功”替代行情或资产证据完整。

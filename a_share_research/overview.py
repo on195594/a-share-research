@@ -3,7 +3,8 @@ import json
 import sqlite3
 
 from a_share_research import db, reading, scans, service, stock_codes
-from a_share_research.account import analysis, mirror, projection_ids
+from a_share_research.account import analysis, mirror, nav_refs, projection_ids
+from a_share_research.evidence import safe_url
 from a_share_research.policy import account_view, registry as policies
 
 
@@ -65,6 +66,42 @@ def receipt_detail(conn, receipt_id):
     return json.loads(row[0])
 
 
+def _receipt_refs(conn, account_id):
+    query = 'SELECT id, created_at, status FROM account_batches WHERE account_id=?'
+    order = ' ORDER BY id DESC LIMIT 1'
+    latest = conn.execute(query + order, (account_id,)).fetchone()
+    posted = latest
+    if latest and latest['status'] != 'posted':
+        posted = conn.execute(query + " AND status='posted'" + order, (account_id,)).fetchone()
+    return {
+        'latest_receipt': dict(latest, path=f"/account/receipts/{latest['id']}") if latest else None,
+        'last_receipt': {'id': posted['id'], 'created_at': posted['created_at'],
+                         'path': f"/account/receipts/{posted['id']}"} if posted else None,
+    }
+
+
+def _nav_summary(row):
+    summary = {k: row[k] for k in ('artifact_sha256', 'start_date', 'end_date', 'benchmark_code', 'created_at')}
+    return dict(summary, path=f"/account/nav/{row['artifact_sha256']}")
+
+
+def nav_detail(conn, artifact_sha256):
+    with db.transaction(conn, immediate=False):
+        try:
+            account_id = account_view.bound_account_id(conn)
+        except policies.PolicyError as exc:
+            raise service.RequestError(str(exc), 404) from exc
+        row = conn.execute('SELECT * FROM account_nav_refs WHERE account_id=? AND artifact_sha256=?',
+                           (account_id, artifact_sha256)).fetchone()
+    if row is None:
+        raise service.RequestError('绑定账户没有这份 NAV 区间凭证', 404)
+    try:
+        result = nav_refs.read_result(row, mirror.target_directory(conn) / 'account-evidence')
+    except (ValueError, TypeError, KeyError) as exc:
+        raise service.RequestError(f'NAV 区间凭证完整性核验失败：{exc}', 409) from exc
+    return _nav_summary(row) | {'result': result}
+
+
 def _policy(saved, holding=None):
     if saved is None:
         return None
@@ -101,7 +138,7 @@ def _announcements(conn, code, path):
             event_path = f"/runs/{event['run_id']}"
         announcements.append({k: event[k] for k in ('id', 'scan_id', 'title', 'kind', 'announced', 'action')} | {
             'review': {k: review[k] for k in ('state', 'label', 'report_id')} if review else None,
-            'path': event_path})
+            'path': event_path, 'source_url': safe_url(event['url'])})
     return announcements
 
 
@@ -112,10 +149,10 @@ def _company(conn, code, held, position, saved):
     path = f'/stock/{code}' if card else f'/stock/{code}/overview'
     if card:
         decision = reading.stance_decision(card['stance'], card['stance_calc'], card['valuation_calc'])
-        research = {k: card[k] for k in ('report_id', 'period', 'completed_at', 'verdict', 'status')}
+        research = {k: card[k] for k in ('report_id', 'period', 'completed_at', 'verdict', 'status', 'summary')}
         research['current'] = {k: card['current'][k] for k in ('last_close_date', 'current_zone')}
         research.update(stance={k: decision[k] for k in ('action', 'text', 'hurdle', 'valid_until')} if decision else None,
-                        path=f"/reports/{card['report_id']}")
+                        zone_note=card['current'].get('note'), path=f"/reports/{card['report_id']}")
         if card['check_failure']:
             gaps.append(card['check_failure']['reason'])
     else:
@@ -129,6 +166,7 @@ def _company(conn, code, held, position, saved):
     if held and policy is None:
         gaps.append('本次持仓周期暂无可引用的监控评估')
     return dict(code=code, name=card['name'] if card else (position or {}).get('name'), path=path,
+                evidence_path=f'/stock/{code}/overview#evidence-{code}',
                 held=held, position=position, research=research, announcements=_announcements(conn, code, path),
                 policy=policy, gaps=gaps)
 
@@ -146,6 +184,7 @@ def _overview(conn, code=None):
             gaps.append(str(exc))
         source = current['source'] if current else None
         account = None
+        account_id = None
         positions = {}
         saved = None
         if source:
@@ -154,9 +193,7 @@ def _overview(conn, code=None):
                 account_id = source['watermark']['account_id']
                 opening = conn.execute('SELECT opened_at FROM account_books WHERE account_id=?', (account_id,)).fetchone()
                 account.update(account_id=account_id, version=source['account_version'], opened_at=opening['opened_at'])
-                receipt = conn.execute("SELECT id, created_at FROM account_batches WHERE account_id=? AND status='posted' "
-                                       "ORDER BY id DESC LIMIT 1", (account_id,)).fetchone()
-                account['last_receipt'] = dict(receipt, path=f"/account/receipts/{receipt['id']}") if receipt else None
+                account.update(_receipt_refs(conn, account_id))
                 positions = _positions(conn, source)
                 try:
                     saved = _saved_monitor(conn)
@@ -167,13 +204,27 @@ def _overview(conn, code=None):
                         gaps.append('暂无绑定账户的已保存监控评估')
             else:
                 gaps.append('当前来源为已核实镜像，缺少绑定账本的持仓周期')
+        elif conn.execute("SELECT 1 FROM account_source WHERE id=1 AND mode='ledger'").fetchone():
+            # A committed interval survives gaps in the current position projection.
+            try:
+                account_id = account_view.bound_account_id(conn)
+            except policies.PolicyError as exc:
+                gaps.append(str(exc))
+        nav_interval = None
+        if account_id is not None:
+            row = conn.execute('SELECT artifact_sha256,start_date,end_date,benchmark_code,created_at '
+                               'FROM account_nav_refs WHERE account_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1',
+                               (account_id,)).fetchone()
+            if row:
+                nav_interval = _nav_summary(row)
+        if nav_interval is None:
+            gaps.append('暂无可查询的 NAV 区间凭证')
         if code is not None:
             held = code in current['codes'] if current else None
             result = _company(conn, code, held, positions.get(code), saved)
             result['gaps'].extend(gaps)
-            return result | {'account': account}
-        gaps.append('暂无可查询的 NAV 区间凭证')
-        return dict(account=account, policy=_policy(saved), gaps=gaps,
+            return result | {'account': account, 'nav_interval': nav_interval}
+        return dict(account=account, policy=_policy(saved), nav_interval=nav_interval, gaps=gaps,
                     holdings=[_company(conn, key, True, positions.get(key), saved)
                               for key in current['codes']] if current else None)
 

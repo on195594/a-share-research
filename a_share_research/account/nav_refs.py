@@ -47,6 +47,20 @@ def record(conn: sqlite3.Connection, artifact: dict, sha: str, key_id: int) -> N
              evidence_hashes=gate.canonical(fields['evidence_hashes'])))
 
 
+def read_result(row: sqlite3.Row, directory: Path, verified_sources: set[str] | None = None) -> dict:
+    """Read the committed result and check the referenced evidence without replaying the interval."""
+    artifact = json.loads(evidence.read(directory, row['artifact_sha256']))
+    fields = _reference(artifact)
+    hashes = fields.pop('evidence_hashes')
+    if any(row[k] != v for k, v in fields.items()) or json.loads(row['evidence_hashes']) != hashes:
+        raise ValueError('区间、基准或证据引用与凭证不一致')
+    verified = set() if verified_sources is None else verified_sources
+    for sha in set(hashes) - verified:
+        evidence.verify(directory, sha)
+        verified.add(sha)
+    return artifact['result']
+
+
 def inspect(conn: sqlite3.Connection, directory: Path) -> list[str]:
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_nav_refs'").fetchone():
         return ['净值区间引用表缺失'] if conn.execute('PRAGMA user_version').fetchone()[0] >= 25 else []
@@ -56,13 +70,7 @@ def inspect(conn: sqlite3.Connection, directory: Path) -> list[str]:
     for row in conn.execute('SELECT * FROM account_nav_refs ORDER BY artifact_sha256'):
         sha = row['artifact_sha256']
         try:
-            fields = _reference(json.loads(evidence.read(directory, sha)))
-            hashes = fields.pop('evidence_hashes')
-            if any(row[k] != v for k, v in fields.items()) or json.loads(row['evidence_hashes']) != hashes:
-                raise ValueError('区间、基准或证据引用与凭证不一致')
-            for source_hash in set(hashes) - verified:
-                evidence.verify(directory, source_hash)
-                verified.add(source_hash)
+            read_result(row, directory, verified)
         except (ValueError, TypeError, KeyError) as exc:
             problems.append(f'净值引用 {sha}：{exc}')
     return problems

@@ -1,0 +1,15 @@
+{% extends "_record.html" %}
+{% from "_overview.html" import receipt_status %}
+{% block heading %}对账回执 #{{ view.receipt_id }}{% endblock %}
+{% block record %}
+<p><strong>{{ receipt_status(view.status) }}</strong> · 账户 {{ view.account_id }} · 版本 {{ view.version }}</p>
+{% if view.problems %}
+<h2>对账待核项</h2>
+<ul class="facts">{% for item in view.problems %}<li>{{ item.field }} · 应为 {{ item.expected }}{% if 'actual' in item %}，实际为 {{ item.actual }}{% endif %}</li>{% endfor %}</ul>
+{% endif %}
+<dl class="snapshot">
+  <div><dt>新增事件</dt><dd>{{ view.added }}</dd></div>
+  <div><dt>重复事件</dt><dd>{{ view.duplicates }}</dd></div>
+  <div><dt>作废事件</dt><dd>{{ view.voided }}</dd></div>
+</dl>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "_record.html" %}
+{% block heading %}NAV 区间凭证{% endblock %}
+{% block record %}
+{% set result = view.result %}
+{% set calc = result.calculation %}
+<p>{{ view.start_date }} 至 {{ view.end_date }} · 对照 {{ view.benchmark_code }}</p>
+<dl class="policy-facts">
+  <div><dt>扣费后单位净值</dt><dd>期初 {{ calc.initial_nav }} · 期末 <strong>{{ calc.end_nav|decimal_format('.4f') }}</strong></dd></div>
+  <div><dt>账户区间收益</dt><dd>{{ calc.account_return|decimal_format('.2%') }}</dd></div>
+  <div><dt>{{ view.benchmark_code }} 全收益</dt><dd>{{ calc.benchmark_return|decimal_format('.2%') }}</dd></div>
+  <div><dt>超额收益</dt><dd>{{ calc.excess_percentage_points|decimal_format('.2f') }} 个百分点</dd></div>
+  <div><dt>两端估值时点</dt><dd>{{ result.inputs.start.as_of|replace('T', ' ') }} 至 {{ result.inputs.end.as_of|replace('T', ' ') }}</dd></div>
+  <div><dt>创建时间</dt><dd>{{ view.created_at|replace('T', ' ') }}</dd></div>
+  <div><dt>凭证 SHA-256</dt><dd>{{ view.artifact_sha256 }}</dd></div>
+</dl>
+{% endblock %}

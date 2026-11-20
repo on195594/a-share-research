@@ -2,6 +2,7 @@
 {% from "_macros.html" import research_form, price_block, research_context %}
 {% from "_charts.html" import verdict_track, verdict_pips, vitals as vitals_panel %}
 {% from "_card.html" import full_card %}
+{% from "_overview.html" import stock_overview_link %}
 {% block title %}{{ reports[0].name }} · 公司档案{% endblock %}
 {% block main %}
 <nav aria-label="公司章节" id="company-sections"><ul class="toc">
@@ -11,6 +12,7 @@
   <li><a href="#price">价格参考</a></li>
 </ul></nav>
 <p class="actions"><a class="btn" href="/reports/{{ card.id }}">阅读 {{ card.name or card.code }} 的完整报告</a></p>
+{{ stock_overview_link(company_overview) }}
 <div>
   {{ full_card(card, due) }}
   <div class="actions card-actions">

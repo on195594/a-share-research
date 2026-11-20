@@ -14,6 +14,7 @@
   <a class="brand" href="/">个股研究</a>
   {% if csrf %}
   <nav class="shell-nav" aria-label="主要页面">
+    <a href="/portfolio/overview"{% if request is defined and request.url.path == '/portfolio/overview' %} aria-current="page"{% endif %}>我的组合</a>
     <a href="/batches">候选初筛</a>
     <a href="/research-library">研究库</a>
     <a href="/policy"{% if request is defined and request.url.path == '/policy' %} aria-current="page"{% endif %}>投资政策</a>

@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from a_share_research import api_keys, db, gate, integrity
+from a_share_research import api_keys, db, gate, integrity, overview, service
 from a_share_research.account import evidence, ledger, nav
 from a_share_research.account.reconciliation import Event, Opening, Snapshot
 from a_share_research.core.market_data import MarketDataResult
@@ -85,6 +85,42 @@ def test_no_flow_real_index_endpoints_and_idempotent_artifact(book):
     replay = nav.replay(book['conn'], book['principal'], 'a', result['artifact_sha256'], book['directory'])
     assert replay['calculation'] == result['calculation']
     assert replay['mode'] == 'saved_input_replay'
+
+
+def test_overviews_share_latest_bound_reference_and_detail_reads_saved_result(book, bind_account):
+    conn = book['conn']
+    bind_account(conn, 'a')
+    gap = '暂无可查询的 NAV 区间凭证'
+    company_code = '600519'
+    for data in (overview.portfolio_overview(conn), overview.company_overview(conn, company_code)):
+        assert data['nav_interval'] is None and gap in data['gaps']
+
+    original = evaluate(book)
+    # Two saved valuations for the same interval retain independently readable results.
+    revised_end = observe(book, '2026-01-08T15:00:00+08:00', '1200')
+    revised = evaluate(book, request(book, end=revised_end))
+    sha = revised['artifact_sha256']
+    conn.execute('PRAGMA query_only=ON')
+    portfolio = overview.portfolio_overview(conn)
+    company = overview.company_overview(conn, company_code)
+    ref = portfolio['nav_interval']
+    assert ref == company['nav_interval'] and gap not in portfolio['gaps'] and gap not in company['gaps']
+    assert (ref['artifact_sha256'], ref['start_date'], ref['end_date'], ref['benchmark_code'], ref['path']) == (
+        sha, '2026-01-05', '2026-01-08', 'H00906.CSI', '/account/nav/' + sha)
+    assert ref['created_at']
+    assert overview.nav_detail(conn, sha) == ref | {'result': {k: revised[k] for k in ('basis', 'inputs', 'calculation')}}
+    assert overview.nav_detail(conn, original['artifact_sha256'])['result']['calculation'] == original['calculation']
+    conn.execute('PRAGMA query_only=OFF')
+
+    # Switch the binding to another book without changing the original reference or file.
+    ledger.initialize(conn, book['principal'], 'b', Opening(positions={}, cash='1000'),
+        datetime.fromisoformat('2026-01-01T00:00:00+08:00'), book['directory'], book['sha'], tolerance=Decimal('0'))
+    conn.execute('DELETE FROM account_source')
+    bind_account(conn, 'b')
+    assert overview.portfolio_overview(conn)['nav_interval'] is None
+    with pytest.raises(service.RequestError, match='绑定账户没有') as error:
+        overview.nav_detail(conn, sha)
+    assert error.value.status == 404
 
 
 @pytest.fixture
@@ -384,7 +420,7 @@ def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path)
 
 
 @pytest.mark.parametrize('damage', ['artifact', 'index', 'dates', 'references'])
-def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, damage):
+def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, damage, bind_account):
     value = request(book)
     sha = evaluate(book, value)['artifact_sha256']
     if damage in ('artifact', 'index'):
@@ -397,6 +433,10 @@ def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, da
             book['conn'].execute("UPDATE account_nav_refs SET evidence_hashes='[]'")
     problems, _ = integrity.check(book['path'], book['path'].parent / 'pdf')
     assert len(problems) == 1 and f'净值引用 {sha}' in problems[0]
+    bind_account(book['conn'], 'a')
+    with pytest.raises(service.RequestError, match='NAV 区间凭证完整性核验失败') as error:
+        overview.nav_detail(book['conn'], sha)
+    assert error.value.status == 409
 
 
 def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account):

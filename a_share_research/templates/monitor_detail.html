@@ -1,0 +1,17 @@
+{% extends "_record.html" %}
+{% from "_overview.html" import monitor_items, monitor_status %}
+{% block heading %}监控评估 #{{ view.id }}{% endblock %}
+{% block record %}
+<p><strong>{{ monitor_status(view.result) }}</strong></p>
+<dl class="policy-facts">
+  <div><dt>评估时点</dt><dd>{{ view.result.as_of|replace('T', ' ') }}</dd></div>
+  <div><dt>账户版本</dt><dd>{{ view.capture_context.source.account_version }}</dd></div>
+  <div><dt>评估采用的政策身份</dt><dd>{{ view.identity }} · 启用编号 {{ view.activation_id }}</dd></div>
+  <div><dt>保存时间</dt><dd>{{ view.created_at|replace('T', ' ') }}</dd></div>
+</dl>
+{% if view.result.escalations or view.result.data_gaps %}
+<h2>监控提醒与待补证据</h2>{{ monitor_items(view.result) }}
+{% endif %}
+{% if view.result.review_prompts %}<h2>研究复核提醒</h2>
+<ul class="facts">{% for prompt in view.result.review_prompts %}<li>{% if prompt.code %}{{ prompt.code }} · {% endif %}{{ prompt.detail }}</li>{% endfor %}</ul>{% endif %}
+{% endblock %}

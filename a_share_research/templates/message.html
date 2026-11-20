@@ -1,9 +1,11 @@
 {% extends "base.html" %}
+{% from "_overview.html" import stock_overview_link %}
 {% block title %}{{ title }} · 个股研究{% endblock %}
 {% block main %}
 <section class="narrow">
   <h1>{{ title }}</h1>
   <p>{{ text }}</p>
+  {% if company_overview %}{{ stock_overview_link(company_overview) }}{% endif %}
   <div class="actions"><a class="btn" href="/">返回首页</a></div>
 </section>
 {% endblock %}
