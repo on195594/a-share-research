@@ -5,7 +5,7 @@
 ## 所有者决定（2026-11-21）
 
 1. 按 agy 的审查结论简化。不为兼容旧逻辑和旧数据做兼容层；发布一律从简；允许试错，不写防御性测试，也不做防御性编程。系统边界（用户输入、外部 API、模型输出解析）照常校验。
-2. L3 用 TypeScript 加 pi-agent-core，研究工具走 MCP（pi-mcp 客户端对接 worker 的 mcp SDK 服务端）。三个包都从宿主的 pi 安装加载，随宿主升级，不在仓库锁版本。不用 pi-durable（msg 4573、4577）。
+2. L3 用 TypeScript 加 pi-agent-core，研究工具走 MCP（pi-mcp 客户端对接 worker 的 mcp SDK 服务端）。所需的 pi 包都从宿主的 pi 安装加载，随宿主升级，不在仓库锁版本。不用 pi-durable（msg 4573、4577）。agy 复审（`agy-argon-review2.md`）指出的 API 坑与遗漏已按所有者要求补进 2.1 节和第 6 节的实施要点（msg 4583）。
 3. 性能不设门禁。评估集每次运行输出调用数和耗时报表，只用来看，不拦截发布。
 4. 一次做彻底：切换后不保留新旧两条路径，也不保留旧编排开关。出问题前向修复，或者回到上一个提交。
 
@@ -37,16 +37,18 @@ L0 事实与规则                                材料与证据、核验、cal
 ```
 
 ### 2.1 agent-runner
-- 新目录 `agent-runner/`，用 Node 内置的类型剥离直接运行 `.ts`，不加构建步骤，也不加 npm 依赖。runner 是 worker 的子进程，**每个 run 启动一次**，单轮任务每批启动一次。启动时按宿主 pi 安装的 `current-version` 加载 `pi-agent-core`、`pi-ai`、`pi-mcp`，加载方式沿用 `pi_infer.mjs`，挂载方式不变。宿主升级 pi 后，下一个 run 自动用上新版本；`calls` 照常记录 `pi_version`。
-- **选型**：采用 `pi-agent-core`。它是建在 pi-ai 之上的 Agent 循环，pi CLI 本身就基于它，自带工具循环、钩子、运行中替换 `state.tools`、`abort` 和 `getApiKey` 凭据刷新。不用 pi-durable：它独有的崩溃续跑对约 5 分钟的研究没有必要，而且要单独锁版本，和“随宿主升级”冲突。也不在 pi-ai 上手写循环，因为那等于继续自己维护适配代码。
-- **研究工具走 MCP**：worker 用现有的 `mcp` SDK 低层 `Server`，按当前 run 注册研究工具，包括取证、`calculate`、`valuation`、`submit_draft`、`review_decide`、`submit_patch`，以及只给 runner 用、不给模型看的 `record_call`。工具 schema 只在 Python 定义一次。runner 用 `pi-mcp` 当客户端，从 `tools/list` 拿到工具后，按 pi-mcp README 的示例包装成 `AgentTool`；runner 自己不写工具定义，只按角色分配子集，不做内部鉴权。
+- 新目录 `agent-runner/`，用 Node 内置的类型剥离直接运行 `.ts`（镜像内 Node 22.23 默认开启），不加构建步骤，也不加 npm 依赖。runner 是 worker 的子进程，**每个 run 启动一次**，单轮任务每批启动一次。启动时按宿主 pi 安装的 `current-version` 加载 `pi-agent-core`、`pi-ai`、`pi-mcp`，以及 `pi-coding-agent` 里负责凭据与模型注册的 `ModelRuntime`。加载方式沿用 `pi_infer.mjs`，挂载方式不变。宿主升级 pi 后，下一个 run 自动用上新版本；`calls` 照常记录 `pi_version`。
+- **选型**：采用 `pi-agent-core`。它是建在 pi-ai 之上的 Agent 循环，pi CLI 本身就基于它，自带工具循环、`prepareRequest`/`finishTurn` 钩子、`terminate`、`reset()` 与 `abort()`。不用 pi-durable：它独有的崩溃续跑对约 5 分钟的研究没有必要，而且要单独锁版本，和“随宿主升级”冲突。也不在 pi-ai 上手写循环，因为那等于继续自己维护适配代码。
+- **研究工具走 MCP**：worker 用现有的 `mcp` SDK 低层 `Server`，按当前 run 注册研究工具，包括取证、`calculate`、`valuation`、`submit_draft`、`review_decide`、`submit_patch`，以及只给 runner 用、不给模型看的 `record_call`。工具 schema 只在 Python 定义一次。runner 用 `pi-mcp` 当客户端，从 `tools/list` 拿到工具后包装成 `AgentTool`，工具名与 Python 定义一致，结果透传 `structuredContent`。runner 自己不写工具定义，只按角色分配子集，不做内部鉴权。
 - **传输**：MCP 的 stdio 帧格式（逐行 JSON-RPC）跑在 runner 子进程的 stdin/stdout 上。runner 一侧用 `PipeTransport` 接自己的标准输入输出，worker 一侧把 SDK 的 stdio server 接到子进程的管道上。这样不需要端口、线程或令牌，worker 仍是单线程，一次只跑一个 run，材料状态不需要加锁。开工时先写最小样例确认两端能握手；不通就改用 worker 内的本机 Streamable HTTP，技术栈与现有 `/mcp` 相同。
 - 同一个研究服务端可以单独以 stdio 启动，读取指定 run 的冻结材料，供 Claude Code、Codex 等 MCP 客户端在开发时挂上去做对照或排查。
-- **流程映射**（研究员、复核员各一个 `Agent`）：
-  - **取证**：`afterToolCall` 读取工具回执里由 L0 算出的增量计数。连续两轮没有增量，就把研究员的 `state.tools` 换成只剩 `submit_draft`。
-  - **成文与复核**：worker 对 `submit_draft` 做机械检查。检查通过后，runner 在这个工具的执行函数里直接 await 复核员 `Agent` 的 `prompt()`，再把问题列表作为工具结果返回给研究员。复核员通过 `review_decide` 一次提交整轮决议，由 worker 内存中的 `ReviewLedger` 校验。复核员格式无效时，当轮可纠正一次。
-  - **修补**：把 `state.tools` 换回现有的受限补证工具和 `submit_patch`。补丁非法时，走现有的整稿重写路径，次数有上限。
-  - **预算与审计**：给 `streamFn` 包一层，负责计数，并在每次模型调用后经 `record_call` 写入 `calls`。`step`、`identity.actual.model`、`prompt_base`/`prompt_block` 的口径不变。超时用 `abort()`，worker 另设整体截止时间，到期结束子进程。进程崩溃时，正在进行的那一次调用的记录会丢失，这一点接受。
+- **流程映射**（研究员、复核员、修补各一个 `Agent`；工具一律顺序执行，`toolExecution: "sequential"`）：
+  - **切换工具集**：`prompt()` 开始时会拷贝一份 `state.tools`，运行中给它赋新数组对当次循环无效。runner 用 `prepareRequest` 在每次请求前把 `context.tools` 换成该角色当前的工具集。
+  - **取证**：在 `finishTurn` 里按整轮判断：本轮各工具回执中由 L0 算出的增量计数都为 0，才记一轮无增量（同一轮调多个工具只算一轮）。连续两轮没有增量，就把研究员的工具集换成只剩 `submit_draft`。
+  - **成文与复核**：worker 对 `submit_draft` 做机械检查。检查通过后，runner 在这个工具的执行函数里先 `reviewer.reset()`，再 await 复核员的 `prompt()`，然后把问题列表连同按 `section[i]` 索引的原稿和 `program_valuation` 作为工具结果返回给研究员。复核员通过 `review_decide` 一次提交整轮决议，由 worker 内存中的 `ReviewLedger` 校验，有效时返回 `terminate: true` 结束复核员循环；格式无效时，当轮可纠正一次。终稿通过或复核轮数到上限时，`submit_draft` 返回 `terminate: true`，研究员循环随即结束，不再多发一次模型调用。
+  - **修补**：新建修补 `Agent`，和现有 `repair()` 一样重开一段干净对话，输入索引化原稿、刷新后的资料块和问题列表，不在研究员的长对话里续写（那样会一直带着 6–15 轮工具回执和旧稿全文）。工具为现有的受限补证工具和 `submit_patch`；补丁非法时把 `submit_draft` 放回工具集，走现有的整稿重写路径，次数有上限。
+  - **预算与审计**：`streamFn` 包装 `ModelRuntime.streamSimple`，在 `await stream.result()` 拿到 `usage` 和 `stopReason` 之后，先 await `record_call` 写入 `calls`，再把终态事件交给 `Agent`，这样最后一次记账一定发生在关闭客户端之前。runner 原样上报实际请求的 `messages` 与 `tools`；worker 的 `log_call` 照旧尝试增量与共享块压缩，对不上就存原文。TS 侧不拼旧切片格式。`step`、`identity.actual.model` 的口径不变。超时用 `abort()`，worker 另设整体截止时间，到期结束子进程。进程崩溃时，正在进行的那一次调用的记录会丢失，这一点接受。
+  - **致命错误**：`EvidenceError`（来源身份或已读页冲突）这类现有设计中会终止整个 run 的错误，不作为普通 `isError` 工具结果返回给模型。worker 记下失败分类（`source_input`）后直接结束 runner 子进程，run 按现有规则失败。
 - **中断**：沿用 `worker.recover()`：普通研究整单重跑一次，自动月批中的研究记为失败。runner 不保存任何持久状态。
 - **历史 `--replay`**：worker 只注册只读工具，不允许新取证，并验收最终材料哈希不变，语义与 `research.py` 现有做法相同。
 - **单轮任务**：Q20 选股、强制排序和 S10 独立比较改为调用 runner 的单轮无工具模式。各自的格式修正、调用明细和冻结规则不变，上限仍是“三项比较或排序各最多 2 次、整批最多 636 次”。双角色预检改为调用 runner 的 `--check`。
@@ -56,7 +58,7 @@ L0 事实与规则                                材料与证据、核验、cal
 可交付条件和发布门禁仍由 Python 判定：已复核终稿中，定位合规的具名 `question` 可以交付，其余未解决问题一律阻断。估值、立场冻结、事件证据、报告与 run 终态在同一事务内写入。受理、去重、扫描接续、月批、记分等入口不变，只把模型调用改为经由 runner。
 
 ### 2.3 模型配置档
-用 JSON 配置档取代现有的 `MODEL_*`、`MODEL_REVIEW_*` 环境变量，配置档入库。每个角色写明 provider、model、reasoning、max_tokens、各项上限与预留、复核轮数上限。配置档的哈希和提交号写进每个 run 的 identity，`stability.py` 和记分读取器按配置档分组；旧记录标为“未记录”。上限数值保留一行来源说明，沿用 `limits.py` 注释的写法。换模型（E 类）就是换一份新配置档，然后跑评估集。
+用 JSON 配置档取代现有的 `MODEL_*`、`MODEL_REVIEW_*` 环境变量，配置档入库，放在 `a_share_research/` 包内，随基础镜像供 worker、web 与 tools 共用（`service.py` 的 `research_call_limit`、`run_budget` 改从这里读调用上限）。每个角色写明 provider、model、reasoning、max_tokens、各项上限与预留、复核轮数上限。配置档的哈希和提交号写进每个 run 的 identity，`stability.py` 和记分读取器按配置档分组；旧记录标为“未记录”。上限数值保留一行来源说明，沿用 `limits.py` 注释的写法。换模型（E 类）就是换一份新配置档，然后跑评估集。
 
 ### 2.4 判断契约
 只保留 `contract.py` 的 `JUDGMENT_CONTRACT` 整数。判断口径有实质变化时手动加 1。删除 `SURFACE_SHA256` 以及 `test_judgment_contract.py` 对源码哈希的锁定。记分按契约号过滤、同月去重的业务测试保留。切换到 runner 时契约号加 1。
@@ -88,6 +90,18 @@ L0 事实与规则                                材料与证据、核验、cal
 |---|---|---|---|
 | 1 政策身份与发布瘦身 | 11-26（最晚 11-28） | 第 3 节、第 4 节、2.4；评估集报表 | 一次例行发布完成切换并自动激活新身份；11-27 的自然止损检查与日报正常 |
 | 2 agent-runner 切换并删旧 | 12-08 | 2.1–2.3；删除 `Acquisition`、review/repair 往返、`model.py`、`pi_infer.mjs`、`limits.py` 及其测试；契约号加 1；改写文档 | 开发实例上跑通 4 例：1 家正常公司、1 次 `--replay`、招商银行反例（结论须与基线相同，为不适用）、1 次选股比较；评估集报表正常输出 |
+
+### 实施要点
+
+第 1 步：
+- 新算法上线时，库内当前激活仍是激活 30（旧算法清单）。宿主的 `freeze_policy` 和新容器 `policy_gate` 的首次 `policy_probe` 都会先读它，所以 `_version` 不再对旧算法清单验签，`_read_state` 读到旧清单时标 `installed=False` 放行，由发布工具按原参数登记新身份并激活。`registry.inspect` 遍历 `policy_evaluations` 时只核对参数，不对历史版本行验签。
+- 删除 `code_hash`、`files.code`、`check_installed` 时一并改掉调用点：`deploy.identity_diff()` 里的 `old['files']['code']`、`registry.main()` 输出中的 `code_hash`，以及 `registry.py`、`monitor.py`、`derived.py` 里对 `check_installed` 的调用。
+
+第 2 步：
+- **凭据**：`pi-agent-core` 和 `pi-ai` 不读 `~/.pi/agent/auth.json`、`models-store.json`。runner 沿用 `pi_infer.mjs`，从 `pi-coding-agent/dist/core/` 动态加载 `ModelRuntime`、`AuthStorage`、`FileModelsStore`，`streamFn` 用 `runtime.streamSimple.bind(runtime)`，由它解析和刷新 OAuth，退出前 `await runtime.settleCredentialWrites()`。代码里对 `@earendil-works/*` 只写 `import type`，值一律按绝对路径动态 `import`。
+- **stdio**：Python 侧给 `stdio_server()` 显式传入用子进程管道包装的 `anyio.AsyncFile`（`proc.stdout` 作读端，`proc.stdin` 作写端），不占用 worker 自己的 fd 0/1。`McpClient` 的 `requestTimeoutMs` 设为 300 000（默认 30 秒，冷缓存的 `industry_trend` 会超过 60 秒）。runner 第一行把 `console.log` 指向 `console.error`，防止污染 stdout 帧。关闭时调用 `process.stdout.end()` 并立即 resolve `exited`，避免 `PipeTransport.close()` 空等 2 秒。
+- **镜像与发布**：`Dockerfile` 加 `COPY agent-runner ./agent-runner`；`deploy.py` 发布前的 `git status --porcelain` 检查列表加入 `agent-runner`。
+- **删除 `model.py`**：`application_identity()`、`judgment_identity()`（`research.py`、`screening.py`、`stability.py` 使用）和 `preflight`（`worker.py`、`deploy.py` 使用）迁入保留的模块，`preflight` 改为调用 runner 的 `--check`。
 
 观察项（不阻塞）：第 2 步上线后，头 5 份生产报告的复核通过率、失败分类和引文核验结果。
 
