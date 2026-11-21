@@ -27,15 +27,6 @@ nice -n 15 uv run pytest -x -q tests/test_account_ledger.py
 
 需要跨模块离线回归时运行 `nice -n 15 uv run pytest -x -q tests`。已有项目环境可用 `uv run --no-sync --offline pytest ...`。各类变更的真实样本、浏览器与模型验证要求见[验证与交付](../AGENTS.md#验证与交付)。
 
-## 实际 Wiki 方法卡
-
-显式指定实际目录，跨库用例会读取 Wiki 文件，核对卡片目录冻结的版本、工作树状态、卡片内容与召回行为。未指定目录时该项跳过。更新卡片时在 `test_research_methods.py` 中核对版本与预期。
-
-```bash
-WIKI_METHOD_CARDS_TEST_DIR=/path/to/wiki/concepts/company-analysis \
-  nice -n 15 uv run pytest -x -q -s tests/test_research_methods.py tests/test_judgment_contract.py
-```
-
 ## 清理边界
 
 可清理 `__pycache__/`、`.pytest_cache/`、`.ruff_cache/`。保留 `tests/data/` 的真实样本、运行数据库、环境文件与仓库外评估证据。
