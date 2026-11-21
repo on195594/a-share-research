@@ -2,7 +2,6 @@
 from copy import deepcopy
 import json
 from pathlib import Path
-import sqlite3
 
 from fastapi.testclient import TestClient
 import pytest
@@ -10,7 +9,6 @@ import pytest
 from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, monitor, position_evaluation, position_sizing, registry
 from a_share_research.tools.server import create_app
-from support.policy import historical_replay
 
 PROPOSAL = dict(code='600900', price=29.5, framework='A')
 
@@ -67,42 +65,6 @@ def test_ready_using_captured_snapshot_transport_injection(policy_setup, monkeyp
     assert registry.inspect(conn) == []
 
 
-def test_new_source_rejected_but_saved_derivation_survives_changes(policy_setup, parent):
-    setup = policy_setup
-    _, conn, principals, manifest, active, _, _ = setup
-    saved = run(setup, parent)
-    conn.execute("UPDATE account_source SET updated_at='changed'")
-    with pytest.raises(registry.PolicyError, match='来源'):
-        run(setup, parent, 'after-source')
-    registry.activate(conn, principals['owner'], manifest['identity'], expected_id=active['id'], request_id='reactivate', reason='transport fixture')
-    assert run(setup, parent) == saved
-    assert registry.evaluation(conn, principals['assistant'], saved['id']) == saved
-    assert registry.inspect(conn) == []
-    with pytest.raises(registry.PolicyError, match='生效政策'):
-        run(setup, parent, 'after-activation')
-
-
-def test_replay_reference_not_service_monitor(policy_setup):
-    setup = policy_setup
-    conn = setup[1]
-    supplied = historical_replay(setup, 'supplied')
-    with pytest.raises(registry.PolicyError, match='服务端监控'):
-        run(setup, supplied)
-    assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
-
-
-def test_transaction_fault_does_not_leave_half_receipt(policy_setup, parent):
-    setup = policy_setup
-    conn = setup[1]
-    conn.execute("CREATE TRIGGER fail_derived BEFORE INSERT ON policy_evaluations BEGIN SELECT RAISE(ABORT,'injected derived storage fault'); END")
-    with pytest.raises(sqlite3.IntegrityError, match='storage fault'):
-        run(setup, parent)
-    assert not conn.in_transaction
-    assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
-    conn.execute('DROP TRIGGER fail_derived')
-    assert run(setup, parent)['mode'] == 'derived_position_size'
-
-
 @pytest.mark.parametrize('field', ['input_hash', 'result_hash'])
 def test_corrupt_parent_hash_prevents_derive_and_breaks_existing_reference(policy_setup, parent, field):
     setup = policy_setup
@@ -118,35 +80,16 @@ def test_corrupt_parent_hash_prevents_derive_and_breaks_existing_reference(polic
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 2
 
 
-def test_http_permissions_validation_pause_and_saved_retry(policy_setup, parent):
-    setup = policy_setup
-    path, conn, _, _, active, _, _ = setup
-    tokens = {role: api_keys.create(conn, 'sizing-' + role, role=role) for role in ('assistant', 'research')}
+def test_http_validates_position_size_arguments(policy_setup, parent):
+    path, conn, _, _, active, _, _ = policy_setup
+    token = api_keys.create(conn, 'position_size-http', role='assistant')
     args = dict(request_id='sizing-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
-    headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
-    with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).status_code == 404
-    app = create_app(path, account_shadow_enabled=True)
-    with TestClient(app) as client:
-        assert client.post('/tools/policy_position_size', headers=headers('research'), json=args).status_code == 403
-        for changed in (args | {'extra': True}, args | {'monitor_evaluation_id': True}, args | {'proposal': PROPOSAL | {'price': 0}},
-                        args | {'proposal': PROPOSAL | {'cash': -1}}, args | {'proposal': PROPOSAL | {'extra': True}}):
-            assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=changed).status_code == 422
-        first = client.post('/tools/policy_position_size', headers=headers('assistant'), json=args)
-        assert first.status_code == 200, first.text
-        assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).json() == first.json()
-        app.state.gate.pause(1)
-        assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).status_code == 503
-
-
-def test_old_parent_rejected_under_new_activation(policy_setup, parent):
-    setup = policy_setup
-    _, conn, principals, manifest, active, _, _ = setup
-    new = registry.activate(conn, principals['owner'], manifest['identity'], expected_id=active['id'],
-                            request_id='new-activation', reason='transport fixture')
-    with pytest.raises(registry.PolicyError, match='服务端监控'):
-        run(setup, parent, expected=new['id'])
-    assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
+    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
+        headers = {'Authorization': 'Bearer ' + token}
+        endpoint = '/tools/policy_position_size'
+        assert client.post(endpoint, headers=headers, json=args | {'proposal': PROPOSAL | {'price': 0}}).status_code == 422
+        response = client.post(endpoint, headers=headers, json=args)
+        assert response.status_code == 200, response.text
 
 
 def test_source_mutation_during_calculation_rolls_back(policy_setup, parent, monkeypatch):

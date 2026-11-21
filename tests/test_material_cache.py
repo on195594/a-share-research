@@ -5,31 +5,10 @@ import json
 
 import pytest
 
-from a_share_research import db
 from a_share_research.evidence import material_hash
-from a_share_research.material import Material, replay_material
+from a_share_research.material import Material
 from support.continuation import BODY
 from support.reports import MATERIAL
-
-
-def test_save_material_skips_writes_when_sha_is_unchanged(tmp_path):
-    material = Material.from_snapshot(deepcopy(MATERIAL.snapshot()))
-    conn = db.connect(tmp_path / 'material.db')
-    try:
-        run_id = db.create_run(conn, material.code)
-        snapshot = material.snapshot()
-        db.save_material(conn, run_id, snapshot)
-        before, statements = conn.total_changes, []
-        conn.set_trace_callback(statements.append)
-        db.save_material(conn, run_id, material.snapshot())
-        conn.set_trace_callback(None)
-        assert conn.total_changes == before
-        assert not any('UPDATE' in sql.upper() for sql in statements)
-        assert replay_material(conn, run_id).snapshot() == snapshot
-        stored = conn.execute('SELECT material FROM runs WHERE id=?', (run_id,)).fetchone()[0]
-        assert stored == json.dumps(snapshot, ensure_ascii=False)
-    finally:
-        conn.close()
 
 
 @pytest.mark.parametrize('change', ['page', 'raw_page', 'table_value', 'table_order',

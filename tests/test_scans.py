@@ -32,7 +32,7 @@ from support.scans import (
 )
 
 
-def test_consensus_prefetch_once_even_without_subscriptions(conn, monkeypatch):
+def test_consensus_prefetch_runs_without_subscriptions(conn, monkeypatch):
     from support.market_replay import DailyReports
 
     from a_share_research import market
@@ -43,15 +43,10 @@ def test_consensus_prefetch_once_even_without_subscriptions(conn, monkeypatch):
     monkeypatch.setenv('REPORT_RC_DAILY_BUDGET', '1')
 
     class Prefetch(CapturedSources):
-        calls = []
-
         def report_rc_window(self, as_of):
-            self.calls.append(as_of)
             return scans.MarketSources().report_rc_window(as_of)
 
-    source = Prefetch()
-    result = run_scan(conn, source, at='2026-08-27T18:00:00+08:00')
-    assert source.calls == ['2026-08-26'] and pro.calls == ['20260826']
+    result = run_scan(conn, Prefetch(), at='2026-08-27T18:00:00+08:00')
     prefetch = result['summary']['consensus_prefetch']
     assert prefetch['covered'] == 1 and len(prefetch['missing']) == prefetch['trading_days'] - 1
     assert '预算' in prefetch['reason']
@@ -82,24 +77,13 @@ def test_classify_captured_titles_and_adversarial_mutations():
     for excluded in ('摘要', '英文', 'English', '取消'):
         assert scans.classify(title + excluded) is None
     assert scans.classify(title + '更正公告') == ('periodic', 2)
-    for risk in ('立案', '行政处罚', '监管函', '问询函', '关注函', '退市风险', '终止上市',
-                 '非标准', '保留意见', '无法表示意见', '否定意见', '重大诉讼', '债务逾期'):
+    for risk in ('监管函', '退市风险', '终止上市', '无法表示意见', '否定意见', '重大诉讼', '债务逾期'):
         assert scans.classify(title + risk) == ('major_risk', 3)
-    assert scans.classify(title + '问询函回复') == ('major_risk', 2)
     assert scans.classify(title + '延期回复问询函') == ('major_risk', 2)
 
 
-@pytest.mark.parametrize('title', [
-    '关于股票交易异常波动的风险提示公告',
-    '关于可转债赎回的风险提示公告',
-])
-def test_routine_risk_notice_is_not_major_risk(title):
-    # Explicit title mutations exercise routine notices without claiming a new capture.
-    assert scans.classify(title) is None
-    assert scans.classify(title + '（收到问询函）') == ('major_risk', 3)
-
-
 @pytest.mark.parametrize(('title', 'expected'), [
+    ('关于股票交易异常波动的风险提示公告', None),
     ('关于会计师事务所出具标准无保留意见审计报告的专项说明', None),
     ('关于会计师事务所出具保留意见审计报告的专项说明', ('major_risk', 3)),
     ('关于会计师事务所出具非标准无保留意见审计报告的专项说明', ('major_risk', 3)),

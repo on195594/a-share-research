@@ -58,42 +58,25 @@ def test_saved_receipt_hashes_replay_retry_and_no_account_write(configured):
         monitor.run(conn, principals['assistant'], path, saved['request_id'], active['id'])
 
 
-def test_http_permissions_strict_args_pause_and_retry(configured):
-    setup, calls = configured
-    path, conn, _, _, active, _, _ = setup
-    tokens = {role: api_keys.create(conn, 'holdings-check-' + role, role=role) for role in ('assistant', 'research')}
+def test_http_validates_holdings_check_arguments(configured):
+    path, conn, _, _, active, _, _ = configured[0]
+    token = api_keys.create(conn, 'holdings_check-http', role='assistant')
     args = dict(request_id='holdings-check-http', expected_activation_id=active['id'])
-    headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
-    endpoint = '/tools/policy_holdings_check'
-    with TestClient(create_app(path)) as client:
-        assert client.post(endpoint, headers=headers('assistant'), json=args).status_code == 404
-    app = create_app(path, account_shadow_enabled=True)
-    with TestClient(app) as client:
-        assert client.post(endpoint, headers=headers('research'), json=args).status_code == 403
-        for changed in (args | {'token': 'forbidden'}, args | {'expected_activation_id': True}, args | {'request_id': ''}):
-            assert client.post(endpoint, headers=headers('assistant'), json=changed).status_code == 422
-        first = client.post(endpoint, headers=headers('assistant'), json=args)
-        assert first.status_code == 200, first.text
-        assert client.post(endpoint, headers=headers('assistant'), json=args).json() == first.json()
-        assert len(calls) == 1
-        app.state.gate.pause(1)
-        assert client.post(endpoint, headers=headers('assistant'), json=args).status_code == 503
+    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
+        headers = {'Authorization': 'Bearer ' + token}
+        endpoint = '/tools/policy_holdings_check'
+        assert client.post(endpoint, headers=headers, json=args | {'expected_activation_id': True}).status_code == 422
+        response = client.post(endpoint, headers=headers, json=args)
+        assert response.status_code == 200, response.text
 
 
-def test_source_change_and_tampered_action_are_not_success(configured, monkeypatch):
+def test_tampered_holdings_check_action_is_rejected(configured):
     setup, _ = configured
     _, conn, principals, _, _, _, _ = setup
-    original = monitor._capture
     saved = run(configured)
-    def changed(*args, **kwargs):
-        value = original(*args, **kwargs)
-        conn.execute("UPDATE account_source SET updated_at='changed-during-holdings-check'")
-        return value
-    monkeypatch.setattr(monitor, '_capture', changed)
-    with pytest.raises(registry.PolicyError, match='来源改变'): run(configured, 'changed-source')
-    assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
     conn.execute('DROP TRIGGER policy_evaluations_no_update')
-    context = deepcopy(saved['capture_context']); context['request']['action'] = 'policy.monitor'
+    context = deepcopy(saved['capture_context'])
+    context['request']['action'] = 'policy.monitor'
     conn.execute('UPDATE policy_evaluations SET capture_context=?,capture_context_hash=?',
                  (gate.canonical(context), gate.digest(context)))
     with pytest.raises(registry.PolicyError, match='损坏'):

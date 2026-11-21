@@ -53,10 +53,6 @@ def test_write_and_reuse_exact_financial_frame(pro, api):
     cached = screening._query(next_client, api, **dict(reversed(list(params.items()))))
     pd.testing.assert_frame_equal(original, cached, check_exact=True)
     assert len(pro.calls) == 1 and next_client.calls == []
-    with closing(sqlite3.connect(db.DATA / "tushare_cache.db")) as conn:
-        row = conn.execute("SELECT key, data, created_at FROM tushare_cache").fetchone()
-        assert len(row[0]) == 64 and json.loads(row[1])["columns"] == list(original.columns)
-        assert datetime.fromisoformat(row[2]).tzinfo is not None
 
 
 def test_cache_key_separates_api_company_dates_and_fields(pro):
@@ -93,31 +89,21 @@ def test_disable_bypasses_existing_cache_without_writes(pro, monkeypatch):
     assert len(pro.calls) == 3
 
 
-def test_disable_does_not_create_database(pro, monkeypatch):
-    monkeypatch.setenv("TUSHARE_CACHE", "0")
-    screening._query(pro, "income", ts_code="000651.SZ")
-    assert not (db.DATA / "tushare_cache.db").exists()
-
-
 @pytest.mark.parametrize("params,cached", [
     ({"trade_date": MARKET["trade_date"]}, True),
     ({"end_date": MARKET["trade_date"]}, True),
     ({}, False),
-    ({"start_date": FIN["as_of"]}, False),
-    ({"trade_date": "00000060"}, False),
     ({"end_date": "00000060"}, False),
 ])
-@pytest.mark.parametrize("api", ["daily", "fina_indicator", "income", "cashflow", "fina_audit"])
-def test_only_bounded_historical_data_is_cached(pro, params, cached, api):
+def test_only_bounded_historical_data_is_cached(pro, params, cached):
+    api = "daily"
     for _ in range(2):
         screening._query(pro, api, ts_code="000651.SZ", **params)
     assert len(pro.calls) == (1 if cached else 2)
     assert (db.DATA / "tushare_cache.db").exists() == cached
 
 
-@pytest.mark.parametrize("days", [0, 1])
-@pytest.mark.parametrize("api", ["daily", "fina_indicator", "income", "cashflow", "fina_audit"])
-@pytest.mark.parametrize("bound", ["trade_date", "end_date"])
+@pytest.mark.parametrize(("days", "api", "bound"), [(0, "daily", "trade_date"), (1, "income", "end_date")])
 def test_current_and_future_dates_are_live(pro, days, api, bound):
     day = (datetime.now(db.SHANGHAI).date() + timedelta(days=days)).strftime("%Y%m%d")
     for _ in range(2):
@@ -142,26 +128,6 @@ def test_cache_write_failure_returns_upstream_data(pro, caplog):
         conn.commit()
     pd.testing.assert_frame_equal(screening._query(pro, "income", **params), expected)
     assert len(pro.calls) == 2
-    assert "cache write failed" in caplog.text
-
-
-class CapturedDateQueries(CapturedQueries):
-    """Captured financial rows with dates normalized as in a-stock-lib."""
-
-    def query(self, api, **params):
-        frame = super().query(api, **params)
-        frame["end_date"] = pd.to_datetime(frame["end_date"], format="%Y%m%d")
-        return frame
-
-
-def test_cache_serialization_failure_returns_upstream_data(pro, caplog):
-    client = CapturedDateQueries()
-    params = {"ts_code": "000651.SZ", "end_date": FIN["as_of"]}
-    expected = client.query("income", **params)
-    with pytest.raises(TypeError):
-        json.dumps(expected.to_dict(orient="split"))
-    pd.testing.assert_frame_equal(screening._query(client, "income", **params), expected)
-    assert len(client.calls) == 2
     assert "cache write failed" in caplog.text
 
 

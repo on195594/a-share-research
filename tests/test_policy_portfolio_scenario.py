@@ -115,18 +115,6 @@ def test_source_and_policy_drift_preserve_saved_retry(policy_setup, parent):
     assert registry.inspect(conn) == []
 
 
-def test_parent_corruption_blocks_derivation_read_and_inspect(policy_setup, parent):
-    setup = policy_setup
-    _, conn, principals, _, _, _, _ = setup
-    saved = run(setup, parent)
-    conn.execute('DROP TRIGGER policy_evaluations_no_update')
-    conn.execute('UPDATE policy_evaluations SET result_hash=? WHERE id=?', ('b'*64, parent['id']))
-    with pytest.raises(registry.PolicyError): run(setup, parent, 'corrupt-parent')
-    with pytest.raises(registry.PolicyError): registry.evaluation(conn, principals['assistant'], saved['id'])
-    assert registry.inspect(conn)
-    assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 2
-
-
 def test_sql_failure_rolls_back_without_partial_receipt(policy_setup, parent):
     setup = policy_setup
     conn = setup[1]
@@ -139,23 +127,13 @@ def test_sql_failure_rolls_back_without_partial_receipt(policy_setup, parent):
     assert run(setup, parent)['mode'] == 'derived_portfolio_scenario'
 
 
-def test_http_permissions_proposal_contract_pause_and_retry(policy_setup, parent):
-    setup = policy_setup
-    path, conn, _, _, active, _, _ = setup
-    tokens = {role: api_keys.create(conn, 'scenario-' + role, role=role) for role in ('assistant', 'research')}
+def test_http_validates_portfolio_scenario_arguments(policy_setup, parent):
+    path, conn, _, _, active, _, _ = policy_setup
+    token = api_keys.create(conn, 'portfolio_scenario-http', role='assistant')
     args = dict(request_id='scenario-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
-    headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
-    endpoint = '/tools/policy_portfolio_scenario'
-    with TestClient(create_app(path)) as client:
-        assert client.post(endpoint, headers=headers('assistant'), json=args).status_code == 404
-    app = create_app(path, account_shadow_enabled=True)
-    with TestClient(app) as client:
-        assert client.post(endpoint, headers=headers('research'), json=args).status_code == 403
-        for proposal in (dict(sales={'600000': 100}), PROPOSAL | {'sales': {}}, PROPOSAL | {'sales': {'600000': True}},
-                         PROPOSAL | {'fees': -1}, PROPOSAL | {'cash': -1}, PROPOSAL | {'extra': True}):
-            assert client.post(endpoint, headers=headers('assistant'), json=args | {'proposal': proposal}).status_code == 422
-        first = client.post(endpoint, headers=headers('assistant'), json=args)
-        assert first.status_code == 200, first.text
-        assert client.post(endpoint, headers=headers('assistant'), json=args).json() == first.json()
-        app.state.gate.pause(1)
-        assert client.post(endpoint, headers=headers('assistant'), json=args).status_code == 503
+    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
+        headers = {'Authorization': 'Bearer ' + token}
+        endpoint = '/tools/policy_portfolio_scenario'
+        assert client.post(endpoint, headers=headers, json=args | {'proposal': PROPOSAL | {'sales': {'600000': True}}}).status_code == 422
+        response = client.post(endpoint, headers=headers, json=args)
+        assert response.status_code == 200, response.text

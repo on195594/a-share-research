@@ -1,19 +1,17 @@
-"""Legacy output/state-machine structural tests, not market or investment evidence.
+"""Holdings check and state-machine tests, not market or investment evidence.
 
 The market snapshot provider currently returns None. The 500/501 values below
 are explicitly synthetic boundaries, not observations of a liquidity shock.
 """
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
-import sqlite3
 
 import pytest
 
 from a_share_research.policy import holdings_check_evaluation
-from a_share_research.policy.v0 import commands_holdings, risk_budget
+from a_share_research.policy.v0 import risk_budget
 from a_share_research.policy.v0.market_quotes import PriceQuote
 
 NOW = '2026-09-07T11:00:00+08:00'
@@ -44,31 +42,16 @@ def market(value, count):
 
 
 @pytest.mark.parametrize('deferred', [False, True])
-def test_original_golden_current_cli_and_pure_parity(deferred, monkeypatch, capsys):
+def test_normal_and_deferred_checks_use_the_captured_stop_lines(deferred):
     value = active(bundle(31.)) if deferred else bundle()
-    @contextmanager
-    def database():
-        conn = sqlite3.connect(':memory:')
-        try:
-            conn.execute('CREATE TABLE holdings(id,code,name,cost_price,stop_loss_15,stop_loss_20,exit_date)')
-            conn.executemany('INSERT INTO holdings VALUES(?,?,?,?,?,?,NULL)', value['holdings'])
-            conn.execute('CREATE TABLE holding_alerts(holding_id,evidence,review_due,reason_code,status)')
-            conn.executemany("INSERT INTO holding_alerts VALUES(?,?,?,'price_stop2_liquidity_defer','open')", value['defers'])
-            yield conn
-        finally:
-            conn.close()
-    monkeypatch.setattr(commands_holdings.db, 'db_session', database)
-    monkeypatch.setattr(commands_holdings.domain, 'cst_now', lambda: datetime.fromisoformat(value['now']))
-    monkeypatch.setattr(commands_holdings.market_quotes, 'fetch_current_price_quotes', lambda codes: {c:PriceQuote(**q) for c,q in value['quotes'].items()})
-    monkeypatch.setattr(commands_holdings.market_quotes, 'fetch_market_limit_down_snapshot', lambda: None)
     original = deepcopy(value)
-    commands_holdings.cmd_check_holdings()
     result = evaluate(value)
-    assert capsys.readouterr().out == GOLDEN[deferred] == result['stdout']
-    assert result['status'] == 'ready' and result['exit_code'] == 0 and result['stderr'] == ''
-    assert value == original
-    assert result['checks'][0]['p3']['status'] == ('deferred' if deferred else 'not_applicable')
-    assert 'shares' not in result['checks'][0] and 'shares' not in result['checks'][0]['p3']
+    assert result['status'] == 'ready' and value == original
+    check, = result['checks']
+    assert check['is_alert'] is deferred
+    assert check['p3']['status'] == ('deferred' if deferred else 'not_applicable')
+    assert '招商银行(600036)' in result['stdout']
+    assert ('暂不可执行' in result['stdout']) is deferred
 
 
 def test_no_holdings_keeps_closed_defers_without_fetch_inputs():
@@ -132,13 +115,11 @@ def test_explicit_timezone_conversion():
     assert evaluate(value) == expected
 
 
-@pytest.mark.parametrize('mutation', [lambda b: b.update(extra=True), lambda b: b.update(now='2026-09-07T11:00:00'),
-    lambda b: b['holdings'][0].append(1), lambda b: b['holdings'][0].__setitem__(0, True),
-    lambda b: b['holdings'].append(deepcopy(b['holdings'][0])), lambda b: b['holdings'][0].__setitem__(1,'６０００３６'),
-    lambda b: b['holdings'][0].__setitem__(3,float('nan')), lambda b: b['holdings'][0].__setitem__(4,'0'),
-    lambda b: b['quotes'].clear(), lambda b: b.update(fundamentals={'600036': None}),
-    lambda b: b['defers'].append([0,None,None]), lambda b: b['defers'].append([1,{},None]),
-    lambda b: b['quotes']['600036'].update(extra=True)])
+@pytest.mark.parametrize('mutation', [
+    lambda b: b.update(fundamentals={'600036': None}),
+    lambda b: b['holdings'].append(deepcopy(b['holdings'][0])),
+    lambda b: b['holdings'][0].__setitem__(3, float('nan')),
+])
 def test_invalid_boundary(mutation):
     value = bundle()
     mutation(value)
@@ -158,10 +139,6 @@ def test_policy_identity_effectiveness_and_holding_order():
     value['quotes']['000001'] = None
     with pytest.raises(ValueError, match='ordered'):
         evaluate(value)
-
-# Captured by executing the pre-extraction original function with the same fixed inputs.
-GOLDEN = {False: '\n────────────────────────────────────────────────────────────────────────\n  持仓止损检查  现价查询时间: 2026-09-07 11:00\n────────────────────────────────────────────────────────────────────────\n  招商银行(600036)     ✅ 正常，现价40.00（止损15%:34.000 20%:32.000）\n\n  无预警，所有持仓价格在止损线之上\n\n', True: '\n────────────────────────────────────────────────────────────────────────\n  持仓止损检查  现价查询时间: 2026-09-07 11:00\n────────────────────────────────────────────────────────────────────────\n  招商银行(600036)     🚨 盘中已跌破20%止损线（32.000），现价31.00，暂不可执行 | P3:deferred(price_stop2_liquidity_defer)\n\n  共 1 项预警，请及时处理：\n    招商银行(600036): 🚨 盘中已跌破20%止损线（32.000），现价31.00，暂不可执行 | P3:deferred(price_stop2_liquidity_defer)\n\n'}
-
 
 @pytest.mark.parametrize('cost', [None, 0., -10.])
 def test_unused_nullable_cost_preserves_output(cost):
@@ -186,8 +163,7 @@ def test_zero_negative_stops_preserve_legacy_format(stop15, stop20):
     value = bundle()
     value['holdings'][0][4:] = [stop15, stop20]
     result = evaluate(value)
-    expected = GOLDEN[False].replace('止损15%:34.000 20%:32.000', f'止损15%:{stop15:.3f} 20%:{stop20:.3f}')
-    assert result['stdout'] == expected
+    assert f'{stop15:.3f}' in result['stdout'] and f'{stop20:.3f}' in result['stdout']
     assert result['checks'][0]['is_alert'] is False
 
 

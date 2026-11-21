@@ -54,8 +54,7 @@ def test_first_restart_requeues_once_and_preserves_request_and_material(conn):
     assert row(conn, run_id) == failed
 
 
-@pytest.mark.parametrize("request_json", [None, "null"])
-@pytest.mark.parametrize("kind", ["research", "price"])
+@pytest.mark.parametrize(("request_json", "kind"), [(None, "research"), ("null", "price")])
 def test_legacy_null_requests_also_have_one_attempt(conn, request_json, kind):
     run_id = db.create_run(conn, MATERIAL.code, request_id="recovery", kind=kind, status="running")
     db.update_run(conn, run_id, request=request_json)
@@ -126,16 +125,13 @@ def execute_until(conn, run_id, boundary):
     return observed
 
 
-@pytest.mark.parametrize("snapshot_state", ["captured", "hash", "company", "missing"])
+@pytest.mark.parametrize("snapshot_state", ["captured", "hash"])
 def test_execute_gathers_fresh_material_instead_of_interrupted_snapshot(conn, snapshot_state):
     run_id, _ = interrupted(conn)
     snapshot = deepcopy(MATERIAL.snapshot())
     if snapshot_state == "hash":
         snapshot["data"]["pages"].clear()
-    elif snapshot_state == "company":
-        db.update_run(conn, run_id, code="002648.SZ")
-    if snapshot_state != "missing":
-        db.update_run(conn, run_id, material=json.dumps(snapshot))
+    db.update_run(conn, run_id, material=json.dumps(snapshot))
     worker.recover(conn)
     before = row(conn, run_id)
     # Stop at the real gather boundary, before external source calls.

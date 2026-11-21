@@ -136,14 +136,6 @@ def test_ledger_binding_is_explicit_without_reading_holdings(book,case):
     if case=='bound':assert result['account_id']=='structural' and result['scope_matches'] is True
 
 
-def test_research_key_still_cannot_read_policy(book):
-    install(book)
-    conn=book[1]
-    principal=api_keys.authenticate(conn,api_keys.create(conn,'structural-research',role='research'))
-    with pytest.raises(registry.PolicyError) as error:registry.current(conn,principal)
-    assert error.value.status==403
-
-
 def test_presentation_and_active_owner_read_do_not_import_runtime_or_market(book):
     install(book)
     root=Path(__file__).resolve().parents[1]

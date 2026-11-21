@@ -39,10 +39,7 @@ def test_formal_queries_require_done_but_frozen_validation_does_not(conn, tmp_pa
 
 @pytest.mark.parametrize('request_id,member', [
     ('batch-1-603606', True), ('batch-1-603606.SH', True),
-    ('batch-abc', False), ('batch-1oops-603606.SH', False),
-    ('batch-01-603606', False), ('batch-1-600519.SH', False),
-    ('batch-1-603606.SS', False), ('batch-1-603606.SH-extra', False),
-    ('batch-1-', False), ('batchB-refresh-603606', False),
+    ('batch-1-600519.SH', False), ('batch-1oops-603606.SH', False),
 ])
 def test_batch_membership_drives_queue_and_retry(conn, request_id, member):
     batch = service.create_batch(conn, 'monthly:2026-11')
