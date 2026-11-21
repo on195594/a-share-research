@@ -26,9 +26,8 @@ def local_policy(tmp_path, monkeypatch):
     old.mkdir()
     shutil.copytree(deploy.ROOT / 'a_share_research', old / 'a_share_research',
                     ignore=shutil.ignore_patterns('__pycache__'))
-    shutil.copyfile(deploy.ROOT / 'uv.lock', old / 'uv.lock')
-    with (old / 'a_share_research/gate.py').open('a') as stream:
-        stream.write('\n# Synthetic predecessor installation of shared policy code.\n')
+    with (old / 'a_share_research/policy/v0/RULES.md').open('a') as stream:
+        stream.write('\nPredecessor rule text for the release fixture.\n')
     config = tmp_path / 'empty.env'
     config.touch(mode=0o600)
 
@@ -108,7 +107,8 @@ def test_exact_approval_and_matched_gate_are_idempotent(local_policy):
     frozen = freeze(local)
     assert frozen['parameters'] == local.old['parameters'] == local.target['parameters']
     assert frozen['diff']['parameters_changed'] is False
-    assert frozen['diff']['code'] == ['a_share_research/gate.py']
+    assert frozen['diff']['rules'] == [local.old['rules_hash'], local.target['rules_hash']]
+    assert local.old['rules_hash'] != local.target['rules_hash']
     local.current = 'new-worker'
     result = deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=local.approval)
     assert result['installed'] is True and local.count() == 2

@@ -1,4 +1,5 @@
 """Policy persistence/authorization contracts; empty account inputs are structural fixtures."""
+import shutil
 import sqlite3
 
 import pytest
@@ -65,17 +66,17 @@ def test_guide_comes_from_active_snapshot_and_never_opens_arbitrary_path(setup):
         registry.guide(conn,principals['assistant'],'../../../../.env')
 
 
-def test_code_drift_blocks_new_activation_but_keeps_saved_guide(setup,monkeypatch):
+def test_rule_change_blocks_new_activation_but_keeps_saved_guide(setup, tmp_path, monkeypatch):
     _,conn,_,principals,manifest = setup
     activate(setup)
-    def drift(_):
-        raise identity.IdentityError('explicit structural drift')
-    monkeypatch.setattr(identity,'check_installed',drift)
+    shutil.copytree(identity.ROOT / identity.GUIDE, tmp_path / identity.GUIDE)
+    (tmp_path / identity.RULES).write_bytes((identity.ROOT / identity.RULES).read_bytes() + b'\n')
+    monkeypatch.setattr(identity, 'ROOT', tmp_path)
     assert registry.current(conn,principals['assistant'])['installed'] is False
     assert registry.guide(conn,principals['assistant'],None)['identity'] == manifest['identity']
     with pytest.raises(registry.PolicyError,match='不一致'):
         activate(setup,expected_id=1,request_id='drift')
-    assert registry.inspect(conn)==[]  # Old identities remain verifiable without matching current code.
+    assert registry.inspect(conn)==[]
 
 
 def test_owner_gate_and_revocation(setup):
@@ -134,8 +135,9 @@ def test_migration_preserves_legacy_pointer_and_is_reentrant(tmp_path):
     conn.close()
 
 
-def test_inspection_detects_corrupt_manifest_without_executing_it(setup):
+def test_inspection_detects_corrupt_active_manifest(setup):
     _,conn,_,_,manifest=setup
+    activate(setup)
     conn.execute('DROP TRIGGER policy_versions_no_update')
     manifest['parameters']['max_position_risk_pct']=99
     conn.execute('UPDATE policy_versions SET manifest=?',(gate.canonical(manifest),))

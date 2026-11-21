@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 
 from a_share_research import db, gate
-from a_share_research.policy import identity, monitor, registry
+from a_share_research.policy import monitor, registry
 from a_share_research.policy.position_request import Reference
 
 
@@ -46,15 +46,13 @@ def run(conn, principal, database, request_id, expected_activation_id, monitor_e
         saved = monitor._existing(conn, principal, request_id, request)
         if saved is not None:
             return registry.evaluation(conn, principal, saved['id'])
-        activation = registry._current(conn)
-        if activation is None or activation['id'] != expected_activation_id:
+        activation, manifest = registry._active_policy(conn)
+        if activation['id'] != expected_activation_id:
             raise registry.PolicyError('生效政策已变化或尚未启用，请先读取当前指针')
-        manifest = registry._version(conn, activation['identity'])
         try:
-            identity.check_installed(manifest)
             capture._current_policy(manifest['parameters'], datetime.fromisoformat(db.now()))
         except ValueError:
-            raise registry.PolicyError('当前实现或参数与生效政策不一致，须先核对政策') from None
+            raise registry.PolicyError('当前参数与生效政策不一致，须先核对政策') from None
         parent = registry.evaluation(conn, principal, monitor_evaluation_id)
         _hashes(parent)
         if (parent['mode'] != 'service_monitor_capture' or parent['activation_id'] != activation['id']
@@ -70,7 +68,6 @@ def run(conn, principal, database, request_id, expected_activation_id, monitor_e
             proposal=proposal)))
         try:
             result = evaluate(bundle, manifest['parameters'])
-            identity.check_installed(manifest)
             capture._current_policy(manifest['parameters'], datetime.fromisoformat(db.now()))
         except ValueError as exc:
             raise registry.PolicyError(f'派生评估输入或政策校验失败：{exc}', 422) from None

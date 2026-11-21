@@ -23,6 +23,8 @@ nice -n 15 uv run pytest -x -q tests/test_account_ledger.py
 | Web、MCP 与客户端 | `test_web_reading.py`、`test_web_account_forms.py`、`test_web_oauth.py`、`test_tools_remote_mcp.py`、`test_tools_cli.py` |
 | 数据库、完整性、发布与宿主 | `test_db.py`、`test_integrity.py`、`test_deploy.py`、`test_rollback.py`、`test_ops_hermes.py` |
 
+`test_policy_samples.py` 重放真实政策评估，只在改动 `a_share_research/policy/` 时运行；样本含真实持仓，存放在私有证据目录 `~/.local/share/a-share-research-evaluations/policy-samples/`（可用 `POLICY_SAMPLES` 指定），不进仓库。
+
 需要跨模块离线回归时运行 `nice -n 15 uv run pytest -x -q tests`。已有项目环境可用 `uv run --no-sync --offline pytest ...`。各类变更的真实样本、浏览器与模型验证要求见[验证与交付](../AGENTS.md#验证与交付)。
 
 ## 实际 Wiki 方法卡

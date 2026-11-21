@@ -320,8 +320,6 @@ def policy_probe(*, owner_token=None):
                 or value['activation']['identity'] != value['identity']
                 or value['manifest']['identity'] != value['identity']):
             raise ValueError
-        from a_share_research.policy.identity import verify
-        verify(value['manifest'])  # Self-consistency only, never host check_installed.
     except (KeyError, TypeError, ValueError):
         raise RuntimeError('镜像内政策状态未知或不完整') from None
     return value
@@ -361,7 +359,6 @@ def identity_diff(old, new):
         return sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
     return dict(identity=[old['identity'], new['identity']],
                 parameters_changed=old['parameters'] != new['parameters'],
-                code=changed(old['files']['code'], new['files']['code']),
                 rules=[old.get('rules_hash'), new.get('rules_hash')],
                 guides=changed(old['files']['guides'], new['files']['guides']))
 
@@ -420,7 +417,6 @@ def freeze_policy(images, fallback, *, approval, not_applicable, preview=False, 
     # Rollback approval freezes the actual fallback implementation, not host sources.
     if approval and approval.get('rollback') is not None:
         previous = policy_command(POLICY_PROBE, dict(action='candidate', parameters=old['parameters']), image=fallback['worker'])
-        verify(previous)
         if previous['identity'] != old['identity'] or previous['parameters'] != old['parameters']:
             raise RuntimeError('批准恢复须为冻结的前驱 identity；恢复镜像不匹配')
         # The restored activation's expected_id is not known until the new append.
