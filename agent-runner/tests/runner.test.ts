@@ -39,9 +39,9 @@ const usage = { input: 7, output: 3, totalTokens: 10, cacheRead: 0, cacheWrite: 
 const controls = ["submit_draft", "submit_patch", "review_decide", "record_call"];
 const evidence = ["calculate", "macro", "peers"];
 const review = { status: "review", binding: { version: 1 }, draft: { title: "bound draft" },
-  material_block: "review material", program_valuation: "program value" };
+  prompt: "review material program value" };
 const repair = { status: "repair", problems: ["resolve this issue"], indexed_draft: { "answer[0]": "original" },
-  material_block: "refreshed material", program_valuation: "program value" };
+  prompt: "resolve this issue answer[0] refreshed material program value" };
 const done = { status: "complete", problems: [] };
 const rejected = { error: "field rejected" };
 
@@ -91,7 +91,7 @@ function worker(turns: Turn[], reply: (name: string) => object, options: { repla
       } else if (method === "resources/read") {
         assert.equal(params.uri, "research://run/context");
         result = { contents: [{ uri: params.uri, text: JSON.stringify({ run_id: 1, question: "initial question",
-          rules: "test rules", output_schema: "test report fields", material_block: "initial material",
+          prompt: "initial question initial material", output_schema: "test report fields",
           remaining_ms: options.remainingMs ?? 60_000, effective_model_call_limit: options.budget ?? 30, mode: options.replay ? "replay" : "run",
           profile_sha256: profile.sha256 }) }] };
       } else if (method === "tools/list") {

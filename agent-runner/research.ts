@@ -4,7 +4,7 @@ import type { McpClient } from "@earendil-works/pi-mcp";
 import { auditedStream, sessionId } from "./calls.ts";
 import { RunnerError } from "./profile.ts";
 import type { Profile, Stage } from "./profile.ts";
-import { initialPrompt, nextDecision } from "./prompts.ts";
+import { nextDecision } from "./prompts.ts";
 import type { Decision, RunContext } from "./prompts.ts";
 import type { Models, Pi } from "./runtime.ts";
 
@@ -23,8 +23,8 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
   const contents = resource.contents[0];
   if (!contents || !("text" in contents)) throw new RunnerError(1, "Missing research context");
   const start: RunContext = JSON.parse(contents.text);
-  if (start.run_id !== runId || !["run", "replay"].includes(start.mode) || typeof start.material_block !== "string"
-      || typeof start.rules !== "string" || typeof start.output_schema !== "string" || typeof start.question !== "string"
+  if (start.run_id !== runId || !["run", "replay"].includes(start.mode) || typeof start.prompt !== "string"
+      || typeof start.output_schema !== "string"
       || !Number.isSafeInteger(start.effective_model_call_limit)
       || !Number.isFinite(start.remaining_ms) || start.profile_sha256 !== profile.sha256) {
     throw new RunnerError(2, "Research context or frozen profile mismatch");
@@ -103,7 +103,7 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
         // No more calls in this batch may mutate the draft or its material, including during nested review.
         sealed = true;
         if (!data) throw new RunnerError(1, "Missing worker control receipt");
-        outcome = { ...nextDecision(data, start), result };
+        outcome = { ...nextDecision(data), result };
         canReturnDraft = outcome.status !== "review";
         if (outcome.status === "review") {
           if (step === "review") throw new RunnerError(1, "Unexpected nested review receipt");
@@ -220,7 +220,7 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
   }
 
   const reviewer = roleAgent("review");
-  let result = await roleAgent(start.mode === "replay" ? "compose" : "explore").ask(initialPrompt(start));
+  let result = await roleAgent(start.mode === "replay" ? "compose" : "explore").ask(start.prompt);
   for (let draft = 1; result.status === "repair" && draft < limits.review_rounds; draft++) {
     if (callsLeft < limits.draft_call_reserve || performance.now() >= deadline) break;
     result = await roleAgent("repair").ask(result.prompt);
