@@ -40,7 +40,7 @@ L0 事实与规则                                材料与证据、核验、cal
 - 新目录 `agent-runner/`，用 Node 内置的类型剥离直接运行 `.ts`（镜像内 Node 22.23 默认开启），不加构建步骤，也不加 npm 依赖。runner 是 worker 的子进程，**每个 run 启动一次**，单轮任务每批启动一次。启动时按宿主 pi 安装的 `current-version` 加载 `pi-agent-core`、`pi-ai`、`pi-mcp`，以及 `pi-coding-agent` 里负责凭据与模型注册的 `ModelRuntime`。加载方式沿用 `pi_infer.mjs`，挂载方式不变。宿主升级 pi 后，下一个 run 自动用上新版本；`calls` 照常记录 `pi_version`。
 - **选型**：采用 `pi-agent-core`。它是建在 pi-ai 之上的 Agent 循环，pi CLI 本身就基于它，自带工具循环、`prepareRequest`/`finishTurn` 钩子、`terminate`、`reset()` 与 `abort()`。不用 pi-durable：它独有的崩溃续跑对约 5 分钟的研究没有必要，而且要单独锁版本，和“随宿主升级”冲突。也不在 pi-ai 上手写循环，因为那等于继续自己维护适配代码。
 - **研究工具走 MCP**：worker 用现有的 `mcp` SDK 低层 `Server`，按当前 run 注册研究工具，包括取证、`calculate`、`valuation`、`submit_draft`、`review_decide`、`submit_patch`，以及只给 runner 用、不给模型看的 `record_call`。工具 schema 只在 Python 定义一次。runner 用 `pi-mcp` 当客户端，从 `tools/list` 拿到工具后包装成 `AgentTool`，工具名与 Python 定义一致，结果透传 `structuredContent`。runner 自己不写工具定义，只按角色分配子集，不做内部鉴权。
-- **传输**：MCP 的 stdio 帧格式（逐行 JSON-RPC）跑在 runner 子进程的 stdin/stdout 上。runner 一侧用 `PipeTransport` 接自己的标准输入输出，worker 一侧把 SDK 的 stdio server 接到子进程的管道上。这样不需要端口、线程或令牌，worker 仍是单线程，一次只跑一个 run，材料状态不需要加锁。开工时先写最小样例确认两端能握手；不通就改用 worker 内的本机 Streamable HTTP，技术栈与现有 `/mcp` 相同。
+- **传输**：MCP 的 stdio 帧格式（逐行 JSON-RPC）跑在 runner 子进程的 stdin/stdout 上。runner 一侧用 `PipeTransport` 接自己的标准输入输出，worker 一侧把 SDK 的 stdio server 接到子进程的管道上。这样不需要端口、线程或令牌，worker 仍是单线程，一次只跑一个 run，材料状态不需要加锁。两端握手已用最小样例验证（见第 6 节前置检查），不再保留 Streamable HTTP 备选。
 - 同一个研究服务端可以单独以 stdio 启动，读取指定 run 的冻结材料，供 Claude Code、Codex 等 MCP 客户端在开发时挂上去做对照或排查。
 - **流程映射**（研究员、复核员、修补各一个 `Agent`；工具一律顺序执行，`toolExecution: "sequential"`）：
   - **切换工具集**：`prompt()` 开始时会拷贝一份 `state.tools`，运行中给它赋新数组对当次循环无效。runner 用 `prepareRequest` 在每次请求前把 `context.tools` 换成该角色当前的工具集。
@@ -99,9 +99,17 @@ L0 事实与规则                                材料与证据、核验、cal
 
 第 2 步：
 - **凭据**：`pi-agent-core` 和 `pi-ai` 不读 `~/.pi/agent/auth.json`、`models-store.json`。runner 沿用 `pi_infer.mjs`，从 `pi-coding-agent/dist/core/` 动态加载 `ModelRuntime`、`AuthStorage`、`FileModelsStore`，`streamFn` 用 `runtime.streamSimple.bind(runtime)`，由它解析和刷新 OAuth，退出前 `await runtime.settleCredentialWrites()`。代码里对 `@earendil-works/*` 只写 `import type`，值一律按绝对路径动态 `import`。
-- **stdio**：Python 侧给 `stdio_server()` 显式传入用子进程管道包装的 `anyio.AsyncFile`（`proc.stdout` 作读端，`proc.stdin` 作写端），不占用 worker 自己的 fd 0/1。`McpClient` 的 `requestTimeoutMs` 设为 300 000（默认 30 秒，冷缓存的 `industry_trend` 会超过 60 秒）。runner 第一行把 `console.log` 指向 `console.error`，防止污染 stdout 帧。关闭时调用 `process.stdout.end()` 并立即 resolve `exited`，避免 `PipeTransport.close()` 空等 2 秒。
+- **stdio**（已用最小样例验证，见下文前置检查）：worker 侧用 `subprocess.Popen` 起 runner，把 `proc.stdout`、`proc.stdin` 各包一层 UTF-8 `TextIOWrapper`（写端 `line_buffering=True`），再用 `anyio.wrap_file` 传给 `stdio_server(stdin=, stdout=)`。显式传入流时，SDK 不会接管 worker 自己的 fd 0/1。仓库锁定的 Python `mcp` 是 2.3.0，低层 `Server` 的处理函数通过构造参数 `on_list_tools`、`on_call_tool` 注册，写法同 `tools/remote_mcp.py`，1.x 的装饰器写法已经不能用。runner 侧 `McpClient` 的构造参数是 `{ name, version, requestTimeoutMs: 300_000 }`（默认超时 30 秒，冷缓存的 `industry_trend` 会超过 60 秒）；`PipeTransport` 设 `closeTimeoutMs: 0`，`closeStdin` 里调用 `process.stdout.end()`。`client.close()` 之后，runner 必须 `process.stdin.destroy()`（或直接退出），否则 worker 侧的 `server.run` 会一直等下去。runner 第一行把 `console.log` 指向 `console.error`，防止污染 stdout 帧。
 - **镜像与发布**：`Dockerfile` 加 `COPY agent-runner ./agent-runner`；`deploy.py` 发布前的 `git status --porcelain` 检查列表加入 `agent-runner`。
 - **删除 `model.py`**：`application_identity()`、`judgment_identity()`（`research.py`、`screening.py`、`stability.py` 使用）和 `preflight`（`worker.py`、`deploy.py` 使用）迁入保留的模块，`preflight` 改为调用 runner 的 `--check`。
+
+### 前置检查（2026-11-21）
+
+样例与输出存放在证据目录的 `stdio-probe/` 下。
+- 宿主 pi 为 1.6.0，`pi-agent-core`、`pi-ai`、`pi-mcp`、`pi-coding-agent` 齐全，要求 Node ≥ 22.19。生产 worker 容器的 Node 是 22.23.5，能直接运行 `.ts`，经 `/home/lin/.pi` 挂载可以加载这四个包；容器内 Python `mcp` 为 2.3.0。
+- stdio 握手（Python 低层 `Server` ↔ `pi-mcp` 的 `PipeTransport` 加 `McpClient`）在宿主跑通：3 MB 的工具结果完整到达（单条消息上限 16 MB），`structuredContent` 透传，35 秒的工具调用在 300 秒超时下正常返回，关闭耗时 1 ms，worker 侧退出码 0。
+- 生产为 `528972c`，政策激活 30，没有排队或运行中的任务；之后的提交都只改文档。owner 凭据是 0600，磁盘剩余 21 GB。第 1 步涉及的测试（政策身份、登记、发布、契约、v0 政策）基线为 959 项全部通过。
+- 已知遗留：`tests/test_batch_c.py` 中有一项在 main 上原本就失败，与本方案无关。
 
 观察项（不阻塞）：第 2 步上线后，头 5 份生产报告的复核通过率、失败分类和引文核验结果。
 
@@ -130,3 +138,6 @@ L0 事实与规则                                材料与证据、核验、cal
 | `docs/implementation-plan.md` | 工作包与里程碑改为两步 |
 | `docs/web-mcp-platform.md` | 4a、4b 的回退目标与实现时机 |
 | `docs/judgment-validation.md` | 契约面哈希改为只用契约号，记分加按配置档分组 |
+| `README.md` 部署与配置 | 随对应步骤的提交更新：第 1 步删去回退评估（`rollback.assess`、`rollback-probe/`）和 `--complete-held` 两段；第 2 步把 `MODEL_*` 说明改为模型配置档，并改写预检说明 |
+| `ARCHITECTURE.md` | 第 1 步把 `policy/` 一行的身份说明改为“规则、指南、参数”；第 2 步按第 5 节整体改写 |
+| `docs/implementation-plan.md` 回退段 | 第 1 步删去“读取兼容性”核对，改为“重新发布上一个提交的镜像” |
