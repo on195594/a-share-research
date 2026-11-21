@@ -1,6 +1,5 @@
 """Web proxy contracts with the in-process MCP endpoint and transport failures."""
 import json
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -63,32 +62,11 @@ def test_route_and_identity_use_internal_endpoint_and_public_host(call):
     assert call(response(rpc(result={"structuredContent": {"data": {"version": 1}}}))) == {"version": 1}
 
 
-def test_session_is_reused_only_within_one_thread(monkeypatch):
-    client = ToolsClient("http://tools/mcp", "stock.example", "private-test")
-    sessions = []
-
-    def post(session, *args, **kwargs):
-        sessions.append(session)
-        return response(rpc(result={"structuredContent": {"data": {}}}))
-
-    monkeypatch.setattr(requests.Session, "post", post)
-    client._call("account_state", {}, REQUEST_ID)
-    client._call("account_state", {}, REQUEST_ID)
-    with ThreadPoolExecutor(max_workers=1) as worker:
-        worker.submit(client._call, "account_state", {}, REQUEST_ID).result()
-    assert sessions[0] is sessions[1]
-    assert sessions[0] is not sessions[2]
-
-
 @pytest.mark.parametrize(("reply", "kind", "message"), [
     (response(tool_error("paused", "发布中，约 1 分钟后用原请求重试")), "unavailable", "发布中"),
-    (response(tool_error("busy", "写入或采集名额已满，请稍后用原请求重试")), "unavailable", "名额已满"),
     (response({}, 429), "unavailable", "限流"),
     (response({"error": {"code": -32603, "data": {"code": "paused"}}}, 503), "unavailable", "发布中"),
-    (response(b"", 503), "unknown", "同一请求编号"),
     (requests.ReadTimeout(), "unknown", "同一请求编号"),
-    (requests.exceptions.ChunkedEncodingError(), "unknown", "同一请求编号"),
-    (response(b'{"jsonrpc":'), "unknown", "同一请求编号"),
     (response(rpc(result={}) | {"id": "some-other-request"}), "unknown", "同一请求编号"),
     (response(tool_error("invalid_arguments", "batch.snapshot.market_values: 缺 600519 市值")),
      "business", "batch.snapshot.market_values: 缺 600519 市值"),

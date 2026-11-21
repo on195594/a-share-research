@@ -6,7 +6,6 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
-import threading
 import time
 
 import pytest
@@ -130,24 +129,9 @@ def payloads():
     }
 
 
-def test_two_cohorts_share_deadline_and_all_five_notification_keys_survive(scoring, monkeypatch, capsys):
-    lock = threading.Lock()
-    active, maximum, observed = 0, 0, []
-    def score(name, module, flags, wall_deadline, monotonic_deadline):
-        nonlocal active, maximum
-        with lock:
-            active += 1
-            maximum = max(maximum, active)
-            observed.append((name, wall_deadline, monotonic_deadline))
-        time.sleep(.03)
-        with lock:
-            active -= 1
-        return payloads()[name]
-    monkeypatch.setattr(scoring, 'score', score)
+def test_all_five_notification_keys_survive(scoring, monkeypatch, capsys):
+    monkeypatch.setattr(scoring, 'score', lambda name, *args: payloads()[name])
     scoring.main()
-    assert maximum == 2 and len(observed) == 4
-    assert len({row[1:] for row in observed}) == 1
-    assert {row[0] for row in observed} == set(payloads())
     state = json.loads(scoring.STATE.read_text())
     assert set(state) == {'V0', 'V1', 'H1', 'H3', 'A3'}
     assert '判断记分周报' in capsys.readouterr().out

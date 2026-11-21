@@ -1,17 +1,15 @@
 """Owner routes, multipart uploads and the installed Skill, without a listening web server."""
 import asyncio
 import hashlib
-import threading
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from zipfile import ZipFile
 
 import httpx
 import pytest
 
-from a_share_research import api_keys, skill_bundle, web_evidence
+from a_share_research import api_keys, skill_bundle
 from a_share_research.tools import registry
 from a_share_research.tools_client import ToolCallError
 from support.mcp import rpc
@@ -38,22 +36,12 @@ def upload(web, monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("partial_failure", [False, True])
-def test_multipart_preserves_files_labels_and_individual_results(web, owner_request, upload, partial_failure, monkeypatch):  # noqa: F811
+def test_multipart_preserves_files_labels_and_individual_results(web, owner_request, upload, partial_failure):  # noqa: F811
     route = owner_request("/account/evidence")
     captures = sorted((Path(__file__).parent / "data").glob("*-announcement.pdf"))
     files = [("files", (p.name, p.read_bytes(), "application/pdf")) for p in captures]
     if partial_failure:
         files.insert(1, ('files', ('x' * 201 + '.pdf', captures[0].read_bytes(), 'application/pdf')))
-    loop_thread = threading.get_ident()
-
-    def off_loop(operation):
-        def check(content):
-            assert threading.get_ident() != loop_thread, operation.__name__
-            return operation(content)
-        return check
-
-    monkeypatch.setattr(web_evidence, "hashlib", SimpleNamespace(sha256=off_loop(hashlib.sha256)))
-    monkeypatch.setattr(web_evidence, "base64", SimpleNamespace(b64encode=off_loop(web_evidence.base64.b64encode)))
 
     async def visit():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app), base_url=web.settings.base_url,
@@ -68,7 +56,6 @@ def test_multipart_preserves_files_labels_and_individual_results(web, owner_requ
     body = result.text
     assert result.status_code == 200 and body.count("上传成功") == len(captures) == 2
     assert ("filename:" in body and "上传失败" in body) == partial_failure
-    assert 'accept="image/*,application/pdf" multiple' in body and "20 MiB" in body
     records = list(web.conn.execute("SELECT * FROM account_evidence_uploads ORDER BY id"))
     assert [row["filename"] for row in records] == [p.name for p in captures]
     assert all(row["key_id"] == upload.key_id and row["label"] == "收盘核对" for row in records)

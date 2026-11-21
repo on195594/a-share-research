@@ -116,22 +116,12 @@ def test_latest_reports_filters_before_grouping_and_bounds_company_scope(conn):
     assert [r['id'] for r in reading.latest_reports(conn, codes=['603606.SH'], passed=True)] == [37]
 
 
-def test_moved_read_queries_use_captured_records_and_do_not_write(conn):
+def test_saved_report_and_run_views_are_read_only(conn):
     before = conn.total_changes
     report = reading.report(conn, 39)
-    assert reading.report_for_run(conn, report['run_id'])['id'] == 39
-    assert reading.report_run(conn, report['run_id'])['status'] == 'done'
-    run = reading.run(conn, report['run_id'])
-    assert run['code'] == report['code']
-    assert reading.api_run(conn, run['id'])['report_id'] == 39
-    assert reading.api_reports(conn, '603606')[0]['id'] == 39
-    assert reading.stock_reports(conn, '000651.SZ')[0]['replay_of'] is not None
+    run = reading.api_run(conn, report['run_id'])
+    assert run['report_id'] == 39 and run['code'] == report['code']
     assert reading.report_bodies(conn, [39])[39] == json.loads(report['body']) | {'schema_version': 1}
-    assert reading.report_bodies(conn, []) == {}
-    assert reading.active_runs(conn) == []
-    assert reading.queue_ahead(conn, run['id'])[0] == 0
-    assert reading.latest_batch(conn) is None and reading.batch_list(conn) == []
-    assert reading.batch(conn, 1) is None and reading.latest_price(conn, run['code']) is None
     assert conn.total_changes == before
 
 

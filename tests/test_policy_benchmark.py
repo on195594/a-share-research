@@ -146,12 +146,13 @@ def test_only_allowed_collector_receives_market_credential(tmp_path, monkeypatch
         envs.append(kwargs['env'])
         return Process()
     monkeypatch.setattr(monitor.subprocess, 'Popen', popen)
-    monitor._capture(tmp_path / 'app.db', 'a_share_research.policy.benchmark', {}, market_token=True)
+    for module in ('benchmark', 'daily_brief'):
+        monitor._capture(tmp_path / 'app.db', f'a_share_research.policy.{module}', {}, market_token=True)
+        assert envs[-1]['TUSHARE_TOKEN'] == 'structural-market-token'
     monitor.capture(tmp_path / 'app.db', {})
-    assert envs[0]['TUSHARE_TOKEN'] == 'structural-market-token'
-    assert envs[1]['TUSHARE_TOKEN'] == 'structural-market-token'
+    assert envs[-1]['TUSHARE_TOKEN'] == 'structural-market-token'
     monitor._capture(tmp_path / 'app.db', 'a_share_research.policy.stop_alert', {})
-    assert 'TUSHARE_TOKEN' not in envs[2]
+    assert 'TUSHARE_TOKEN' not in envs[-1]
     assert all('ASHARE_OWNER_TOKEN' not in e and 'MODEL_API_KEY' not in e for e in envs)
     with pytest.raises(ValueError):
         monitor._capture(tmp_path / 'app.db', 'a_share_research.policy.stop_alert', {}, market_token=True)

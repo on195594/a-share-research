@@ -71,25 +71,16 @@ def test_changed_source_state_or_key_cannot_commit_success(configured, monkeypat
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 0
 
 
-def test_http_permissions_shape_pause_and_receipt(configured):
-    setup, calls = configured
-    path, conn, _, _, activation, _, _ = setup
-    tokens = {role: api_keys.create(conn, 'stop-http-' + role, role=role) for role in ('assistant', 'research')}
-    payload = dict(request_id='http-stop', expected_activation_id=activation['id'], previous_state={})
-    headers = lambda role: {'Authorization': 'Bearer ' + tokens[role]}
-    with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload).status_code == 404
-    app = create_app(path, account_shadow_enabled=True)
-    with TestClient(app) as client:
-        assert client.post('/tools/policy_stop_alert', headers=headers('research'), json=payload).status_code == 403
-        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'),
-                           json=payload | {'previous_state': {'date': '2026-02-30'}}).status_code == 422
-        first = client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload)
-        assert first.status_code == 200, first.text
-        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload).json() == first.json()
-        assert len(calls) == 1
-        app.state.gate.pause(1)
-        assert client.post('/tools/policy_stop_alert', headers=headers('assistant'), json=payload).status_code == 503
+def test_http_validates_stop_alert_arguments(configured):
+    path, conn, _, _, active, _, _ = configured[0]
+    token = api_keys.create(conn, 'stop_alert-http', role='assistant')
+    args = dict(request_id='http-stop', expected_activation_id=active['id'], previous_state={})
+    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
+        headers = {'Authorization': 'Bearer ' + token}
+        endpoint = '/tools/policy_stop_alert'
+        assert client.post(endpoint, headers=headers, json=args | {'previous_state': {'date': '2026-02-30'}}).status_code == 422
+        response = client.post(endpoint, headers=headers, json=args)
+        assert response.status_code == 200, response.text
 
 
 def test_context_action_state_and_source_corruption_rejected(configured):

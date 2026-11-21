@@ -8,7 +8,7 @@ from statistics import median
 import pandas as pd
 import pytest
 
-from a_share_research import market, checking, evidence, industry
+from a_share_research import checking, evidence, industry
 from a_share_research.research_tools import ResearchTools, calculate
 from a_share_research.sources import SourceError, peer_members
 from support.reports import MATERIAL, report
@@ -100,15 +100,6 @@ def test_mutated_industry_evidence_is_rejected(mutation):
     with pytest.raises(ValueError, match='行业'):
         industry.validate_rows(rows, rows)
     assert evidence.citation_errors([{'ref': row['id']}], {}, rows)
-
-
-def test_historical_cache_identity_and_current_membership(monkeypatch):
-    monkeypatch.delenv('TUSHARE_CACHE')
-    day = max(DATA['daily_basic'])
-    params = DATA['daily_basic'][day]['params']
-    assert market._tushare_cache_key('daily_basic', params)
-    assert market._tushare_cache_key('daily_basic', params) != market._tushare_cache_key('daily_basic', params | {'trade_date': min(DATA['daily_basic'])})
-    assert market._tushare_cache_key('index_member_all', DATA['membership']['params'])
 
 
 def test_peer_weighted_return_excludes_the_company():

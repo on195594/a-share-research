@@ -78,19 +78,15 @@ def test_expired_receipt_does_not_advance_levels_or_emit_alert(client, monkeypat
     assert client.load_state() == dict(schema_version=1, state={}, pending=None)
 
 
-@pytest.mark.parametrize('variant', ['mode', 'request', 'activation', 'previous', 'missing-result', 'state', 'future'])
+@pytest.mark.parametrize('variant', ['request', 'previous', 'state'])
 def test_wrong_receipt_keeps_pending_and_notification_state(client, monkeypatch, variant):
     call, _ = transport(client, monkeypatch)
     def corrupt(name, args):
         result = call(name, args)
         if name == 'policy_stop_alert':
-            if variant == 'mode': result['mode'] = 'service_monitor_capture'
             if variant == 'request': result['request_id'] = 'other-request'
-            if variant == 'activation': result['activation_id'] = 99
             if variant == 'previous': result['input']['previous_state'] = {'date': '2026-10-21'}
-            if variant == 'missing-result': result['result'] = {}
             if variant == 'state': result['result']['state'] = {'date': '2026-02-30'}
-            if variant == 'future': result['input']['now'] = '2026-10-23T10:00:00+08:00'
         return result
     monkeypatch.setattr(client, 'tool', corrupt)
     with pytest.raises(client.ToolsError, match='回执不兼容'): client.check()
@@ -111,13 +107,17 @@ def test_unavailable_quotes_clear_successful_request_without_marking_notified(cl
     assert client.load_state() == dict(schema_version=1, state={}, pending=None)
 
 
-def test_corrupt_state_and_concurrency_never_acquire(client, monkeypatch):
+@pytest.mark.parametrize('script', ['a-share-stop-alert', 'a-share-daily-brief', 'a-share-benchmark'])
+def test_held_lock_and_corrupt_state_do_not_call_service(script, tmp_path, monkeypatch):
+    client = load(script)
+    monkeypatch.setattr(client, 'STATE', tmp_path / 'state.json')
     monkeypatch.setattr(client, 'tool', lambda *args: pytest.fail('no transport'))
     with client.STATE.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert client.check() == ('', '', 0)
     client.STATE.write_text('{')
-    with pytest.raises(ValueError): client.check()
+    with pytest.raises(ValueError):
+        client.check()
     assert client.STATE.read_text() == '{'
 
 

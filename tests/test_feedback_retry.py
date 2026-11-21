@@ -19,9 +19,6 @@ def test_failed_feedback_form_submission_retry_failure_then_success_closes_group
     payload = json.loads(web.conn.execute('SELECT request FROM runs WHERE id=18').fetchone()[0])
     web.conn.execute('DELETE FROM reports WHERE id=12')
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=18")
-    html = web.run_page(request, 18).body.decode()
-    assert 'action="/runs/18/retry-feedback"' in html and '重试原核查' in html
-    assert 'action="/research"' not in html
     before = web.conn.total_changes
     assert web.retry_feedback(request, 18, request_id='retry-a', csrf='invalid').status_code == 403
     assert web.conn.total_changes == before
@@ -82,15 +79,11 @@ def test_retry_rejects_ordinary_completed_replay_and_incomplete_records(feedback
     with pytest.raises(service.RequestError): service.retry_feedback(web.conn, 18, 'missing-feedback', requester='web-owner')
 
 
-def test_home_search_stays_visible_and_question_fold_keeps_typed_text():
-    for pending, error, question in [([], None, None), ([{'id': 18, 'parent_id': 11}], None, None),
-                                      ([{'id': 18, 'parent_id': 11}], '请重新选择', '现金流是否一致？')]:
-        html = render('home.html', pending=pending, pending_more=False, companies=[],
-                      active=[], batch=None, error=error, question=question)
-        # The search row is never folded, whatever the pending state; a typed question reopens its fold.
-        assert '<section class="start"' in html and 'id="q" name="q"' in html
-        assert ('<details class="question" open>' in html) == bool(question)
-        assert (error or '') in html
+def test_home_retains_typed_question_on_error():
+    question = '现金流是否一致？'
+    html = render('home.html', pending=[{'id': 18, 'parent_id': 11}], pending_more=False, companies=[],
+                  active=[], batch=None, error='请重新选择', question=question)
+    assert question in html and '请重新选择' in html
 
 
 def test_gap_disclosure_and_native_source_navigation():

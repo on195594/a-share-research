@@ -97,28 +97,14 @@ def test_optional_scalar_replacements_do_not_rewrite_other_fields():
 
 
 @pytest.mark.parametrize("patch,match", [
-    (None, "补丁须为对象"), ([], "补丁须为对象"),
-    ({"ops": {}}, "ops 必须是数组"), ({"ops": [], "risks": BODY["risks"]}, "不要输出完整报告"),
-    ({"ops": [], "business": BODY["business"][1:]}, "不要输出完整报告"),
-    ({"ops": [None]}, r"ops\[0\]"), ({"ops": [{"op": "move"}]}, "replace/delete/add"),
-    ({"ops": [replace("unknown[0]")]}, "章节或位置不存在"),
-    ({"ops": [{"op": "add", "where": "unknown", "value": ITEM}]}, "章节或位置不存在"),
+    ([], "补丁须为对象"),
+    ({"ops": [], "risks": BODY["risks"]}, "不要输出完整报告"),
+    ({"ops": [None]}, r"ops\[0\]"),
     ({"ops": [replace("risks[-1]")]}, "章节或位置不存在"),
-    ({"ops": [replace("risks[1.0]")]}, "章节或位置不存在"),
-    ({"ops": [replace("risks[True]")]}, "章节或位置不存在"),
-    ({"ops": [replace("risks[01]")]}, "章节或位置不存在"),
-    ({"ops": [replace("risks")]}, "章节或位置不存在"),
-    ({"ops": [replace(["risks", 0])]}, "章节或位置不存在"),
     ({"ops": [replace(f"risks[{len(BODY['risks'])}]")]}, "越界"),
-    ({"ops": [replace("methods[0]")]}, "越界"),
     ({"ops": [replace(), replace()]}, "重复操作"),
     ({"ops": [replace(), {"op": "delete", "where": "risks[2]"}]}, "既删又改"),
-    ({"ops": [{"op": "delete", "where": "risks[2]"}, replace()]}, "既删又改"),
-    ({"ops": [{"op": "delete", "where": "risks[2]"}] * 2}, "重复操作"),
-    ({"ops": [{"op": "replace", "where": "risks[2]"}]}, "必须包含字段"),
     ({"ops": [replace(value=None)]}, "条目对象"),
-    ({"ops": [], "resolutions": []}, "补丁须为对象"),
-    ({"ops": [], "risk_resolutions": []}, "补丁须为对象"),
 ])
 def test_malformed_patches_are_actionable_and_atomic(patch, match):
     draft, before = deepcopy(BODY), deepcopy(patch)

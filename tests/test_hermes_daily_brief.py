@@ -1,7 +1,6 @@
 """Daily client retry/presentation contracts over an explicit historical-boundary input."""
 from copy import deepcopy
 from datetime import datetime, timedelta
-import fcntl
 import json
 
 import pytest
@@ -77,33 +76,20 @@ def test_old_day_is_resolved_without_current_day_delivery(client, daily_bundle, 
     assert client.load_state()['pending'] is None
 
 
-@pytest.mark.parametrize('variant', ['mode', 'activation', 'request', 'result', 'future', 'day'])
+@pytest.mark.parametrize('variant', ['request', 'day', 'result'])
 def test_bad_receipt_cannot_clear_pending(client, daily_bundle, monkeypatch, variant):
     source = daily_bundle
     call, _ = transport(client, monkeypatch, source)
     def corrupt(name, args):
         value = call(name, args)
         if name == 'policy_daily_brief':
-            if variant == 'mode': value['mode'] = 'service_monitor_capture'
-            if variant == 'activation': value['activation_id'] = 9
             if variant == 'request': value['request_id'] = 'wrong'
             if variant == 'result': value['result'] = {}
-            if variant == 'future': value['input']['now'] = '2099-01-01T00:00:00+08:00'
             if variant == 'day': value['input']['brief_today'] = '2026-02-30'
         return value
     monkeypatch.setattr(client, 'tool', corrupt)
     with pytest.raises(client.ToolsError, match='回执不兼容'): client.check()
     assert client.load_state()['pending'] is not None
-
-
-def test_concurrent_or_broken_state_does_not_call_service(client, monkeypatch):
-    monkeypatch.setattr(client, 'tool', lambda *args: pytest.fail('no service call'))
-    with client.STATE.with_suffix('.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert client.check() == ('', '', 0)
-    client.STATE.write_text('{')
-    with pytest.raises(ValueError): client.check()
-    assert client.STATE.read_text() == '{'
 
 
 def test_state_write_failure_does_not_send_brief(client, daily_bundle, monkeypatch, capsys):
