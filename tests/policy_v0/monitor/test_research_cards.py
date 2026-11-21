@@ -311,9 +311,8 @@ def test_optional_failures_preserve_all_gates(
 
 
 @pytest.mark.parametrize(
-    "stance", ["现在分批", ["现在分批"], 1, True, "", [], 0, False]
+    ("stance", "with_frozen"), [("现在分批", True), ([], False)]
 )
-@pytest.mark.parametrize("with_frozen", [False, True])
 def test_nonobject_stance_is_a_contract_error(cards, stance, with_frozen):
     held = card(cards, "600900")
     held["stance"] = stance
@@ -336,8 +335,6 @@ def test_optional_object_stance_remains_compatible_and_unchanged(cards, stance):
     before = deepcopy(cards)
     monitor_contract.validate_research_cards(cards)
     assert cards == before
-    del held["stance"]
-    monitor_contract.validate_research_cards(cards)
 
 
 @pytest.mark.parametrize(

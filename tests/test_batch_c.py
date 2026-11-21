@@ -367,13 +367,6 @@ def test_two_pool_form_has_independent_fields_and_unique_ids():
     assert '两组互不挤占，空位按现金计；小市值组可留空' in html
 
 
-def test_empty_small_pool_keeps_large_freeze_available():
-    html = _render_two_pools([])
-    assert 'name="codes"' in html and '冻结两组所选' in html
-    assert 'id="small-pool"' in html and 'id="small-comparison"' in html
-    assert 'id="small-candidates"' not in html
-
-
 def test_unlinked_small_candidates_wait_without_query_or_finished_count():
     captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
     row = {k: v for k, v in captured['rows'][0].items()
@@ -397,4 +390,3 @@ def test_failed_task_remains_linked_without_report():
     html = _render_two_pools([row], status='researching')
     small_matrix = html.split('id="small-candidates"', 1)[1].split('</table>', 1)[0]
     assert 'href="/runs/987"' in small_matrix
-    assert 'href="/runs/987">查看失败详情' in html

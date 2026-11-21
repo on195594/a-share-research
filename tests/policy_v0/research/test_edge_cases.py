@@ -7,30 +7,12 @@ Coverage gaps addressed:
 """
 
 import hashlib
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from a_share_research.policy.v0 import commands_holdings, db, domain
+from a_share_research.policy.v0 import commands_holdings, db
 from policy_v0.helpers import seed_event, seed_position
-
-
-def _insert_analysis(code: str, result: str = "test_result", score: int | None = None):
-    today = domain.cst_today()
-    conn = db.get_db()
-    conn.execute(
-        "INSERT INTO analysis_results (code, date, result, created_at, score) VALUES (?,?,?,?,?)",
-        (code, today, result, datetime.now().isoformat(), score),
-    )
-    conn.commit()
-    conn.close()
-
-
-# ═══════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════
 
 
 class TestHoldingsDisplay:
@@ -41,37 +23,18 @@ class TestHoldingsDisplay:
         out = capsys.readouterr().out
         assert "暂无持仓记录" in out
 
-    def test_closed_position_shows_pnl_and_stats(self, capsys):
-        """Closed position history shows P&L % and statistics (胜率/平均盈亏)."""
-        _h600519 = seed_position("600519", 100.0, 100)
-        seed_event(_h600519, "sell", "2026-01-06", shares=100, price=120.0, close=True)
-        capsys.readouterr()
+    @pytest.mark.parametrize("second_price,second_pnl,win_rate", [
+        (11.0, "+10.0%", "100%"), (8.0, "-20.0%", "50%"),
+    ])
+    def test_closed_position_shows_pnl_and_stats(self, capsys, second_price, second_pnl, win_rate):
+        first = seed_position("600519", 100.0, 100)
+        second = seed_position("000001", 10.0, 100)
+        seed_event(first, "sell", "2026-01-06", shares=100, price=120.0, close=True)
+        seed_event(second, "sell", "2026-01-06", shares=100, price=second_price, close=True)
         commands_holdings.cmd_holdings()
         out = capsys.readouterr().out
-        assert "已平仓历史" in out
-        assert "+20.0%" in out
-        assert "胜率" in out
-        assert "平均盈亏" in out
-
-    def test_loss_position_shows_negative_pnl(self, capsys):
-        """Loss position shows negative P&L percentage."""
-        _h000001 = seed_position("000001", 10.0, 100)
-        seed_event(_h000001, "sell", "2026-01-06", shares=100, price=8.0, close=True)
-        capsys.readouterr()
-        commands_holdings.cmd_holdings()
-        out = capsys.readouterr().out
-        assert "-20.0%" in out
-
-    def test_win_rate_calculation_all_winners(self, capsys):
-        """All profitable positions → 胜率 100%."""
-        _h600519 = seed_position("600519", 100.0, 100)
-        _h000001 = seed_position("000001", 10.0, 100)
-        seed_event(_h600519, "sell", "2026-01-06", shares=100, price=110.0, close=True)
-        seed_event(_h000001, "sell", "2026-01-06", shares=100, price=11.0, close=True)
-        capsys.readouterr()
-        commands_holdings.cmd_holdings()
-        out = capsys.readouterr().out
-        assert "胜率 100%" in out
+        assert "已平仓历史" in out and "+20.0%" in out and second_pnl in out
+        assert f"胜率 {win_rate}" in out and "平均盈亏" in out
 
     def test_code_filter_does_not_leak_other_holdings(self, capsys):
         seed_position("603606", 34.24, 500, notes="east-only")
@@ -122,30 +85,6 @@ class TestHoldingsDisplay:
         assert row == (None, None)
         assert event_count == 0
 
-    @pytest.mark.parametrize(
-        "command,args",
-        [
-            (commands_holdings.cmd_retro_pending, []),
-            (commands_holdings.cmd_retro_outliers, []),
-        ],
-    )
-    def test_retro_read_commands_are_physically_read_only(
-        self, isolated_cache_database, capsys, command, args
-    ):
-        _h603606 = seed_position("603606", 34.24, 500)
-        seed_event(_h603606, "sell", "2026-01-06", shares=500, price=35.00, close=True)
-        conn = db.get_db()
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-        capsys.readouterr()
-        path = Path(isolated_cache_database)
-        before = hashlib.sha256(path.read_bytes()).hexdigest()
-
-        command(args)
-
-        after = hashlib.sha256(path.read_bytes()).hexdigest()
-        assert after == before
-
 
 # ═══════════════════════════════════════════════════════════════════
 
@@ -184,31 +123,21 @@ def _insert_closed_holding_with_events(
 
 
 class TestRetroPending:
-    def test_retro_pending_shows_closed_without_retro(self, capsys):
+    def test_retro_pending_only_shows_closed_without_retro(self, capsys):
+        holding = seed_position("600519", 1500.0, 10, day="2026-01-01")
+        seed_event(holding, "sell", "2026-04-01", shares=10, price=1600.0, close=True)
+        commands_holdings.cmd_retro_pending()
+        assert "600519" in capsys.readouterr().out
         with db.db_session() as conn:
             conn.execute(
-                "INSERT INTO holdings (code, name, cost_price, shares, buy_date, buy_score, exit_price, exit_date, updated_at) "
-                "VALUES ('600519', '贵州茅台', 1500.0, 10, '2026-01-01', 75, 1600.0, '2026-04-01', '2026-04-01')"
+                """INSERT INTO retro_notes (holding_id, code, error_tags, created_at)
+                   VALUES (?, '600519', '无错误', '2026-04-02')""",
+                (holding,),
             )
             conn.commit()
         commands_holdings.cmd_retro_pending()
         out = capsys.readouterr().out
-        assert "600519" in out
-
-    def test_retro_pending_empty_when_all_have_retro(self, capsys):
-        with db.db_session() as conn:
-            conn.execute(
-                "INSERT INTO holdings (id, code, name, cost_price, shares, buy_date, buy_score, exit_price, exit_date, updated_at) "
-                "VALUES (1, '600519', '贵州茅台', 1500.0, 10, '2026-01-01', 75, 1600.0, '2026-04-01', '2026-04-01')"
-            )
-            conn.execute(
-                "INSERT INTO retro_notes (holding_id, code, error_tags, created_at) VALUES (1, '600519', '无错误', '2026-04-02')"
-            )
-            conn.commit()
-        commands_holdings.cmd_retro_pending()
-        out = capsys.readouterr().out
-        assert "600519" not in out
-        assert "无待复盘" in out
+        assert "600519" not in out and "无待复盘" in out
 
 
 class TestRetroStats:
@@ -232,47 +161,21 @@ class TestRetroStats:
 
 
 class TestRetroOutliers:
-    def test_retro_outliers_finds_large_loss(self, capsys):
+    @pytest.mark.parametrize("limit", ["10", "-10"])
+    def test_retro_outliers_finds_large_loss(self, capsys, limit):
         with db.db_session() as conn:
             _insert_closed_holding_with_events(
-                conn,
-                code="601088",
-                name="神华",
-                cost=30.0,
-                shares=100,
-                buy_score=55,
-                exit_price=25.0,
-            )
-            conn.commit()
-        commands_holdings.cmd_retro_outliers(["--loss", "-10"])
-        out = capsys.readouterr().out
-        assert "601088" in out
-
-    def test_retro_outliers_positive_loss_param(self, capsys):
-        with db.db_session() as conn:
-            _insert_closed_holding_with_events(
-                conn,
-                code="601088",
-                name="神华",
-                cost=30.0,
-                shares=100,
-                buy_score=55,
-                exit_price=25.0,
+                conn, code="601088", name="神华", cost=30.0, shares=100,
+                buy_score=55, exit_price=25.0,
             )
             _insert_closed_holding_with_events(
-                conn,
-                code="600036",
-                name="招行",
-                cost=40.0,
-                shares=100,
-                buy_score=70,
-                exit_price=38.0,
+                conn, code="600036", name="招行", cost=40.0, shares=100,
+                buy_score=70, exit_price=38.0,
             )
             conn.commit()
-        commands_holdings.cmd_retro_outliers(["--loss", "10"])
+        commands_holdings.cmd_retro_outliers(["--loss", limit])
         out = capsys.readouterr().out
-        assert "601088" in out
-        assert "600036" not in out
+        assert "601088" in out and "600036" not in out
 
     def test_retro_outliers_excludes_already_reviewed(self, capsys):
         with db.db_session() as conn:

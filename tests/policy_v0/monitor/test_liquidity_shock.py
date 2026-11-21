@@ -52,6 +52,7 @@ def test_snapshot_boundary_and_freshness():
 @pytest.mark.parametrize(
     "bad_snapshot",
     [
+        lambda now: {"limit_down_count": 500, "as_of": now.isoformat()},
         lambda now: snapshot(now, source="news search"),
         lambda now: snapshot(now - timedelta(seconds=121), is_final=False),
     ],
@@ -69,6 +70,18 @@ def test_untrusted_or_stale_501_cannot_start_defer(bad_snapshot):
     )
     assert result["status"] == "incomplete"
     assert result["reason_code"] == "market_snapshot_incomplete"
+
+
+@pytest.mark.parametrize(("count", "triggered", "status"), [
+    (500, True, "clear"), (501, True, "deferred"), (501, False, "not_applicable"),
+])
+def test_only_second_stop_with_more_than_500_limit_downs_defers(count, triggered, status):
+    now = datetime(2026, 9, 7, 10, 0, tzinfo=CST)
+    result = risk_gates.liquidity_shock_gate({
+        "stop_loss_triggered": triggered, "stop_loss_20": 8, "quote": quote(),
+        "market_snapshot": snapshot(now, count), "now": now,
+    })
+    assert result["status"] == status
 
 
 def test_defer_is_one_shot_and_due_rechecks_price():
@@ -97,6 +110,12 @@ def test_defer_is_one_shot_and_due_rechecks_price():
     assert done["status"] == "clear"
     assert done["reason_code"] == "stop_loss_20_reconfirmed"
     assert done["defer_started_at"] == first["defer_started_at"]
+    suspended = risk_gates.liquidity_shock_gate({
+        "stop_loss_triggered": True, "stop_loss_20": 8, "quote": quote(suspended=True),
+        "market_snapshot": snapshot(due), "now": due, "existing_defer": first,
+    })
+    assert suspended["status"] == "untradeable"
+    assert suspended["defer_started_at"] == first["defer_started_at"]
 
 
 def test_due_recovered_price_clears_candidate_without_action():

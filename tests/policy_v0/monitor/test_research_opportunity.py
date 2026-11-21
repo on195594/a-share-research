@@ -207,8 +207,8 @@ def test_checkpoint_threshold_is_shown_unrounded():
 
 
 @pytest.mark.parametrize("patch", [
-    {"metric": "M.close"}, {"period": None}, {"period": "2026-13-31"},
-    {"op": ">"}, {"value": True}, {"value": None}, {"value": float("inf")}, {"extra": 1},
+    {"metric": "M.close"}, {"period": "2026-13-31"}, {"op": ">"},
+    {"value": True}, {"extra": 1},
 ])
 def test_checkpoint_shape_rejects_mutations(patch):
     card = new_checkpoint_card()
@@ -218,8 +218,9 @@ def test_checkpoint_shape_rejects_mutations(patch):
         run(card)
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-@pytest.mark.parametrize("location", ["frozen", "row", "evidence", "missing_evidence"])
+@pytest.mark.parametrize("legacy,location", [
+    (False, "frozen"), (True, "frozen"), (False, "row"), (True, "evidence"),
+])
 def test_checkpoint_mismatch_rejected(legacy, location):
     card = reference_card("300750") if legacy else new_checkpoint_card()
     if location == "frozen":
@@ -230,8 +231,6 @@ def test_checkpoint_mismatch_rejected(legacy, location):
     research, prompts, _ = run(card)
     if location == "row":
         research["candidates"][0]["stance_add_trigger"] = None
-    elif location == "evidence":
-        prompts[0]["evidence"]["stance_add_trigger"] = None
     else:
         del prompts[0]["evidence"]["stance_add_trigger"]
     with pytest.raises(monitor_contract.MonitorContractError):

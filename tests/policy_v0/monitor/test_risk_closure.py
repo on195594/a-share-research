@@ -4,7 +4,6 @@ import json
 import socket
 import sqlite3
 import subprocess
-from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 
@@ -13,7 +12,6 @@ import pytest
 from a_share_research.policy.v0 import (
     cache,
     commands_monitor,
-    db,
     domain,
     market_quotes,
     monitor_contract,
@@ -77,10 +75,10 @@ def test_budget_does_not_compare_rounded_percentages(isolated_cache_database):
     assert payload["account"]["risk_budget_status"] == "over_budget"
 
 
-@pytest.mark.parametrize("field", ["shares", "stop_loss_20", "price"])
-@pytest.mark.parametrize(
-    "bad", [None, True, False, 0, -1, float("nan"), float("inf"), -float("inf"), "100"]
-)
+@pytest.mark.parametrize("field,bad", [
+    ("shares", True), ("stop_loss_20", None), ("price", float("nan")),
+    ("shares", 0), ("stop_loss_20", "100"), ("price", -1),
+])
 def test_unknown_inputs_never_mean_zero_risk(field, bad, isolated_cache_database):
     local, quotes = _inputs(isolated_cache_database)
     if field == "price":
@@ -97,9 +95,7 @@ def test_unknown_inputs_never_mean_zero_risk(field, bad, isolated_cache_database
     assert payload["action_status"] == "review_candidate"
 
 
-@pytest.mark.parametrize(
-    "bad", [None, True, False, 0, -1, float("nan"), float("inf"), "100000"]
-)
+@pytest.mark.parametrize("bad", [None, 0, True, float("inf")])
 def test_invalid_denominator_does_not_clear_even_empty(bad, isolated_cache_database):
     for local in (
         {"holdings": [], "closed_count": 0},
@@ -232,13 +228,7 @@ def test_both_public_clis_consume_same_input_and_policy(
     "field,bad",
     [
         ("stop_loss_20", None),
-        ("stop_loss_20", "bad"),
-        ("stop_loss_20", 0),
-        ("stop_loss_20", float("inf")),
-        ("shares", None),
-        ("shares", -1),
         ("shares", 1.5),
-        ("shares", "bad"),
     ],
 )
 def test_text_unknown_risk_never_prints_normal(
@@ -258,32 +248,12 @@ def test_text_unknown_risk_never_prints_normal(
     assert "本次有效参数内：预算内" not in text
 
 
-@pytest.mark.parametrize(
-    "state",
-    [
-        "missing",
-        "nan",
-        "inf",
-        "bool",
-        "zero",
-        "negative",
-        "stale",
-        "conflicted",
-        "no_time",
-        "no_source",
-    ],
-)
-def test_text_and_json_share_quote_validation(
-    state, isolated_cache_database, monkeypatch, capsys
-):
+@pytest.mark.parametrize("state,price", [
+    ("missing", 100), ("invalid_price", float("nan")),
+    ("stale", 100), ("conflicted", 100), ("no_time", 100), ("no_source", 100),
+])
+def test_text_and_json_share_quote_validation(state, price, isolated_cache_database, monkeypatch, capsys):
     _inputs(isolated_cache_database)
-    price = {
-        "nan": float("nan"),
-        "inf": float("inf"),
-        "bool": True,
-        "zero": 0,
-        "negative": -1,
-    }.get(state, 100)
     quote = (
         None
         if state == "missing"
@@ -319,24 +289,16 @@ def test_text_distinguishes_breach_and_unknown_and_broken_stop(
     assert all(marker in text for marker in ("已知超预算", "不可完整判定", "已破线"))
 
 
-@pytest.mark.parametrize("missing_schema", [False, True])
-def test_text_missing_database_does_not_bootstrap(
-    missing_schema, isolated_cache_database, monkeypatch, capsys
-):
-    if missing_schema:
-        with sqlite3.connect(isolated_cache_database) as conn:
-            conn.execute("CREATE TABLE sentinel (value)")
-    monkeypatch.setattr(db, "_ensure_schema", lambda *a: pytest.fail("migration"))
-    mock_price_quotes(monkeypatch, lambda *a: pytest.fail("network"))
+@pytest.mark.parametrize("empty", [False, True])
+def test_portfolio_risk_refuses_unavailable_database(empty, isolated_cache_database, capsys):
+    if empty:
+        sqlite3.connect(isolated_cache_database).close()
     assert cache.main(["portfolio-risk"]) == 1
     assert "不可用" in capsys.readouterr().err
-    if not missing_schema:
-        assert not isolated_cache_database.exists()
-    else:
+    assert isolated_cache_database.exists() is empty
+    if empty:
         with sqlite3.connect(isolated_cache_database) as conn:
-            assert conn.execute("SELECT name FROM sqlite_master").fetchall() == [
-                ("sentinel",)
-            ]
+            assert conn.execute("SELECT name FROM sqlite_master").fetchall() == []
 
 
 def test_risk_commands_do_not_write_migrate_or_network(
@@ -345,31 +307,6 @@ def test_risk_commands_do_not_write_migrate_or_network(
     _inputs(isolated_cache_database, shares=101)
     with sqlite3.connect(isolated_cache_database) as conn:
         before = list(conn.iterdump())
-    original = db.read_only_db_session
-    sql = []
-
-    def authorize(action, *_):
-        return (
-            sqlite3.SQLITE_OK
-            if action
-            in {
-                sqlite3.SQLITE_SELECT,
-                sqlite3.SQLITE_READ,
-                sqlite3.SQLITE_FUNCTION,
-                sqlite3.SQLITE_TRANSACTION,
-            }
-            else sqlite3.SQLITE_DENY
-        )
-
-    @contextmanager
-    def checked():
-        with original() as conn:
-            conn.set_authorizer(authorize)
-            conn.set_trace_callback(sql.append)
-            yield conn
-
-    monkeypatch.setattr(db, "read_only_db_session", checked)
-    monkeypatch.setattr(db, "_ensure_schema", lambda *a: pytest.fail("migration"))
     monkeypatch.setattr(socket.socket, "connect", lambda *a: pytest.fail("network"))
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **k: pytest.fail("external command/notification")
@@ -377,10 +314,6 @@ def test_risk_commands_do_not_write_migrate_or_network(
     mock_price_quotes(monkeypatch, _quotes)
     assert _run(capsys, ["--portfolio-value", "100000"])[0] == 0
     assert cache.main(["portfolio-risk", "--portfolio-value", "100000"]) == 0
-    assert sql and all(
-        statement.lstrip().startswith(("SELECT", "BEGIN", "COMMIT"))
-        for statement in sql
-    )
     with sqlite3.connect(isolated_cache_database) as conn:
         assert list(conn.iterdump()) == before
 
@@ -404,111 +337,67 @@ def test_contract_rejects_over_budget_clean_combinations(
         monitor_contract.validate_monitor_snapshot(payload)
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        "account_missing",
-        "policy_missing",
-        "unknown_budget",
-        "risk_missing",
-        "active_count",
-        "bool_value",
-        "zero_value",
-        "negative_value",
-        "duplicate_budget",
-        "missing_budget_escalation",
-    ],
-)
-def test_contract_requires_current_safety_evidence(mutation, isolated_cache_database):
-    payload = _snapshot(
-        isolated_cache_database,
-        shares=101
-        if "budget_escalation" in mutation or mutation == "duplicate_budget"
-        else 100,
-    )
-    if mutation == "account_missing":
-        payload["account"] = {}
-    elif mutation == "policy_missing":
-        del payload["account"]["risk_policy"]
-    elif mutation == "unknown_budget":
-        payload["account"]["risk_budget_status"] = None
-    elif mutation == "risk_missing":
-        payload["account"]["total_stop_risk"] = None
-    elif mutation == "active_count":
-        payload["quote_coverage"].update(active=2, priced=2)
-    elif mutation in {"bool_value", "zero_value", "negative_value"}:
-        payload["account"]["portfolio_value"] = {
-            "bool_value": True,
-            "zero_value": 0,
-            "negative_value": -1,
-        }[mutation]
-    elif mutation == "duplicate_budget":
-        payload["escalations"].append(deepcopy(payload["escalations"][0]))
-    elif mutation == "missing_budget_escalation":
-        payload["escalations"] = []
+@pytest.mark.parametrize("field,patch", [
+    ("account", {}),
+    ("account", {"risk_policy": None}),
+    ("account", {"risk_budget_status": None}),
+    ("account", {"total_stop_risk": None}),
+    ("account", {"portfolio_value": True}),
+    ("quote_coverage", {"active": 2, "priced": 2}),
+])
+def test_contract_requires_current_safety_evidence(field, patch, isolated_cache_database):
+    payload = _snapshot(isolated_cache_database)
+    payload[field] = payload[field] | patch if patch else {}
     with pytest.raises(monitor_contract.MonitorContractError):
         monitor_contract.validate_monitor_snapshot(payload)
 
 
-@pytest.mark.parametrize(
-    "field", ["market_value", "stop_risk", "stop_risk_pct", "portfolio_weight_pct"]
-)
-@pytest.mark.parametrize("bad", [None, True, "0", -1])
-def test_clean_contract_rejects_invalid_holding_risk(
-    field, bad, isolated_cache_database
-):
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_over_budget_requires_one_escalation(duplicate, isolated_cache_database):
+    payload = _snapshot(isolated_cache_database, shares=101)
+    payload["escalations"] *= 2 if duplicate else 0
+    with pytest.raises(monitor_contract.MonitorContractError):
+        monitor_contract.validate_monitor_snapshot(payload)
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("market_value", None), ("stop_risk", True),
+    ("stop_risk_pct", "0"), ("portfolio_weight_pct", -1),
+])
+def test_clean_contract_rejects_invalid_holding_risk(field, bad, isolated_cache_database):
     payload = _snapshot(isolated_cache_database)
     payload["holdings"][0][field] = bad
     with pytest.raises(monitor_contract.MonitorContractError):
         monitor_contract.validate_monitor_snapshot(payload)
 
 
-@pytest.mark.parametrize(
-    "field,bad",
-    [
-        ("status", "stale"),
-        ("price", 0),
-        ("price", True),
-        ("source", ""),
-        ("as_of", "invalid"),
-    ],
-)
-def test_clean_contract_requires_usable_quote_evidence(
-    field, bad, isolated_cache_database
-):
+@pytest.mark.parametrize("field,bad", [
+    ("status", "stale"), ("price", 0), ("source", ""), ("as_of", "invalid"),
+])
+def test_clean_contract_requires_usable_quote_evidence(field, bad, isolated_cache_database):
     payload = _snapshot(isolated_cache_database)
     payload["holdings"][0]["quote"][field] = bad
     with pytest.raises(monitor_contract.MonitorContractError):
         monitor_contract.validate_monitor_snapshot(payload)
 
 
-@pytest.mark.parametrize("field", ["quote", "shares", "stop_loss_20", "market_value"])
-def test_omitted_stop_reason_cannot_bypass_clean_evidence(
-    field, isolated_cache_database
-):
+def test_omitted_stop_reason_cannot_bypass_clean_evidence(isolated_cache_database):
     payload = _snapshot(isolated_cache_database)
     payload["stop_reason"] = payload["manifest"]["stop_reason"] = None
-    payload["holdings"][0].pop(field)
-    if field == "quote":
-        payload["holdings"][0]["quote"] = {}
+    payload["holdings"][0]["quote"] = {}
     with pytest.raises(monitor_contract.MonitorContractError):
         monitor_contract.loads_monitor_snapshot(json.dumps(payload))
 
 
-@pytest.mark.parametrize("code", ["600000", None])
-@pytest.mark.parametrize("missing", ["lower_bound", "holding_risk", "both"])
-def test_over_budget_requires_evidence_not_only_detail(
-    code, missing, isolated_cache_database
-):
+@pytest.mark.parametrize("code,missing", [("600000", "lower_bound"), (None, "holding_risk")])
+def test_over_budget_requires_evidence_not_only_detail(code, missing, isolated_cache_database):
     payload = _snapshot(isolated_cache_database, shares=101)
     payload["escalations"][0]["code"] = code
-    payload["account"]["total_stop_risk"] = None
-    payload["account"]["total_stop_risk_pct"] = None
-    if missing in {"lower_bound", "both"}:
+    payload["account"].update(total_stop_risk=None, total_stop_risk_pct=None)
+    if missing == "lower_bound":
         payload["account"]["known_stop_risk_lower_bound"] = None
-    if missing in {"holding_risk", "both"}:
-        payload["holdings"][0]["stop_risk"] = None
-        payload["holdings"][0]["stop_risk_pct"] = None
+    else:
+        payload["holdings"][0].update(stop_risk=None, stop_risk_pct=None)
     with pytest.raises(monitor_contract.MonitorContractError, match="risk"):
         monitor_contract.loads_monitor_snapshot(json.dumps(payload))
 

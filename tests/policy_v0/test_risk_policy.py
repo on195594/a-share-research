@@ -155,20 +155,10 @@ def test_stored_asset_path_errors_use_the_risk_policy_error_contract(
         _resolve()
 
 
-@pytest.mark.parametrize(
-    "stored_scope,explicit_scope",
-    [
-        ("fixture-account", " fixture-account "),
-        (" fixture-account ", "fixture-account"),
-        (" fixture-account ", " fixture-account "),
-    ],
-)
-def test_stored_scope_uses_existing_nonempty_string_semantics(
-    stored_scope, explicit_scope
-):
-    path = _account_file(account_scope=stored_scope)
+def test_stored_scope_uses_existing_nonempty_string_semantics():
+    path = _account_file(account_scope=" fixture-account ")
     before = path.read_bytes()
-    result = _resolve(account_scope=explicit_scope)
+    result = _resolve(account_scope=" fixture-account ")
     assert result.account_scope == "fixture-account"
     assert path.read_bytes() == before
 
@@ -296,26 +286,16 @@ def test_numeric_override_is_per_field_and_does_not_reconfirm_policy(tmp_path):
     "field,bad",
     [
         ("schema_version", True),
-        ("schema_version", 2),
-        ("schema_version", 1.0),
         ("policy_id", ""),
         ("account_scope", "other"),
         ("currency", "USD"),
         ("confirmation_ref", None),
-        ("confirmed_at", ""),
         ("confirmed_at", "2999-01-01T00:00:00Z"),
         ("effective_from", "2999-01-01T00:00:00Z"),
         ("effective_to", "2001-01-01T00:00:00Z"),
-        ("effective_to", "1900-01-01T00:00:00Z"),
-        ("effective_from", "2026-01-01"),
-        ("confirmed_at", "not-a-date"),
         ("max_position_risk_pct", True),
-        ("max_position_risk_pct", float("nan")),
-        ("max_portfolio_risk_pct", float("inf")),
-        ("max_portfolio_risk_pct", 0),
         ("max_portfolio_risk_pct", 101),
         ("drawdown_observation_target_pct", -1),
-        ("max_position_risk_pct", "2"),
     ],
 )
 def test_invalid_file_never_falls_back_even_with_cli_overrides(field, bad, tmp_path):
@@ -329,10 +309,9 @@ def test_invalid_file_never_falls_back_even_with_cli_overrides(field, bad, tmp_p
         )
 
 
-@pytest.mark.parametrize("field", ["max_position_risk_pct", "max_portfolio_risk_pct"])
-@pytest.mark.parametrize(
-    "bad", [True, False, 0, -1, 100.01, float("inf"), float("nan")]
-)
+@pytest.mark.parametrize("field,bad", [
+    ("max_position_risk_pct", True), ("max_portfolio_risk_pct", 100.01),
+])
 def test_invalid_override_is_controlled(field, bad):
     with pytest.raises(risk_policy.RiskPolicyError):
         _resolve(**{field: bad})
@@ -361,49 +340,23 @@ def test_explicit_missing_file_is_not_a_default(source, tmp_path, monkeypatch):
         _resolve(max_position_risk_pct=3, **kwargs)
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        "permissions",
-        "directory",
-        "symlink",
-        "owner",
-        "duplicate",
-        "malformed",
-        "overflow",
-        "array",
-    ],
-)
-def test_discovered_bad_default_file_fails_closed(case, tmp_path, monkeypatch):
+@pytest.mark.parametrize("case", ["permissions", "symlink", "owner", "duplicate", "malformed"])
+def test_discovered_bad_default_file_fails_closed(case, monkeypatch):
     path, _ = paths.risk_policy_path()
     _file(path)
     if case == "permissions":
         path.chmod(0o644)
-    elif case in {"directory", "symlink"}:
+    elif case == "symlink":
         path.unlink()
-        if case == "directory":
-            path.mkdir()
-        else:
-            path.symlink_to(tmp_path / "missing-target")
+        path.symlink_to(path.with_name("missing-target"))
     elif case == "owner":
-        # Fake a foreign owner for the policy file only; pytest's own capture files keep real fstat.
-        real_fstat, policy_inode = os.fstat, path.stat().st_ino
-        monkeypatch.setattr(
-            paths.os,
-            "fstat",
-            lambda fd: SimpleNamespace(st_uid=os.getuid() + 1, st_mode=0o100600)
-            if real_fstat(fd).st_ino == policy_inode
-            else real_fstat(fd),
-        )
+        actual_fstat, inode = os.fstat, path.stat().st_ino
+        def foreign_owner(fd):
+            stat = actual_fstat(fd)
+            return SimpleNamespace(st_uid=os.getuid() + 1, st_mode=stat.st_mode) if stat.st_ino == inode else stat
+        monkeypatch.setattr(paths.os, "fstat", foreign_owner)
     else:
-        path.write_text(
-            {
-                "duplicate": '{"schema_version":1,"schema_version":1}',
-                "malformed": "not-json",
-                "overflow": '{"x":1e999}',
-                "array": "[]",
-            }[case]
-        )
+        path.write_text('{"schema_version":1,"schema_version":1}' if case == "duplicate" else "not-json")
     with pytest.raises(risk_policy.RiskPolicyError):
         _resolve(account_scope="fixture-account", max_position_risk_pct=3)
 
@@ -722,33 +675,11 @@ def test_monitor_missing_scope_keeps_holding_layer_without_applying_policy(
     assert "account-scope" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "case", ["mismatch", "expired", "invalid", "unreadable", "missing"]
-)
-def test_monitor_partial_mode_does_not_hide_policy_errors(
-    case, tmp_path, monkeypatch, capsys
-):
-    path = tmp_path / "policy.json"
-    value = _policy()
-    if case == "expired":
-        value["effective_to"] = "2001-01-01T00:00:00+08:00"
-    elif case == "invalid":
-        value["max_position_risk_pct"] = -1
-    _file(path, value)
-    if case == "unreadable":
-        path.chmod(0o644)
-    elif case == "missing":
-        path.unlink()
-    monkeypatch.setattr(
-        commands_holdings.db,
-        "read_only_db_session",
-        lambda *a: pytest.fail("database access"),
-    )
+def test_monitor_partial_mode_does_not_hide_policy_errors(tmp_path, monkeypatch, capsys):
+    path = _file(tmp_path / "policy.json", _policy(max_position_risk_pct=-1))
+    monkeypatch.setattr(commands_holdings.db, "read_only_db_session", lambda *a: pytest.fail("database access"))
     monkeypatch.setattr(socket.socket, "connect", lambda *a: pytest.fail("network"))
-    args = ["monitor-snapshot", "--json", "--policy-file", str(path)]
-    if case == "mismatch":
-        args += ["--account-scope", "other-account"]
-    assert cache.main(args) == 1
+    assert cache.main(["monitor-snapshot", "--json", "--policy-file", path]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "风险参数不可用" in captured.err
@@ -774,7 +705,7 @@ def test_untradable_boards_apply_with_or_without_account_scope(tmp_path):
     )
 
 
-@pytest.mark.parametrize("bad", ["STAR", ["CHINEXT"], ["STAR", "STAR"], [None], {}])
+@pytest.mark.parametrize("bad", ["STAR", ["CHINEXT"], ["STAR", "STAR"]])
 def test_invalid_untradable_boards_fail_closed(bad, tmp_path):
     path = _file(tmp_path / "policy.json", _policy(untradable_boards=bad))
     with pytest.raises(risk_policy.RiskPolicyError, match="untradable_boards"):

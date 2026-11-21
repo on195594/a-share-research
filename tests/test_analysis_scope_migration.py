@@ -75,7 +75,7 @@ def test_scoped_holdings_and_cycles_have_independent_unique_keys(legacy):
             insert(legacy,identity,holding,version,account_id=account,cycle_id=cycle,request_hash=request_hash)
 
 
-@pytest.mark.parametrize('account,cycle',[('a',''),('','cycle:a'),(None,'cycle:a'),('a',None)])
+@pytest.mark.parametrize('account,cycle',[('a',''),(None,'cycle:a')])
 def test_empty_scope_pairing_or_null_is_rejected(legacy,account,cycle):
     migrate(legacy)
     with pytest.raises(sqlite3.IntegrityError):

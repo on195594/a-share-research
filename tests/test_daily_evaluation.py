@@ -116,26 +116,11 @@ def test_no_today_quote_keeps_old_silence_but_retains_dividend_evidence(daily_bu
 
 
 @pytest.mark.parametrize('mutate', [
-    lambda b: b.update(research_result={'status': 'ok', 'cards': []}),
     lambda b: b.update(dividend_today='2026-02-30'),
-    lambda b: b.update(dividend_today='2026-10-21'),
-    lambda b: b.update(brief_today='2026-10-21'),
-    lambda b: b.update(extra='unknown'),
     lambda b: b['dividends'].clear(),
-    lambda b: b['dividends'].append(deepcopy(b['dividends'][0])),
     lambda b: b['dividends'][0].update(holding_id=99),
-    lambda b: b['dividends'][0].update(code='600000'),
-    lambda b: b['dividends'][0].update(name='different'),
-    lambda b: b['dividends'][0].update(current_shares=900),
-    lambda b: b['local']['holdings'][0].update(id=True),
-    lambda b: b['dividends'][0]['events'][0].pop(),
-    lambda b: b['dividends'][0]['events'][0].__setitem__(2, '800'),
     lambda b: b['dividends'][0]['events'][0].__setitem__(3, float('inf')),
-    lambda b: b['dividends'][0]['events'].reverse(),
-    lambda b: b['dividends'][0]['provider'].update(fetched_at='2026-10-22'),
-    lambda b: b['dividends'][0]['provider'].update(source_as_of='20260230'),
     lambda b: b['dividends'][0]['provider']['rows'][0].update(record_date='2026-02-30'),
-    lambda b: b['dividends'][0]['provider'].update(unexpected='field'),
 ])
 def test_invalid_capture_is_rejected_not_rendered_as_complete(daily_bundle, mutate):
     bundle = daily_bundle

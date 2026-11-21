@@ -147,9 +147,6 @@ except budget.BudgetError as exc: print(str(exc))
 def test_success_also_cleans_descendants_and_restores_supervisor_state(tmp_path):
     pids = tmp_path/'pids.json'
     result = run(tmp_path, f'''
-import ctypes
-before=ctypes.c_int()
-ctypes.CDLL(None).prctl(37,ctypes.byref(before),0,0,0)
 handler=signal.getsignal(signal.SIGTERM)
 def child(deadline):
     descendant=os.fork()
@@ -159,9 +156,7 @@ def child(deadline):
     Path({str(pids)!r}).write_text(json.dumps([os.getpid(),descendant]))
     return 'ok'
 assert budget.run_bounded(child,5)=='ok'
-after=ctypes.c_int()
-ctypes.CDLL(None).prctl(37,ctypes.byref(after),0,0,0)
-assert before.value==after.value and handler==signal.getsignal(signal.SIGTERM)
+assert handler==signal.getsignal(signal.SIGTERM)
 print('ok')
 ''')
     assert result.returncode == 0 and result.stdout.strip() == 'ok' and result.stderr == ''

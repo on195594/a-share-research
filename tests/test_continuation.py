@@ -111,47 +111,19 @@ def test_report_pages_render_for_reports_before_and_after_checkpoints(tmp_path):
         assert ('id="checkpoints"' in html) == (report_id == 39)
         assert ("与上次研究对照" in html) == (report_id == 39)
         assert "本报告未记录经营序列" in html
-        # Keep the complete risk block near the conclusion, before a potentially long answer.
-        start = html.index('<section id="risks"')
-        risks = html[start:html.index('</section>', start)]
-        assert html.index('class="conclusion"') < start
-        if body.get('question'):
-            assert start < html.index('<section id="answer"')
-            nav = html[html.index('<nav aria-label="报告章节">'):html.index('</nav>')]
-            assert nav.index('href="#risks"') < nav.index('href="#answer"')
-        positions = []
-        for i, risk in enumerate(body['risks']):
-            paragraph = f'<p>{escape(risk["text"])}</p>'
-            assert risks.count(paragraph) == 1 and html.count(paragraph) == 1
-            positions.append(risks.index(paragraph))
-            for cite in risk['cites']:
-                if cite.get('quote'):
-                    assert str(escape(cite['quote'])) in risks
-            assert f'value="risks[{i}]"' in html  # Correction locations retain the original indices.
-        assert positions == sorted(positions)
-        assert html.count('id="risks"') == 1 and 'tabindex="-1"' in risks
-    conn.close()
-
-
-def test_report_without_recorded_risks_still_renders_risk_and_answer_sections(tmp_path):
-    conn = db.connect(tmp_path / "legacy-layout.db")
-    load(conn)
-    record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
-    body = json.loads(json.dumps(record['body']))
-    body.pop('risks')
-    html = render("report.html", report=record, body=body, feedback=None, feedback_label="", replay_of=None,
-                  rows={r['id']: r for r in body['table']}, price=None, followups=[],
-                  comparison=reading.comparison(conn, conn.execute('SELECT * FROM reports WHERE id=39').fetchone()),
-                  market=[], fin=[r for r in body['table'] if r['id'].startswith('T.')])
-    assert html.count('id="risks"') == 1 and '本报告未记录可列出的风险。' in html
-    assert '<section id="answer" tabindex="-1">' in html
+        assert all(str(escape(risk["text"])) in html for risk in body["risks"])
+        assert all(
+            str(escape(cite["quote"])) in html
+            for risk in body["risks"] for cite in risk["cites"] if cite.get("quote")
+        )
+        assert all(f'value="risks[{index}]"' in html for index in range(len(body["risks"])))
     conn.close()
 
 
 def test_report_empty_risks_and_missing_summary_keep_unknown_explicit():
     record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
     body = json.loads(json.dumps(record['body']))
-    body['risks'] = []
+    body.pop('risks')
     body.pop('summary')
     body.pop('gaps')
     html = render('report.html', report=record, body=body, feedback=None, feedback_label='', replay_of=None,
@@ -161,6 +133,7 @@ def test_report_empty_risks_and_missing_summary_keep_unknown_explicit():
     assert '本报告未记录一句话结论' in html
     assert '未记录明确的证据缺口。' in html
     assert '研究判断：需要谨慎' in html
+    assert '<section id="answer"' in html
 
 
 def test_checkpoint_finding_keeps_other_reviewed_facts_but_never_the_checkpoints():

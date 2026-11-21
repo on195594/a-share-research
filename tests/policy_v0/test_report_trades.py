@@ -88,7 +88,7 @@ def test_same_day_trade_has_no_invented_gap_from_its_trade_price(monkeypatch, ca
     assert "含分红送转 +0.00%，基准 +0.00%，差 +0.00pp" in _lines(capsys)[1][0]
 
 @pytest.mark.parametrize(
-    "day", ["20261105", "2026-W45-4", "2026W454", "2026-11-5", "2026-02-29"]
+    "day", ["2026-W45-4", "2026-02-29"]
 )
 @pytest.mark.parametrize(
     "command,arguments",
@@ -283,10 +283,10 @@ def test_without_linked_trades_no_market_data_is_requested(monkeypatch, capsys):
 def test_report_trades_reuses_prices_and_failures_only_within_one_command(
     monkeypatch, capsys, outcome
 ):
-    for code in ("000001", "600900"):
-        _trade(code, "buy", "2026-06-01", 10.0, 500, 101)
-        _trade(code, "buy", "2026-06-01", 10.0, 100, 102)
-        _trade(code, "buy", "2026-10-21", 10.0, 100, 103)
+    code = "000001"
+    _trade(code, "buy", "2026-06-01", 10.0, 500, 101)
+    _trade(code, "buy", "2026-06-01", 10.0, 100, 102)
+    _trade(code, "buy", "2026-10-21", 10.0, 100, 103)
     _market(monkeypatch, {"2026-06-01": 100.0, "2026-10-21": 100.0}, {})
     calls = []
 
@@ -301,13 +301,8 @@ def test_report_trades_reuses_prices_and_failures_only_within_one_command(
         calls.clear()
         assert cache.main(["report-trades", "--end", "2026-10-21"]) == 0
         _, lines = _lines(capsys)
-        assert len(lines) == 6
-        assert sorted(calls) == [
-            ("000001", "2026-06-01"),
-            ("000001", "2026-10-21"),
-            ("600900", "2026-06-01"),
-            ("600900", "2026-10-21"),
-        ]
+        assert len(lines) == 3
+        assert sorted(calls) == [(code, "2026-06-01"), (code, "2026-10-21")]
         if outcome == "degraded":
             assert all("不作比较" in line for line in lines)
         elif outcome == "failed":

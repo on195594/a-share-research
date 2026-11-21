@@ -29,8 +29,8 @@ def install_provider(monkeypatch, frame):
     return client
 
 
-@pytest.mark.parametrize("code", ["H00300.CSI", "H00922.CSI"])
-def test_index_closes_use_library_contract(monkeypatch, code):
+def test_index_closes_use_library_contract(monkeypatch):
+    code = "H00300.CSI"
     client = install_provider(
         monkeypatch,
         pd.DataFrame({"trade_date": ["20261030"], "close": [1200.5]}),

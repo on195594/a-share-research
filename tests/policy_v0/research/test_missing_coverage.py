@@ -3,6 +3,8 @@
 """
 
 import json
+
+import pytest
 from datetime import datetime
 
 from a_share_research.policy.v0 import commands_admin, commands_holdings, db, domain, market_quotes
@@ -33,83 +35,40 @@ def _insert_analysis(code: str, result: str = "结论", score: int | None = None
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestCheckHoldingsBoundary:
-    """价格恰好等于止损线时的行为（<=运算符的边界条件）"""
-
-    def _add_holding_cost40(self):
-        # cost=40 → sl15=34.000, sl20=32.000
-        seed_position("600036", 40.0, 100, notes="测试")
-
-    def test_price_exactly_at_15pct_stop_triggers_yellow(self, capsys, monkeypatch):
-        self._add_holding_cost40()
-        monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
-        mock_price_quotes(
-            monkeypatch,
-            lambda codes: {
-                code: (market_quotes.PriceQuote(34.0, domain.cst_today(), "15:00:00"))
-                for code in codes
-            },
-        )
-        commands_holdings.cmd_check_holdings()
-        out = capsys.readouterr().out
-        assert "⚠️ 已跌破15%止损线" in out
-        assert "共 1 项预警" in out
-
-    def test_price_exactly_at_20pct_stop_triggers_red(self, capsys, monkeypatch):
-        self._add_holding_cost40()
-        monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
-        mock_price_quotes(
-            monkeypatch,
-            lambda codes: {
-                code: (market_quotes.PriceQuote(32.0, domain.cst_today(), "15:00:00"))
-                for code in codes
-            },
-        )
-        commands_holdings.cmd_check_holdings()
-        out = capsys.readouterr().out
-        assert "🔴 已跌破20%止损线" in out
+@pytest.mark.parametrize("price,expected", [
+    (34.0, "已跌破15%止损线"), (32.0, "已跌破20%止损线"), (34.001, "正常"),
+])
+def test_holding_stop_price_boundary(capsys, monkeypatch, price, expected):
+    seed_position("600036", 40.0, 100, notes="测试")
+    monkeypatch.setattr(domain, "is_a_share_trading_hours", lambda _now: False)
+    mock_price_quotes(monkeypatch, lambda codes: {
+        code: market_quotes.PriceQuote(price, domain.cst_today(), "15:00:00")
+        for code in codes
+    })
+    commands_holdings.cmd_check_holdings()
+    out = capsys.readouterr().out
+    assert expected in out
+    assert ("共 1 项预警" if price <= 34 else "无预警") in out
+    if price == 32.0:
         assert "P3:incomplete(market_snapshot_incomplete)" in out
         assert "建议立即止损" not in out
 
-    def test_price_one_cent_above_15pct_stop_is_normal(self, capsys, monkeypatch):
-        """34.001 > sl15=34.000，不应触发预警"""
-        self._add_holding_cost40()
-        mock_price_quotes(
-            monkeypatch,
-            lambda codes: {
-                code: (market_quotes.PriceQuote(34.001, domain.cst_today(), "15:00:00"))
-                for code in codes
-            },
-        )
-        commands_holdings.cmd_check_holdings()
-        out = capsys.readouterr().out
-        assert "✅ 正常" in out
-        assert "无预警" in out
-
-
-# ═══════════════════════════════════════════════════════════════════
-
 
 class TestWatchlistRows:
-    def test_needs_refresh_false_when_analysed_today(self, capsys):
-        set_valid_fundamentals("600036", "招商银行", "银行", {"pe_ttm": 5.5})
-        _insert_analysis("600036", score=62)
-        commands_admin.cmd_watchlist(["--json"])
-        rows = json.loads(capsys.readouterr().out)
-        assert rows[0]["code"] == "600036"
-        assert rows[0]["needs_refresh"] is False
 
     def test_ordering_scored_before_unscored(self, capsys):
         """Pending first analysis is prioritized ahead of an already-current row."""
-        set_valid_fundamentals("000001", "平安银行", "银行", {})
+        set_valid_fundamentals("000001", "平安银行", "银行", {"pe_ttm": 5.5, "pb": 0.8})
         set_valid_fundamentals("600036", "招商银行", "银行", {})
         record_valid_quote("000001")
         _insert_analysis("600036", score=55)  # only 600036 has analysis today
 
         commands_admin.cmd_watchlist(["--json"])
         rows = json.loads(capsys.readouterr().out)
-        codes = [r["code"] for r in rows]
-        assert codes.index("000001") < codes.index("600036")
+        assert [row["code"] for row in rows] == ["000001", "600036"]
+        assert rows[0]["pe_static"] == rows[0]["pe_ttm"] == 5.5
+        assert rows[0]["needs_refresh"] is True
+        assert rows[1]["needs_refresh"] is False
 
     def test_expired_stocks_excluded(self, capsys, monkeypatch):
         set_valid_fundamentals("600036", "招商银行", "银行", {})

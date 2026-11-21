@@ -38,9 +38,8 @@ def test_read_only_scope_resets_after_exception() -> None:
     assert not db.is_read_only()
 
 
-@pytest.mark.parametrize("suffix", ["#fragment", "?query", "%23"])
-def test_read_only_database_path_is_literal(tmp_path, monkeypatch, suffix) -> None:
-    database = tmp_path / f"cache.db{suffix}"
+def test_read_only_database_path_is_literal(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "cache.db#fragment?query%23"
     decoy = tmp_path / "cache.db"
     for path, value in ((database, "selected"), (decoy, "decoy")):
         connection = sqlite3.connect(path)

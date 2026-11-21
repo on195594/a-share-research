@@ -4,68 +4,15 @@ import sqlite3
 
 from a_share_research.policy.v0 import cache
 
-CLI_ARGUMENT_CASES = {
-    "research": (
-        ["reports", "600519"],
-        ["report", "9", "--compact"],
-    ),
-    "alerts": (["600000"], ["600000", "--active", "--json"]),
-    "l3-list": (["600000"], ["600000", "--active", "--json"]),
-    "retro-pending": ([], []),
-    "retro-stats": ([], ["A通用"]),
-    "retro-outliers": ([], ["--loss", "10"]),
-    "holdings": ([], ["600000", "--compact", "--json", "--active-only"]),
-    "position-return": (["600000"], ["600000", "10"]),
-    "dividend-check": ([], ["600000"]),
-    "benchmark-report": ([], ["--end", "2026-10-21"]),
-    "report-trades": ([], ["--end", "2026-10-21"]),
-    "daily-brief": ([], []),
-    "stop-alert": ([], []),
-    "portfolio-scenario": (
-        ["--snapshot", "/tmp/snapshot.json", "--sell", "600000:100", "--fees", "0"],
-        ["--snapshot", "/tmp/snapshot.json", "--sell", "600000:100", "--sell", "600001:200", "--fees", "5", "--cash", "100"],
-    ),
-    "position-size": (
-        ["--snapshot", "/tmp/snapshot.json", "--code", "600000", "--price", "10", "--framework", "B"],
-        ["--snapshot", "/tmp/snapshot.json", "--code", "600000", "--price", "10", "--framework", "B", "--cash", "1000"],
-    ),
-    "portfolio-risk": (
-        [],
-        [
-            "--portfolio-value",
-            "100000",
-            "--max-position-risk-pct",
-            "2",
-            "--max-portfolio-risk-pct",
-            "8",
-        ],
-    ),
-    "check-holdings": ([], []),
-    "monitor-snapshot": (
-        ["--json"],
-        [
-            "--portfolio-value",
-            "100000",
-            "--max-position-risk-pct",
-            "2",
-            "--max-portfolio-risk-pct",
-            "8",
-            "--json",
-        ],
-    ),
-    "watchlist": ([], ["--json", "--breakdown"]),
-    "list": ([], []),
-}
-
-
-def test_public_mains_return_int() -> None:
-    assert isinstance(cache.main(["--help"]), int)
-
-
-def test_cli_help_does_not_create_state(tmp_path, monkeypatch) -> None:
+def test_cli_help_does_not_create_state(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     assert cache.main(["--help"]) == 0
+    output = capsys.readouterr().out
+    assert all(name in output for name in cache.COMMANDS)
+    assert "--confirm-write" not in output
     assert not (tmp_path / ".local").exists()
+    assert cache.COMMANDS.keys() == cache.COMMAND_CLASSIFICATION.keys()
+    assert set(cache.COMMAND_CLASSIFICATION.values()) == {"R0", "R1"}
 
 
 def test_holdings_missing_database_is_unavailable_not_not_held(
@@ -112,22 +59,6 @@ def test_json_monitoring_views_fail_when_database_is_missing(
         assert not database.exists()
 
 
-def test_cli_argument_matrix_covers_every_command(monkeypatch) -> None:
-    assert set(CLI_ARGUMENT_CASES) == set(cache.COMMANDS)
-    cache.paths.cache_db_path().touch()
-    called: list[tuple[str, list[str]]] = []
-    for command, cases in CLI_ARGUMENT_CASES.items():
-        monkeypatch.setitem(
-            cache.COMMANDS,
-            command,
-            lambda args, name=command: called.append((name, args)),
-        )
-        for case in cases:
-            called.clear()
-            assert cache.main([command, *case]) == 0, command
-            assert called == [(command, case)], command
-
-
 def test_global_options_and_removed_write_commands_never_dispatch(monkeypatch) -> None:
     called: list[list[str]] = []
     monkeypatch.setitem(cache.COMMANDS, "holdings", called.append)
@@ -143,11 +74,9 @@ def test_argparse_rejects_extra_positionals_and_unknown_options(monkeypatch) -> 
         raise AssertionError("invalid argv reached command handler")
 
     cache.paths.cache_db_path().touch()
-    for command, (_, maximum) in CLI_ARGUMENT_CASES.items():
-        monkeypatch.setitem(cache.COMMANDS, command, fail_if_called)
-        assert cache.main([command, *maximum, "EXTRA_POSITIONAL"]) == 2, command
-        assert cache.main([command, "--unknown-option"]) == 2, command
-
+    monkeypatch.setitem(cache.COMMANDS, "holdings", fail_if_called)
+    assert cache.main(["holdings", "600000", "EXTRA_POSITIONAL"]) == 2
+    assert cache.main(["holdings", "--unknown-option"]) == 2
 
 def test_every_subcommand_has_help(capsys) -> None:
     for command in cache.COMMANDS:

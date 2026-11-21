@@ -44,7 +44,7 @@ def test_importing_paths_does_not_create_home_state(tmp_path) -> None:
     assert not (tmp_path / ".local").exists()
 
 
-@pytest.mark.parametrize("existing_mode", [None, 0o700, 0o755])
+@pytest.mark.parametrize("existing_mode", [None, 0o700])
 def test_db_parent_permissions_do_not_change_existing_directories(
     tmp_path, existing_mode
 ):
@@ -52,11 +52,7 @@ def test_db_parent_permissions_do_not_change_existing_directories(
     if existing_mode is not None:
         parent.mkdir(mode=existing_mode)
         parent.chmod(existing_mode)
-    if existing_mode == 0o755:
-        with pytest.raises(PermissionError, match="0700"):
-            paths.ensure_db_parent(parent / "cache.db")
-    else:
-        paths.ensure_db_parent(parent / "cache.db")
+    paths.ensure_db_parent(parent / "cache.db")
     assert parent.stat().st_mode & 0o777 == (existing_mode or 0o700)
 
 

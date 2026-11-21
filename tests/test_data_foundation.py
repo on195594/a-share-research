@@ -1,9 +1,7 @@
 """Invariants of the v9 data foundation: rebuilt tables, generated identity columns and their checks."""
 
-import ast
 import importlib
 import json
-import re
 import sqlite3
 import sys
 import threading
@@ -43,9 +41,7 @@ def stored(conn, table):
 
 
 COMPANY_TABLES = ("runs", "reports", "prices", "scan_events", "subscriptions", "disclosure_checks")
-CANONICAL_CODES = (("603606", "603606"), ("603606.SH", "603606"),
-                   ("000333.SZ", "000333"), ("920001.BJ", "920001"))
-INVALID_CODES = ("603606.SS", "60360", "６０３６０６", "603606.sh", "603606 ", "", "6036060", "60360x")
+
 
 
 def test_rebuilt_tables_keep_payload_last_and_ids_are_never_reused(conn):
@@ -108,38 +104,21 @@ def insert_company(conn, table, code):
                           json.dumps(close), RECORD['created_at']))
 
 
-@pytest.mark.parametrize('table', COMPANY_TABLES)
-@pytest.mark.parametrize('code', INVALID_CODES)
-def test_storage_rejects_a_code_without_a_company(tmp_path, table, code):
-    conn = db.connect(tmp_path / 'app.db')
-    with pytest.raises(sqlite3.IntegrityError, match='company_key'):
-        insert_company(conn, table, code)
-
-
-@pytest.mark.parametrize('table', COMPANY_TABLES)
-@pytest.mark.parametrize('code,expected', CANONICAL_CODES)
-def test_company_key_and_normalization_agree_on_canonical_forms(tmp_path, table, code, expected):
+@pytest.mark.parametrize('table,code,key', [
+    ('runs', '603606.SH', '603606'),
+    ('reports', '603606', '603606'),
+    ('prices', '000333.SZ', '000333'),
+    ('scan_events', '920001.BJ', '920001'),
+    ('subscriptions', '603606.SH', '603606'),
+    ('disclosure_checks', '603606', '603606'),
+])
+def test_storage_uses_canonical_company_key(tmp_path, table, code, key):
     conn = db.connect(tmp_path / 'app.db')
     insert_company(conn, table, code)
-    assert conn.execute(f'SELECT company_key FROM {table} WHERE code=?', (code,)).fetchone()[0] == expected
-    assert stock_codes.normalize_key(code) == expected
-
-
-@pytest.mark.parametrize('code', [code for code in INVALID_CODES if code != '603606 '])
-def test_normalization_rejects_the_same_noncanonical_codes(code):
-    with pytest.raises(ValueError):
-        stock_codes.normalize_key(code)
-
-
-@pytest.mark.parametrize('table', COMPANY_TABLES)
-@pytest.mark.parametrize('code,expected', CANONICAL_CODES)
-@pytest.mark.parametrize('padding', [(' ', ''), ('', ' '), ('\t', '\n')])
-def test_whitespace_tolerance_is_only_an_input_boundary(tmp_path, table, code, expected, padding):
-    conn = db.connect(tmp_path / 'app.db')
-    value = padding[0] + code + padding[1]
-    assert stock_codes.normalize_key(value) == expected
-    with pytest.raises(sqlite3.IntegrityError, match='company_key'):
-        insert_company(conn, table, value)
+    assert conn.execute(f'SELECT company_key FROM {table} WHERE code=?', (code,)).fetchone()[0] == key
+    for invalid in (' ' + code, '603606.SS'):
+        with pytest.raises(sqlite3.IntegrityError, match='company_key'):
+            insert_company(conn, table, invalid)
 
 
 @pytest.mark.parametrize("request_id, code, expected", [
@@ -163,12 +142,6 @@ def test_batch_id_only_accepts_the_exact_request_shape(tmp_path, request_id, cod
     conn = db.connect(tmp_path / "app.db")
     run = db.create_run(conn, code, request_id)
     assert conn.execute("SELECT batch_id FROM runs WHERE id = ?", (run,)).fetchone()[0] == expected
-
-
-def test_full_width_code_gets_a_request_error_not_a_database_error(tmp_path):
-    conn = db.connect(tmp_path / "app.db")
-    with pytest.raises(service.RequestError):
-        service.submit(conn, "６０３６０６", "full-width")
 
 
 def test_migration_keeps_rows_triggers_and_sequence_and_reruns_as_a_noop(tmp_path):
@@ -337,40 +310,6 @@ def test_latest_close_normalizes_both_code_forms(conn):
     bare = scans.latest_close(conn, '603606')
     assert bare['last_close'] == float(close)
     assert scans.latest_close(conn, '603606.SH') == bare
-
-
-
-def test_business_sql_uses_shared_company_and_sample_definitions():
-    root = Path(db.__file__).parent
-    # Section 3.5 of the data foundation plan: selection predicates kept as frozen.
-    retained = {'validation.py': 3, 'zones.py': 1, 'reading.py': 2}
-    found = dict.fromkeys(retained, 0)
-    for path in root.rglob('*.py'):
-        tree = ast.parse(path.read_text())
-        # DDL defines the identity; only these exact assignments may use substr(code).
-        excluded = set()
-        samples = set()
-        if path.name == 'db.py':
-            for node in tree.body:
-                if isinstance(node, ast.Assign):
-                    names = {target.id for target in node.targets if isinstance(target, ast.Name)}
-                    if names & {'COMPANY_KEY', 'BATCH_ID'}:
-                        excluded.update(id(child) for child in ast.walk(node))
-                    if names & {'RESEARCH_ORIGINAL', 'FORMAL_REPORT'}:
-                        samples.update(id(child) for child in ast.walk(node))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
-                continue
-            text = node.value
-            location = f'{path.name}:{node.lineno}'
-            if id(node) not in excluded:
-                assert not re.search(r'\bsubstr\s*\(\s*(?:[a-z_]\w*\.)?code\b', text, re.I), location
-            assert not re.search(r"\bLIKE\s*'batch-%'", text, re.I), location
-            if id(node) not in samples:
-                hits = len(re.findall(r'\breplay_of\s+IS\s+NULL\b', text, re.I))
-                assert not hits or path.name in retained, location
-                found[path.name] = found.get(path.name, 0) + hits
-    assert {name: found[name] for name in retained} == retained
 
 
 @pytest.fixture

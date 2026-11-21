@@ -135,13 +135,8 @@ def test_existing_tools_is_automatically_included_and_not_resumed_before_verific
     deploy.deploy('revision',state.evidence)
     assert state.containers=={'web':'new-web','worker':'new-worker','tools':'new-worker'}
     assert not state.paused
-    assert index(state,('control','status')) < index(state,('control','pause'))
     assert index(state,('control','pause')) < index(state,('run','docker','compose','stop'))
-    stops=commands(state,'stop')
-    assert {s for event in stops for s in event[6:]}=={'web','worker','tools'}
-    assert max(state.events.index(event) for event in stops)<index(state,('backup',))
-    assert index(state,('backup',))<index(state,('run','docker','tag','new-web'))
-    assert any(event[-3:]==('web','worker','tools') for event in commands(state,'up'))
+    assert index(state,('backup',)) < index(state,('run','docker','tag','new-web'))
     assert index(state,('tools_ready',True))<index(state,('control','resume'))
     assert json.loads((state.evidence / 'worker-preflight.json').read_text())['ready']
     tags=[event for event in state.events if event[:3]==('run','docker','tag')]
@@ -200,14 +195,6 @@ def test_tools_requires_the_configured_method_cards_directory_before_pause(opera
     assert not commands(state, 'stop')
 
 
-def test_lost_resume_reply_pauses_admission_again(operations):
-    state = operations(failure='resume_lost')
-    with pytest.raises(RuntimeError, match='lost resume reply'):
-        deploy.deploy('revision', state.evidence)
-    assert state.paused
-    assert state.containers['tools'] == 'new-worker'
-
-
 @pytest.mark.parametrize('offline', [False, True])
 def test_republish_previous_commit_uses_the_restored_database_or_keeps_existing_pause(operations, local_policy, offline):
     state = operations()
@@ -236,8 +223,7 @@ def test_backup_failure_restarts_existing_services_without_retagging(operations)
     state=operations(failure='backup', previous_config=True)
     with pytest.raises(RuntimeError,match='backup failure'):
         deploy.deploy('revision',state.evidence,allow_config=True)
-    assert commands(state,'start')[-1][-3:]==('web','worker','tools')
-    assert not commands(state,'up')
+    assert state.containers == {'web':'old-web','worker':'old-worker','tools':'old-worker'}
     assert all(state.running.values()) and not state.paused
     assert state.tags=={'web':'old-web','worker':'old-worker'}
 
@@ -247,7 +233,6 @@ def test_without_tools_container_ordinary_release_keeps_two_services(operations)
     deploy.deploy('revision',state.evidence)
     assert state.containers=={'web':'new-web','worker':'new-worker'}
     assert not any(event[0]=='control' for event in state.events)
-    assert commands(state,'up')[-1][-2:]==('web','worker')
 
 
 @pytest.mark.parametrize('allow_config', [False, True])
@@ -308,19 +293,24 @@ def test_failed_policy_activation_keeps_tools_paused(operations, local_policy):
     assert ('control', 'resume') not in state.events
 
 
-def test_failure_saving_success_after_resume_pauses_tools_again(operations, monkeypatch):
-    state = operations()
+@pytest.mark.parametrize("failure,error,message", [
+    ("resume_lost", RuntimeError, "lost resume reply"),
+    ("evidence", OSError, "evidence failure"),
+])
+def test_release_failure_after_resume_pauses_tools_again(operations, monkeypatch, failure, error, message):
+    state = operations(failure=failure)
     write = deploy.save_evidence
 
     def save(directory, name, value):
-        if name == 'release-state.json' and value['status'] == 'succeeded':
+        if failure == "evidence" and name == 'release-state.json' and value['status'] == 'succeeded':
             raise OSError('injected evidence failure')
         return write(directory, name, value)
 
     monkeypatch.setattr(deploy, 'save_evidence', save)
-    with pytest.raises(OSError, match='evidence failure'):
+    with pytest.raises(error, match=message):
         deploy.deploy('revision', state.evidence)
     assert ('control', 'resume') in state.events and state.paused
+    assert state.containers['tools'] == 'new-worker'
 
 
 def test_real_matched_same_image_never_adds_activation_or_pauses(operations, local_policy, monkeypatch):

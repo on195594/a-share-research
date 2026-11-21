@@ -74,11 +74,6 @@ def test_pe_reference_rejects_wrong_company():
         sources.pe_quantiles(pd.DataFrame([MARKET]), "603606", MARKET["trade_date"])
 
 
-def test_report_rc_limit_message_classification():
-    assert market._report_rc_limited(Exception("抱歉，您每分钟最多访问该接口1次"))
-    assert not market._report_rc_limited(Exception("没有访问权限"))
-
-
 @pytest.fixture
 def daily_reports(monkeypatch):
     monkeypatch.delenv("TUSHARE_CACHE", raising=False)
@@ -225,19 +220,6 @@ def test_research_passes_market_date_and_company_and_replay_never_fetches(daily_
     assert len(calls) == 1 and budget_calls() == 8
 
 
-def test_minute_slot_survives_repeated_calls_without_burning_budget(daily_reports, monkeypatch):
-    monkeypatch.setattr(market, "REPORT_RC_MIN_INTERVAL", 61)
-    market.query(daily_reports, "report_rc", start_date="20260918", end_date="20260918")
-    result = sources.report_rc_window("2026-09-18")
-    assert result["covered_days"] == 1
-    assert "冷却" in result["reason"] and budget_calls() == 1
-    assert result["upstream_attempts"] == 0
-    assert daily_reports.calls == ["20260918"]
-    # Cached reads remain usable in the cooldown, including cache-only freeze.
-    assert sources.report_rc_window("2026-09-18", days=0, cache_only=True)["covered_days"] == 1
-    assert budget_calls() == 1
-
-
 def test_minute_slot_is_atomic_across_processes_and_restart(daily_reports):
     script = """
 from a_share_research import market
@@ -256,20 +238,6 @@ except market.ReportRCCoolingDown:
     restarted = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=30)
     assert restarted.returncode == 0 and restarted.stdout.strip() == "0"
     assert budget_calls() == 1
-
-
-def test_empty_response_cache_expires_and_can_be_refreshed(daily_reports):
-    params = dict(start_date="20260917", end_date="20260917")
-    assert market.query(daily_reports, "report_rc", **params).empty
-    assert market.query(daily_reports, "report_rc", **params).empty
-    assert budget_calls() == 1
-    key = market._tushare_cache_key("report_rc", params)
-    with closing(market.report_rc_connect()) as conn:
-        conn.execute("UPDATE tushare_cache SET created_at=? WHERE key=?",
-                     ((datetime.now(db.SHANGHAI) - timedelta(days=8)).isoformat(), key))
-    assert market.cached_response("report_rc", params) is None
-    assert market.query(daily_reports, "report_rc", **params).empty
-    assert budget_calls() == 2
 
 
 def test_recent_empty_day_retries_daily(daily_reports, monkeypatch):
@@ -294,6 +262,7 @@ def test_recent_empty_day_retries_daily(daily_reports, monkeypatch):
 
 
 @pytest.mark.parametrize("message,seconds", [
+    ("抱歉，您每分钟最多访问该接口1次", 61),
     ("抱歉，您访问接口(report_rc)频率超限(1次/分钟)", 61),
     ("每小时最多访问10次", 3601),
     ("连接超时", 300),

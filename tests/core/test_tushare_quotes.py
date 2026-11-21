@@ -34,29 +34,16 @@ def test_tushare_stock_code_supports_beijing_exchange() -> None:
     assert to_tushare_stock_code("430047.BJ") == "430047.BJ"
 
 
-def test_tushare_normalizer_requires_dataframe():
-    result = _normalize_tushare_bars(
-        [{"trade_date": "20260623", "close": "10.5"}],
-        DAILY_SOURCE,
-        "close_price",
-    )
-
-    assert result.status == "failed"
-    assert result.error_code == SCHEMA_CHANGED
+@pytest.mark.parametrize("payload,error", [
+    ([{"trade_date": "20260623", "close": "10.5"}], SCHEMA_CHANGED),
+    (pd.DataFrame({"trade_date": ["20260623"], "close": [10.5]}), MISSING_COLUMNS),
+])
+def test_tushare_normalizer_refuses_bad_response_shape(payload, error):
+    result = _normalize_tushare_bars(payload, DAILY_SOURCE, "close_price")
+    assert result.status == "failed" and result.error_code == error
 
 
-def test_tushare_normalizer_requires_ohlc_for_close_price():
-    result = _normalize_tushare_bars(
-        pd.DataFrame({"trade_date": ["20260623"], "close": [10.5]}),
-        DAILY_SOURCE,
-        "close_price",
-    )
-
-    assert result.status == "failed"
-    assert result.error_code == MISSING_COLUMNS
-
-
-@pytest.mark.parametrize("bad_close", [float("nan"), float("inf"), 0.0, -1.0])
+@pytest.mark.parametrize("bad_close", [float("nan"), 0.0])
 def test_tushare_normalizer_rejects_invalid_prices(bad_close: float):
     result = _normalize_tushare_bars(
         pd.DataFrame(

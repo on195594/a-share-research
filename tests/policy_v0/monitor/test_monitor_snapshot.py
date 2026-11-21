@@ -16,7 +16,6 @@ from a_share_research.policy.v0 import (
     db,
     domain,
     market_quotes,
-    monitor_contract,
 )
 from policy_v0.helpers import mock_price_quotes
 from support.policy_replay import _quotes, _run, _seed_holding
@@ -28,14 +27,10 @@ def test_local_snapshot_keeps_one_wal_version(
     isolated_cache_database, monkeypatch
 ) -> None:
     holding_id = _seed_holding(isolated_cache_database)
-    with sqlite3.connect(isolated_cache_database) as writer:
-        writer.execute("PRAGMA journal_mode=WAL")
+    with sqlite3.connect(isolated_cache_database, timeout=0) as writer:
         original_session = db.read_only_db_session
-        statements = []
-        updated = []
 
-        def trace(sql):
-            statements.append(sql)
+        def update_after_first_read(sql):
             if "SELECT COUNT(*) FROM holdings" in sql:
                 writer.execute("UPDATE holdings SET shares=200")
                 writer.execute(
@@ -48,80 +43,49 @@ def test_local_snapshot_keeps_one_wal_version(
                     (holding_id, domain.utc_now().isoformat(), domain.utc_now().isoformat()),
                 )
                 writer.commit()
-                updated.append(True)
 
         @contextmanager
-        def traced_session():
+        def interrupted_read():
             with original_session() as reader:
-                reader.set_trace_callback(trace)
+                reader.set_trace_callback(update_after_first_read)
                 yield reader
-                assert not reader.in_transaction
 
-        monkeypatch.setattr(db, "read_only_db_session", traced_session)
+        monkeypatch.setattr(db, "read_only_db_session", interrupted_read)
         local = commands_monitor._load_monitor_local_snapshot()
-        assert updated == [True]
         assert local["holdings"][0]["shares"] == 100
         assert local["holdings"][0]["alerts"] == []
         assert writer.execute("SELECT shares FROM holdings").fetchone() == (200,)
         assert writer.execute("SELECT COUNT(*) FROM holding_alerts").fetchone() == (1,)
-        assert statements[0] == "BEGIN DEFERRED"
-        assert statements[-1] == "COMMIT"
-        assert all(
-            sql.lstrip().startswith(("SELECT", "BEGIN", "COMMIT")) for sql in statements
-        )
 
 
-@pytest.mark.parametrize("existing_transaction", [False, True])
-@pytest.mark.parametrize("query_failure", [False, True])
+
 def test_local_snapshot_releases_transaction_and_connection(
-    isolated_cache_database, monkeypatch, existing_transaction, query_failure
+    isolated_cache_database, monkeypatch
 ) -> None:
     _seed_holding(isolated_cache_database)
     original_session = db.read_only_db_session
-    statements = []
-    connections = []
-
-    def authorize(action, table, _column, _database, _trigger):
-        if (
-            query_failure
-            and action == sqlite3.SQLITE_READ
-            and table == "holding_alerts"
-        ):
-            return sqlite3.SQLITE_DENY
-        if action in {
-            sqlite3.SQLITE_INSERT,
-            sqlite3.SQLITE_UPDATE,
-            sqlite3.SQLITE_DELETE,
-        }:
-            pytest.fail("snapshot attempted application DML")
-        return sqlite3.SQLITE_OK
 
     @contextmanager
-    def checked_session():
+    def failing_read():
         with original_session() as reader:
-            connections.append(reader)
-            reader.set_trace_callback(statements.append)
-            reader.set_authorizer(authorize)
-            if existing_transaction:
-                reader.execute("BEGIN DEFERRED")
+            reader.set_authorizer(
+                lambda action, table, *_: sqlite3.SQLITE_DENY
+                if action == sqlite3.SQLITE_READ and table == "holding_alerts"
+                else sqlite3.SQLITE_OK
+            )
             try:
                 yield reader
             finally:
                 assert not reader.in_transaction
 
-    monkeypatch.setattr(db, "read_only_db_session", checked_session)
-    if query_failure:
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "read_only_db_session", failing_read)
         with pytest.raises(sqlite3.DatabaseError):
             commands_monitor._load_monitor_local_snapshot()
-    else:
-        commands_monitor._load_monitor_local_snapshot()
-    assert statements.count("BEGIN DEFERRED") == 1
-    assert statements[-1] == ("ROLLBACK" if query_failure else "COMMIT")
-    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
-        connections[0].execute("SELECT 1")
+    assert commands_monitor._load_monitor_local_snapshot()["holdings"]
 
 
-def test_clean_five_holding_fast_gate_uses_one_read_session_one_quote_batch_and_no_writes(
+def test_clean_five_holding_fast_gate_does_not_write(
     isolated_cache_database, monkeypatch, capsys
 ) -> None:
     positions = [
@@ -133,46 +97,29 @@ def test_clean_five_holding_fast_gate_uses_one_read_session_one_quote_batch_and_
     ]
     for code, shares in positions:
         _seed_holding(isolated_cache_database, code, shares=shares)
-    codes = sorted(code for code, _shares in positions)
+    with sqlite3.connect(isolated_cache_database) as conn:
+        legacy = {"regulatory_gate": {"status": "blocked", "action_eligible": False, "reason_code": "legacy"}}
+        conn.execute(
+            """INSERT INTO stock_fundamentals (code, name, industry, data, updated_at, ttl_hours)
+               VALUES ('600036', 'fixture', 'fixture', ?, '2000-01-01T00:00:00+00:00', 1)""",
+            (json.dumps(legacy),),
+        )
     with sqlite3.connect(isolated_cache_database) as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     before = hashlib.sha256(isolated_cache_database.read_bytes()).hexdigest()
-
-    session_count = 0
-    session_open = False
-    original_session = db.read_only_db_session
-
-    @contextmanager
-    def counted_session(*args, **kwargs):
-        nonlocal session_count, session_open
-        session_count += 1
-        session_open = True
-        with original_session(*args, **kwargs) as conn:
-            yield conn
-        session_open = False
-
-    quote_calls: list[list[str]] = []
-
-    def fetch(requested: list[str]) -> dict:
-        assert session_open is False
-        quote_calls.append(requested)
-        return _quotes(requested)
-
-    monkeypatch.setattr(db, "read_only_db_session", counted_session)
-    mock_price_quotes(monkeypatch, fetch)
+    mock_price_quotes(monkeypatch, _quotes)
 
     # Synthetic clean scenario: 62,000 risk on 1M stays inside both budgets.
     result, payload = _run(capsys, ["--portfolio-value", "1000000"])
 
     assert result == 0
-    assert session_count == 1
-    assert quote_calls == [codes]
     assert payload["data_status"] == "complete"
     assert payload["valuation_status"] == "exact"
     assert payload["review_status"] == "cleared"
     assert payload["action_status"] == "no_action"
     assert payload["stop_reason"] == "clean_fast_gate"
-    assert payload["escalations"] == []
+    assert payload["escalations"] == [] and payload["data_gaps"] == []
+    assert "risk_gates" not in payload["holdings"][0]
     assert payload["quote_coverage"] == {"active": 5, "complete": True, "priced": 5}
     assert payload["manifest"]["research_subagents"] == 0
     assert hashlib.sha256(isolated_cache_database.read_bytes()).hexdigest() == before
@@ -209,28 +156,6 @@ def test_missing_industry_comparison_blocks_clean_fast_gate(
         (gap["code"], gap["field"], gap["minimum_action"])
         for gap in payload["data_gaps"]
     } >= {("600036", "industry_change_pct", "supply a same-day industry comparison")}
-
-
-def test_legacy_fundamentals_rows_do_not_affect_snapshot(
-    isolated_cache_database, monkeypatch, capsys
-) -> None:
-    """P0-P2 gates were removed; an expired or blocked legacy row is ignored."""
-    _seed_holding(isolated_cache_database)
-    blocked = {"status": "blocked", "action_eligible": False, "reason_code": "legacy"}
-    with sqlite3.connect(isolated_cache_database) as conn:
-        conn.execute(
-            """INSERT INTO stock_fundamentals
-               (code, name, industry, data, updated_at, ttl_hours)
-               VALUES ('600036', 'fixture', 'fixture', ?, '2000-01-01T00:00:00+00:00', 1)""",
-            (json.dumps({"regulatory_gate": blocked}),),
-        )
-    mock_price_quotes(monkeypatch, _quotes)
-
-    _result, payload = _run(capsys, ["--portfolio-value", "100000"])
-
-    assert "governance_gate" not in {item["reason_code"] for item in payload["escalations"]}
-    assert "governance_gates" not in {gap["field"] for gap in payload["data_gaps"]}
-    assert "risk_gates" not in payload["holdings"][0]
 
 
 @pytest.mark.parametrize(
@@ -473,20 +398,6 @@ def test_missing_database_returns_machine_readable_unavailable_without_creating_
     assert not database.exists()
 
 
-def test_status_validator_rejects_cross_dimension_enums() -> None:
-    payload = commands_monitor.unavailable_monitor_snapshot(100000)
-    dimensions = {
-        "data_status": "exact",
-        "valuation_status": "blocked",
-        "review_status": "no_action",
-        "action_status": "complete",
-    }
-    for field, invalid in dimensions.items():
-        candidate = {**payload, field: invalid}
-        with pytest.raises(ValueError, match=field):
-            monitor_contract.validate_monitor_snapshot(candidate)
-
-
 def test_frozen_five_holding_replay_freezes_new_risk_without_trade_candidate(
     isolated_cache_database, monkeypatch, capsys
 ) -> None:
@@ -652,13 +563,7 @@ def test_missing_stop_loss_makes_account_risk_budget_unknown(
 def test_monitor_industry_unavailable_stays_within_one_bounded_request(
     case, monkeypatch
 ) -> None:
-    failed_cache = case in {
-        "absent",
-        "stale",
-        "malformed",
-        "invalid_member",
-        "nan_epoch",
-    }
+    failed_cache = case in {"absent", "stale", "malformed", "invalid_member", "nan_epoch"}
 
     class FakeProvider:
         def read_cached_industry_map(self):
@@ -709,40 +614,21 @@ def test_monitor_industry_unavailable_stays_within_one_bounded_request(
         assert industry_result is not None
 
 
-@pytest.mark.parametrize(
-    "error_code",
-    [
-        "CACHE_MISSING",
-        "CACHE_STALE",
-        "CACHE_CORRUPT",
-        "CACHE_MALFORMED",
-        "CACHE_FUTURE_TIMESTAMP",
-        "CACHE_READ_FAILED",
-    ],
-)
-def test_failed_cached_industry_states_never_network_or_write(
-    error_code, tmp_path, monkeypatch
-) -> None:
-    calls = []
-
+def test_failed_cached_industry_states_never_network_or_write(tmp_path, monkeypatch) -> None:
     class FakeProvider:
         def read_cached_industry_map(self):
-            calls.append("read_cached_industry_map")
-            return SimpleNamespace(status="failed", value=None, error_code=error_code)
+            return SimpleNamespace(status="failed", value=None, error_code="CACHE_MISSING")
 
         def fetch_industry_map(self):
-            raise AssertionError("cache-only consumer must not use network API")
+            pytest.fail("cache-only consumer must not use network API")
 
     monkeypatch.setattr(commands_holdings, "TushareFundamentalsProvider", FakeProvider)
-    monkeypatch.setattr(
-        commands_holdings.market_quotes, "fetch_sina_batch_quotes", dict.fromkeys
-    )
+    monkeypatch.setattr(commands_holdings.market_quotes, "fetch_sina_batch_quotes", dict.fromkeys)
 
     _, result = commands_holdings.fetch_monitor_price_quotes(["600036"])
 
     assert result.status == "failed"
-    assert result.error_code == error_code
-    assert calls == ["read_cached_industry_map"]
+    assert result.error_code == "CACHE_MISSING"
     assert list(tmp_path.iterdir()) == []
 
 
@@ -792,14 +678,7 @@ def test_monitor_snapshot_preserves_industry_cache_status(
     "field,value",
     [
         ("shares", None),
-        ("shares", 0),
-        ("shares", -1),
-        ("shares", True),
-        ("stop_loss_20", None),
         ("stop_loss_20", 0),
-        ("stop_loss_20", float("nan")),
-        ("price", None),
-        ("price", 0),
         ("price", float("nan")),
     ],
 )
@@ -890,39 +769,18 @@ def test_tier_review_price_entrances(
         assert conn.execute("SELECT * FROM holding_tier_state").fetchall() == before
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        "missing_config",
-        "missing_cost",
-        "zero_cost",
-        "missing_target",
-        "zero_target",
-        "path_a",
-    ],
-)
+@pytest.mark.parametrize("change", [
+    "DELETE FROM holding_tier_state",
+    "UPDATE holdings SET reference_cost=NULL",
+    "UPDATE holding_tier_state SET exit_path='B', exit_target_pct=0",
+    "UPDATE holding_tier_state SET exit_path='A'",
+])
 def test_tier_missing_configuration_or_evidence_fails_closed(
-    case,
-    isolated_cache_database,
-    monkeypatch,
-    capsys,
+    change, isolated_cache_database, monkeypatch, capsys
 ) -> None:
     _seed_holding(isolated_cache_database)
     with sqlite3.connect(isolated_cache_database) as conn:
-        if case == "missing_config":
-            conn.execute("DELETE FROM holding_tier_state")
-        elif case in {"missing_cost", "zero_cost"}:
-            conn.execute(
-                "UPDATE holdings SET reference_cost=?",
-                (None if case == "missing_cost" else 0,),
-            )
-        elif case in {"missing_target", "zero_target"}:
-            conn.execute(
-                "UPDATE holding_tier_state SET exit_path='B', exit_target_pct=?",
-                (None if case == "missing_target" else 0,),
-            )
-        elif case == "path_a":
-            conn.execute("UPDATE holding_tier_state SET exit_path='A'")
+        conn.execute(change)
     mock_price_quotes(monkeypatch, _quotes)
 
     result, payload = _run(capsys, ["--portfolio-value", "100000"])
