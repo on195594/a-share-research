@@ -5,7 +5,7 @@
 ## 所有者决定（2026-11-21）
 
 1. 按 agy 的审查结论简化。不为兼容旧逻辑和旧数据做兼容层；发布一律从简；允许试错，不写防御性测试，也不做防御性编程。系统边界（用户输入、外部 API、模型输出解析）照常校验。
-2. L3 用 TypeScript 直接调用 pi-ai。pi-ai 从宿主的 pi 安装加载，随宿主升级，不在仓库锁版本。不用 pi-durable。
+2. L3 用 TypeScript 加 pi-agent-core，研究工具走 MCP（pi-mcp 客户端对接 worker 的 mcp SDK 服务端）。三个包都从宿主的 pi 安装加载，随宿主升级，不在仓库锁版本。不用 pi-durable（msg 4573、4577）。
 3. 性能不设门禁。评估集每次运行输出调用数和耗时报表，只用来看，不拦截发布。
 4. 一次做彻底：切换后不保留新旧两条路径，也不保留旧编排开关。出问题前向修复，或者回到上一个提交。
 
@@ -30,26 +30,27 @@
 ## 2. 目标结构
 
 ```
-L3 agent-runner（TypeScript + 宿主 pi-ai）  研究员/复核员循环、停止、上限、格式纠正、单轮任务
-      │ stdin/stdout JSON 行
+L3 agent-runner（TypeScript + 宿主 pi-agent-core/pi-mcp）  研究员/复核员循环、停止、上限、格式纠正、单轮任务
+      │ MCP（子进程 stdin/stdout）
 L1+L2 worker（Python）                       受理、领取、材料冻结、工具执行、机械检查、ReviewLedger、发布门禁、审计、记分
 L0 事实与规则                                材料与证据、核验、calculate/valuation、补丁合并、判断账本、账户、政策
 ```
 
 ### 2.1 agent-runner
-- 新目录 `agent-runner/`，用 Node 内置的类型剥离直接运行 `.ts`，不加构建步骤，不加 npm 依赖。runner 作为 worker 的子进程运行，**每个 run 启动一次**，单轮任务每批启动一次。启动时按宿主 pi 安装的 `current-version` 加载 pi-ai，加载逻辑沿用 `pi_infer.mjs`，挂载方式不变。宿主升级 pi 后，下一个 run 自动用上新版本；`calls` 照常记录 `pi_version`。
-- 协议是 stdin/stdout 上逐行传 JSON。runner 发出 `tool_call`、`check_draft`、`review_decide`、`call_record`、`done`，worker 同步执行后逐条回复。worker 维持单线程，一次只跑一个 run，所以材料状态不需要加锁。
-- runner 自己管理研究员和复核员两个消息数组，用显式循环推进各阶段：
-  - **取证**：工具回执里带上 L0 算出的增量计数。连续两轮没有增量就停止取证，之后只给研究员提供 `submit_draft`。
-  - **成文**：`submit_draft` 由 worker 做机械检查。检查通过后，runner 开启复核员的回合。
-  - **复核**：复核员用 `review_decide` 一次提交整轮决议，由 worker 内存中的 `ReviewLedger` 校验。复核员格式无效时，当轮可纠正一次。
-  - **修补**：恢复现有的受限补证工具和 `submit_patch`。补丁非法时，走现有的整稿重写路径，次数有上限。
-  - 复核轮数、调用次数、单次超时和整体时限都来自模型配置档，由 runner 计数，并用 `AbortSignal` 控制超时。worker 另设一个整体截止时间，到期就结束子进程。
-- **审计**：每次模型调用返回或失败后，runner 发一条 `call_record`，由 worker 写入 `calls`。`step`、`identity.actual.model`、`prompt_base` 和 `prompt_block` 的口径保持不变，`stability.py` 照常读取。进程崩溃会丢失正在进行的那一次调用的记录，这一点接受。
-- **中断**：沿用 `worker.recover()`：普通研究整单重跑一次，自动月批中的研究直接记为失败。runner 不保存任何持久状态，不建 `agent.db`、`run_tool_calls`、`run_agent`。
-- **历史 `--replay`**：worker 只给只读工具集，不允许新取证，并验收最终材料哈希不变，语义与 `research.py` 现有做法相同。
+- 新目录 `agent-runner/`，用 Node 内置的类型剥离直接运行 `.ts`，不加构建步骤，也不加 npm 依赖。runner 是 worker 的子进程，**每个 run 启动一次**，单轮任务每批启动一次。启动时按宿主 pi 安装的 `current-version` 加载 `pi-agent-core`、`pi-ai`、`pi-mcp`，加载方式沿用 `pi_infer.mjs`，挂载方式不变。宿主升级 pi 后，下一个 run 自动用上新版本；`calls` 照常记录 `pi_version`。
+- **选型**：采用 `pi-agent-core`。它是建在 pi-ai 之上的 Agent 循环，pi CLI 本身就基于它，自带工具循环、钩子、运行中替换 `state.tools`、`abort` 和 `getApiKey` 凭据刷新。不用 pi-durable：它独有的崩溃续跑对约 5 分钟的研究没有必要，而且要单独锁版本，和“随宿主升级”冲突。也不在 pi-ai 上手写循环，因为那等于继续自己维护适配代码。
+- **研究工具走 MCP**：worker 用现有的 `mcp` SDK 低层 `Server`，按当前 run 注册研究工具，包括取证、`calculate`、`valuation`、`submit_draft`、`review_decide`、`submit_patch`，以及只给 runner 用、不给模型看的 `record_call`。工具 schema 只在 Python 定义一次。runner 用 `pi-mcp` 当客户端，从 `tools/list` 拿到工具后，按 pi-mcp README 的示例包装成 `AgentTool`；runner 自己不写工具定义，只按角色分配子集，不做内部鉴权。
+- **传输**：MCP 的 stdio 帧格式（逐行 JSON-RPC）跑在 runner 子进程的 stdin/stdout 上。runner 一侧用 `PipeTransport` 接自己的标准输入输出，worker 一侧把 SDK 的 stdio server 接到子进程的管道上。这样不需要端口、线程或令牌，worker 仍是单线程，一次只跑一个 run，材料状态不需要加锁。开工时先写最小样例确认两端能握手；不通就改用 worker 内的本机 Streamable HTTP，技术栈与现有 `/mcp` 相同。
+- 同一个研究服务端可以单独以 stdio 启动，读取指定 run 的冻结材料，供 Claude Code、Codex 等 MCP 客户端在开发时挂上去做对照或排查。
+- **流程映射**（研究员、复核员各一个 `Agent`）：
+  - **取证**：`afterToolCall` 读取工具回执里由 L0 算出的增量计数。连续两轮没有增量，就把研究员的 `state.tools` 换成只剩 `submit_draft`。
+  - **成文与复核**：worker 对 `submit_draft` 做机械检查。检查通过后，runner 在这个工具的执行函数里直接 await 复核员 `Agent` 的 `prompt()`，再把问题列表作为工具结果返回给研究员。复核员通过 `review_decide` 一次提交整轮决议，由 worker 内存中的 `ReviewLedger` 校验。复核员格式无效时，当轮可纠正一次。
+  - **修补**：把 `state.tools` 换回现有的受限补证工具和 `submit_patch`。补丁非法时，走现有的整稿重写路径，次数有上限。
+  - **预算与审计**：给 `streamFn` 包一层，负责计数，并在每次模型调用后经 `record_call` 写入 `calls`。`step`、`identity.actual.model`、`prompt_base`/`prompt_block` 的口径不变。超时用 `abort()`，worker 另设整体截止时间，到期结束子进程。进程崩溃时，正在进行的那一次调用的记录会丢失，这一点接受。
+- **中断**：沿用 `worker.recover()`：普通研究整单重跑一次，自动月批中的研究记为失败。runner 不保存任何持久状态。
+- **历史 `--replay`**：worker 只注册只读工具，不允许新取证，并验收最终材料哈希不变，语义与 `research.py` 现有做法相同。
 - **单轮任务**：Q20 选股、强制排序和 S10 独立比较改为调用 runner 的单轮无工具模式。各自的格式修正、调用明细和冻结规则不变，上限仍是“三项比较或排序各最多 2 次、整批最多 636 次”。双角色预检改为调用 runner 的 `--check`。
-- runner 不提供任何文件、命令或 bash 工具，研究 AI 的三条硬边界不变。
+- runner 不提供文件、命令或 bash 工具，研究 AI 的三条硬边界不变。
 
 ### 2.2 worker
 可交付条件和发布门禁仍由 Python 判定：已复核终稿中，定位合规的具名 `question` 可以交付，其余未解决问题一律阻断。估值、立场冻结、事件证据、报告与 run 终态在同一事务内写入。受理、去重、扫描接续、月批、记分等入口不变，只把模型调用改为经由 runner。
@@ -100,7 +101,7 @@ L0 事实与规则                                材料与证据、核验、cal
 
 | 风险 | 对策 |
 |---|---|
-| 宿主 pi 升级后行为变化 | `calls` 记录 `pi_version`；报告异常时先对照版本，前向修复 |
+| 宿主 pi 升级后行为变化，或 pi-agent-core 出现破坏性 API 变更 | `calls` 记录 `pi_version`；runner 报错或报告异常时先对照版本，前向修复 |
 | 切换后发现缺陷 | 前向修复，或回到上一个提交的镜像 |
 | 删掉身份里的代码哈希后，改代码无意中改变了政策输出 | 改 `policy/` 时跑约 20 条真实样本测试，并观察自然评估 |
 | 订阅通道 429 | 一次只跑一个 run，与现状相同 |
