@@ -711,7 +711,7 @@ def log_call(conn, run_id: int, step: str, prompt: str, *, response=None, usage=
     cur = conn.execute(
         "INSERT INTO calls (run_id, step, prompt, response, usage, seconds, error, created_at, identity,"
         " prompt_base, prompt_block) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (run_id, step, stored, response, json.dumps(usage) if usage else None, seconds, error, now(),
+        (run_id, step, stored, response, json.dumps(usage) if usage is not None else None, seconds, error, now(),
          json.dumps(identity) if identity is not None else None, base_id, block_ref),
     )
     return cur.lastrowid
