@@ -6,12 +6,8 @@ from contextlib import closing
 import pytest
 
 from a_share_research import api_keys, db, oauth_store
-
-
-REDIRECT = "https://client.example/callback"
-RESOURCE = "https://stock.example/mcp"
-BINDING = dict(client_id="browser", redirect_uri=REDIRECT, resource=RESOURCE,
-               code_challenge="E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")  # RFC 7636 Appendix B
+from support.mcp import BINDING, REDIRECT
+from support.mcp import OAUTH_RESOURCE as RESOURCE
 
 
 @pytest.fixture

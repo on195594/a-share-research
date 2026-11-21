@@ -6,35 +6,15 @@ import sqlite3
 import pytest
 
 from a_share_research import db, gate
-from a_share_research.account import analysis, cycle_analysis, ledger
+from a_share_research.account import cycle_analysis, ledger
 from a_share_research.policy import account_input
-from a_share_research.policy.v0 import account_store
-from test_v0_account_store import book as policy_book
-from test_position_store import batch
-
-
-@pytest.fixture
-def bound_book(tmp_path):
-    for conn,principal,old_directory,sha in policy_book.__wrapped__(tmp_path):
-        directory=tmp_path/'account-evidence'
-        old_directory.rename(directory)
-        account_store.initialize(conn,principal,'a',directory,[sha])
-        baseline=analysis.initialize(conn,principal,1)
-        cycle_analysis.initialize(conn,principal,'a','legacy:1',cycle_analysis.Initialize(
-            expected_account_version=0,evidence_hashes=[sha],legacy_revision_id=baseline['revision_id']),directory)
-        binding=dict(schema_version=1,account_id='a',account_scope='structural-scope',mirror_watermark={})
-        conn.execute('INSERT INTO account_source VALUES(1,?,?,?,?)',('ledger','a'*64,db.now(),gate.canonical(binding)))
-        yield tmp_path/'app.db',conn,principal,directory,sha
+from support.policy import observe
+from support.positions import batch
 
 
 def source(book):
     path,conn,_,_,_=book
     return account_input.read(conn,path.parent,conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source').fetchone())
-
-
-def observe(book,total='11200'):
-    _,conn,principal,directory,sha=book
-    return ledger.observe(conn,principal,'a',ledger.Observation(observed_at='2026-11-01T15:00:00+08:00',total_assets=total),directory,sha)
 
 
 def test_bound_source_uses_account_scoped_projection_without_old_asset_file(bound_book):
@@ -164,8 +144,7 @@ def test_posted_snapshot_must_reconcile_with_its_receipt(bound_book):
 
 
 def test_scoped_analysis_append_changes_source_without_account_version(bound_book):
-    from test_account_analysis import request
-    from test_analysis_transitions import open_alert
+    from support.account_analysis import open_alert, request
     before=source(bound_book)
     _,conn,principal,directory,sha=bound_book
     change=request((conn,principal,directory,sha),[open_alert()])

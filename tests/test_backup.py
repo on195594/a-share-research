@@ -1,6 +1,4 @@
 """Captured research records plus invented account/storage fixtures; never production data."""
-from datetime import datetime
-from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
@@ -9,34 +7,9 @@ import stat
 
 import pytest
 
-from a_share_research import api_keys, backup, db
+from a_share_research import backup, db
 from a_share_research.account import evidence, ledger
-from test_integrity import research_db, PDF, SHA
-
-
-def database_rows(path):
-    with sqlite3.connect(path) as conn:
-        tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
-        result = {table: sorted(conn.execute(f'SELECT * FROM "{table}"').fetchall(), key=repr) for table in tables}
-        result['__user_version__'] = conn.execute('PRAGMA user_version').fetchone()[0]
-        return result
-
-
-@pytest.fixture
-def source(tmp_path):
-    directory = tmp_path / 'source'
-    directory.mkdir(mode=0o700)
-    conn, run = research_db(directory)
-    token = api_keys.create(conn, 'invented-backup-account', role='assistant')
-    principal = api_keys.authenticate(conn, token)
-    sha = evidence.store(directory / 'account-evidence', b'INVENTED ACCOUNT OPENING; NOT BROKER OR INVESTMENT EVIDENCE')
-    ledger.initialize(conn, principal, 'structural', dict(positions={}, cash='10000'),
-        datetime.fromisoformat('2026-11-01T00:00:00+08:00'), directory / 'account-evidence', sha, tolerance=Decimal(0))
-    # Allocate and delete a run so preserving sqlite_sequence is observably different from MAX(id).
-    removed = db.create_run(conn, '600001', status='queued')
-    conn.execute('DELETE FROM runs WHERE id=?', (removed,))
-    yield directory, conn, principal, sha, run
-    conn.close()
+from support.backup import PDF, SHA, database_rows
 
 
 def create(source, tmp_path):
@@ -45,7 +18,8 @@ def create(source, tmp_path):
     return target, manifest
 
 
-def test_backup_restore_preserve_every_row_sequences_and_private_permissions(source, tmp_path):
+def test_backup_restore_preserve_every_row_sequences_and_private_permissions(backup_source, tmp_path):
+    source = backup_source
     database = source[0] / 'app.db'
     before = database_rows(database)
     bundle, manifest = create(source, tmp_path)
@@ -72,7 +46,8 @@ def test_backup_restore_preserve_every_row_sequences_and_private_permissions(sou
 
 
 @pytest.mark.parametrize('damage', ['missing', 'tampered'])
-def test_committed_account_evidence_must_exist_and_match_hash(source, tmp_path, damage):
+def test_committed_account_evidence_must_exist_and_match_hash(backup_source, tmp_path, damage):
+    source = backup_source
     path = source[0] / 'account-evidence' / source[3]
     if damage == 'missing':
         path.unlink()
@@ -84,7 +59,8 @@ def test_committed_account_evidence_must_exist_and_match_hash(source, tmp_path, 
     assert not target.exists()
 
 
-def test_failed_request_with_unknown_evidence_does_not_block_backup(source, tmp_path):
+def test_failed_request_with_unknown_evidence_does_not_block_backup(backup_source, tmp_path):
+    source = backup_source
     directory, conn, principal, _, _ = source
     rejected = ledger.submit(conn, principal, 'structural', ledger.Batch(expected_version=0,
         events=[], evidence_hashes=['0' * 64], snapshot=dict(positions={}, cash='10000', market_values={}, total_assets='10000')),
@@ -97,7 +73,8 @@ def test_failed_request_with_unknown_evidence_does_not_block_backup(source, tmp_
 
 
 @pytest.mark.parametrize('operation', ['create', 'restore'])
-def test_existing_destination_is_never_overwritten(source, tmp_path, operation):
+def test_existing_destination_is_never_overwritten(backup_source, tmp_path, operation):
+    source = backup_source
     target = tmp_path / 'existing'
     target.mkdir()
     marker = target / 'keep'
@@ -114,7 +91,8 @@ def test_existing_destination_is_never_overwritten(source, tmp_path, operation):
 
 
 @pytest.mark.parametrize('damage', ['extra', 'missing', 'tampered', 'symlink', 'traversal'])
-def test_verify_rejects_unsafe_or_incomplete_bundle_without_restore_output(source, tmp_path, damage):
+def test_verify_rejects_unsafe_or_incomplete_bundle_without_restore_output(backup_source, tmp_path, damage):
+    source = backup_source
     bundle, manifest = create(source, tmp_path)
     name = 'account-evidence/' + source[3]
     if damage == 'extra':
@@ -137,7 +115,8 @@ def test_verify_rejects_unsafe_or_incomplete_bundle_without_restore_output(sourc
     assert not restored.exists()
 
 
-def test_manifest_cannot_omit_required_evidence_even_when_file_list_is_consistent(source, tmp_path):
+def test_manifest_cannot_omit_required_evidence_even_when_file_list_is_consistent(backup_source, tmp_path):
+    source = backup_source
     bundle, manifest = create(source, tmp_path)
     name = 'account-evidence/' + source[3]
     (bundle / name).unlink()
@@ -148,7 +127,8 @@ def test_manifest_cannot_omit_required_evidence_even_when_file_list_is_consisten
         backup.verify(bundle)
 
 
-def test_source_symlink_evidence_is_not_followed(source, tmp_path):
+def test_source_symlink_evidence_is_not_followed(backup_source, tmp_path):
+    source = backup_source
     name = source[0] / 'account-evidence' / source[3]
     elsewhere = tmp_path / 'original-evidence'
     name.rename(elsewhere)
@@ -176,7 +156,8 @@ def attach_storage_pdf(source):
     return path
 
 
-def test_required_real_pdf_bytes_roundtrip_and_cache_is_excluded(source, tmp_path):
+def test_required_real_pdf_bytes_roundtrip_and_cache_is_excluded(backup_source, tmp_path):
+    source = backup_source
     pdf = attach_storage_pdf(source)
     pdf.with_suffix('.layout.json').write_text('{"storage_fixture":"disposable extraction cache"}')
     bundle, manifest = create(source, tmp_path)
@@ -189,7 +170,8 @@ def test_required_real_pdf_bytes_roundtrip_and_cache_is_excluded(source, tmp_pat
 
 
 @pytest.mark.parametrize('damage', ['missing', 'tampered'])
-def test_required_pdf_missing_or_corrupt_refuses_bundle(source, tmp_path, damage):
+def test_required_pdf_missing_or_corrupt_refuses_bundle(backup_source, tmp_path, damage):
+    source = backup_source
     path = attach_storage_pdf(source)
     if damage == 'missing':
         path.unlink()
@@ -200,7 +182,8 @@ def test_required_pdf_missing_or_corrupt_refuses_bundle(source, tmp_path, damage
     assert not (tmp_path / 'bundle').exists()
 
 
-def test_source_commit_after_snapshot_does_not_change_backup_rows_or_required_references(source, tmp_path, monkeypatch):
+def test_source_commit_after_snapshot_does_not_change_backup_rows_or_required_references(backup_source, tmp_path, monkeypatch):
+    source = backup_source
     directory, conn, principal, original_sha, _ = source
     before = database_rows(directory / 'app.db')
     copy = backup._copy
@@ -223,7 +206,8 @@ def test_source_commit_after_snapshot_does_not_change_backup_rows_or_required_re
     assert backup.verify(bundle)['ok']
 
 
-def test_restore_copy_failure_cleans_only_its_new_destination(source, tmp_path, monkeypatch):
+def test_restore_copy_failure_cleans_only_its_new_destination(backup_source, tmp_path, monkeypatch):
+    source = backup_source
     bundle, _ = create(source, tmp_path)
     original = {str(p.relative_to(bundle)): p.read_bytes() for p in bundle.rglob('*') if p.is_file()}
     target = tmp_path / 'restored'
@@ -239,7 +223,8 @@ def test_restore_copy_failure_cleans_only_its_new_destination(source, tmp_path, 
     assert {str(p.relative_to(bundle)): p.read_bytes() for p in bundle.rglob('*') if p.is_file()} == original
 
 
-def test_verify_checks_domain_integrity_even_when_database_file_hash_is_recomputed(source, tmp_path):
+def test_verify_checks_domain_integrity_even_when_database_file_hash_is_recomputed(backup_source, tmp_path):
+    source = backup_source
     bundle, manifest = create(source, tmp_path)
     database = bundle / 'app.db'
     with sqlite3.connect(database) as conn:
@@ -252,7 +237,8 @@ def test_verify_checks_domain_integrity_even_when_database_file_hash_is_recomput
         backup.verify(bundle)
 
 
-def test_wal_mode_bundle_is_rejected_without_creating_or_modifying_files(source, tmp_path):
+def test_wal_mode_bundle_is_rejected_without_creating_or_modifying_files(backup_source, tmp_path):
+    source = backup_source
     bundle, manifest = create(source, tmp_path)
     database = bundle / 'app.db'
     conn = sqlite3.connect(database)

@@ -5,8 +5,6 @@
 import json
 from datetime import datetime
 
-import pytest
-
 from a_share_research.policy.v0 import commands_admin, commands_holdings, db, domain, market_quotes
 from policy_v0.helpers import (
     mock_price_quotes,
@@ -14,14 +12,6 @@ from policy_v0.helpers import (
     seed_position,
     set_valid_fundamentals,
 )
-
-
-@pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "test_extra.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
-    yield str(db_file)
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

@@ -8,14 +8,12 @@ import pytest
 from a_share_research.account import evidence
 from a_share_research.tools.registry import Context, ToolError, invoke
 from a_share_research.tools_client import ToolCallError
-from test_account_nav import book as book_fixture, collect_nav as collect_fixture, observe, post
-
-book = book_fixture
-collect_nav = collect_fixture
+from support.account_nav import observe, post
 
 
 @pytest.mark.parametrize('with_flow', [False, True])
-def test_freeze_and_evaluate_selected_interval(web, book, collect_nav, monkeypatch, with_flow):
+def test_freeze_and_evaluate_selected_interval(web, nav_book, collect_nav, monkeypatch, with_flow):
+    book = nav_book
     _, collections = collect_nav
     if with_flow:
         event_id = post(book)

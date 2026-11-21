@@ -1,24 +1,13 @@
 """Hermes scripts: real plan rows and actual script copies, without host access."""
 
-import importlib.util
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 from datetime import timedelta
 
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "ops/hermes"
-
-
-def load(name):
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SOURCE / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from support.hermes import ROOT, SOURCE, load
 
 
 @pytest.fixture

@@ -17,10 +17,8 @@ from a_share_research.research import publish
 from a_share_research.evidence import material_hash
 from support.reports import MATERIAL
 from support.continuation import RECORDS
-from test_price import DATA as PRICES
-
-PDF = Path(__file__).parent / "data" / "601138-buyback-announcement.pdf"
-SHA = hashlib.sha256(PDF.read_bytes()).hexdigest()
+from support.backup import PDF, SHA, research_db
+from support.market_replay import PRICE_DATA as PRICES
 
 
 def stored(tmp_path: Path) -> Path:
@@ -79,15 +77,6 @@ def test_stored_pdf_that_no_longer_matches_is_replaced_not_reused(tmp_path):
     pdf.write_bytes(bytes(damaged))
     assert sources.store_pdf(tmp_path, PDF.read_bytes(), SHA) == pdf
     assert pdf.read_bytes() == PDF.read_bytes()
-
-
-def research_db(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
-    conn = db.connect(tmp_path / "app.db")
-    run_id = db.create_run(conn, MATERIAL.code, status="running")
-    snapshot = MATERIAL.snapshot()
-    db.update_run(conn, run_id, material=json.dumps(snapshot, ensure_ascii=False),
-                  identity=json.dumps({"material_sha256": snapshot["sha256"]}))
-    return conn, run_id
 
 
 def test_invalid_final_body_never_finishes_a_run(tmp_path):

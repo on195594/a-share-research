@@ -5,25 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from a_share_research.account import analysis, cycle_analysis, ledger
-from test_account_analysis import branch as _branch_fixture, request, append, legacy_rows, start_cycle
-
-branch = _branch_fixture
-
-
-def condition(**overrides):
-    return dict(condition='Structural replacement condition', scope='core_driver', action='review',
-                materiality_basis='Structural materiality', temporary_exit_rule='Structural exit rule',
-                evidence_cadence='quarterly') | overrides
-
-
-def rewrite(**overrides):
-    return dict(kind='thesis', l1='Structural replacement L1', l2='Structural replacement L2',
-                rewrite_reason='Structural rewrite', retire_l3_ids=[1], new_l3=[condition(), condition(scope='non_core')]) | overrides
-
-
-def open_alert(reason_code='structural-new', **overrides):
-    return dict(kind='alert_open', level='red', category='unverified', reason_code=reason_code,
-                reason='Structural alert reason', evidence='Structural alert evidence', review_due='2026-11-12') | overrides
+from support.account_analysis import append, condition, legacy_rows, open_alert, request, rewrite, start_cycle
 
 
 def test_rewrite_preserves_prior_revisions_and_atomically_links_new_conditions(branch):

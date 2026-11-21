@@ -21,7 +21,7 @@ from a_share_research.policy.v0 import (
 )
 from a_share_research.policy.v0.trading_costs import COMMISSION_RATE, STAMP_TAX_RATE
 from policy_v0.helpers import mock_price_quotes
-from policy_v0.monitor.test_monitor_snapshot import _quotes, _seed_holding
+from support.policy_replay import _quotes, _seed_holding
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/monitor/research-cards.json"
 UNCHANGED = (

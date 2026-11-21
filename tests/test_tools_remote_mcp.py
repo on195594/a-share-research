@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from mcp.types import CLIENT_CAPABILITIES_META_KEY, PROTOCOL_VERSION_META_KEY, SERVER_INFO_META_KEY
+from mcp.types import SERVER_INFO_META_KEY
 from requests import ConnectionError
 
 from a_share_research import api_keys, db, oauth_store, service
@@ -22,10 +22,8 @@ from a_share_research.tools.control import ControlError, Gate
 from a_share_research.tools.registry import TOOLS
 from a_share_research.tools.server import create_app
 from support.continuation import load
+from support.mcp import MODERN, ORIGIN, RESOURCE, rpc
 
-ORIGIN = 'https://stock.example:8443'
-RESOURCE = ORIGIN + '/mcp'
-MODERN = '2026-07-28'
 LEGACY = '2025-11-25'
 
 
@@ -51,21 +49,6 @@ def remote(database, account_enabled):
     app = create_app(path, gate=Gate(limit=1), account_shadow_enabled=account_enabled)
     with TestClient(app, base_url=ORIGIN) as client:
         yield client, tokens
-
-
-def rpc(client, token, method, params=None, *, version=MODERN, headers=None, serialize=json.dumps):
-    fields = {} if token is None else {'Authorization': 'Bearer ' + token}
-    params = dict(params or {})
-    if method != 'initialize':
-        fields['MCP-Protocol-Version'] = version
-    if version == MODERN:
-        fields['Mcp-Method'] = method
-        if method == 'tools/call':
-            fields['Mcp-Name'] = params['name']
-        params['_meta'] = {PROTOCOL_VERSION_META_KEY: version, CLIENT_CAPABILITIES_META_KEY: {}}
-    fields['Content-Type'] = 'application/json'
-    return client.post('/mcp', headers=fields | (headers or {}),
-                       content=serialize({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}))
 
 
 def call(client, token, name, arguments=None, *, version=MODERN):

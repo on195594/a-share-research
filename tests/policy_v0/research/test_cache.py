@@ -26,14 +26,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CACHE_PY = PROJECT_ROOT / "a_share_research" / "policy" / "v0" / "cache.py"
 
 
-@pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
-    """每个测试用独立临时数据库，不影响生产 cache.db"""
-    db_file = tmp_path / "test_cache.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
-    yield str(db_file)
-
-
 # ── WAL 模式 ──────────────────────────────────────────────────────────────────
 
 
@@ -47,8 +39,9 @@ def test_wal_mode_enabled():
 # ── CLI 分派 ───────────────────────────────────────────────────────────────
 
 
-def test_cli_valid_command_smoke(isolated_db):
+def test_cli_valid_command_smoke(isolated_cache_database):
     """Subprocess smoke test for the real CLI dispatch path."""
+    isolated_db = str(isolated_cache_database)
     db.get_db().close()
     result = subprocess.run(
         [sys.executable, str(CACHE_PY), "list"],
@@ -90,8 +83,9 @@ def test_default_db_path_is_the_application_database_without_creating_state(tmp_
     assert not tmp_home.exists() and not expected_db.parent.exists(), "路径解析不应创建状态目录"
 
 
-def test_cli_invalid_command_fails(isolated_db):
+def test_cli_invalid_command_fails(isolated_cache_database):
     """Unknown CLI commands should fail visibly."""
+    isolated_db = str(isolated_cache_database)
     result = subprocess.run(
         [sys.executable, str(CACHE_PY), "not-a-command"],
         env={**os.environ, "POLICY_V0_DB": isolated_db},

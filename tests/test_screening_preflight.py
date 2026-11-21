@@ -137,7 +137,7 @@ def test_stale_exception_after_owner_freeze_cannot_overwrite_marks(connections, 
 
 @pytest.mark.parametrize("reply", ["success", "failure"])
 def test_stale_comparison_cannot_overwrite_winning_freeze(connections, monkeypatch, reply):
-    from test_batch_c import completed_pools
+    from support.screening import completed_pools
 
     worker, web = connections
     candidates, _ = completed_pools(worker, large_passed=True, small_passed=False, rule=s.RULE)
@@ -161,7 +161,7 @@ def test_stale_comparison_cannot_overwrite_winning_freeze(connections, monkeypat
 
 
 def test_comparison_failure_still_retries_then_fails(connections, monkeypatch):
-    from test_batch_c import completed_pools
+    from support.screening import completed_pools
 
     worker, _ = connections
     completed_pools(worker, large_passed=True, small_passed=False, rule=s.RULE)

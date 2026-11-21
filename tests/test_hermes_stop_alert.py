@@ -7,8 +7,8 @@ import json
 import pytest
 
 from a_share_research.policy import stop_evaluation
-from test_ops_hermes import load
-from test_stop_evaluation import bundle
+from support.evaluations import stop_bundle as bundle
+from support.hermes import load
 
 
 @pytest.fixture

@@ -4,34 +4,16 @@ import re
 from html import unescape
 
 import pytest
-from fastapi import Request
 
 from a_share_research import overview, scans, service, template_filters
 from a_share_research.account import cycle_analysis
 from a_share_research.tools.registry import Context, invoke
-from test_account_analysis import request
-from test_account_nav import book as nav_book_fixture, evaluate as save_nav
-from test_analysis_transitions import rewrite
-from test_policy_ledger_monitor import bound_book as bound_book_fixture, configured as monitor_fixture, run as save_monitor
-from test_position_store import batch, event, state, submit
-from test_scans import CATALOG, priced, run_scan
-
-
-configured = monitor_fixture
-bound_book = bound_book_fixture
-nav_book = nav_book_fixture
-
-
-def page_request(path, *, cookie="", accept="text/html"):
-    headers = [(b"cookie", cookie.encode()), (b"accept", accept.encode())]
-    return Request({"type": "http", "method": "GET", "path": path, "headers": headers,
-                    "query_string": b"", "scheme": "http", "server": ("localhost", 80)})
-
-
-@pytest.fixture
-def owner_request(web):
-    cookie = web.start_session().headers["set-cookie"].split(";", 1)[0]
-    return lambda path, **kwargs: page_request(path, cookie=cookie, **kwargs)
+from support.account_analysis import request, rewrite
+from support.account_nav import evaluate as save_nav
+from support.policy import run_monitor as save_monitor
+from support.positions import batch, event, state, submit
+from support.scans import CATALOG, priced, run_scan
+from support.web import page_request
 
 
 def html(response, status=200):
@@ -65,7 +47,8 @@ def test_overview_display_formats():
     assert template_filters.monitor_gap(dict(field='new_field', minimum_action='new hint')) == 'new_field · new hint'
 
 
-def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(configured):
+def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_monitor):
+    configured = ledger_monitor
     (path, conn, principal, directory, sha), _, active, _ = configured
     book = (conn, principal, directory, sha)
     cycle_analysis.update(conn, principal, 'a', 'legacy:1', request(book, [rewrite(retire_l3_ids=[])]), directory)
@@ -109,7 +92,8 @@ def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(configured)
             read(conn, record_id)
 
 
-def test_corrupt_monitor_is_a_gap_in_overviews_and_a_conflict_on_its_deep_link(configured, web, owner_request):
+def test_corrupt_monitor_is_a_gap_in_overviews_and_a_conflict_on_its_deep_link(ledger_monitor, web, owner_request):
+    configured = ledger_monitor
     (_, conn, _, _, _), _, _, _ = configured
     receipt = save_monitor(configured)
     conn.execute('DROP TRIGGER policy_evaluations_no_update')
@@ -187,7 +171,8 @@ def test_account_gaps_do_not_flag_an_unheld_company_or_its_missing_report(bound_
     assert f'href="/stock/{code}/overview"' in stock and '总览有待核对项' in stock
 
 
-def test_held_company_without_research_links_to_saved_records_and_evidence(configured, web, owner_request):
+def test_held_company_without_research_links_to_saved_records_and_evidence(ledger_monitor, web, owner_request):
+    configured = ledger_monitor
     (database, conn, principal, directory, sha), _, _, _ = configured
     book = conn, principal, directory, sha
     posted = submit(book, batch(book, [], shares=100, cash='10000'))
@@ -261,7 +246,8 @@ def test_nav_deep_link_opens_the_saved_after_cost_comparison(nav_book, bind_acco
         assert value in detail
 
 
-def test_overview_uses_ledger_projection_while_policy_capture_verifies_evidence(configured):
+def test_overview_uses_ledger_projection_while_policy_capture_verifies_evidence(ledger_monitor):
+    configured = ledger_monitor
     from a_share_research.policy.registry import PolicyError
 
     (_, conn, _, directory, sha), _, _, _ = configured

@@ -11,18 +11,14 @@ from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, monitor, portfolio_scenario, position_sizing, registry
 from a_share_research.policy.v0.portfolio_scenario import compare
 from a_share_research.tools.server import create_app
-from test_policy_monitor import historical_replay, setup as monitor_setup
+from support.policy import historical_replay
 
 PROPOSAL = dict(sales={'600000': 100}, fees=5.0)
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
-    yield from monitor_setup.__wrapped__(tmp_path, monkeypatch)
-
-
-@pytest.fixture
-def parent(setup):
+def parent(policy_setup):
+    setup = policy_setup
     path, conn, principals, _, active, _, _ = setup
     return monitor.run(conn, principals['assistant'], path, 'scenario-parent', active['id'])
 
@@ -39,7 +35,8 @@ def account_rows(conn):
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'account_%'")}
 
 
-def test_unavailable_reference_hashes_idempotence_no_capture_or_account_write(setup, parent, monkeypatch):
+def test_unavailable_reference_hashes_idempotence_no_capture_or_account_write(policy_setup, parent, monkeypatch):
+    setup = policy_setup
     monkeypatch.setattr(monitor, '_capture', lambda *a, **k: pytest.fail('scenario cannot capture inputs'))
     monkeypatch.setattr(monitor, 'capture', lambda *a, **k: pytest.fail('scenario cannot capture inputs'))
     _, conn, principals, _, active, _, _ = setup
@@ -65,8 +62,9 @@ def test_unavailable_reference_hashes_idempotence_no_capture_or_account_write(se
             run(setup, parent, **changed)
 
 
-def test_ready_captured_snapshot_transport_matches_pure_comparison(setup, monkeypatch):
+def test_ready_captured_snapshot_transport_matches_pure_comparison(policy_setup, monkeypatch):
     # Transport injection only: saved no_action fixture remains unchanged; no live account claim.
+    setup = policy_setup
     snapshot = json.loads((Path(__file__).parent / 'policy_v0/fixtures/monitor/agent-behavior-snapshots.json').read_text())['no_action']
     original = deepcopy(snapshot)
     assert snapshot['account']['risk_policy'] == setup[3]['parameters']
@@ -81,7 +79,8 @@ def test_ready_captured_snapshot_transport_matches_pure_comparison(setup, monkey
     assert account_rows(conn) == before and registry.inspect(conn) == []
 
 
-def test_cross_operation_request_conflict_and_invalid_parent_kinds(setup, parent):
+def test_cross_operation_request_conflict_and_invalid_parent_kinds(policy_setup, parent):
+    setup = policy_setup
     path, conn, principals, _, active, _, _ = setup
     sizing = position_sizing.run(conn, principals['assistant'], path, 'sizing-request', active['id'], parent['id'],
                                  dict(code='600900', price=29.5, framework='A'))
@@ -98,7 +97,8 @@ def test_cross_operation_request_conflict_and_invalid_parent_kinds(setup, parent
                             dict(code='600900', price=29.5, framework='A'))
 
 
-def test_source_and_policy_drift_preserve_saved_retry(setup, parent):
+def test_source_and_policy_drift_preserve_saved_retry(policy_setup, parent):
+    setup = policy_setup
     _, conn, principals, manifest, active, _, _ = setup
     saved = run(setup, parent)
     conn.execute("UPDATE account_source SET updated_at='scenario-drift'")
@@ -115,7 +115,8 @@ def test_source_and_policy_drift_preserve_saved_retry(setup, parent):
     assert registry.inspect(conn) == []
 
 
-def test_parent_corruption_blocks_derivation_read_and_inspect(setup, parent):
+def test_parent_corruption_blocks_derivation_read_and_inspect(policy_setup, parent):
+    setup = policy_setup
     _, conn, principals, _, _, _, _ = setup
     saved = run(setup, parent)
     conn.execute('DROP TRIGGER policy_evaluations_no_update')
@@ -126,7 +127,8 @@ def test_parent_corruption_blocks_derivation_read_and_inspect(setup, parent):
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 2
 
 
-def test_sql_failure_rolls_back_without_partial_receipt(setup, parent):
+def test_sql_failure_rolls_back_without_partial_receipt(policy_setup, parent):
+    setup = policy_setup
     conn = setup[1]
     before = account_rows(conn)
     conn.execute("CREATE TRIGGER fail_scenario BEFORE INSERT ON policy_evaluations BEGIN SELECT RAISE(ABORT,'scenario storage fault'); END")
@@ -137,7 +139,8 @@ def test_sql_failure_rolls_back_without_partial_receipt(setup, parent):
     assert run(setup, parent)['mode'] == 'derived_portfolio_scenario'
 
 
-def test_http_permissions_proposal_contract_pause_and_retry(setup, parent):
+def test_http_permissions_proposal_contract_pause_and_retry(policy_setup, parent):
+    setup = policy_setup
     path, conn, _, _, active, _, _ = setup
     tokens = {role: api_keys.create(conn, 'scenario-' + role, role=role) for role in ('assistant', 'research')}
     args = dict(request_id='scenario-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)

@@ -12,19 +12,14 @@ from a_share_research.core.market_data import MarketDataResult
 from a_share_research.policy import benchmark, benchmark_evaluation, monitor, registry
 from a_share_research.tools.registry import Context, invoke
 from a_share_research.tools.server import create_app
-from test_benchmark_evaluation import bundle as structural_bundle
-from test_policy_monitor import setup as monitor_setup
-from test_policy_account_input import bound_book as ledger_book
-from test_policy_capture import scoped_parameters
+from support.evaluations import benchmark_bundle as structural_bundle
+from support.policy import policy_input_book as ledger_book
+from support.policy import scoped_parameters
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
-    yield from monitor_setup.__wrapped__(tmp_path, monkeypatch)
-
-
-@pytest.fixture
-def configured(setup, monkeypatch):
+def configured(policy_setup, monkeypatch):
+    setup = policy_setup
     path, conn, _, _, _, original, _ = setup
     calls = []
     def capture(database, module, payload, *, market_token):
@@ -166,7 +161,7 @@ def test_only_allowed_collector_receives_market_credential(tmp_path, monkeypatch
 def test_collector_keeps_all_history_and_skips_stocks_without_valuation(tmp_path, monkeypatch, index_mode):
     from a_share_research.core import providers
     from a_share_research.policy.v0 import domain
-    for path, conn, principal, directory, sha in ledger_book.__wrapped__(tmp_path):
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
         monkeypatch.setenv('POLICY_V0_DB', str(path))
         now = datetime.fromisoformat('2026-11-02T15:35:00+08:00')
         monkeypatch.setattr(domain, 'cst_now', lambda: now)
@@ -195,7 +190,8 @@ def test_collector_keeps_all_history_and_skips_stocks_without_valuation(tmp_path
         assert list(conn.iterdump()) == before
 
 
-def test_actual_empty_child_no_provider_calls(setup):
+def test_actual_empty_child_no_provider_calls(policy_setup):
+    setup = policy_setup
     path, conn, principals, _, active, _, _ = setup
     saved = benchmark.run(conn, principals['assistant'], path, 'actual-empty-benchmark', active['id'], '2026-10-22')
     assert saved['input']['events'] == [] and saved['input']['indices'] == {} and saved['input']['prices'] == {}

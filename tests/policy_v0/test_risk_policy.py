@@ -18,7 +18,7 @@ from a_share_research.policy.v0 import (
     risk_policy,
 )
 from policy_v0.helpers import mock_price_quotes
-from policy_v0.monitor.test_monitor_snapshot import _quotes, _seed_holding
+from support.policy_replay import _quotes, _seed_holding
 
 NOW = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
 

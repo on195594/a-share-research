@@ -10,18 +10,14 @@ import pytest
 from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, monitor, position_evaluation, position_sizing, registry
 from a_share_research.tools.server import create_app
-from test_policy_monitor import historical_replay, setup as monitor_setup
+from support.policy import historical_replay
 
 PROPOSAL = dict(code='600900', price=29.5, framework='A')
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
-    yield from monitor_setup.__wrapped__(tmp_path, monkeypatch)
-
-
-@pytest.fixture
-def parent(setup):
+def parent(policy_setup):
+    setup = policy_setup
     path, conn, principals, _, active, _, _ = setup
     return monitor.run(conn, principals['assistant'], path, 'parent-monitor', active['id'])
 
@@ -33,7 +29,8 @@ def run(setup, parent, request='derived', **kwargs):
                                kwargs.pop('proposal', PROPOSAL))
 
 
-def test_saved_reference_hashes_no_network_and_idempotence(setup, parent, monkeypatch):
+def test_saved_reference_hashes_no_network_and_idempotence(policy_setup, parent, monkeypatch):
+    setup = policy_setup
     monkeypatch.setattr(monitor, '_capture', lambda *a, **k: pytest.fail('sizing cannot acquire inputs'))
     monkeypatch.setattr(monitor, 'capture', lambda *a, **k: pytest.fail('sizing cannot acquire inputs'))
     path, conn, principals, manifest, active, _, _ = setup
@@ -56,8 +53,9 @@ def test_saved_reference_hashes_no_network_and_idempotence(setup, parent, monkey
             run(setup, parent, **changed)
 
 
-def test_ready_using_captured_snapshot_transport_injection(setup, monkeypatch):
+def test_ready_using_captured_snapshot_transport_injection(policy_setup, monkeypatch):
     # Only service transport is injected; sizing uses the existing captured no_action evidence unchanged.
+    setup = policy_setup
     snapshot = json.loads((Path(__file__).parent / 'policy_v0/fixtures/monitor/agent-behavior-snapshots.json').read_text())['no_action']
     assert snapshot['account']['risk_policy'] == setup[3]['parameters']
     monkeypatch.setattr(evaluation, 'evaluate', lambda *a: deepcopy(snapshot))
@@ -69,7 +67,8 @@ def test_ready_using_captured_snapshot_transport_injection(setup, monkeypatch):
     assert registry.inspect(conn) == []
 
 
-def test_new_source_rejected_but_saved_derivation_survives_changes(setup, parent):
+def test_new_source_rejected_but_saved_derivation_survives_changes(policy_setup, parent):
+    setup = policy_setup
     _, conn, principals, manifest, active, _, _ = setup
     saved = run(setup, parent)
     conn.execute("UPDATE account_source SET updated_at='changed'")
@@ -83,7 +82,8 @@ def test_new_source_rejected_but_saved_derivation_survives_changes(setup, parent
         run(setup, parent, 'after-activation')
 
 
-def test_replay_reference_not_service_monitor(setup):
+def test_replay_reference_not_service_monitor(policy_setup):
+    setup = policy_setup
     conn = setup[1]
     supplied = historical_replay(setup, 'supplied')
     with pytest.raises(registry.PolicyError, match='服务端监控'):
@@ -91,7 +91,8 @@ def test_replay_reference_not_service_monitor(setup):
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
 
 
-def test_transaction_fault_does_not_leave_half_receipt(setup, parent):
+def test_transaction_fault_does_not_leave_half_receipt(policy_setup, parent):
+    setup = policy_setup
     conn = setup[1]
     conn.execute("CREATE TRIGGER fail_derived BEFORE INSERT ON policy_evaluations BEGIN SELECT RAISE(ABORT,'injected derived storage fault'); END")
     with pytest.raises(sqlite3.IntegrityError, match='storage fault'):
@@ -103,7 +104,8 @@ def test_transaction_fault_does_not_leave_half_receipt(setup, parent):
 
 
 @pytest.mark.parametrize('field', ['input_hash', 'result_hash'])
-def test_corrupt_parent_hash_prevents_derive_and_breaks_existing_reference(setup, parent, field):
+def test_corrupt_parent_hash_prevents_derive_and_breaks_existing_reference(policy_setup, parent, field):
+    setup = policy_setup
     _, conn, principals, _, _, _, _ = setup
     saved = run(setup, parent)
     conn.execute('DROP TRIGGER policy_evaluations_no_update')
@@ -116,7 +118,8 @@ def test_corrupt_parent_hash_prevents_derive_and_breaks_existing_reference(setup
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 2
 
 
-def test_http_permissions_validation_pause_and_saved_retry(setup, parent):
+def test_http_permissions_validation_pause_and_saved_retry(policy_setup, parent):
+    setup = policy_setup
     path, conn, _, _, active, _, _ = setup
     tokens = {role: api_keys.create(conn, 'sizing-' + role, role=role) for role in ('assistant', 'research')}
     args = dict(request_id='sizing-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
@@ -136,7 +139,8 @@ def test_http_permissions_validation_pause_and_saved_retry(setup, parent):
         assert client.post('/tools/policy_position_size', headers=headers('assistant'), json=args).status_code == 503
 
 
-def test_old_parent_rejected_under_new_activation(setup, parent):
+def test_old_parent_rejected_under_new_activation(policy_setup, parent):
+    setup = policy_setup
     _, conn, principals, manifest, active, _, _ = setup
     new = registry.activate(conn, principals['owner'], manifest['identity'], expected_id=active['id'],
                             request_id='new-activation', reason='transport fixture')
@@ -145,7 +149,8 @@ def test_old_parent_rejected_under_new_activation(setup, parent):
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
 
 
-def test_source_mutation_during_calculation_rolls_back(setup, parent, monkeypatch):
+def test_source_mutation_during_calculation_rolls_back(policy_setup, parent, monkeypatch):
+    setup = policy_setup
     conn = setup[1]
     before = conn.execute('SELECT updated_at FROM account_source').fetchone()[0]
     original = position_evaluation.evaluate
@@ -160,7 +165,8 @@ def test_source_mutation_during_calculation_rolls_back(setup, parent, monkeypatc
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
 
 
-def test_missing_derived_snapshot_is_a_readable_integrity_failure(setup, parent):
+def test_missing_derived_snapshot_is_a_readable_integrity_failure(policy_setup, parent):
+    setup = policy_setup
     _, conn, principals, _, _, _, _ = setup
     saved = run(setup, parent)
     broken = deepcopy(saved['input'])

@@ -6,12 +6,7 @@ import pytest
 
 from a_share_research.account import analysis
 from a_share_research.policy.v0 import commands_monitor, db as policy_db
-from test_account_analysis import branch as branch_fixture, historical_revision, request
-
-
-@pytest.fixture
-def branch(tmp_path):
-    yield from branch_fixture.__wrapped__(tmp_path)
+from support.account_analysis import historical_revision, request
 
 
 def initialize(branch):

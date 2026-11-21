@@ -9,11 +9,9 @@ from a_share_research import web_ledger
 from a_share_research.account import evidence, ledger
 from a_share_research.tools import registry
 from a_share_research.tools_client import ToolCallError
-from test_account_ledger import batch, book, buy, submit  # noqa: F401
-from test_policy_account_input import bound_book as policy_book_fixture
-from test_position_store import batch as position_batch, event as position_event
-
-policy_book = policy_book_fixture
+from support.accounts import batch, buy, submit
+from support.positions import batch as position_batch
+from support.positions import event as position_event
 
 
 class BoundTools:
@@ -111,7 +109,8 @@ def test_trade_field_error_and_disabled_form(web, account):
     assert 'Web 账户写入未启用' in disabled.body.decode() and '<fieldset disabled>' in disabled.body.decode()
 
 
-def test_reopened_position_uses_selected_registered_profile(web, policy_book):
+def test_reopened_position_uses_selected_registered_profile(web, bound_book):
+    policy_book = bound_book
     path, conn, principal, directory, sha = policy_book
     client = BoundTools(registry.Context(conn, path, principal, account_shadow_enabled=True))
     closing_trade = position_batch((conn, principal, directory, sha), [position_event('sell')], shares=0, cash='11200')

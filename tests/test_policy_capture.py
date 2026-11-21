@@ -9,9 +9,7 @@ import pytest
 
 from a_share_research.policy import capture, evaluation
 from a_share_research.policy.v0 import db, risk_budget
-
-
-NOW = datetime.fromisoformat('2026-11-11T12:00:00+08:00')
+from support.policy import NOW, scoped_parameters
 
 
 @pytest.fixture
@@ -42,14 +40,6 @@ def snapshot(**changes):
     # Explicit asset-envelope fixture to exercise denominator metadata, not an account record.
     return dict(schema_version=1, currency='CNY', portfolio_value=100., account_scope='structural-scope',
                 source='structural-only', recorded_at='2026-11-11T10:00:00+08:00') | changes
-
-
-def scoped_parameters(**changes):
-    return dict(policy_id='structural-policy', source='policy_file', account_scope='structural-scope', currency='CNY',
-                effective_from='2026-01-01T00:00:00+08:00', effective_to=None,
-                confirmed_at='2026-01-01T00:00:00+08:00', confirmation_ref='structural-only',
-                max_position_risk_pct=2., max_portfolio_risk_pct=8.,
-                field_sources={'max_position_risk_pct':'policy_file','max_portfolio_risk_pct':'policy_file'}) | changes
 
 
 def test_collection_is_read_only_and_retains_unavailable_inputs(collector):

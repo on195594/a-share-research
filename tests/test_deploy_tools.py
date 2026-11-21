@@ -8,9 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from a_share_research import deploy
-from test_deploy_policy import local_policy as _local_policy
-
-local_policy = _local_policy
 
 
 @pytest.fixture

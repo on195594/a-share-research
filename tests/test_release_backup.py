@@ -1,18 +1,12 @@
 """Release backup integration only; never invokes Docker or touches live data."""
 import os
 
-import pytest
-
 from a_share_research import backup, deploy
-from test_backup import source as source_fixture, database_rows
+from support.backup import database_rows
 
 
-@pytest.fixture
-def source(tmp_path):
-    yield from source_fixture.__wrapped__(tmp_path)
-
-
-def test_release_backup_keeps_legacy_db_entry_and_verified_evidence_bundle(source,tmp_path):
+def test_release_backup_keeps_legacy_db_entry_and_verified_evidence_bundle(backup_source,tmp_path):
+    source = backup_source
     target=tmp_path/'backup-pre-structural-20261111-000000.db'
     result=deploy.create_release_backup(source[0]/'app.db',target)
     bundle=target.with_suffix('.bundle')
@@ -23,7 +17,8 @@ def test_release_backup_keeps_legacy_db_entry_and_verified_evidence_bundle(sourc
     assert backup.verify(bundle)['ok']
 
 
-def test_release_pruning_removes_only_matched_complete_old_pairs(source,tmp_path):
+def test_release_pruning_removes_only_matched_complete_old_pairs(backup_source,tmp_path):
+    source = backup_source
     targets=[]
     for index in range(4):
         target=tmp_path/f'backup-pre-structural-20261111-00000{index}.db'
@@ -36,7 +31,8 @@ def test_release_pruning_removes_only_matched_complete_old_pairs(source,tmp_path
     assert (source[0]/'app.db').exists()
 
 
-def test_unmatched_or_incomplete_bundle_is_preserved_during_pruning(source,tmp_path):
+def test_unmatched_or_incomplete_bundle_is_preserved_during_pruning(backup_source,tmp_path):
+    source = backup_source
     target=tmp_path/'backup-pre-structural-20261111-000000.db'
     deploy.create_release_backup(source[0]/'app.db',target)
     bundle=target.with_suffix('.bundle')

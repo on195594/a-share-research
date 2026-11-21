@@ -9,8 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from a_share_research import api_keys, oauth_store
-from test_oauth_store import BINDING, REDIRECT
-
+from support.mcp import BINDING, REDIRECT
 
 # RFC 7636 Appendix B verifier for the existing store fixture's S256 challenge.
 VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"

@@ -9,17 +9,9 @@ from a_share_research.account.mirror import MANIFEST
 from a_share_research.account.positions import PositionSeed, PositionEntry, replay
 from a_share_research.account.reconciliation import Event
 from a_share_research.policy.v0.account_projection import project
+from support.positions import opening
 
 PROFILE = {'stops':{'A通用':['0.85','0.80'],'C资源':['0.82','0.75']},'main_entry_ratio':'0.5'}
-
-
-def opening():
-    row = dict.fromkeys(MANIFEST['holdings'])
-    row.update(id=1,code='600001',name='Structural',shares=100,cost_price=10,buy_date='2026-10-01',
-        framework='C资源',framework_confident=1,initial_shares=100,reference_cost=10,
-        main_entry_date='2026-10-01',main_entry_basis=1000,additions_since_main=0,
-        stop_loss_15=8.5,stop_loss_20=8,buy_score=50,notes='Structural original note',updated_at='2026-10-01')
-    return row
 
 
 def ev(kind='buy', day=2, **values):

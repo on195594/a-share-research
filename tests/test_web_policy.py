@@ -1,7 +1,7 @@
 """Authenticated read-only policy page, using isolated HTTP and captured research fixtures."""
 from a_share_research import api_keys,db
 from a_share_research.policy import registry
-from test_policy_capture import scoped_parameters
+from support.policy import scoped_parameters
 
 
 def activate(conn,**changes):

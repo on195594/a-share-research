@@ -7,15 +7,13 @@ import sys
 import time
 from contextlib import closing
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from a_share_research import market, db, sources, valuation
+from support.market_replay import CALENDAR, DATA, ROWS, DailyReports, budget_calls
 
-DATA = Path(__file__).parent / "data"
-ROWS = json.loads((DATA / "report_rc_603606_20261031.json").read_text())
 MARKET = json.loads((DATA / "600519-financials.json").read_text())["market"]
 
 
@@ -81,30 +79,6 @@ def test_report_rc_limit_message_classification():
     assert not market._report_rc_limited(Exception("没有访问权限"))
 
 
-CALENDAR = json.loads((DATA / "backtest-dates.json").read_text())["days"]
-
-
-class DailyReports:
-    """对真实 report_rc 响应按 report_date 切分，模拟全市场逐日响应；不改预测值。"""
-
-    def __init__(self, error=None):
-        self.calls = []
-        self.error = error
-
-    def query(self, api, **params):
-        if api == "trade_cal":
-            assert params["exchange"] == "SSE" and params["is_open"] == "1"
-            return pd.DataFrame({"cal_date": [d for d in CALENDAR if params["start_date"] <= d <= params["end_date"]]})
-        assert api == "report_rc"
-        assert set(params) == {"start_date", "end_date"}
-        assert params["start_date"] == params["end_date"]
-        self.calls.append(params["start_date"])
-        if self.error:
-            raise RuntimeError(self.error)
-        return pd.DataFrame([r for r in ROWS if r["report_date"] == params["start_date"]],
-                            columns=pd.DataFrame(ROWS).columns)
-
-
 @pytest.fixture
 def daily_reports(monkeypatch):
     monkeypatch.delenv("TUSHARE_CACHE", raising=False)
@@ -116,12 +90,6 @@ def daily_reports(monkeypatch):
     pro = DailyReports()
     monkeypatch.setattr(market, "client", lambda: pro)
     return pro
-
-
-def budget_calls():
-    with closing(sqlite3.connect(db.DATA / "tushare_cache.db")) as conn:
-        return conn.execute("SELECT calls FROM report_rc_budget WHERE day=?",
-                            (datetime.now(db.SHANGHAI).date().isoformat(),)).fetchone()[0]
 
 
 def test_window_budget_accumulates_across_calls_and_recent_days_first(daily_reports):
@@ -236,9 +204,9 @@ print(accepted)
 
 
 def test_research_passes_market_date_and_company_and_replay_never_fetches(daily_reports, monkeypatch):
+    from support.valuation import assumptions, material
+
     from a_share_research import research
-    from test_valuation import material
-    from support.valuation import assumptions
 
     original = sources.report_rc_window
     calls = []

@@ -12,9 +12,8 @@ from a_share_research.account.positions import PositionEntry
 from a_share_research.account.reconciliation import identity
 from a_share_research.policy.v0 import account_store, cache, monitor_research
 from a_share_research.tools.registry import Context, invoke
-from test_account import source_database
-from test_account_ledger import batch, book as book
-from test_service_delivery import SUCCESS, saved
+from support.accounts import batch, source_database
+from support.delivery import SUCCESS, saved
 
 
 @pytest.fixture
@@ -150,5 +149,3 @@ def test_policy_runtime_cannot_submit_research(research, args):
     runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
     assert cache.main(["research", *args]) == 2
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == runs
-
-

@@ -9,41 +9,13 @@ from a_share_research.account import analysis, evidence, ledger, position_store
 from a_share_research.account.mirror import MANIFEST
 from a_share_research.policy.v0 import account_store, db as policy_db
 from a_share_research.tools import registry
-from test_position_store import book as cost_book, seed, event, batch, submit
-from test_v0_account_projection import opening
+from support.positions import batch, event, submit
 
 
 def rows(conn, prefix=''):
     return {table: [dict(zip(MANIFEST[table], row)) for row in conn.execute(
         f"SELECT {','.join(MANIFEST[table])} FROM {prefix}{table} ORDER BY id")]
         for table in ('holdings', 'holding_events')}
-
-
-def insert(conn, table, row):
-    columns = MANIFEST[table]
-    conn.execute(f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
-                 [row[column] for column in columns])
-
-
-@pytest.fixture
-def book(tmp_path):
-    for fixture in cost_book.__wrapped__(tmp_path):
-        conn, principal, directory, sha = fixture
-        insert(conn, 'holdings', opening())
-        closed = opening() | dict(id=2, code='600002', name='Structural closed', shares=0,
-            buy_date='2026-09-01', exit_date='2026-09-30', exit_price=11)
-        insert(conn, 'holdings', closed)
-        for identity, holding, kind, day, price in (
-            (10, 2, 'buy', '2026-09-01', 10), (11, 2, 'sell', '2026-09-30', 11),
-            (20, 1, 'buy', '2026-10-01', 10)):
-            historical = dict.fromkeys(MANIFEST['holding_events'])
-            historical.update(id=identity, holding_id=holding, code=f'60000{holding}',
-                event_type=kind, event_date=day, shares=100, price=price, fees=0, tax=0,
-                inferred=0, created_at=day, notes='Structural historical evidence',
-                realized_pnl=100 if kind == 'sell' else None)
-            insert(conn, 'holding_events', historical)
-        position_store.initialize(conn, principal, 'a', [seed()], directory, [sha])
-        yield fixture
 
 
 def initialize(book, hashes=None):
@@ -60,7 +32,8 @@ def configure(monkeypatch, tmp_path):
     monkeypatch.setenv('POLICY_V0_ACCOUNT_SHADOW', 'a')
 
 
-def test_baseline_preserves_every_column_history_and_immutable_binding(book):
+def test_baseline_preserves_every_column_history_and_immutable_binding(policy_book):
+    book = policy_book
     before = rows(book[0])
     first = initialize(book)
     assert {table: first[table] for table in before} == before
@@ -76,7 +49,8 @@ def test_baseline_preserves_every_column_history_and_immutable_binding(book):
         initialize(book, [other])
 
 
-def test_future_buy_sell_stable_mapping_keeps_history_and_main_untouched(book):
+def test_future_buy_sell_stable_mapping_keeps_history_and_main_untouched(policy_book):
+    book = policy_book
     before = rows(book[0])
     initialize(book)
     assert submit(book, batch(book, [event()]))['status'] == 'posted'
@@ -101,7 +75,8 @@ def test_future_buy_sell_stable_mapping_keeps_history_and_main_untouched(book):
 
 
 @pytest.mark.parametrize('missing', ['profile', 'framework'])
-def test_inspection_detects_historical_financial_posting_with_missing_policy_context(book, missing):
+def test_inspection_detects_historical_financial_posting_with_missing_policy_context(policy_book, missing):
+    book = policy_book
     profile = initialize(book)['profile_identity']
     assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
     metadata = dict(policy_identity='unknown-structural-profile' if missing == 'profile' else profile,
@@ -117,7 +92,8 @@ def test_inspection_detects_historical_financial_posting_with_missing_policy_con
     assert any('政策投影缺口' in item for item in account_store.inspect(book[0]))
 
 
-def test_new_cycle_explicit_context_gets_fresh_stable_identity(book):
+def test_new_cycle_explicit_context_gets_fresh_stable_identity(policy_book):
+    book = policy_book
     profile = initialize(book)['profile_identity']
     assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
     reopened = event(price='10', broker_id='structural-reopen', occurred_at='2026-11-03T10:00:00+08:00')
@@ -133,7 +109,8 @@ def test_new_cycle_explicit_context_gets_fresh_stable_identity(book):
     assert result['holding_events'][-1]['holding_id'] == new['id']
 
 
-def test_account_submit_rolls_back_invalid_opening_framework_then_projects_valid_entry(book, tmp_path, bind_account):
+def test_account_submit_rolls_back_invalid_opening_framework_then_projects_valid_entry(policy_book, tmp_path, bind_account):
+    book = policy_book
     conn, principal, directory, _ = book
     profile = initialize(book)['profile_identity']
     directory.rename(tmp_path / 'account-evidence')
@@ -162,7 +139,8 @@ def test_account_submit_rolls_back_invalid_opening_framework_then_projects_valid
 
 
 @pytest.mark.parametrize('invalid', ['empty_evidence', 'absent_evidence', 'shares', 'late'])
-def test_policy_opening_rejects_unbound_or_inconsistent_sources(book, invalid):
+def test_policy_opening_rejects_unbound_or_inconsistent_sources(policy_book, invalid):
+    book = policy_book
     hashes = [book[3]]
     error = ledger.LedgerError
     match = '股数'
@@ -181,7 +159,8 @@ def test_policy_opening_rejects_unbound_or_inconsistent_sources(book, invalid):
 
 
 @pytest.mark.parametrize('role', ['research', 'owner'])
-def test_policy_reads_and_initialization_require_account_role(book, role):
+def test_policy_reads_and_initialization_require_account_role(policy_book, role):
+    book = policy_book
     denied = api_keys.authenticate(book[0], api_keys.create(book[0], 'structural-denied-' + role, role=role))
     with pytest.raises(ledger.LedgerError) as caught:
         account_store.initialize(book[0], denied, 'a', book[2], [book[3]])
@@ -192,7 +171,8 @@ def test_policy_reads_and_initialization_require_account_role(book, role):
     assert caught.value.status == 403
 
 
-def test_source_hash_tampering_is_detected_by_read_and_inspection(book):
+def test_source_hash_tampering_is_detected_by_read_and_inspection(policy_book):
+    book = policy_book
     initialize(book)
     book[0].execute('DROP TRIGGER policy_v0_account_openings_no_update')
     book[0].execute("UPDATE policy_v0_account_openings SET source_hash='tampered'")
@@ -202,7 +182,8 @@ def test_source_hash_tampering_is_detected_by_read_and_inspection(book):
 
 
 @pytest.mark.parametrize('combined', [False, True])
-def test_opt_in_temp_projection_is_sealed_and_default_off_stays_legacy(book, tmp_path, monkeypatch, combined):
+def test_opt_in_temp_projection_is_sealed_and_default_off_stays_legacy(policy_book, tmp_path, monkeypatch, combined):
+    book = policy_book
     before = rows(book[0])
     initialize(book)
     if combined:

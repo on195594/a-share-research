@@ -1,12 +1,9 @@
 """Price levels on 61 real sessions of 长江电力 and CSI 300 ending 2026-10-20."""
 
-import json
-from pathlib import Path
 
 import pytest
 from a_share_research.price import PriceError, SUPPORTED_CODE, compute
-
-DATA = json.loads((Path(__file__).parent / "data" / "600900-61d.json").read_text())
+from support.market_replay import PRICE_DATA as DATA
 
 
 def test_levels_match_the_reference_run():

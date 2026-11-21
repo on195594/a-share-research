@@ -3,8 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from test_ops_hermes import load
+from support.hermes import load
 
 
 def test_monthly_request_and_full_status_use_the_same_month(ashare_cli, tmp_path, monkeypatch, capsys):

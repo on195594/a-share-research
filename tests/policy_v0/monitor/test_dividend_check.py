@@ -3,19 +3,9 @@
 import pytest
 
 from a_share_research.policy.v0 import cache, commands_holdings
+from support.policy_replay import HUADONG_DIVIDENDS, HUADONG_EVENTS
 
 # 000963 lifecycle as recorded before the 2026-10-22 dividend entry.
-HUADONG_EVENTS = [
-    ("buy", "2026-06-10", 600, 30.1367, 0.0, 0.0, None, 0),
-    ("buy", "2026-08-06", 200, 27.81, 4.84, 0.0, None, 0),
-]
-HUADONG_DIVIDENDS = [
-    # Record date before the first buy: not entitled.
-    {"record_date": "2026-06-09", "ex_date": "2026-06-10", "pay_date": "2026-06-10",
-     "cash_div": 0.58, "split_ratio": 0.0},
-    {"record_date": "2026-09-17", "ex_date": "2026-09-18", "pay_date": "2026-09-18",
-     "cash_div": 0.35, "split_ratio": 0.0},
-]
 
 
 def test_entitled_unrecorded_dividend_uses_record_date_position():
@@ -46,7 +36,7 @@ def test_sold_out_or_future_record_date_is_not_entitled():
 
 
 def test_dividend_check_prints_entry_command(isolated_cache_database, monkeypatch, capsys):
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
+    from support.policy_replay import _seed_holding
 
     _seed_holding(isolated_cache_database, "000963", shares=800)
     monkeypatch.setattr(
@@ -76,7 +66,7 @@ def test_changed_share_count_prompts_the_entitled_total(
     isolated_cache_database, monkeypatch, capsys
 ):
 
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
+    from support.policy_replay import _seed_holding
 
     # 1000 shares on the record date, 500 sold afterwards; 500 remain open.
     _seed_holding(isolated_cache_database, "000963", shares=500)
@@ -98,7 +88,7 @@ def test_changed_share_count_prompts_the_entitled_total(
 def test_partially_recorded_cash_and_split_gives_no_auto_command(
     isolated_cache_database, monkeypatch, capsys
 ):
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
+    from support.policy_replay import _seed_holding
 
     mixed = [{"record_date": "2026-09-17", "ex_date": "2026-09-18",
               "pay_date": "2026-09-18", "cash_div": 0.35, "split_ratio": 0.3}]

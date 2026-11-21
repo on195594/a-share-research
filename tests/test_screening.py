@@ -155,8 +155,9 @@ def test_a_proposed_draft_left_by_a_restart_is_frozen_by_the_worker(tmp_path):
 
 @pytest.mark.parametrize("auto", [True, False], ids=["auto", "owner"])
 def test_dual_pool_freeze_reads_coverage_once(tmp_path, monkeypatch, auto):
+    from support.screening import cache_partial_window, proposed
+
     from a_share_research import db, sources
-    from test_batch_c import cache_partial_window, proposed
 
     cache_partial_window(monkeypatch)
     with db.connect(tmp_path / "batches.db") as conn:

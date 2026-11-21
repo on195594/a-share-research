@@ -12,11 +12,7 @@ from a_share_research.research_tools import ResearchTools
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
 from support.valuation import BODY, ROWS, STORED, assumptions, with_probabilities
-
-
-def material():
-    return Material(BODY['code'], BODY['name'], Document(**BODY['document']), {}, {},
-                    deepcopy(BODY['table']), BODY['market_date'])
+from support.valuation import material
 
 
 @pytest.mark.parametrize('record', [r for r in STORED if not r['valuation_calc'].get('not_priced')])

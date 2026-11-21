@@ -3,46 +3,13 @@ import json
 
 import pytest
 
-from a_share_research import api_keys
 from a_share_research.policy import capture, monitor, registry
-from test_policy_account_input import bound_book as input_book, observe
-from test_policy_capture import NOW, scoped_parameters
+from support.policy import observe, scoped_parameters
+from support.policy import run_monitor as run
 
 
-@pytest.fixture
-def bound_book(tmp_path):
-    yield from input_book.__wrapped__(tmp_path)
-
-
-@pytest.fixture
-def configured(bound_book, monkeypatch):
-    path,conn,principal,directory,sha=bound_book
-    owner=api_keys.authenticate(conn,api_keys.create(conn,'ledger-monitor-owner',role='owner'))
-    manifest=registry.register(conn,owner,scoped_parameters())
-    active=registry.activate(conn,owner,manifest['identity'],expected_id=0,
-        request_id='ledger-monitor-activate',reason='structural ledger collector')
-    monkeypatch.setenv('POLICY_V0_DB',str(path))
-    monkeypatch.delenv('POLICY_V0_ACCOUNT_SHADOW',raising=False)
-    monkeypatch.delenv('POLICY_V0_ANALYSIS_SHADOW',raising=False)
-    monkeypatch.setattr(capture.domain,'cst_now',lambda:NOW)
-    monkeypatch.setattr(capture.monitor_research,'fetch_cards',lambda:{'status':'not_configured','cards':[]})
-    monkeypatch.setattr(capture.commands_holdings,'fetch_monitor_price_quotes',lambda codes:({code:None for code in codes},None))
-    calls=[]
-    def collect(database,parameters,*,source):
-        assert not conn.in_transaction
-        calls.append(source)
-        return capture.collect(parameters,source=source)
-    monkeypatch.setattr(monitor,'capture',collect)
-    return bound_book,owner,active,calls
-
-
-def run(configured,request_id='ledger-capture'):
-    book,_,active,_=configured
-    path,conn,principal,_,_=book
-    return monitor.run(conn,principal,path,request_id,active['id'])
-
-
-def test_ledger_collection_reads_scoped_projection_and_never_legacy_asset_file(configured,monkeypatch):
+def test_ledger_collection_reads_scoped_projection_and_never_legacy_asset_file(ledger_monitor,monkeypatch):
+    configured = ledger_monitor
     book,_,_,calls=configured
     path,conn,principal,_,_=book
     (path.parent/'account-snapshot.json').write_text('deliberately invalid old asset file')
@@ -61,7 +28,8 @@ def test_ledger_collection_reads_scoped_projection_and_never_legacy_asset_file(c
     assert 'POLICY_V0_ANALYSIS_SHADOW' not in capture.os.environ
 
 
-def test_ledger_asset_observation_is_not_a_valuation_timestamp(configured):
+def test_ledger_asset_observation_is_not_a_valuation_timestamp(ledger_monitor):
+    configured = ledger_monitor
     book,_,_,_=configured
     observe(book)
     receipt=run(configured)
@@ -72,7 +40,8 @@ def test_ledger_asset_observation_is_not_a_valuation_timestamp(configured):
     assert denominator['denominator_freshness_status']=='unknown'
 
 
-def test_observation_during_network_collection_rejects_even_when_book_version_unchanged(configured,monkeypatch):
+def test_observation_during_network_collection_rejects_even_when_book_version_unchanged(ledger_monitor,monkeypatch):
+    configured = ledger_monitor
     book,_,_,_=configured
     _,conn,_,_,_=book
     original=monitor.capture
@@ -86,7 +55,8 @@ def test_observation_during_network_collection_rejects_even_when_book_version_un
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0]==0
 
 
-def test_wrong_bound_scope_rejects_before_collection(configured):
+def test_wrong_bound_scope_rejects_before_collection(ledger_monitor):
+    configured = ledger_monitor
     book,_,_,calls=configured
     _,conn,_,_,_=book
     binding=json.loads(conn.execute('SELECT watermark FROM account_source').fetchone()[0])
@@ -96,7 +66,8 @@ def test_wrong_bound_scope_rejects_before_collection(configured):
     assert calls==[]
 
 
-def test_child_detects_source_change_and_restores_projection_environment(configured,monkeypatch):
+def test_child_detects_source_change_and_restores_projection_environment(ledger_monitor,monkeypatch):
+    configured = ledger_monitor
     book,_,_,_=configured
     _,conn,_,_,_=book
     source=monitor._source(conn,book[0].parent)
@@ -114,7 +85,8 @@ def test_child_detects_source_change_and_restores_projection_environment(configu
     assert capture.os.environ['POLICY_V0_ANALYSIS_SHADOW']=='previous-analysis'
 
 
-def test_saved_ledger_context_remains_valid_after_later_observation(configured):
+def test_saved_ledger_context_remains_valid_after_later_observation(ledger_monitor):
+    configured = ledger_monitor
     receipt=run(configured)
     book,_,_,_=configured
     observe(book)
@@ -122,7 +94,8 @@ def test_saved_ledger_context_remains_valid_after_later_observation(configured):
     assert run(configured)==receipt
 
 
-def test_recorded_valuation_time_reaches_collector_and_saved_evaluation(configured):
+def test_recorded_valuation_time_reaches_collector_and_saved_evaluation(ledger_monitor):
+    configured = ledger_monitor
     from a_share_research.account import ledger
     book,_,_,_=configured
     _,conn,principal,directory,sha=book

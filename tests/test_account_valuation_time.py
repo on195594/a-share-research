@@ -8,12 +8,7 @@ from pydantic import ValidationError
 from a_share_research import db, gate
 from a_share_research.account import ledger
 from a_share_research.account.reconciliation import Snapshot
-from test_account_ledger import book as ledger_book, batch, submit
-
-
-@pytest.fixture
-def book(tmp_path):
-    yield from ledger_book.__wrapped__(tmp_path)
+from support.accounts import batch, submit
 
 
 def snapshot(**changes):

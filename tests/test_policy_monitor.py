@@ -11,33 +11,9 @@ import pytest
 
 from a_share_research import api_keys, db, gate
 from a_share_research.account import mirror
-from a_share_research.policy import evaluation, monitor, registry
+from a_share_research.policy import monitor, registry
 from a_share_research.policy.v0 import risk_budget
-
-
-@pytest.fixture
-def setup(tmp_path, monkeypatch):
-    path=tmp_path/'app.db'
-    conn=db.connect(path)
-    principals={role:api_keys.authenticate(conn,api_keys.create(conn,role,role=role))
-                for role in ('owner','assistant','research')}
-    parameters=risk_budget.policy()
-    manifest=registry.register(conn,principals['owner'],parameters)
-    activation=registry.activate(conn,principals['owner'],manifest['identity'],expected_id=0,
-                                 request_id='structural-activation',reason='empty-account transport fixture')
-    sha=mirror.digest(mirror._read(conn,tmp_path))
-    conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)',('mirror',sha,db.now(),'{}'))
-    bundle=dict(local=dict(holdings=[],closed_count=0),quotes={},portfolio_value=None,industry_result=None,
-                now=db.now(),risk_policy=parameters,denominator_evidence={},account_scope_required=False,
-                research_result={'status':'not_configured','cards':[]})
-    captured=[]
-    def capture(database, actual_parameters):
-        captured.append((database,actual_parameters))
-        assert not conn.in_transaction  # Network collection must not retain the caller's database lock.
-        return deepcopy(bundle)
-    monkeypatch.setattr(monitor,'capture',capture)
-    yield path,conn,principals,manifest,activation,bundle,captured
-    conn.close()
+from support.policy import historical_replay
 
 
 def run(setup, request_id='monitor-once', expected=None, role='assistant'):
@@ -45,21 +21,8 @@ def run(setup, request_id='monitor-once', expected=None, role='assistant'):
     return monitor.run(conn,principals[role],path,request_id,activation['id'] if expected is None else expected)
 
 
-def historical_replay(setup, request_id):
-    """Seed a v19 receipt to exercise readers after the replay writer was retired."""
-    _, conn, principals, manifest, activation, bundle, _ = setup
-    result = evaluation.evaluate(bundle, manifest['parameters'])
-    row = conn.execute(
-        'INSERT INTO policy_evaluations '
-        '(identity,activation_id,created_at,created_by,request_id,input_hash,result_hash,input,result) '
-        'VALUES (?,?,?,?,?,?,?,?,?)',
-        (manifest['identity'], activation['id'], db.now(), principals['assistant'].key_id, request_id,
-         gate.digest(bundle), gate.digest(result), gate.canonical(bundle), gate.canonical(result)),
-    )
-    return registry.evaluation(conn, principals['assistant'], row.lastrowid)
-
-
-def test_capture_receipt_binds_identity_source_inputs_and_is_idempotent(setup):
+def test_capture_receipt_binds_identity_source_inputs_and_is_idempotent(policy_setup):
+    setup = policy_setup
     path,conn,principals,manifest,activation,bundle,captured=setup
     result=run(setup)
     assert result['mode']=='service_monitor_capture'
@@ -83,7 +46,8 @@ def test_capture_receipt_binds_identity_source_inputs_and_is_idempotent(setup):
     assert registry.inspect(conn)==[]
 
 
-def test_request_id_cannot_cross_replay_and_service_capture(setup):
+def test_request_id_cannot_cross_replay_and_service_capture(policy_setup):
+    setup = policy_setup
     captured = setup[-1]
     historical_replay(setup, 'replayed')
     with pytest.raises(registry.PolicyError,match='不同评估'):
@@ -96,7 +60,8 @@ def test_request_id_cannot_cross_replay_and_service_capture(setup):
 
 
 @pytest.mark.parametrize('case',['missing','ledger','hash','asset-file','wrong-pointer','unauthorized'])
-def test_invalid_source_or_access_fails_before_collection(setup,case):
+def test_invalid_source_or_access_fails_before_collection(policy_setup,case):
+    setup = policy_setup
     path,conn,_,_,_,_,captured=setup
     if case=='missing': conn.execute('DELETE FROM account_source')
     if case=='ledger': conn.execute("UPDATE account_source SET mode='ledger'")
@@ -111,7 +76,8 @@ def test_invalid_source_or_access_fails_before_collection(setup,case):
     assert conn.execute('SELECT COUNT(*) FROM policy_evaluations').fetchone()[0]==0
 
 
-def test_no_activation_never_collects(setup):
+def test_no_activation_never_collects(policy_setup):
+    setup = policy_setup
     _,conn,_,_,_,_,captured=setup
     conn.execute('DROP TRIGGER policy_activations_no_delete')
     conn.execute('DELETE FROM policy_activations')
@@ -122,7 +88,8 @@ def test_no_activation_never_collects(setup):
 
 
 @pytest.mark.parametrize('change',['policy','mirror','revocation','both'])
-def test_changes_during_capture_reject_without_receipt(setup,monkeypatch,change):
+def test_changes_during_capture_reject_without_receipt(policy_setup,monkeypatch,change):
+    setup = policy_setup
     path,conn,principals,manifest,activation,bundle,_=setup
     def capture(*_):
         other=sqlite3.connect(path,isolation_level=None)
@@ -145,7 +112,8 @@ def test_changes_during_capture_reject_without_receipt(setup,monkeypatch,change)
     assert not conn.in_transaction
 
 
-def test_collection_failure_and_storage_fault_do_not_save_receipt(setup,monkeypatch):
+def test_collection_failure_and_storage_fault_do_not_save_receipt(policy_setup,monkeypatch):
+    setup = policy_setup
     _,conn,_,_,_,bundle,_=setup
     def failed(*_): raise registry.PolicyError('structural timeout',504)
     monkeypatch.setattr(monitor,'capture',failed)
@@ -158,7 +126,8 @@ def test_collection_failure_and_storage_fault_do_not_save_receipt(setup,monkeypa
     assert not conn.in_transaction
 
 
-def test_bad_collector_input_never_saves(setup,monkeypatch):
+def test_bad_collector_input_never_saves(policy_setup,monkeypatch):
+    setup = policy_setup
     _,conn,_,_,_,bundle,_=setup
     monkeypatch.setattr(monitor,'capture',lambda *_:bundle|{'risk_policy':risk_budget.policy(3,9)})
     with pytest.raises(registry.PolicyError) as error: run(setup)
@@ -166,7 +135,8 @@ def test_bad_collector_input_never_saves(setup,monkeypatch):
     assert conn.execute('SELECT COUNT(*) FROM policy_evaluations').fetchone()[0]==0
 
 
-def test_context_tamper_is_found_in_read_and_inspection(setup):
+def test_context_tamper_is_found_in_read_and_inspection(policy_setup):
+    setup = policy_setup
     _,conn,principals,_,_,_,_=setup
     result=run(setup)
     conn.execute('DROP TRIGGER policy_evaluations_no_update')
@@ -176,7 +146,8 @@ def test_context_tamper_is_found_in_read_and_inspection(setup):
     assert registry.inspect(conn)
 
 
-def test_concurrent_same_request_returns_one_committed_receipt(setup,monkeypatch):
+def test_concurrent_same_request_returns_one_committed_receipt(policy_setup,monkeypatch):
+    setup = policy_setup
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
     path,conn,principals,_,activation,bundle,_=setup
@@ -197,7 +168,8 @@ def test_concurrent_same_request_returns_one_committed_receipt(setup,monkeypatch
     assert registry.inspect(conn)==[]
 
 
-def test_v20_additive_columns_preserve_prior_replay_and_rerun(setup):
+def test_v20_additive_columns_preserve_prior_replay_and_rerun(policy_setup):
+    setup = policy_setup
     _,conn,principals,*_=setup
     historical_replay(setup, 'before-capture-columns')
     conn.execute('ALTER TABLE policy_evaluations DROP COLUMN capture_context_hash')
@@ -302,7 +274,8 @@ def test_real_capture_process_with_explicit_empty_account_needs_no_market_reques
     assert path.read_bytes()==before
 
 
-def test_changed_machine_code_survives_tools_mapping_but_no_other_conflict(setup):
+def test_changed_machine_code_survives_tools_mapping_but_no_other_conflict(policy_setup):
+    setup = policy_setup
     from a_share_research.tools.registry import Context, ToolError, invoke
     path, conn, principals, manifest, activation, _, _ = setup
     registry.activate(conn, principals['owner'], manifest['identity'], expected_id=activation['id'],

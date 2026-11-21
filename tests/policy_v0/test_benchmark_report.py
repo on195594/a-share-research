@@ -45,7 +45,7 @@ def test_report_values_open_shares_at_common_valuation_day(
 ):
     import sqlite3
 
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
+    from support.policy_replay import _seed_holding
 
     holding_id = _seed_holding(isolated_cache_database, "600900", shares=50)
     with sqlite3.connect(isolated_cache_database) as conn:

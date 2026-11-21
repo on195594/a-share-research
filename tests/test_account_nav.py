@@ -7,72 +7,22 @@ from contextlib import closing
 from datetime import datetime
 from decimal import Decimal
 import json
-from pathlib import Path
 
-import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 from a_share_research import api_keys, db, gate, integrity, overview, service
 from a_share_research.account import evidence, ledger, nav
-from a_share_research.account.reconciliation import Event, Opening, Snapshot
+from a_share_research.account.reconciliation import Opening, Snapshot
 from a_share_research.core.market_data import MarketDataResult
 from a_share_research.core.providers import TushareMarketDataProvider
 from a_share_research.tools.registry import TOOLS, Context, ToolError, discover, invoke
 from a_share_research.tools.server import create_app
+from support.account_nav import capture, evaluate, observe, post, request
 
 
-@pytest.fixture
-def book(tmp_path):
-    conn = db.connect(tmp_path / 'app.db')
-    principal = api_keys.authenticate(conn, api_keys.create(conn, 'NAV structural', role='assistant'))
-    directory = tmp_path / 'account-evidence'
-    sha = evidence.store(directory, b'Structural NAV fixture, NOT broker evidence or actual performance')
-    ledger.initialize(conn, principal, 'a', Opening(positions={}, cash='1000'),
-        datetime.fromisoformat('2026-01-01T00:00:00+08:00'), directory, sha, tolerance=Decimal('0'))
-    result = dict(conn=conn, principal=principal, directory=directory, sha=sha, path=tmp_path / 'app.db')
-    result['start'] = observe(result, '2026-01-05T15:00:00+08:00', '1000')
-    result['end'] = observe(result, '2026-01-08T15:00:00+08:00', '1100')
-    result['index'] = json.loads((Path(__file__).parent / 'data/account-nav-h00906.json').read_text())
-    yield result
-    conn.close()
-
-
-def observe(book, stamp, value):
-    receipt = ledger.observe(book['conn'], book['principal'], 'a', ledger.Observation(
-        observed_at='2026-11-11T16:00:00+08:00', portfolio_value_as_of=stamp, total_assets=value),
-        book['directory'], book['sha'])
-    return {'kind': 'observation', 'id': receipt['observation_id'], 'reason': 'Explicit structural valuation selection'}
-
-
-def capture(book):
-    return nav.capture(book['conn'], book['principal'], 'a')
-
-
-def request(book, **changes):
-    return nav.Request.model_validate(dict(expected_state_sha256=capture(book)['state_sha256'],
-        start=book['start'], end=book['end'], flows=[], coverage=dict(
-            start='2026-01-05T15:00:00+08:00', end='2026-01-08T15:00:00+08:00',
-            currency='CNY', scope='cash_equity_no_liabilities', complete_external_flows=True,
-            no_security_transfers=True, evidence_hashes=[book['sha']], explanation='Structural complete flow declaration'),
-        benchmark_evidence_hash=evidence.store(book['directory'], gate.canonical(book['index']).encode())) | changes)
-
-
-def evaluate(book, value=None):
-    return nav.evaluate(book['conn'], book['principal'], 'a', value or request(book), book['directory'])
-
-
-def post(book, *, cash='100', kind='deposit', voids=(), balance='1100', code=None):
-    event = Event(kind=kind, cash=cash, code=code, occurred_at='2026-01-06T10:00:00+08:00', broker_id='flow')
-    version = ledger.state(book['conn'], book['principal'], 'a')['version']
-    receipt = ledger.submit(book['conn'], book['principal'], 'a', ledger.Batch(expected_version=version,
-        events=[event], void_event_ids=list(voids), evidence_hashes=[book['sha']],
-        snapshot=Snapshot(positions={}, cash=balance, market_values={}, total_assets=balance)), book['directory'])
-    assert receipt['status'] == 'posted'
-    return book['conn'].execute('SELECT max(id) FROM account_journal').fetchone()[0]
-
-
-def test_no_flow_real_index_endpoints_and_idempotent_artifact(book):
+def test_no_flow_real_index_endpoints_and_idempotent_artifact(nav_book):
+    book = nav_book
     before = capture(book)
     result = evaluate(book)
     assert Decimal(result['calculation']['account_return']) == Decimal('.1')
@@ -87,7 +37,8 @@ def test_no_flow_real_index_endpoints_and_idempotent_artifact(book):
     assert replay['mode'] == 'saved_input_replay'
 
 
-def test_overviews_share_latest_bound_reference_and_detail_reads_saved_result(book, bind_account):
+def test_overviews_share_latest_bound_reference_and_detail_reads_saved_result(nav_book, bind_account):
+    book = nav_book
     conn = book['conn']
     bind_account(conn, 'a')
     gap = '暂无可查询的 NAV 区间凭证'
@@ -125,28 +76,8 @@ def test_overviews_share_latest_bound_reference_and_detail_reads_saved_result(bo
     assert error.value.status == 404
 
 
-@pytest.fixture
-def collect_nav(book, bind_account, monkeypatch):
-    bind_account(book['conn'], 'a')
-    args = request(book).model_dump(mode='json', exclude={'benchmark_evidence_hash'})
-    index = book['index']
-    calls = []
-
-    def fetch(provider, code, start, end):
-        calls.append((code, start, end))
-        rows = [row for row in index['rows'] if start <= row['date'] <= end]
-        return MarketDataResult(pd.DataFrame(rows), 'ok', index['source'], index['fetched_at'],
-                                source_as_of=max(row['date'] for row in rows), freshness_days=0)
-
-    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', fetch)
-    def collect(connection=book['conn'], **changes):
-        ctx = Context(connection, book['path'], book['principal'], account_shadow_enabled=True)
-        return invoke(ctx, 'account_nav_evaluate', {'request': args | changes})['data']
-
-    return collect, calls
-
-
-def test_collected_index_is_referenced_replayed_and_reused(book, collect_nav):
+def test_collected_index_is_referenced_replayed_and_reused(nav_book, collect_nav):
+    book = nav_book
     collect, calls = collect_nav
     tool = TOOLS['account_nav_evaluate']
     assert tool.collects and tool.access == 'write'
@@ -176,7 +107,8 @@ def test_collected_index_is_referenced_replayed_and_reused(book, collect_nav):
     assert collect() == first and len(calls) == 2
 
 
-def test_collected_index_reuses_request_committed_during_fetch(book, collect_nav, monkeypatch):
+def test_collected_index_reuses_request_committed_during_fetch(nav_book, collect_nav, monkeypatch):
+    book = nav_book
     collect, _ = collect_nav
     with closing(db.connect(book['path'])) as other, monkeypatch.context() as patch:
         def finish_other_request(*args):
@@ -193,7 +125,8 @@ def test_collected_index_reuses_request_committed_during_fetch(book, collect_nav
     assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 1
 
 
-def test_replay_requires_a_committed_reference_for_collected_provenance(book, collect_nav):
+def test_replay_requires_a_committed_reference_for_collected_provenance(nav_book, collect_nav):
+    book = nav_book
     collect, _ = collect_nav
     for receipt in (evaluate(book), collect()):
         # Same saved inputs and result, re-uploaded as a distinct, unregistered file.
@@ -211,7 +144,8 @@ def test_replay_requires_a_committed_reference_for_collected_provenance(book, co
     ('start', '2026-01-05T14:59:59+08:00'),
     ('end', '2026-01-08T15:00:00.000001+08:00'),
 ])
-def test_non_close_endpoint_rejected_before_collection(book, collect_nav, endpoint, stamp):
+def test_non_close_endpoint_rejected_before_collection(nav_book, collect_nav, endpoint, stamp):
+    book = nav_book
     collect, calls = collect_nav
     ref = observe(book, stamp, '1000')
     value = request(book).model_dump(mode='json')
@@ -223,7 +157,8 @@ def test_non_close_endpoint_rejected_before_collection(book, collect_nav, endpoi
 
 
 @pytest.mark.parametrize('missing', ['2026-01-05', '2026-01-08'])
-def test_collected_index_requires_both_exact_closes(book, collect_nav, missing):
+def test_collected_index_requires_both_exact_closes(nav_book, collect_nav, missing):
+    book = nav_book
     collect, _ = collect_nav
     # Remove only the endpoint from the captured rows, leaving adjacent trading days.
     book['index']['rows'] = [r for r in book['index']['rows'] if r['date'] != missing]
@@ -235,7 +170,8 @@ def test_collected_index_requires_both_exact_closes(book, collect_nav, missing):
     assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 0
 
 
-def test_index_collection_exception_saves_failure_and_allows_retry(book, collect_nav, monkeypatch):
+def test_index_collection_exception_saves_failure_and_allows_retry(nav_book, collect_nav, monkeypatch):
+    book = nav_book
     collect, _ = collect_nav
 
     def interrupted(*args):
@@ -259,8 +195,9 @@ def test_index_collection_exception_saves_failure_and_allows_retry(book, collect
     ('TIMEOUT', 503, 'unavailable', '行情暂不可用，稍后用原请求重试'),
     ('EMPTY_RESPONSE', 422, 'invalid_arguments', '2026-01-05 至 2026-01-08.*另选区间'),
 ])
-def test_failed_index_response_reports_recovery_and_evidence(book, collect_nav, monkeypatch,
+def test_failed_index_response_reports_recovery_and_evidence(nav_book, collect_nav, monkeypatch,
                                                             code, status, tool_code, message):
+    book = nav_book
     collect, _ = collect_nav
     index = book['index']
     failed = MarketDataResult(None, 'failed', index['source'], index['fetched_at'], error_code=code)
@@ -273,15 +210,17 @@ def test_failed_index_response_reports_recovery_and_evidence(book, collect_nav, 
     assert book['conn'].execute('SELECT count(*) FROM account_nav_refs').fetchone()[0] == 0
 
 
-def test_index_json_decimal_amount_is_not_rounded_through_binary_float(book):
+def test_index_json_decimal_amount_is_not_rounded_through_binary_float(nav_book):
     # Deliberate precision variant, not a captured market observation.
+    book = nav_book
     raw = gate.canonical(book['index']).replace('7467.2048', '7467.20480000000000000000000001')
     value = request(book, benchmark_evidence_hash=evidence.store(book['directory'], raw.encode()))
     result = evaluate(book, value)
     assert result['inputs']['benchmark_start'] == '7467.20480000000000000000000001'
 
 
-def test_each_deposit_needs_exact_preflow_valuation_and_not_profit(book):
+def test_each_deposit_needs_exact_preflow_valuation_and_not_profit(nav_book):
+    book = nav_book
     event_id = post(book)
     with pytest.raises(ledger.LedgerError, match='每笔有效'):
         evaluate(book)
@@ -296,7 +235,8 @@ def test_each_deposit_needs_exact_preflow_valuation_and_not_profit(book):
     ('fee', '10', '990', '990', '-.01'),
     ('dividend', '100', '1100', '1100', '.1'),
 ])
-def test_withdrawal_is_external_but_fee_and_dividend_are_returns(book, kind, cash, balance, end, expected):
+def test_withdrawal_is_external_but_fee_and_dividend_are_returns(nav_book, kind, cash, balance, end, expected):
+    book = nav_book
     event_id = post(book, kind=kind, cash=cash, balance=balance, code='600519' if kind == 'dividend' else None)
     book['end'] = observe(book, '2026-01-08T15:00:00+08:00', end)
     refs = []
@@ -306,7 +246,8 @@ def test_withdrawal_is_external_but_fee_and_dividend_are_returns(book, kind, cas
     assert Decimal(result['calculation']['account_return']) == Decimal(expected)
 
 
-def test_new_observation_changes_hash_without_version_change_and_old_replay_survives(book):
+def test_new_observation_changes_hash_without_version_change_and_old_replay_survives(nav_book):
+    book = nav_book
     original = request(book)
     result = evaluate(book, original)
     state = capture(book)
@@ -320,7 +261,8 @@ def test_new_observation_changes_hash_without_version_change_and_old_replay_surv
     assert replay['calculation'] == result['calculation']
 
 
-def test_void_correction_creates_new_capture_without_reinterpreting_old_result(book):
+def test_void_correction_creates_new_capture_without_reinterpreting_old_result(nav_book):
+    book = nav_book
     first = post(book)
     before = observe(book, '2026-01-06T10:00:00+08:00', '1000')
     original = evaluate(book, request(book, flows=[{'event_id': first, 'before': before}]))
@@ -335,14 +277,16 @@ def test_void_correction_creates_new_capture_without_reinterpreting_old_result(b
 
 
 @pytest.mark.parametrize('field', ['complete_external_flows', 'no_security_transfers'])
-def test_unknown_coverage_never_defaults_to_zero(book, field):
+def test_unknown_coverage_never_defaults_to_zero(nav_book, field):
+    book = nav_book
     value = request(book).model_dump(mode='json')
     value['coverage'][field] = False
     with pytest.raises(ledger.LedgerError, match='完整外部资金'):
         evaluate(book, nav.Request.model_validate(value))
 
 
-def test_coverage_interval_and_missing_original_rejected(book):
+def test_coverage_interval_and_missing_original_rejected(nav_book):
+    book = nav_book
     value = request(book)
     value.coverage.start = datetime.fromisoformat('2026-01-04T15:00:00+08:00')
     with pytest.raises(ledger.LedgerError, match='精确匹配'):
@@ -353,7 +297,8 @@ def test_coverage_interval_and_missing_original_rejected(book):
 
 
 @pytest.mark.parametrize('mutation', ['missing', 'duplicate', 'wrong_code', 'stale', 'failed', 'nonfinite'])
-def test_index_failures_are_not_filled_with_nearest_close(book, mutation):
+def test_index_failures_are_not_filled_with_nearest_close(nav_book, mutation):
+    book = nav_book
     index = book['index']
     if mutation == 'missing':
         index['rows'] = [r for r in index['rows'] if r['date'] != '2026-01-08']
@@ -371,7 +316,8 @@ def test_index_failures_are_not_filled_with_nearest_close(book, mutation):
         evaluate(book)
 
 
-def test_missing_valuation_time_does_not_use_record_time(book):
+def test_missing_valuation_time_does_not_use_record_time(nav_book):
+    book = nav_book
     receipt = ledger.observe(book['conn'], book['principal'], 'a', ledger.Observation(
         observed_at='2026-01-05T15:00:00+08:00', total_assets='1000'), book['directory'], book['sha'])
     book['start']['id'] = receipt['observation_id']
@@ -379,7 +325,8 @@ def test_missing_valuation_time_does_not_use_record_time(book):
         evaluate(book)
 
 
-def test_posted_snapshot_can_be_selected_without_claiming_full_history(book):
+def test_posted_snapshot_can_be_selected_without_claiming_full_history(nav_book):
+    book = nav_book
     receipt = ledger.submit(book['conn'], book['principal'], 'a', ledger.Batch(
         expected_version=0, evidence_hashes=[book['sha']], snapshot=Snapshot(positions={}, cash='1000',
             total_assets='1000', market_values={}, portfolio_value_as_of='2026-01-05T15:00:00+08:00')), book['directory'])
@@ -388,7 +335,8 @@ def test_posted_snapshot_can_be_selected_without_claiming_full_history(book):
     assert evaluate(book)['basis']['trade_history_acceptance'] == 'not_assessed'
 
 
-def test_post_flow_batch_cannot_be_used_as_pre_flow_value(book):
+def test_post_flow_batch_cannot_be_used_as_pre_flow_value(nav_book):
+    book = nav_book
     event_id = post(book)
     receipt = book['conn'].execute('SELECT batch_id FROM account_journal WHERE id=?', (event_id,)).fetchone()[0]
     with pytest.raises(ledger.LedgerError, match='不能作为流前'):
@@ -396,7 +344,8 @@ def test_post_flow_batch_cannot_be_used_as_pre_flow_value(book):
             'kind': 'batch', 'id': receipt, 'reason': 'Invalid post-flow snapshot'}}]))
 
 
-def test_tampered_saved_result_rejected_and_cross_account_denied(book):
+def test_tampered_saved_result_rejected_and_cross_account_denied(nav_book):
+    book = nav_book
     result = evaluate(book)
     raw = json.loads(evidence.read(book['directory'], result['artifact_sha256']))
     raw['result']['calculation']['end_nav'] = '9'
@@ -407,7 +356,8 @@ def test_tampered_saved_result_rejected_and_cross_account_denied(book):
         nav.replay(book['conn'], book['principal'], 'b', result['artifact_sha256'], book['directory'])
 
 
-def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path):
+def test_shipping_backup_restore_preserves_nav_inputs_and_replay(nav_book, tmp_path):
+    book = nav_book
     from a_share_research import backup
     value = request(book)
     coverage = evidence.store(book['directory'], b'Structural NAV coverage declaration')
@@ -436,7 +386,8 @@ def test_shipping_backup_restore_preserves_nav_inputs_and_replay(book, tmp_path)
 
 
 @pytest.mark.parametrize('damage', ['artifact', 'index', 'dates', 'references'])
-def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, damage, bind_account):
+def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(nav_book, damage, bind_account):
+    book = nav_book
     value = request(book)
     sha = evaluate(book, value)['artifact_sha256']
     if damage in ('artifact', 'index'):
@@ -455,7 +406,8 @@ def test_integrity_detects_missing_nav_evidence_or_mismatched_reference(book, da
     assert error.value.status == 409
 
 
-def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account):
+def test_tools_permissions_discovery_roundtrip_and_revocation(nav_book, bind_account):
+    book = nav_book
     bind_account(book['conn'], 'a')
     ctx = Context(book['conn'], book['path'], book['principal'], account_shadow_enabled=True)
     names = {t['name'] for t in discover(book['principal'], account_shadow_enabled=True)}
@@ -476,7 +428,8 @@ def test_tools_permissions_discovery_roundtrip_and_revocation(book, bind_account
     assert error.value.status == 403
 
 
-def test_http_discovery_capture_evaluate_replay_and_missing_material(book, bind_account):
+def test_http_discovery_capture_evaluate_replay_and_missing_material(nav_book, bind_account):
+    book = nav_book
     bind_account(book['conn'], 'a')
     token = api_keys.create(book['conn'], 'NAV HTTP structural', role='assistant')
     headers = {'Authorization': 'Bearer ' + token}

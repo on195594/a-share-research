@@ -1,21 +1,16 @@
 """Web proxy contracts with the in-process MCP endpoint and transport failures."""
-import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace
 
-import httpx
 import pytest
 import requests
 
 from a_share_research import api_keys
-from a_share_research.tools import remote_mcp
-from a_share_research.tools.control import Gate
-from a_share_research.tools.server import create_app
 from a_share_research.tools_client import ToolCallError, ToolsClient
-from test_account_ledger import batch, book  # noqa: F401
-from test_tools_remote_mcp import ORIGIN, RESOURCE
+from support.accounts import batch
+from support.mcp import ORIGIN
 
 
 def response(body, status=200):
@@ -104,30 +99,6 @@ def test_page_recovery_depends_on_the_receipt(call, reply, kind, message):
     with pytest.raises(ToolCallError) as error:
         call(reply)
     assert error.value.kind == kind and message in str(error.value)
-
-
-@pytest.fixture
-def mcp_http(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASHARE_PUBLIC_MCP_URL", RESOURCE)
-    gate = Gate(limit=1)
-
-    # Keep ASGI dispatch on the test thread; all handlers and database calls are real.
-    async def inline(function, *args):
-        return function(*args)
-
-    monkeypatch.setattr(remote_mcp, "run_in_threadpool", inline)
-
-    async def request(url, *, headers, content):
-        app = create_app(tmp_path / "app.db", gate=gate, account_shadow_enabled=True)
-        async with app.router.lifespan_context(app), httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url=ORIGIN
-        ) as server:
-            return await server.post(url, headers=headers, content=content)
-
-    def post(url, *, headers, content):
-        return asyncio.run(request(url, headers=headers, content=content))
-
-    return SimpleNamespace(post=post), gate
 
 
 def test_web_grant_and_gate_against_mcp(book, bind_account, tmp_path, monkeypatch, mcp_http):  # noqa: F811

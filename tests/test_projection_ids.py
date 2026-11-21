@@ -6,13 +6,12 @@ import pytest
 
 from a_share_research import db
 from a_share_research.account import projection_ids
-from test_position_store import book as _book_fixture, initialize, seed, event, batch, submit, state
-
-book = _book_fixture
+from support.positions import batch, event, initialize, seed, state, submit
 
 
 @pytest.fixture
-def mapped(book):
+def mapped(position_book):
+    book = position_book
     with db.transaction(book[0]):
         projection_ids.migrate(book[0])
     return book

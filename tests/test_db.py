@@ -10,8 +10,8 @@ import pytest
 from a_share_research import api_keys, db, scans
 from support.continuation import RECORDS, load
 from support.reports import MATERIAL
-from test_analysis_scope_migration import insert as insert_analysis
-from test_backup import database_rows
+from support.account_analysis import insert as insert_analysis
+from support.backup import database_rows
 
 
 def legacy_database(path, columns="present"):

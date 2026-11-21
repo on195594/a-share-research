@@ -4,7 +4,6 @@ The surrounding monitor account uses an existing structural fixture; this is not
 new market, broker or investment evidence. No upstream calls are made.
 """
 from copy import deepcopy
-from dataclasses import asdict
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -14,44 +13,10 @@ import pytest
 from a_share_research.core.market_data import MarketDataResult
 from a_share_research.core import providers
 from a_share_research.policy import daily_evaluation
-from a_share_research.policy.v0 import commands_holdings, commands_monitor, domain, market_quotes, risk_budget
+from a_share_research.policy.v0 import commands_holdings, commands_monitor, domain, market_quotes
 from a_share_research.policy.v0.dividend_input import implemented_rows
-from policy_v0.monitor.test_dividend_check import HUADONG_DIVIDENDS, HUADONG_EVENTS
-from policy_v0.monitor.test_monitor_snapshot import _seed_holding
-
-
-NOW = '2026-10-22T15:30:05+08:00'
-
-
-def provider(rows):
-    return dict(rows=rows, source='tushare.dividend', status='ok' if rows is not None else 'failed',
-                fetched_at=NOW, source_as_of=None, error_code=None if rows is not None else 'TIMEOUT',
-                error_type=None if rows is not None else 'TimeoutError')
-
-
-@pytest.fixture
-def bundle(tmp_path, monkeypatch):
-    path = tmp_path / 'app.db'
-    monkeypatch.setenv('POLICY_V0_DB', str(path))
-    monkeypatch.setenv('A_STOCK_CONFIG_FILE', str(tmp_path / 'missing-runtime.env'))
-    monkeypatch.delenv('POLICY_V0_ACCOUNT_SHADOW', raising=False)
-    monkeypatch.delenv('POLICY_V0_ANALYSIS_SHADOW', raising=False)
-    monkeypatch.setattr(domain, 'cst_now', lambda: datetime.fromisoformat(NOW))
-    monkeypatch.setattr(domain, 'cst_today', lambda: '2026-10-22')
-    monkeypatch.setattr(domain, 'utc_now', lambda: datetime.fromisoformat('2026-10-22T07:30:05+00:00'))
-    _seed_holding(path, '000963', shares=800)
-    local = commands_monitor._load_monitor_local_snapshot()
-    row = local['holdings'][0]
-    normalized = [dict(div_proc='实施', record_date=d['record_date'], ex_date=d['ex_date'],
-                       pay_date=d['pay_date'], cash_div_tax=d['cash_div'], stk_div=d['split_ratio'])
-                  for d in HUADONG_DIVIDENDS]
-    return dict(local=local, quotes={'000963': asdict(market_quotes.PriceQuote(
-                    26.21, '2026-10-22', '15:00:00', 'historical-boundary-fixture', previous_close=26.59))},
-                portfolio_value=None, industry_result=None, now=NOW, risk_policy=risk_budget.policy(),
-                denominator_evidence={}, account_scope_required=False, research_result={'status': 'not_configured'},
-                dividend_today='2026-10-22', brief_today='2026-10-22', dividends=[
-                    dict(holding_id=row['id'], code=row['code'], name=row['name'], current_shares=row['shares'],
-                         events=[list(event) for event in HUADONG_EVENTS], provider=provider(normalized))])
+from support.evaluations import provider
+from support.policy_replay import HUADONG_DIVIDENDS, _seed_holding
 
 
 def evaluate(value):
@@ -82,7 +47,8 @@ def old_stdout(bundle, monkeypatch, capsys):
     return capsys.readouterr()
 
 
-def test_recorded_entitlement_280_and_exact_old_command_output(bundle, monkeypatch, capsys):
+def test_recorded_entitlement_280_and_exact_old_command_output(daily_bundle, monkeypatch, capsys):
+    bundle = daily_bundle
     before = deepcopy(bundle)
     result = evaluate(bundle)
     assert bundle == before
@@ -95,14 +61,16 @@ def test_recorded_entitlement_280_and_exact_old_command_output(bundle, monkeypat
 
 
 @pytest.mark.parametrize('day', ['2026-09-17', '2026-09-18'])
-def test_existing_dividend_on_record_or_pay_day_suppresses_missing_claim(bundle, monkeypatch, capsys, day):
+def test_existing_dividend_on_record_or_pay_day_suppresses_missing_claim(daily_bundle, monkeypatch, capsys, day):
+    bundle = daily_bundle
     bundle['dividends'][0]['events'].append(['dividend', day, None, None, 0., 0., 280., 0])
     result = evaluate(bundle)
     assert result['dividends']['findings'] == []
     assert result['stdout'] == old_stdout(bundle, monkeypatch, capsys).out
 
 
-def test_cash_plus_split_partial_entry_retains_old_cash_message(bundle, monkeypatch, capsys):
+def test_cash_plus_split_partial_entry_retains_old_cash_message(daily_bundle, monkeypatch, capsys):
+    bundle = daily_bundle
     bundle['dividends'][0]['provider']['rows'][1]['stk_div'] = .3  # Explicit bonus-share boundary variant.
     bundle['dividends'][0]['events'].append(['dividend', '2026-09-17', None, None, 0., 0., 280., 0])
     result = evaluate(bundle)
@@ -110,7 +78,8 @@ def test_cash_plus_split_partial_entry_retains_old_cash_message(bundle, monkeypa
     assert result['stdout'] == old_stdout(bundle, monkeypatch, capsys).out
 
 
-def test_empty_success_and_provider_failure_remain_distinct(bundle, monkeypatch, capsys):
+def test_empty_success_and_provider_failure_remain_distinct(daily_bundle, monkeypatch, capsys):
+    bundle = daily_bundle
     bundle['dividends'][0]['provider'] = provider([])
     empty = evaluate(bundle)
     assert empty['dividends'] == dict(checked=1, findings=[], failures=[])
@@ -123,7 +92,8 @@ def test_empty_success_and_provider_failure_remain_distinct(bundle, monkeypatch,
     assert failed['stdout'] == old_stdout(bundle, monkeypatch, capsys).out
 
 
-def test_failure_does_not_hide_other_holdings_findings(bundle, tmp_path, monkeypatch, capsys):
+def test_failure_does_not_hide_other_holdings_findings(daily_bundle, tmp_path, monkeypatch, capsys):
+    bundle = daily_bundle
     second_id = _seed_holding(tmp_path / 'app.db', '600036', shares=500)
     bundle['local'] = commands_monitor._load_monitor_local_snapshot()
     second = next(row for row in bundle['local']['holdings'] if row['id'] == second_id)
@@ -136,7 +106,8 @@ def test_failure_does_not_hide_other_holdings_findings(bundle, tmp_path, monkeyp
     assert result['stdout'] == old_stdout(bundle, monkeypatch, capsys).out
 
 
-def test_no_today_quote_keeps_old_silence_but_retains_dividend_evidence(bundle, monkeypatch, capsys):
+def test_no_today_quote_keeps_old_silence_but_retains_dividend_evidence(daily_bundle, monkeypatch, capsys):
+    bundle = daily_bundle
     bundle['quotes']['000963']['quote_date'] = '2026-10-21'
     result = evaluate(bundle)
     assert result['status'] == 'silent' and result['stdout'] == ''
@@ -166,17 +137,20 @@ def test_no_today_quote_keeps_old_silence_but_retains_dividend_evidence(bundle, 
     lambda b: b['dividends'][0]['provider']['rows'][0].update(record_date='2026-02-30'),
     lambda b: b['dividends'][0]['provider'].update(unexpected='field'),
 ])
-def test_invalid_capture_is_rejected_not_rendered_as_complete(bundle, mutate):
+def test_invalid_capture_is_rejected_not_rendered_as_complete(daily_bundle, mutate):
+    bundle = daily_bundle
     mutate(bundle)
     with pytest.raises(ValueError): evaluate(bundle)
 
 
-def test_parameter_mismatch_rejected(bundle):
+def test_parameter_mismatch_rejected(daily_bundle):
+    bundle = daily_bundle
     with pytest.raises(ValueError, match='does not match'):
         daily_evaluation.evaluate(bundle, bundle['risk_policy'] | {'max_position_risk_pct': 3.})
 
 
-def test_duplicate_local_code_still_keeps_distinct_holding_checks(bundle):
+def test_duplicate_local_code_still_keeps_distinct_holding_checks(daily_bundle):
+    bundle = daily_bundle
     second = deepcopy(bundle['local']['holdings'][0])
     second['id'] = 2
     bundle['local']['holdings'].append(second)
@@ -189,7 +163,8 @@ def test_duplicate_local_code_still_keeps_distinct_holding_checks(bundle):
     with pytest.raises(ValueError, match='code/id order'): evaluate(bundle)
 
 
-def test_implemented_filter_matches_recorded_rows_and_missing_numeric_variants(bundle):
+def test_implemented_filter_matches_recorded_rows_and_missing_numeric_variants(daily_bundle):
+    bundle = daily_bundle
     rows = bundle['dividends'][0]['provider']['rows']
     assert implemented_rows(rows) == HUADONG_DIVIDENDS
     base = rows[1]

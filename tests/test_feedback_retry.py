@@ -1,40 +1,18 @@
 """Retry the captured Maotai feedback in an isolated store; no worker/model runs."""
-import importlib
 import json
-import sys
 from datetime import datetime, timedelta
 
 import pytest
 from starlette.requests import Request
 
-import a_share_research
 from a_share_research import companies, db, reading, service
-from a_share_research.login_token import mint
-from support.continuation import load, RECORDS
+from support.continuation import RECORDS
 from support.templates import render
+from support.web import browser_request
 
 
-@pytest.fixture
-def web(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, 'DATA', tmp_path)
-    monkeypatch.setenv('DEV_LOGIN', '1')
-    monkeypatch.setenv('PUBLIC_BASE_URL', 'http://127.0.0.1:8627')
-    monkeypatch.setenv('SESSION_SECRET', 'isolated-feedback-retry-' * 2)
-    monkeypatch.setattr(a_share_research, 'web', None, raising=False)
-    monkeypatch.delitem(sys.modules, 'a_share_research.web', raising=False)
-    module = importlib.import_module('a_share_research.web')
-    load(module.conn)
-    yield module
-    module.conn.close()
-
-
-def browser_request(web):
-    token = mint(web.conn, 1)
-    return Request({'type': 'http', 'method': 'POST', 'scheme': 'http', 'path': '/', 'query_string': b'',
-                    'headers': [(b'cookie', f'session={token}'.encode())], 'server': ('127.0.0.1', 8627)}), web.csrf_token(web._hash(token))
-
-
-def test_failed_feedback_form_submission_retry_failure_then_success_closes_group(web):
+def test_failed_feedback_form_submission_retry_failure_then_success_closes_group(feedback_web):
+    web = feedback_web
     request, csrf = browser_request(web)
     original = dict(web.conn.execute('SELECT * FROM reports WHERE id=12').fetchone())
     original.pop('company_key')  # generated; cannot be written back
@@ -73,7 +51,8 @@ def test_failed_feedback_form_submission_retry_failure_then_success_closes_group
     assert web.run_page(request, second).headers['location'] == '/reports/12'
 
 
-def test_failed_feedback_with_report_also_has_retry_and_revalidates_parent(web):
+def test_failed_feedback_with_report_also_has_retry_and_revalidates_parent(feedback_web):
+    web = feedback_web
     request, csrf = browser_request(web)
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=18")
     body = json.loads(web.conn.execute('SELECT body FROM reports WHERE id=12').fetchone()[0])
@@ -87,7 +66,8 @@ def test_failed_feedback_with_report_also_has_retry_and_revalidates_parent(web):
     assert web.conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == before
 
 
-def test_retry_rejects_ordinary_completed_replay_and_incomplete_records(web):
+def test_retry_rejects_ordinary_completed_replay_and_incomplete_records(feedback_web):
+    web = feedback_web
     for run_id in (17, 18):  # ordinary and completed feedback
         with pytest.raises(service.RequestError):
             service.retry_feedback(web.conn, run_id, 'invalid', requester='web-owner')
@@ -124,7 +104,8 @@ def test_gap_disclosure_and_native_source_navigation():
         assert '?scope=1#research-scope' in html and '?evidence=1#evidence' in html
 
 
-def test_retry_keeps_followup_and_price_kind_and_is_idempotent(web):
+def test_retry_keeps_followup_and_price_kind_and_is_idempotent(feedback_web):
+    web = feedback_web
     request, csrf = browser_request(web)
     followup = service.submit(web.conn, '600519', 'followup-failure', question='现金流是否一致？', parent_report_id=11)
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (followup,))
@@ -149,7 +130,8 @@ def test_retry_keeps_followup_and_price_kind_and_is_idempotent(web):
         service.retry_run(web.conn, new_price)
 
 
-def test_failed_followup_report_retries_saved_question(web):
+def test_failed_followup_report_retries_saved_question(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     # Captured report with only its task state changed to failed for the UI branch.
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=17")
@@ -159,7 +141,8 @@ def test_failed_followup_report_retries_saved_question(web):
     assert '重新研究</button>' not in html
 
 
-def test_search_explains_fallback_and_null_legacy_request_renders(web):
+def test_search_explains_fallback_and_null_legacy_request_renders(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     report = web.conn.execute('SELECT run_id FROM reports WHERE id=39').fetchone()
     web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (report['run_id'],))
@@ -173,7 +156,8 @@ def test_search_explains_fallback_and_null_legacy_request_renders(web):
     assert web.report_page(request, 37).status_code == 200
 
 
-def test_failed_task_leaves_home_list_once_asked_again_or_stale(web, monkeypatch):
+def test_failed_task_leaves_home_list_once_asked_again_or_stale(feedback_web, monkeypatch):
+    web = feedback_web
     ids = lambda: [r['id'] for r in reading.active_runs(web.conn)]
     fail = lambda run: web.conn.execute("UPDATE runs SET status='failed' WHERE id=?", (run,))
     # A feedback retry takes a fresh form request id, so only its saved request identifies it.
@@ -205,7 +189,8 @@ def test_failed_task_leaves_home_list_once_asked_again_or_stale(web, monkeypatch
     assert question not in ids()
 
 
-def test_company_page_heads_formal_research_not_feedback(web):
+def test_company_page_heads_formal_research_not_feedback(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     newest = next(r for r in reading.stock_reports(web.conn, '600519.SH') if not r['replay_of'])
     assert newest['id'] == 12 and newest['feedback_text']
@@ -215,7 +200,8 @@ def test_company_page_heads_formal_research_not_feedback(web):
     assert '/reports/12' in html and web.stock_page(request, '600519.SH', report=12).status_code == 200
 
 
-def test_retry_button_names_what_it_retries_and_batch_task_stays_detached(web):
+def test_retry_button_names_what_it_retries_and_batch_task_stays_detached(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     plain = service.submit(web.conn, '600519', 'plain-label')
     web.conn.execute("UPDATE runs SET status='failed', error='失败状态变体' WHERE id=?", (plain,))
@@ -230,7 +216,8 @@ def test_retry_button_names_what_it_retries_and_batch_task_stays_detached(web):
     assert '不回填本批次' in web.report_page(request, 11).body.decode()
 
 
-def test_historical_report_links_newer_formal_even_when_it_failed(web):
+def test_historical_report_links_newer_formal_even_when_it_failed(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     html = web.report_page(request, 37).body.decode()
     assert '正在阅读历史报告' in html and '/reports/39' in html
@@ -240,7 +227,8 @@ def test_historical_report_links_newer_formal_even_when_it_failed(web):
     assert '最新正式研究（复核未通过）' in web.report_page(request, 37).body.decode()
 
 
-def test_price_progress_is_not_research_progress(web):
+def test_price_progress_is_not_research_progress(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     run = db.create_run(web.conn, '600519.SH', 'local-price-progress', kind='price', status='running')
     db.update_run(web.conn, run, step='price', started_at=db.now())
@@ -249,7 +237,8 @@ def test_price_progress_is_not_research_progress(web):
     assert 'aria-label="研究进度"' not in html and '撰写报告' not in html
 
 
-def test_library_scope_survives_new_query_and_clears_explicitly(web):
+def test_library_scope_survives_new_query_and_clears_explicitly(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     html = web.research_library(request, q='现金流', history=True, scope='all', page=2).body.decode()
     assert 'name="history" value="true"' in html and 'name="scope" value="all"' in html

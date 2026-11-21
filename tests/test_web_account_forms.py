@@ -14,9 +14,8 @@ import pytest
 from a_share_research import api_keys, skill_bundle, web_evidence
 from a_share_research.tools import registry
 from a_share_research.tools_client import ToolCallError
-from test_overview import owner_request, page_request  # noqa: F401
-from test_tools_remote_mcp import rpc
-from test_web_tools_client import mcp_http  # noqa: F401
+from support.mcp import rpc
+from support.web import page_request
 
 
 @pytest.fixture

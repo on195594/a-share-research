@@ -4,8 +4,7 @@ import sqlite3
 import pytest
 
 from a_share_research.account import audit
-from test_account_ledger import book as book
-from test_account_ledger import batch, submit
+from support.accounts import batch, submit
 
 
 @pytest.fixture
@@ -28,7 +27,7 @@ def test_clean_conflicts_duplicates_and_corrections(posted):
     submit(posted, batch(posted, version=1))
     submit(posted, batch(posted, version=0))
     assert audit.inspect(conn) == []
-    from test_account_ledger import buy
+    from support.accounts import buy
     event_id = conn.execute('SELECT id FROM account_journal').fetchone()[0]
     submit(posted, batch(posted, version=1, events=[buy(price='1401')], cash='59900', voids=[event_id]))
     assert audit.inspect(conn) == []

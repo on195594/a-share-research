@@ -9,8 +9,7 @@ import pytest
 from a_share_research import backup, backup_refs, db, gate, integrity
 from a_share_research.account import analysis, evidence
 from support.reports import MATERIAL, report
-from test_backup import source as source
-from test_integrity import PDF
+from support.backup import PDF
 
 
 def put(conn, table, column, value, *, raw=False):
@@ -29,7 +28,8 @@ def test_missing_legacy_tables_and_empty_database(conn):
     assert backup_refs.required(conn)=={'account_evidence': [], 'pdf': []}
 
 
-def test_backup_requires_uploaded_file_before_posting_and_restores_complete_legacy_bundle(source, tmp_path):  # noqa: F811
+def test_backup_requires_uploaded_file_before_posting_and_restores_complete_legacy_bundle(backup_source, tmp_path):  # noqa: F811
+    source = backup_source
     directory, conn, principal, opening_sha, _ = source
     evidence_dir = directory / 'account-evidence'
     sha = evidence.store(evidence_dir, PDF.read_bytes())
@@ -79,7 +79,6 @@ def test_captured_material_and_report_without_pdf_hash_do_not_guess(conn):
     put(conn,'runs','material',MATERIAL.snapshot())
     put(conn,'reports','body',report(document=MATERIAL.doc.info()))
     assert backup_refs.required(conn)['pdf']==[]
-
 
 
 def test_legacy_missing_pdf_hash_and_uncollected_material_are_skipped(conn):

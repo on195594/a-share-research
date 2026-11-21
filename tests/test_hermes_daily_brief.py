@@ -7,13 +7,7 @@ import json
 import pytest
 
 from a_share_research.policy import daily_evaluation
-from test_daily_evaluation import bundle as daily_bundle
-from test_ops_hermes import load
-
-
-@pytest.fixture
-def source(tmp_path, monkeypatch):
-    return daily_bundle.__wrapped__(tmp_path, monkeypatch)
+from support.hermes import load
 
 
 @pytest.fixture
@@ -41,7 +35,8 @@ def transport(client, monkeypatch, source):
     return call, calls
 
 
-def test_brief_preserves_dividend_findings_and_provider_failures(client, source, monkeypatch):
+def test_brief_preserves_dividend_findings_and_provider_failures(client, daily_bundle, monkeypatch):
+    source = daily_bundle
     transport(client, monkeypatch, source)
     out, err, status = client.check()
     assert status == 0 and err == '' and '应收280.00元' in out
@@ -52,7 +47,8 @@ def test_brief_preserves_dividend_findings_and_provider_failures(client, source,
     assert '分红未核对：数据获取失败' in out and '应收280.00元' not in out
 
 
-def test_response_loss_keeps_same_request_without_second_policy_lookup(client, source, monkeypatch):
+def test_response_loss_keeps_same_request_without_second_policy_lookup(client, daily_bundle, monkeypatch):
+    source = daily_bundle
     call, calls = transport(client, monkeypatch, source)
     receipt = {}
     def lost(name, args):
@@ -72,7 +68,8 @@ def test_response_loss_keeps_same_request_without_second_policy_lookup(client, s
     assert len(calls) == 2 and client.load_state()['pending'] is None
 
 
-def test_old_day_is_resolved_without_current_day_delivery(client, source, monkeypatch):
+def test_old_day_is_resolved_without_current_day_delivery(client, daily_bundle, monkeypatch):
+    source = daily_bundle
     transport(client, monkeypatch, source)
     client.datetime.current += timedelta(days=1)
     out, err, status = client.check()
@@ -81,7 +78,8 @@ def test_old_day_is_resolved_without_current_day_delivery(client, source, monkey
 
 
 @pytest.mark.parametrize('variant', ['mode', 'activation', 'request', 'result', 'future', 'day'])
-def test_bad_receipt_cannot_clear_pending(client, source, monkeypatch, variant):
+def test_bad_receipt_cannot_clear_pending(client, daily_bundle, monkeypatch, variant):
+    source = daily_bundle
     call, _ = transport(client, monkeypatch, source)
     def corrupt(name, args):
         value = call(name, args)
@@ -108,7 +106,8 @@ def test_concurrent_or_broken_state_does_not_call_service(client, monkeypatch):
     assert client.STATE.read_text() == '{'
 
 
-def test_state_write_failure_does_not_send_brief(client, source, monkeypatch, capsys):
+def test_state_write_failure_does_not_send_brief(client, daily_bundle, monkeypatch, capsys):
+    source = daily_bundle
     transport(client, monkeypatch, source)
     save = client.save_json
     def broken(path, value):
@@ -122,7 +121,8 @@ def test_state_write_failure_does_not_send_brief(client, source, monkeypatch, ca
     assert client.load_state()['pending'] is not None
 
 
-def test_certain_activation_change_recollects_with_new_durable_uuid(client, source, monkeypatch):
+def test_certain_activation_change_recollects_with_new_durable_uuid(client, daily_bundle, monkeypatch):
+    source = daily_bundle
     original = dict(request_id='daily-before-release', expected_activation_id=3)
     client.STATE.write_text(json.dumps(dict(schema_version=1, pending=original,
         binding=client.client_identity()[0])))

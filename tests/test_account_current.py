@@ -7,13 +7,7 @@ from a_share_research import api_keys, db
 from a_share_research.account import mirror
 from a_share_research.policy import account_view, registry
 from a_share_research.tools.registry import Context, ToolError, invoke
-from test_policy_account_input import bound_book as input_book
-from test_position_store import batch, event, submit
-
-
-@pytest.fixture
-def bound_book(tmp_path):
-    yield from input_book.__wrapped__(tmp_path)
+from support.positions import batch, event, submit
 
 
 def test_bound_account_reads_only_selected_ledger_and_is_read_only(bound_book):

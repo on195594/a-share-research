@@ -5,9 +5,9 @@ No live data, paid research, or production notifications are used here.
 from copy import deepcopy
 
 from a_share_research import disclosure_checks, material, scans, service
-from test_scans import CapturedSources, conn, disclosure_replay, run_scan  # noqa: F401
 from support.financials import CAPTURES, frames
-from test_ops_hermes import load
+from support.hermes import load
+from support.scans import CapturedSources, run_scan
 
 
 def source_with(source, mutate):

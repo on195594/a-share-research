@@ -11,18 +11,13 @@ from a_share_research import api_keys, gate
 from a_share_research.core.market_data import MarketDataResult
 from a_share_research.policy import daily_brief, daily_evaluation, monitor, registry
 from a_share_research.tools.server import create_app
-from test_policy_monitor import setup as monitor_setup
-from test_policy_account_input import bound_book as ledger_book
-from test_policy_capture import scoped_parameters
+from support.policy import policy_input_book as ledger_book
+from support.policy import scoped_parameters
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
-    yield from monitor_setup.__wrapped__(tmp_path, monkeypatch)
-
-
-@pytest.fixture
-def configured(setup, monkeypatch):
+def configured(policy_setup, monkeypatch):
+    setup = policy_setup
     path, conn, _, _, _, bundle, _ = setup
     calls = []
     def capture(database, module, payload, *, market_token):
@@ -142,7 +137,7 @@ def test_only_explicit_market_transports_receive_market_credential(tmp_path, mon
 def test_ledger_capture_keeps_full_event_rows_and_provider_failure(tmp_path, monkeypatch):
     from a_share_research.policy import capture
     from a_share_research.policy.v0 import domain, commands_holdings
-    for path, conn, principal, directory, sha in ledger_book.__wrapped__(tmp_path):
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
         monkeypatch.setenv('POLICY_V0_DB', str(path))
         now = datetime.fromisoformat('2026-11-02T15:35:00+08:00')
         monkeypatch.setattr(domain, 'cst_now', lambda: now)
@@ -166,7 +161,8 @@ def test_ledger_capture_keeps_full_event_rows_and_provider_failure(tmp_path, mon
         assert list(conn.iterdump()) == before
 
 
-def test_actual_empty_child_has_no_quote_or_dividend_requests(setup):
+def test_actual_empty_child_has_no_quote_or_dividend_requests(policy_setup):
+    setup = policy_setup
     path, conn, principals, _, active, _, _ = setup
     saved = daily_brief.run(conn, principals['assistant'], path, 'actual-empty-daily', active['id'])
     assert saved['input']['local']['holdings'] == [] and saved['input']['dividends'] == []

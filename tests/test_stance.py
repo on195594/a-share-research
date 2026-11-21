@@ -15,23 +15,14 @@ from a_share_research.sources import Document
 from support.reports import MATERIAL, report
 from support.templates import ENV, render
 from support.valuation import BODY, assumptions, with_probabilities
+from support.stance import ADD, EVIDENCE, FLIP_SAMPLES
 
 BOUNDARY_RUNS = json.loads((Path(__file__).parent / "data/stance-boundary-20261105.json").read_text())
-FLIP_SAMPLES = json.loads((Path(__file__).parent / "data/stance-flip-samples-20261107.json").read_text())
 
 
 def material(table=None):
     return Material(BODY['code'], BODY['name'], Document(**BODY['document']), {}, {},
                     deepcopy(table or BODY['table']), BODY['market_date'])
-
-
-EVIDENCE = {'action': '等证据', 'text': '上半年经营现金流转负，先看下一期是否转正。',
-            'cites': [{'ref': 'T.op_cash', 'period': '2026-06-30'}],
-            'trigger': {'metric': 'T.op_cash', 'period': '2026-09-30', 'op': '>=', 'value': 0}}
-
-
-ADD = {k: deepcopy(v) for k, v in EVIDENCE.items() if k != 'trigger'}
-ADD.update(action='现在分批', add_trigger=deepcopy(EVIDENCE['trigger']))
 
 
 def stance_problems(value, table=None, valuation_value=None):

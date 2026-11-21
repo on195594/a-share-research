@@ -8,19 +8,14 @@ import pytest
 from a_share_research import api_keys, gate
 from a_share_research.policy import monitor, registry, stop_alert, stop_evaluation
 from a_share_research.tools.server import create_app
-from test_policy_monitor import setup as monitor_setup
-from test_policy_account_input import bound_book as ledger_book
-from test_policy_capture import scoped_parameters
-from test_stop_evaluation import bundle as stop_bundle
+from support.evaluations import stop_bundle
+from support.policy import policy_input_book as ledger_book
+from support.policy import scoped_parameters
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
-    yield from monitor_setup.__wrapped__(tmp_path, monkeypatch)
-
-
-@pytest.fixture
-def configured(setup, monkeypatch):
+def configured(policy_setup, monkeypatch):
+    setup = policy_setup
     path, conn, principals, manifest, activation, _, _ = setup
     calls = []
     def collect(database, module, payload):
@@ -111,7 +106,8 @@ def test_context_action_state_and_source_corruption_rejected(configured):
     assert registry.inspect(conn)
 
 
-def test_shipping_child_on_empty_account_never_needs_market_data(setup):
+def test_shipping_child_on_empty_account_never_needs_market_data(policy_setup):
+    setup = policy_setup
     path, conn, principals, _, activation, _, _ = setup
     receipt = stop_alert.run(conn, principals['assistant'], path, 'actual-empty-child', activation['id'], {})
     assert receipt['input']['holdings'] == [] and receipt['input']['quotes'] == {}
@@ -122,7 +118,7 @@ def test_shipping_child_on_empty_account_never_needs_market_data(setup):
 
 def test_actual_ledger_collector_reads_canonical_lines_without_writing_state(tmp_path, monkeypatch):
     from a_share_research.policy.v0 import domain, market_quotes
-    for path, conn, principal, directory, sha in ledger_book.__wrapped__(tmp_path):
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
         monkeypatch.setenv('POLICY_V0_DB', str(path))
         monkeypatch.setattr(domain, 'cst_now', lambda: datetime.fromisoformat('2026-11-02T10:31:00+08:00'))
         calls = []

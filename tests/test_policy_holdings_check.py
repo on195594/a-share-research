@@ -10,18 +10,13 @@ from a_share_research import api_keys, gate
 from a_share_research.account import analysis, cycle_analysis
 from a_share_research.policy import holdings_check, holdings_check_evaluation, monitor, registry
 from a_share_research.tools.server import create_app
-from test_policy_monitor import setup as monitor_setup
-from test_policy_account_input import bound_book as ledger_book
-from test_policy_capture import scoped_parameters
+from support.policy import policy_input_book as ledger_book
+from support.policy import scoped_parameters
 
 
 @pytest.fixture
-def setup(tmp_path, monkeypatch):
-    yield from monitor_setup.__wrapped__(tmp_path, monkeypatch)
-
-
-@pytest.fixture
-def configured(setup, monkeypatch):
+def configured(policy_setup, monkeypatch):
+    setup = policy_setup
     path, conn, _, _, _, bundle, _ = setup
     calls = []
     def capture(database, module, payload, *, market_token=False):
@@ -106,7 +101,8 @@ def test_source_change_and_tampered_action_are_not_success(configured, monkeypat
     assert registry.inspect(conn)
 
 
-def test_fixed_collector_drops_credentials_and_uses_only_own_module(setup, monkeypatch):
+def test_fixed_collector_drops_credentials_and_uses_only_own_module(policy_setup, monkeypatch):
+    setup = policy_setup
     path, conn, principals, _, active, bundle, _ = setup
     for key in ('TUSHARE_TOKEN', 'ASHARE_OWNER_TOKEN', 'MODEL_API_KEY'):
         monkeypatch.setenv(key, 'must-not-inherit')
@@ -131,7 +127,7 @@ def test_fixed_collector_drops_credentials_and_uses_only_own_module(setup, monke
 def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path, monkeypatch):
     from a_share_research.policy import capture, daily_brief
     from a_share_research.policy.v0 import domain, market_quotes
-    for path, conn, principal, directory, sha in ledger_book.__wrapped__(tmp_path):
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
         cycle_analysis.update(conn, principal, 'a', 'legacy:1', analysis.Update(
             expected_version=0, evidence_hashes=[sha], reason='structural alert transport', changes=[
                 analysis.AlertOpen(kind='alert_open', level='yellow', category='unverified',
@@ -163,7 +159,8 @@ def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path,
         assert list(conn.iterdump()) == before
 
 
-def test_actual_empty_child_does_not_request_market_data(setup):
+def test_actual_empty_child_does_not_request_market_data(policy_setup):
+    setup = policy_setup
     path, conn, principals, _, active, _, _ = setup
     before = account_rows(conn)
     saved = holdings_check.run(conn, principals['assistant'], path, 'actual-empty-holdings-check', active['id'])
@@ -173,7 +170,8 @@ def test_actual_empty_child_does_not_request_market_data(setup):
     assert saved['result']['status'] == 'no_holdings' and account_rows(conn) == before
 
 
-def test_empty_collector_skips_all_providers(setup, monkeypatch):
+def test_empty_collector_skips_all_providers(policy_setup, monkeypatch):
+    setup = policy_setup
     from a_share_research.policy import capture, daily_brief
     from a_share_research.policy.v0 import market_quotes
     path, conn, _, manifest, _, _, _ = setup

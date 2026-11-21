@@ -9,8 +9,7 @@ import pytest
 
 from a_share_research.policy.v0 import monitor_research
 from a_share_research import disclosure_checks
-from test_ops_hermes import ROOT, load
-from test_scans import conn, disclosure_replay  # noqa: F401  (fixtures)
+from support.hermes import ROOT, load
 
 
 @pytest.fixture
@@ -135,7 +134,7 @@ def test_opportunity_rebind_only_after_certain_policy_change(advisor, ashare_cli
 
 @pytest.mark.parametrize('account', [None, {'codes': [], 'source': {}}, {'codes': [], 'source': {'mode': 'ledger'}}])
 def test_holdings_read_only_at_delivery_and_opportunity_failure_keeps_scan(advisor, ashare_cli, account):
-    from test_advisor_resume import RECEIPT, response
+    from support.hermes import RECEIPT, response
 
     original = dict(request_id='opportunity-pending', expected_activation_id=7)
     advisor.OPPORTUNITY_STATE.write_text(json.dumps(dict(schema_version=1, seen=['keep-seen'], pending=original,
@@ -160,8 +159,9 @@ def test_holdings_read_only_at_delivery_and_opportunity_failure_keeps_scan(advis
 
 
 def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn, disclosure_replay):  # noqa: F811
+    from support.scans import AT, CapturedSources, run_scan
+
     from a_share_research import db, scans, service
-    from test_scans import AT, CapturedSources, run_scan
     code, _, source = disclosure_replay
 
     class Failure(CapturedSources):
@@ -198,8 +198,9 @@ def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn,
 
 
 def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, conn, ashare_cli):  # noqa: F811
+    from support.scans import AT
+
     from a_share_research import scans
-    from test_scans import AT
 
     cards_payload = json.loads((ROOT / 'tests/policy_v0/fixtures/monitor/research-cards.json').read_text())['response']
     for item in cards_payload['cards']:

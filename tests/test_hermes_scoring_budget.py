@@ -10,8 +10,7 @@ import threading
 import time
 
 import pytest
-
-from test_ops_hermes import load
+from support.hermes import load
 
 
 @pytest.fixture

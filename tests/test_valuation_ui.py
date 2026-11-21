@@ -66,7 +66,7 @@ def test_unpriced_and_calculation_gap_keep_reason_and_escape_external_text():
 
 def test_partial_coverage_keeps_statistics_and_appears_on_cards():
     body = calculated()
-    from test_advisor_sources import CALENDAR
+    from support.market_replay import CALENDAR
     days = [d for d in CALENDAR if '20260728' <= d <= '20261026']
     covered = sorted({r['report_date'].replace('-', '') for r in ROWS} & set(days))
     coverage = {'trading_days': len(days), 'covered_days': len(covered), 'truncated_days': covered[:1]}
@@ -120,7 +120,7 @@ def test_v2_shadow_and_research_stance_render_with_program_price():
 
 
 def test_add_trigger_is_optional_reference_and_old_wait_still_renders():
-    from test_stance import ADD, EVIDENCE
+    from support.stance import ADD, EVIDENCE
     body = calculated()
     body['stance'] = ADD
     html = page(body)

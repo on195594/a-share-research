@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from support.templates import ENV, TEMPLATES
-from test_company_card import server  # noqa: F401 — in-process HTTP fixture
 from a_share_research.evidence import report_source_view
 from markupsafe import escape
 
@@ -64,8 +63,10 @@ def test_financial_periods_preserve_source_dates_and_explain_coverage():
 
 def test_financial_table_keeps_comparable_periods_after_preceding_periods_expand():
     import re
+
+    from support.financials import CAPTURES, frames
+
     from a_share_research.material import financial_table
-    from test_financial_series import CAPTURES, frames
     template = (TEMPLATES / 'report.html').read_text()
     start = template.index('    <details class="block" id="data"')
     end = template.index('    </details>', start) + len('    </details>')
@@ -277,8 +278,9 @@ def test_report_layout_orders_business_financial_valuation_before_prior_agenda(t
 
 def test_noncritical_flip_sensitivity_folds_while_critical_stays_open():
     from copy import deepcopy
+
+    from support.stance import FLIP_SAMPLES
     from support.templates import render
-    from test_stance import FLIP_SAMPLES
 
     def rendered(sample):
         calc = sample['valuation_calc']
@@ -300,14 +302,16 @@ def test_noncritical_flip_sensitivity_folds_while_critical_stays_open():
     assert ' open>' not in rendered(noncritical)
 
 
-
-def test_stock_page_checks_stay_with_checkpoint_and_trigger(server, monkeypatch):  # noqa: F811
-    from a_share_research import reading, service, web
+def test_stock_page_checks_stay_with_checkpoint_and_trigger(reading_server, monkeypatch):  # noqa: F811
+    server = reading_server
+    from support.scans import replay_disclosure as disclosure_replay
+    from support.scans import run_scan
     from support.templates import ENV
-    from test_scans import disclosure_replay, run_scan
+
+    from a_share_research import reading, service, web
 
     conn, client, url, *_ = server
-    code, body, source = disclosure_replay.__wrapped__(conn)
+    code, body, source = disclosure_replay(conn)
     monkeypatch.setattr(web, 'current_session', lambda request: 'offline-owner')
     before = client.get(url + f'/stock/{code}')
     assert before.status_code == 200

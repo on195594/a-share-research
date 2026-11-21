@@ -24,8 +24,7 @@ from a_share_research.tools.registry import discover
 from a_share_research.tools.server import create_app
 from scripts import ashare as cli
 from support.continuation import load
-from test_policy_monitor import setup as policy_setup  # noqa: F401
-from test_tools_remote_mcp import MODERN, ORIGIN, RESOURCE
+from support.mcp import MODERN, ORIGIN, RESOURCE
 
 
 def private_config(tmp_path, **changes):

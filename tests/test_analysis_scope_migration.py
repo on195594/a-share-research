@@ -5,6 +5,7 @@ import pytest
 
 from a_share_research import db
 from a_share_research.account import analysis_scope
+from support.account_analysis import insert
 
 _COLUMNS = ('id','holding_id','company_key','version','parent_id','request_hash','source','actor_key_id',
             'created_at','snapshot_hash','evidence_hashes','request','snapshot')
@@ -28,15 +29,6 @@ def legacy():
         insert(conn,identity,holding,version,parent)
     yield conn
     conn.close()
-
-
-def insert(conn, identity, holding, version=0, parent=None, **scope):
-    values=dict(id=identity,holding_id=holding,company_key='600001',version=version,parent_id=parent,
-        request_hash=f'request-{identity}',source='structural',actor_key_id=None,
-        created_at='2026-11-11T10:00:00+08:00',snapshot_hash=f'snapshot-{identity}',
-        evidence_hashes='["原始证据"]',request='{ "preserve whitespace": true }',snapshot='{"state": "原值"}')
-    values.update(scope)
-    conn.execute(f"INSERT INTO account_analysis_history ({','.join(values)}) VALUES ({','.join('?' for _ in values)})",tuple(values.values()))
 
 
 def rows(conn):

@@ -5,9 +5,6 @@ import pytest
 
 from a_share_research import gate
 from a_share_research.account import analysis, ledger
-from test_account_analysis import branch as _branch_fixture
-
-branch = _branch_fixture
 
 
 def historical_rebase(branch):

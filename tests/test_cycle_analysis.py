@@ -8,15 +8,8 @@ from pydantic import ValidationError
 
 from a_share_research import api_keys
 from a_share_research.account import analysis, cycle_analysis, evidence, ledger, position_store
-from test_account_analysis import historical_revision, legacy_rows, request
-from test_analysis_transitions import rewrite, open_alert
-from test_position_store import seed, event, batch, submit
-from test_v0_account_store import book as policy_book
-
-
-@pytest.fixture
-def book(tmp_path):
-    yield from policy_book.__wrapped__(tmp_path)
+from support.account_analysis import historical_revision, legacy_rows, open_alert, request, rewrite
+from support.positions import batch, event, seed, submit
 
 
 def initialize(book, cycle='legacy:1', account='a', version=0, revision=None, hashes=None):
@@ -42,7 +35,8 @@ def reopened(book):
     return position_store.state(book[0], book[1], 'a')['projection']['cycles'][-1]['cycle_id']
 
 
-def test_seed_baseline_requires_explicit_current_legacy_revision_and_keeps_snapshot(book):
+def test_seed_baseline_requires_explicit_current_legacy_revision_and_keeps_snapshot(policy_book):
+    book = policy_book
     old = analysis.initialize(book[0], book[1], 1)
     before = legacy_rows(book[0])
     with pytest.raises(ledger.LedgerError, match='当前分析版本'):
@@ -59,7 +53,8 @@ def test_seed_baseline_requires_explicit_current_legacy_revision_and_keeps_snaps
     assert analysis.inspect(book[0]) == []
 
 
-def test_same_holding_id_accounts_and_legacy_history_remain_isolated(book):
+def test_same_holding_id_accounts_and_legacy_history_remain_isolated(policy_book):
+    book = policy_book
     conn, principal, directory, sha = book
     conn.execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     old = analysis.initialize(conn, principal, 1)
@@ -82,7 +77,8 @@ def test_same_holding_id_accounts_and_legacy_history_remain_isolated(book):
     assert analysis.inspect(conn) == []
 
 
-def test_new_cycle_starts_empty_pending_then_appends_thesis_alert_and_tier(book):
+def test_new_cycle_starts_empty_pending_then_appends_thesis_alert_and_tier(policy_book):
+    book = policy_book
     cycle = reopened(book)
     before = legacy_rows(book[0])
     base = initialize(book, cycle, version=2)
@@ -107,7 +103,8 @@ def test_new_cycle_starts_empty_pending_then_appends_thesis_alert_and_tier(book)
 
 
 @pytest.mark.parametrize('invalid', ['version', 'evidence', 'borrow', 'empty'])
-def test_new_baseline_rejects_invalid_version_evidence_and_legacy_borrow(book, invalid):
+def test_new_baseline_rejects_invalid_version_evidence_and_legacy_borrow(policy_book, invalid):
+    book = policy_book
     legacy = analysis.initialize(book[0], book[1], 1)
     cycle = reopened(book)
     args = dict(cycle=cycle, version=2)
@@ -125,7 +122,8 @@ def test_new_baseline_rejects_invalid_version_evidence_and_legacy_borrow(book, i
     assert cycle_analysis.history(book[0], book[1], 'a', cycle)['revisions'] == []
 
 
-def test_seed_cannot_import_stale_or_other_holdings_revision(book):
+def test_seed_cannot_import_stale_or_other_holdings_revision(policy_book):
+    book = policy_book
     conn, principal, *_ = book
     conn.execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     old = analysis.initialize(conn, principal, 1)
@@ -137,7 +135,8 @@ def test_seed_cannot_import_stale_or_other_holdings_revision(book):
 
 
 @pytest.mark.parametrize('retirement', ['closed', 'void'])
-def test_closed_or_voided_cycle_keeps_audit_history_but_refuses_new_writes(book, retirement):
+def test_closed_or_voided_cycle_keeps_audit_history_but_refuses_new_writes(policy_book, retirement):
+    book = policy_book
     cycle = reopened(book)
     base = initialize(book, cycle, version=2)
     if retirement == 'closed':
@@ -155,7 +154,8 @@ def test_closed_or_voided_cycle_keeps_audit_history_but_refuses_new_writes(book,
 
 
 @pytest.mark.parametrize('column,value', [('snapshot_hash','bad'), ('cycle_id','wrong-cycle')])
-def test_hash_and_cycle_ownership_tampering_are_detected(book, column, value):
+def test_hash_and_cycle_ownership_tampering_are_detected(policy_book, column, value):
+    book = policy_book
     cycle = reopened(book)
     base = initialize(book, cycle, version=2)
     book[0].execute('DROP TRIGGER account_analysis_no_update')
@@ -165,7 +165,8 @@ def test_hash_and_cycle_ownership_tampering_are_detected(book, column, value):
         update(book, cycle=cycle)
 
 
-def test_snapshot_row_cannot_claim_another_holding_even_with_recomputed_hash(book):
+def test_snapshot_row_cannot_claim_another_holding_even_with_recomputed_hash(policy_book):
+    book = policy_book
     from a_share_research import gate
     cycle = reopened(book)
     base = initialize(book, cycle, version=2)
@@ -180,7 +181,8 @@ def test_snapshot_row_cannot_claim_another_holding_even_with_recomputed_hash(boo
 
 
 @pytest.mark.parametrize('role', ['research', 'owner'])
-def test_scoped_read_and_write_require_assistant(book, role):
+def test_scoped_read_and_write_require_assistant(policy_book, role):
+    book = policy_book
     cycle = reopened(book)
     initialize(book, cycle, version=2)
     denied = api_keys.authenticate(book[0], api_keys.create(book[0], 'structural-denied-' + role, role=role))
@@ -215,7 +217,8 @@ def reopen_for_projection(book):
     return position_store.state(book[0], book[1], 'a')['projection']['cycles'][-1]['cycle_id']
 
 
-def test_combined_projection_refuses_new_cycle_until_explicit_analysis_baseline(book, tmp_path, monkeypatch):
+def test_combined_projection_refuses_new_cycle_until_explicit_analysis_baseline(policy_book, tmp_path, monkeypatch):
+    book = policy_book
     import sqlite3
     from a_share_research.policy.v0 import db as policy_db, commands_monitor
     analysis.initialize(book[0], book[1], 1)
@@ -248,7 +251,8 @@ def test_combined_projection_refuses_new_cycle_until_explicit_analysis_baseline(
     assert legacy_rows(book[0]) == before
 
 
-def test_scoped_seed_projection_stays_independent_of_later_legacy_revision(book, tmp_path, monkeypatch):
+def test_scoped_seed_projection_stays_independent_of_later_legacy_revision(policy_book, tmp_path, monkeypatch):
+    book = policy_book
     from a_share_research.policy.v0 import db as policy_db
     book[0].execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     old = analysis.initialize(book[0], book[1], 1)
@@ -264,7 +268,8 @@ def test_scoped_seed_projection_stays_independent_of_later_legacy_revision(book,
     assert analysis.inspect(book[0]) == []
 
 
-def test_combined_seed_without_scoped_baseline_uses_legacy_analysis(book, tmp_path, monkeypatch):
+def test_combined_seed_without_scoped_baseline_uses_legacy_analysis(policy_book, tmp_path, monkeypatch):
+    book = policy_book
     from a_share_research.policy.v0 import db as policy_db
     book[0].execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
     analysis.initialize(book[0], book[1], 1)
@@ -275,7 +280,8 @@ def test_combined_seed_without_scoped_baseline_uses_legacy_analysis(book, tmp_pa
         assert projected.execute('SELECT tier3_status FROM holding_tier_state WHERE holding_id=1').fetchone()[0] == 'completed'
 
 
-def test_http_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(book, tmp_path, bind_account):
+def test_http_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(policy_book, tmp_path, bind_account):
+    book = policy_book
     from fastapi.testclient import TestClient
     from a_share_research.tools.server import create_app
     cycle = reopened(book)

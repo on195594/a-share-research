@@ -13,11 +13,8 @@ NOW = datetime(2026, 7, 14, 2, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "p0.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
+def fixed_clock(monkeypatch):
     monkeypatch.setattr(domain, "utc_now", lambda: NOW)
-    yield str(db_file)
 
 
 def test_schema_migration_adds_quote_tables_and_analysis_columns() -> None:

@@ -9,9 +9,7 @@ import pytest
 from a_share_research import reading
 from support.continuation import BODY
 from support.templates import render
-from test_feedback_retry import browser_request, web
-
-_ = web  # pytest fixture from test_feedback_retry
+from support.web import browser_request
 
 
 def captured():
@@ -44,9 +42,11 @@ def test_captured_pair_preserves_values_negative_cash_and_exact_saved_ratios():
 
 
 def test_ratios_from_original_precision_still_map_to_the_saved_peer_rows():
+    from support.financials import CAPTURES, frames
+    from support.financials import FINANCIAL_DATA as DATA
+
     from a_share_research.material import financial_table
     from a_share_research.research_tools import calculate
-    from test_financial_series import CAPTURES, frames, FINANCIAL_DATA as DATA
 
     body = captured()
     body['table'] = [r for r in body['table'] if not r['id'].startswith('C.')]
@@ -220,8 +220,9 @@ def test_two_inapplicable_ratios_keep_each_company_reason_without_a_ratio_row():
 
 
 def test_restatement_reason_blocks_a_value_and_does_not_silently_select_an_older_period():
+    from support.financials import CAPTURES, frames
+
     from a_share_research.material import financial_table
-    from test_financial_series import CAPTURES, frames
     body = captured()
     current = row(body, 'P000858.T.op_cash')
     protected = next(r for r in financial_table(frames(CAPTURES['000858']), {}) if r['id'] == 'T.op_cash')
@@ -238,8 +239,9 @@ def test_restatement_reason_blocks_a_value_and_does_not_silently_select_an_older
 
 
 def test_text_gaps_are_not_parsed_as_structured_version_checks():
+    from support.financials import CAPTURES, frames
+
     from a_share_research.material import financial_table
-    from test_financial_series import CAPTURES, frames
     body = captured()
     protected = next(r for r in financial_table(frames(CAPTURES['000858']), {}) if r['id'] == 'T.op_cash')
     body['gaps'] = list(protected['unavailable'].values())
@@ -299,7 +301,8 @@ def test_missing_fetch_dates_and_untrusted_long_names_render_as_text():
     assert 'href="#financial"' in panel(body) and 'href="#answer"' not in panel(body)
 
 
-def test_report_route_is_read_only_and_failed_or_nonpeer_reports_hide_panel(web):
+def test_report_route_is_read_only_and_failed_or_nonpeer_reports_hide_panel(feedback_web):
+    web = feedback_web
     request, _ = browser_request(web)
     before = web.conn.total_changes
     response = web.report_page(request, 8)

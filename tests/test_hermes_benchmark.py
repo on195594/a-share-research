@@ -6,8 +6,9 @@ import fcntl
 import pytest
 
 from a_share_research.policy import benchmark_evaluation
-from test_benchmark_evaluation import GOLDEN, bundle
-from test_ops_hermes import load
+from support.evaluations import GOLDEN
+from support.evaluations import benchmark_bundle as bundle
+from support.hermes import load
 
 
 @pytest.fixture

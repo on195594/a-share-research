@@ -6,7 +6,6 @@ not new financial observations or a broker acceptance run.
 """
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import asdict
 from datetime import datetime
 import json
 import sqlite3
@@ -18,16 +17,8 @@ import pytest
 from a_share_research.policy import stop_evaluation
 from a_share_research.policy.stop_state import StopState, validate_state
 from a_share_research.policy.v0 import commands_holdings, domain, market_quotes, risk_budget
-
-
-STOP1, STOP2 = 24.824, 23.364
-
-
-def bundle(price=24.0, now='2026-10-22T10:31:00+08:00', quote_time='10:30:00', state=None):
-    return dict(risk_policy=risk_budget.policy(), now=now,
-                holdings=[dict(code='000963', name='华东医药', stop_loss_15=STOP1, stop_loss_20=STOP2)],
-                quotes={'000963': asdict(market_quotes.PriceQuote(price, '2026-10-22', quote_time, 'boundary-fixture'))},
-                previous_state={} if state is None else state)
+from support.evaluations import STOP1
+from support.evaluations import stop_bundle as bundle
 
 
 def evaluate(value):
@@ -158,7 +149,7 @@ def test_bundle_rejects_untyped_or_nonfinite_input(mutation):
 
 
 def test_policy_identity_and_validity_window_are_checked():
-    from test_policy_capture import scoped_parameters
+    from support.policy import scoped_parameters
     value = bundle()
     with pytest.raises(ValueError,match='does not match'):
         stop_evaluation.evaluate(value,risk_budget.policy(3.0))

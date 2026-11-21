@@ -83,7 +83,7 @@ def test_cli_protocol_does_not_parse_chinese_or_leak_raw_errors(ashare_cli, stat
 ])
 def test_unknown_result_requires_original_identity_and_arguments(
         ashare_cli, tmp_path, monkeypatch, capsys, script, name):
-    from test_ops_hermes import load
+    from support.hermes import load
 
     job = load(script)
     monkeypatch.setattr(job, 'STATE', tmp_path / 'state.json')

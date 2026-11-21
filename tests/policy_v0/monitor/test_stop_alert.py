@@ -46,7 +46,7 @@ def _run(monkeypatch, tmp_path, capsys, now, price, quote_time="10:30:00"):
 def test_command_alerts_then_stays_silent_and_keeps_state_beside_the_database(
     isolated_cache_database, monkeypatch, tmp_path, capsys
 ):
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
+    from support.policy_replay import _seed_holding
 
     # Fixture holding: stop_loss_15=85, stop_loss_20=80.
     _seed_holding(isolated_cache_database, "000963", shares=800)
@@ -61,7 +61,7 @@ def test_command_alerts_then_stays_silent_and_keeps_state_beside_the_database(
 def test_command_is_silent_at_lunch_and_fails_visibly_on_stale_quotes(
     isolated_cache_database, monkeypatch, tmp_path, capsys
 ):
-    from policy_v0.monitor.test_monitor_snapshot import _seed_holding
+    from support.policy_replay import _seed_holding
 
     _seed_holding(isolated_cache_database, "000963", shares=800)
     lunch = datetime(2026, 10, 22, 12, 0, tzinfo=CST)

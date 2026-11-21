@@ -16,13 +16,6 @@ from a_share_research.policy.v0 import commands_holdings, db, domain
 from policy_v0.helpers import seed_event, seed_position
 
 
-@pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
-    db_file = tmp_path / "test_edge.db"
-    monkeypatch.setenv("POLICY_V0_DB", str(db_file))
-    yield str(db_file)
-
-
 def _insert_analysis(code: str, result: str = "test_result", score: int | None = None):
     today = domain.cst_today()
     conn = db.get_db()
@@ -100,7 +93,7 @@ class TestHoldingsDisplay:
 
         assert capsys.readouterr().out.strip() == "NOT_HELD 603606"
 
-    def test_holdings_handler_is_physically_read_only(self, isolated_db, capsys):
+    def test_holdings_handler_is_physically_read_only(self, isolated_cache_database, capsys):
         seed_position("603606", 34.24, 500)
         conn = db.get_db()
         conn.execute("DELETE FROM holding_events")
@@ -113,7 +106,7 @@ class TestHoldingsDisplay:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.close()
         capsys.readouterr()
-        path = Path(isolated_db)
+        path = Path(isolated_cache_database)
         before = hashlib.sha256(path.read_bytes()).hexdigest()
 
         commands_holdings.cmd_holdings(["603606"])
@@ -137,7 +130,7 @@ class TestHoldingsDisplay:
         ],
     )
     def test_retro_read_commands_are_physically_read_only(
-        self, isolated_db, capsys, command, args
+        self, isolated_cache_database, capsys, command, args
     ):
         _h603606 = seed_position("603606", 34.24, 500)
         seed_event(_h603606, "sell", "2026-01-06", shares=500, price=35.00, close=True)
@@ -145,7 +138,7 @@ class TestHoldingsDisplay:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.close()
         capsys.readouterr()
-        path = Path(isolated_db)
+        path = Path(isolated_cache_database)
         before = hashlib.sha256(path.read_bytes()).hexdigest()
 
         command(args)

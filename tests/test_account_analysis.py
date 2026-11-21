@@ -1,75 +1,12 @@
 """Structural state transitions only; these invented fixtures are not investment evidence."""
-from datetime import datetime
-from decimal import Decimal
 import json
 import sqlite3
 
 import pytest
 from pydantic import ValidationError
 
-from a_share_research import api_keys, db
-from a_share_research.account import analysis, cycle_analysis, evidence, ledger, position_store
-from test_position_store import seed
-
-
-@pytest.fixture
-def branch(tmp_path):
-    conn = db.connect(tmp_path / 'app.db')
-    analysis.migrate(conn)
-    principal = api_keys.authenticate(conn, api_keys.create(conn, 'structural', role='assistant'))
-    directory = tmp_path / 'evidence'
-    sha = evidence.store(directory, b'Structural analysis evidence; no broker or investment assertion')
-    conn.execute("INSERT INTO holdings(id,code,name) VALUES (1,'600001','Structural fixture')")
-    conn.execute("INSERT INTO holdings(id,code,name) VALUES (2,'600002','Other structural fixture')")
-    conn.execute("INSERT INTO holding_thesis_versions(id,holding_id,version,l1,l2,rewrite_reason,status,created_at)"
-                 " VALUES (1,1,1,'Structural L1','Structural L2','fixture','active','2026-11-01')")
-    for identity, holding, active in ((1,1,1),(2,1,0),(3,2,1)):
-        conn.execute("INSERT INTO holding_l3_conditions(id,holding_id,condition_text,created_at,updated_at,is_active)"
-                     " VALUES (?,?, 'Structural condition','2026-11-01','2026-11-01',?)", (identity,holding,active))
-    for identity, status in ((1,'active'),(2,'pending'),(3,'resolved')):
-        conn.execute("INSERT INTO holding_alerts(id,holding_id,code,level,category,reason_code,reason,status,opened_at,updated_at)"
-                     " VALUES (?,1,'600001','yellow','unverified',?,'Structural alert',?,'2026-11-01','2026-11-01')",
-                     (identity,f'structural-{identity}',status))
-    conn.execute("INSERT INTO holding_tier_state(holding_id,updated_at) VALUES (1,'2026-11-01')")
-    seeds = [seed(), seed(code='600002', cycle_id='legacy:2', legacy_holding_id=2)]
-    ledger.initialize(conn, principal, 'a', dict(positions={s.code: s.shares for s in seeds}, cash='10000'),
-                      datetime.fromisoformat('2026-11-01T00:00:00+08:00'), directory, sha, tolerance=Decimal(0))
-    position_store.initialize(conn, principal, 'a', seeds, directory, [sha])
-    yield conn, principal, directory, sha
-    conn.close()
-
-
-def legacy_rows(conn):
-    return {t: [tuple(r) for r in conn.execute(f'SELECT * FROM {t} ORDER BY 1')]
-            for t in (*analysis.TABLES,'holdings','holding_events')}
-
-
-def request(branch, changes=None, version=0, **extra):
-    return analysis.Update.model_validate(dict(expected_version=version, evidence_hashes=[branch[3]],
-        reason='Structural transition', changes=changes or [dict(kind='l3',id=1,status='watch',
-            as_of='2026-11-11',evidence='Structural evidence')]) | extra)
-
-
-def start_cycle(branch, holding_id=1):
-    conn, principal, directory, sha = branch
-    legacy = analysis.initialize(conn, principal, holding_id)
-    return cycle_analysis.initialize(conn, principal, 'a', f'legacy:{holding_id}', dict(
-        expected_account_version=0, evidence_hashes=[sha], legacy_revision_id=legacy['revision_id']), directory)
-
-
-def append(branch, value, holding_id=1):
-    return cycle_analysis.update(branch[0], branch[1], 'a', f'legacy:{holding_id}', value, branch[2])
-
-
-def historical_revision(branch, holding_id, value):
-    """Seed a pre-cutover revision alongside a journal branch for historical reader tests."""
-    conn, principal, *_ = branch
-    holding = analysis.read_holding(conn, holding_id)
-    latest = analysis.current(conn, principal, holding_id)
-    snapshot = latest['snapshot']
-    analysis.apply_changes(conn, holding, snapshot, value.changes)
-    return analysis.insert_revision(conn, holding, latest['version'] + 1, latest['revision_id'],
-        'assistant', principal, value.model_dump(mode='json'), value.evidence_hashes, snapshot)
+from a_share_research.account import analysis, cycle_analysis, evidence, ledger
+from support.account_analysis import append, legacy_rows, request, start_cycle
 
 
 def test_baseline_retains_missing_legacy_fields_and_is_idempotent(branch):

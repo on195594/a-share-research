@@ -2,9 +2,12 @@
 
 These are deterministic arithmetic inputs, not an endorsed valuation or a model research run.
 """
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
+
+from a_share_research.material import Material
+from a_share_research.sources import Document
 
 DATA = Path(__file__).resolve().parents[1] / 'data'
 RECORD = next(r['report'] for r in json.loads((DATA / 'continuation-records.json').read_text())['records']
@@ -39,3 +42,8 @@ def with_probabilities(value, weights=(25, 50, 25)):
         for name, weight in zip(('保守', '中性', '乐观'), weights):
             value['scenarios'][name]['probability'] = weight
     return value
+
+
+def material():
+    return Material(BODY['code'], BODY['name'], Document(**BODY['document']), {}, {},
+                    deepcopy(BODY['table']), BODY['market_date'])

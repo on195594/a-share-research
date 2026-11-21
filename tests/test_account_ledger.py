@@ -1,43 +1,12 @@
 """Shadow journal invariants; structural numbers from test_account, not broker acceptance evidence."""
-from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 import sqlite3
 
 import pytest
 from a_share_research import api_keys, db
 from a_share_research.account import evidence, ledger
-from a_share_research.account.reconciliation import Event, Opening, Snapshot
-
-
-@pytest.fixture
-def book(tmp_path):
-    conn = db.connect(tmp_path / 'app.db')
-    principal = api_keys.authenticate(conn, api_keys.create(conn, 'account', role='assistant'))
-    directory = tmp_path / 'evidence'
-    sha = evidence.store(directory, b'Structural account test evidence, not a broker statement')
-    ledger.initialize(conn, principal, 'a', Opening(positions={}, cash='200000'),
-                      datetime.fromisoformat('2026-10-01T00:00:00+08:00'), directory, sha, tolerance=Decimal('0'))
-    yield conn, principal, directory, sha
-    conn.close()
-
-
-def buy(**changes):
-    return Event.model_validate(dict(kind='buy', code='600519', shares=100, price='1400.5',
-                                    occurred_at='2026-10-08T15:30:00+08:00', broker_id='trade1') | changes)
-
-
-def batch(book, *, version=0, events=None, positions=None, cash='59950', voids=()):
-    positions = positions if positions is not None else {'600519':100}
-    values = {code: Decimal(shares)*100 for code, shares in positions.items() if shares}
-    return ledger.Batch(expected_version=version, events=[buy()] if events is None else events,
-                        void_event_ids=list(voids), evidence_hashes=[book[3]],
-                        snapshot=Snapshot(positions=positions, cash=cash, market_values=values,
-                                          total_assets=Decimal(cash)+sum(values.values())))
-
-
-def submit(book, value):
-    return ledger.submit(book[0],book[1],'a',value,book[2])
+from a_share_research.account.reconciliation import Event
+from support.accounts import batch, buy, submit
 
 
 def test_posted_retries_and_cross_batch_duplicates_are_not_new_events(book):

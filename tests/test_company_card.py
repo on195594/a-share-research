@@ -8,33 +8,18 @@ import pytest
 from a_share_research import db, scans, service, stance, valuation
 from support.continuation import load
 from support.valuation import BODY, RECORD, ROWS, STORED, assumptions
-from test_scans import AT, CATALOG, CapturedSources, captured_events, cite_in_card, citing, complete_cards_at, priced, run_scan
-from test_advisor_sources import CALENDAR
-
-
-@pytest.fixture
-def server(tmp_path, monkeypatch):
-    """Exercise the HTTP app in process, without a listener or uvicorn subprocess."""
-    from fastapi.testclient import TestClient
-    from a_share_research import api_keys
-    from test_service_delivery import saved
-
-    monkeypatch.setenv('PUBLIC_BASE_URL', 'http://localhost')
-    monkeypatch.setenv('SESSION_SECRET', 'isolated-test-only-not-a-real-secret')
-    monkeypatch.setenv('DEV_LOGIN', '1')
-    from a_share_research import web
-
-    conn = db.connect(tmp_path / 'app.db')
-    monkeypatch.setattr(web, 'conn', conn)
-    monkeypatch.setattr(web, 'settings', web.Settings.from_env())
-    run, report = saved(conn)
-    _, failed = saved(conn, passed=False)
-    queued = service.submit(conn, '600519', 'lost-http-response', question='现金流')
-    token = api_keys.create(conn, 'isolated-http-test')
-    with TestClient(web.app, base_url='http://localhost',
-                    headers={'Authorization': 'Bearer ' + token}) as client:
-        yield conn, client, 'http://localhost', run, report, failed, queued
-    conn.close()
+from support.market_replay import CALENDAR
+from support.scans import (
+    AT,
+    CATALOG,
+    CapturedSources,
+    captured_events,
+    cite_in_card,
+    citing,
+    complete_cards_at,
+    priced,
+    run_scan,
+)
 
 
 def test_card_latest_passed_non_feedback_and_read_only(tmp_path):
@@ -254,7 +239,8 @@ def test_announcement_failure_pauses_card_until_same_code_recovers(tmp_path, val
     conn.close()
 
 
-def test_card_http_authentication_read_only_and_404(server):
+def test_card_http_authentication_read_only_and_404(reading_server):
+    server = reading_server
     conn, client, url, _run, report, _failed, _queued = server
     before = conn.total_changes
     route = url + '/api/companies/600519/card'
@@ -268,7 +254,8 @@ def test_card_http_authentication_read_only_and_404(server):
     assert conn.total_changes == before
 
 
-def test_cards_http_authentication_version_and_payload(server):
+def test_cards_http_authentication_version_and_payload(reading_server):
+    server = reading_server
     conn, client, url, *_ = server
     scans.replace_subscriptions(conn, ['600519', '603606'], catalog=CATALOG)
     route = url + '/api/cards'
@@ -356,13 +343,15 @@ def test_unpriced_or_missing_frozen_basis_is_unknown_not_false(tmp_path, calc):
     conn.close()
 
 
-def test_card_endpoints_return_only_effective_public_checks(server):
-    from test_scans import disclosure_replay
+def test_card_endpoints_return_only_effective_public_checks(reading_server):
+    server = reading_server
+    from support.scans import replay_disclosure as disclosure_replay
+
     from a_share_research import disclosure_checks
 
     conn, client, url, *_ = server
     # Reuse T2's documented cross-company/period variants and real persistence path.
-    code, _, source = disclosure_replay.__wrapped__(conn)
+    code, _, source = disclosure_replay(conn)
     run_scan(conn, source)
 
     class Revision(CapturedSources):

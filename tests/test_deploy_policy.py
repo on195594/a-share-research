@@ -5,92 +5,14 @@ Docker orchestration remains simulated by test_deploy_tools; not production acce
 from contextlib import closing
 from datetime import datetime, timedelta
 import json
-import os
-import shutil
 import sqlite3
 import subprocess
-import sys
 from types import SimpleNamespace
 
 import pytest
 
-from a_share_research import api_keys, db, deploy
-from a_share_research.account import mirror
+from a_share_research import db, deploy
 from a_share_research.policy.v0 import risk_budget
-
-
-@pytest.fixture
-def local_policy(tmp_path, monkeypatch):
-    original_freeze, original_probe = deploy.freeze_policy, deploy.policy_probe
-    old = tmp_path / 'old-install'
-    old.mkdir()
-    shutil.copytree(deploy.ROOT / 'a_share_research', old / 'a_share_research',
-                    ignore=shutil.ignore_patterns('__pycache__'))
-    with (old / 'a_share_research/policy/v0/RULES.md').open('a') as stream:
-        stream.write('\nPredecessor rule text for the release fixture.\n')
-    config = tmp_path / 'empty.env'
-    config.touch(mode=0o600)
-
-    def setup(state=None, *, parameters=None):
-        monkeypatch.setattr(deploy, 'freeze_policy', original_freeze)
-        monkeypatch.setattr(deploy, 'policy_probe', original_probe)
-        data = state.data if state else tmp_path / 'data'
-        data.mkdir(exist_ok=True)
-        database = data / 'app.db'
-        with closing(db.connect(database)) as conn:
-            token = api_keys.create(conn, 'isolated-owner', role='owner')
-            conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)',
-                         ('mirror', mirror.digest(mirror._read(conn, data)), db.now(), '{}'))
-        local = SimpleNamespace(current='old-worker', database=database,
-                                token=token, lose_reply=False, failed_writes=False, after_activate=None, probe_time=None)
-        def command(script, payload, *, image=None):
-            selected = image or (state.containers['worker'] if state else local.current)
-            root = old if selected == 'old-worker' else deploy.ROOT
-            action = 'activate' if script == deploy.POLICY_ACTIVATE else payload['action']
-            if action == 'activate' and local.failed_writes:
-                raise RuntimeError('injected activation failure')
-            script = script.replace("Path('/data/app.db')", f'Path({str(database)!r})')
-            script = script.replace("sqlite3.connect('/data/app.db',", f'sqlite3.connect({str(database)!r},')
-            if local.probe_time is not None:
-                script = script.replace('now = datetime.fromisoformat(db.now())',
-                                        f'now = datetime.fromisoformat({local.probe_time!r})')
-            result = subprocess.run([sys.executable, '-c', script], input=json.dumps(payload), text=True,
-                capture_output=True, cwd=root, timeout=10,
-                env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'PYTHONPATH': str(root),
-                     'A_STOCK_CONFIG_FILE': str(config)})
-            if result.returncode:
-                raise RuntimeError('local policy command failed')
-            if action == 'activate' and local.lose_reply:
-                local.lose_reply = False
-                raise RuntimeError('injected lost activation receipt')
-            if action == 'activate' and local.after_activate:
-                hook, local.after_activate = local.after_activate, None
-                hook()
-            return json.loads(result.stdout)
-        monkeypatch.setattr(deploy, 'policy_command', command)
-        local.command = command
-        params = parameters or risk_budget.policy()
-        candidate = command(deploy.POLICY_PROBE, dict(action='candidate', parameters=params), image='old-worker')
-        local.old = candidate
-        local.activation = command(deploy.POLICY_ACTIVATE, dict(identity=candidate['identity'], parameters=params,
-            owner_token=token, expected_id=0, request_id='predecessor', reason='synthetic initial fixture'))
-        local.target = command(deploy.POLICY_PROBE, dict(action='candidate', parameters=params), image='new-worker')
-        local.approval = dict(identity=local.target['identity'], expected_id=local.activation['id'],
-                             request_id='approved-release-once', reason='isolated exact release approval', owner_token=token)
-        local.approval_path = tmp_path / 'approval.json'
-        def approve():
-            local.approval_path.write_text(json.dumps(local.approval))
-            local.approval_path.chmod(0o600)
-            return local.approval_path
-        local.approve = approve
-        def count():
-            with closing(sqlite3.connect(database)) as conn:
-                return conn.execute('SELECT COUNT(*) FROM policy_activations').fetchone()[0]
-        local.count = count
-        if not state:
-            monkeypatch.setattr(deploy, 'describe', lambda service: dict(image=local.current, running=True))
-        return local
-    return setup
 
 
 def freeze(local):

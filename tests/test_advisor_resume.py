@@ -7,16 +7,7 @@ import time
 from zoneinfo import ZoneInfo
 
 import pytest
-
-from test_ops_hermes import load
-
-
-RECEIPT = dict(version='research-v1', request_id='$request_id', id=7, scan_id=7, path='/scans/7')
-
-
-def response(**changes):
-    return dict(version='research-v1', id=7, status='done', summary={}, notify=[],
-                requested_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()) | changes
+from support.hermes import RECEIPT, load, response
 
 
 @pytest.fixture

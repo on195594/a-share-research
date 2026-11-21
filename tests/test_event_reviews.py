@@ -12,7 +12,7 @@ import pytest
 from a_share_research import db, prompts, research, scans, service, sources
 from a_share_research.material import Material
 from support.valuation import BODY, RECORD
-from test_scans import AT, CATALOG, CapturedSources, captured_events, citing, complete_cards_at, conn, run_scan  # noqa: F401
+from support.scans import AT, CATALOG, CapturedSources, captured_events, citing, complete_cards_at, run_scan
 
 DATA = Path(__file__).parent / 'data'
 GOVERNANCE = json.loads((DATA / 'governance-announcements.json').read_text())['items']

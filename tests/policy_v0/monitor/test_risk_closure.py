@@ -20,7 +20,7 @@ from a_share_research.policy.v0 import (
     risk_budget,
 )
 from policy_v0.helpers import mock_price_quotes
-from policy_v0.monitor.test_monitor_snapshot import _quotes, _run, _seed_holding
+from support.policy_replay import _quotes, _run, _seed_holding
 
 ROOT = Path(__file__).resolve().parents[3] / "a_share_research/policy/v0/guide"
 
