@@ -7,10 +7,11 @@ import sqlite3
 
 import pytest
 
-from a_share_research import api_keys, db, initial_release, scans
+from a_share_research import api_keys, db, scans
 from support.continuation import RECORDS, load
 from support.reports import MATERIAL
 from test_analysis_scope_migration import insert as insert_analysis
+from test_backup import database_rows
 
 
 def legacy_database(path, columns="present"):
@@ -362,12 +363,14 @@ def v24(tmp_path, monkeypatch):
 
 def test_grant_migration_preserves_old_columns_audit_and_pending_request(v24):
     path, token, key_id, requester, scan_id = v24
-    before = initial_release.state(path)
-    assert before['version'] == 24
+    before = database_rows(path)
+    assert before.pop('__user_version__') == 24
+    keys = before.pop('api_keys')
     with closing(db.connect(path)) as conn:
-        after = initial_release.state(path, before['columns'])
-        assert after['version'] == 25 and after['tables'] == before['tables']
-        assert {tuple(row) for row in conn.execute('SELECT kind,client,revoked_at FROM api_keys')} == {('pat', None, None)}
+        after = database_rows(path)
+        assert after['__user_version__'] == 25
+        assert after['api_keys'] == [(*row, 'pat', None, None) for row in keys]
+        assert {table: after[table] for table in before} == before
         assert api_keys.authenticate(conn, token) == api_keys.Principal(key_id, 'assistant')
         assert scans.submit_request(conn, requester, 'pending') == scan_id
         with pytest.raises(sqlite3.IntegrityError, match='rotate key'):
@@ -393,7 +396,8 @@ def test_grant_migration_preserves_old_columns_audit_and_pending_request(v24):
 
 def test_grant_copy_hash_mismatch_rolls_back_the_entire_migration(v24, monkeypatch):
     path = v24[0]
-    before = initial_release.state(path)
+    with closing(sqlite3.connect(path)) as conn:
+        before = list(conn.iterdump())
     original = api_keys._column_hashes
 
     def corrupt_copy(conn):
@@ -404,6 +408,8 @@ def test_grant_copy_hash_mismatch_rolls_back_the_entire_migration(v24, monkeypat
     monkeypatch.setattr(api_keys, '_column_hashes', corrupt_copy)
     with pytest.raises(ValueError, match='旧列哈希不一致'):
         db.connect(path)
-    assert initial_release.state(path) == before
-    with closing(sqlite3.connect(path)) as conn, pytest.raises(sqlite3.IntegrityError, match='rotate key'):
-        conn.execute("UPDATE api_keys SET role='owner'")
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 24
+        assert list(conn.iterdump()) == before
+        with pytest.raises(sqlite3.IntegrityError, match='rotate key'):
+            conn.execute("UPDATE api_keys SET role='owner'")

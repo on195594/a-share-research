@@ -1,192 +1,122 @@
 """Release-order simulations only: no Docker, live service or production acceptance."""
 import io
 import json
-from contextlib import nullcontext
+import sqlite3
+from contextlib import closing, nullcontext
 from types import SimpleNamespace
 
 import pytest
 
 from a_share_research import deploy
-from a_share_research.tools.control import Gate
 from test_deploy_policy import local_policy as _local_policy
 
 local_policy = _local_policy
 
 
 @pytest.fixture
-def operations(monkeypatch,tmp_path):
-    """Model container images and local admission without mocking release decisions."""
-    def setup(*, existing=True, failure=None, paused=False, compatible=True, previous_config=False):
-        data=tmp_path/'data'
-        data.mkdir(exist_ok=True)
-        cards = str(tmp_path / 'method-cards')
-        state=SimpleNamespace(events=[], existing=existing, failure=failure, paused=paused,
-            in_flight=0, data=data, env={'DATA_DIR':'/data','TUSHARE_TOKEN':'private-test-value',
-                'METHOD_CARDS_DIR':'/method-cards',
-                'ASHARE_PUBLIC_MCP_URL':'https://stock.example/mcp',
-                'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED':'0'},
-            tags={'web':'old-web','worker':'old-worker'},
-            containers={'web':'old-web','worker':'old-worker'},
-            running={'web':True,'worker':True})
+def operations(monkeypatch, tmp_path):
+    """Model only host commands, container state and readiness."""
+    def setup(*, existing=True, failure=None, paused=False, previous_config=False):
+        data = tmp_path / 'data'
+        data.mkdir()
+        state = SimpleNamespace(data=data, evidence=tmp_path / 'release-evidence', events=[], paused=paused,
+                                in_flight=0, env={'METHOD_CARDS_DIR': '/method-cards'},
+                                tags={'web': 'old-web', 'worker': 'old-worker'})
+        state.containers = dict(state.tags)
         if existing:
-            state.containers['tools']='old-worker'
-            state.running['tools']=True
-        state.declared_hashes = {s: f'config-{s}' for s in ('web', 'worker', 'tools')}
+            state.containers['tools'] = 'old-worker'
+        state.running = dict.fromkeys(state.containers, True)
+        state.declared_hashes = {s: f'config-{s}' for s in state.containers}
         running_hashes = state.declared_hashes.copy()
-        previous_services = {'web', 'tools'} if previous_config else set()
-        for service in previous_services:
-            running_hashes[service] = 'previous-' + service
-
-        def record(name,*args):
-            state.events.append((name,*args))
+        if previous_config:
+            running_hashes['web'] = 'previous-web-config'
 
         def describe(service):
-            record('describe',service,state.containers[service])
-            info = {'image': state.containers[service], 'running': state.running[service],
-                    'config_hash': running_hashes[service], 'cpus': 0, 'ports': {},
-                    'networks': ['nginx-network'] if service != 'worker' else ['a-share-research_default'],
-                    'mounts': {'/data': [str(data), True], '/method-cards': [cards, False]}}
-            if service in previous_services:
-                del info['mounts']['/method-cards']
-                if service == 'tools':
-                    info['networks'] = ['a-share-research_default']
-            if service == 'tools':
-                info['cpus'] = 400_000_000
-                info['ports'] = {'8621/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8621'}]}
-                info['mounts']['/run/ashare-tools'] = ['tmpfs', True]
-            return info
+            return dict(image=state.containers[service], running=state.running[service],
+                        config_hash=running_hashes[service])
 
         def run(*args):
-            if args[:2]==('docker','compose') and '--hash' in args and args[-1]=='tools':
-                # Real Compose 5.7.0 rejects this profiled service without explicitly enabling its profile.
-                assert args[2:4]==('--profile','tools')
-            if args[:4]==('docker','compose','--profile','tools'):
-                args=(*args[:2],*args[4:])
-            record('run',*args)
-            if args[:2]==('git','rev-parse'):
-                return 'revision'
-            if args[:2]==('git','status'):
+            if args[:4] == ('docker', 'compose', '--profile', 'tools'):
+                args = (*args[:2], *args[4:])
+            state.events.append(('run', *args))
+            if args[:2] == ('git', 'rev-parse'):
+                return 'previous' if args[-1] == 'previous^{commit}' else 'revision'
+            if args[:2] == ('git', 'merge-base'):
+                return args[2]
+            if args[:2] == ('git', 'status'):
                 return ''
-            if args[:2]==('docker','ps'):
-                return 'existing-tools-container' if 'tools' in state.containers else ''
-            if args[:2]==('docker','tag'):
-                source,destination=args[2:]
-                if destination.endswith(':latest'):
-                    service=destination.removeprefix('a-share-research-').removesuffix(':latest')
-                    state.tags[service]=source
-                return ''
-            if args[:3]==('docker','compose','config'):
+            if args[:2] == ('docker', 'ps'):
+                return 'tools' if existing else ''
+            if args[:2] == ('docker', 'inspect'):
+                return str(data)
+            if args[:3] == ('docker', 'compose', 'config'):
                 if '--hash' in args:
                     return f'{args[-1]} {state.declared_hashes[args[-1]]}'
-                volumes = [{'source': str(data), 'target': '/data', 'type': 'bind'},
-                           {'source': cards, 'target': '/method-cards', 'type': 'bind', 'read_only': True}]
-                return json.dumps({'networks': {'nginx-network': {'name': 'nginx-network'},
-                                                'default': {'name': 'a-share-research_default'}},
-                    'services':{'web':{'volumes':volumes, 'networks': {'nginx-network': None}},
-                                'worker':{'volumes':volumes, 'networks': {'default': None}},
-                    'tools':{'image':'a-share-research-worker','environment':state.env,'volumes':volumes,
-                             'networks': {'nginx-network': None},
-                             'tmpfs':['/run/ashare-tools:uid=1000,gid=1000,mode=0700']}}})
-            if args[:3]==('docker','compose','stop'):
+                return json.dumps({'services': {'tools': {'environment': state.env}}})
+            if args[:2] == ('docker', 'tag'):
+                if args[-1].endswith(':latest'):
+                    service = args[-1].removeprefix('a-share-research-').removesuffix(':latest')
+                    state.tags[service] = args[2]
+                return ''
+            if args[:3] == ('docker', 'compose', 'stop'):
                 for service in args[5:]:
-                    state.running[service]=False
+                    state.running[service] = False
                 return ''
-            if args[:3]==('docker','compose','up'):
-                services=args[args.index('--no-deps')+1:]
-                for service in services:
-                    state.containers[service]=state.tags['worker' if service=='tools' else service]
-                    state.running[service]=True
-                    running_hashes[service] = state.declared_hashes[service]
-                    previous_services.discard(service)
-                if 'tools' in services and not existing:
-                    state.paused=Gate(state.data/'.tools-paused').status()['paused']
-                    record('first_start_marker',state.paused)
-                return ''
-            if args[:3]==('docker','compose','start'):
+            if args[:3] == ('docker', 'compose', 'start'):
                 for service in args[3:]:
-                    state.running[service]=True
+                    state.running[service] = True
                 return ''
-            if args[:3]==('docker','compose','rm') or args[:2]==('docker','rm'):
-                state.containers.pop('tools',None)
-                state.running.pop('tools',None)
+            if args[:3] == ('docker', 'compose', 'up'):
+                for service in args[args.index('--no-deps') + 1:]:
+                    state.containers[service] = state.tags['worker' if service == 'tools' else service]
+                    state.running[service] = True
+                    running_hashes[service] = state.declared_hashes[service]
+                if 'tools' in args and (data / '.tools-paused').exists():
+                    state.paused = True
                 return ''
-            if args[:3]==('docker','exec','a-share-research-worker'):
-                if 'a_share_research.integrity' in args:
-                    record('integrity')
-                    return json.dumps({'ok':failure!='integrity' or state.containers['worker']=='old-worker'})
-                record('preflight')
-                if failure=='preflight' and state.containers['worker']!='old-worker':
-                    raise RuntimeError('injected preflight failure')
-                return json.dumps({'ok':True})
             raise AssertionError(f'unexpected operation: {args!r}')
 
-        def control(action,*args,**kwargs):
-            record('control',action)
-            if action=='pause':
-                state.paused=True
-                Gate(state.data/'.tools-paused').pause(0)
-                if failure=='resume_lost_redrain_failed' and getattr(state,'resume_lost',False):
-                    raise RuntimeError('injected rollback drain timeout')
-                state.in_flight=0
-                if failure=='drain_timeout':
-                    state.in_flight=1
+        def control(action):
+            state.events.append(('control', action))
+            if action == 'pause':
+                state.paused = True
+                if failure == 'drain_timeout':
                     raise RuntimeError('injected drain timeout')
-                if failure=='not_drained':
-                    state.in_flight=1
-            elif action=='resume':
-                state.paused=False
-                if (state.data/'.tools-paused').exists():
-                    Gate(state.data/'.tools-paused').resume()
-                if failure in ('resume_lost','resume_lost_redrain_failed') and not getattr(state,'resume_lost',False):
-                    state.resume_lost=True
-                    state.in_flight=1
+                state.in_flight = int(failure == 'not_drained')
+            if action == 'resume':
+                state.paused = False
+                if failure == 'resume_lost':
                     raise RuntimeError('injected lost resume reply')
-            return {'paused':state.paused,'in_flight':state.in_flight}
+            return dict(paused=state.paused, in_flight=state.in_flight)
 
-        def ready(*,paused=False):
-            record('tools_ready',paused)
-            assert state.paused==paused
-            if paused and state.in_flight:
-                raise RuntimeError('not drained')
-            return {'paused':paused,'in_flight':state.in_flight,'ok':True}
+        def ready(*, paused=False):
+            state.events.append(('tools_ready', paused))
+            assert state.paused == paused
+            return dict(paused=paused, in_flight=state.in_flight, database_ready=True)
 
         def backup(*args):
-            record('backup')
-            if failure=='backup':
-                raise RuntimeError('injected backup failure')
-            return {'rows':0}
-
-        def assess(images,database,evidence_directory):
-            record('rollback_probe')
-            assert images=={'web':'old-web','worker':'old-worker'}
-            assert database==data/'app.db'
-            assert evidence_directory==state.evidence/'rollback-probe'
+            state.events.append(('backup',))
             assert not any(state.running.values())
-            if 'tools' in state.containers:
-                assert state.paused and state.in_flight==0
-            return {'ok':compatible,'scope':'read_only','images':{
-                service:{'ok':compatible,'error':None if compatible else 'incompatible_records'}
-                for service in images}}
+            if failure == 'backup':
+                raise RuntimeError('injected backup failure')
+            return {'files': 1}
 
-        # Host locking has a separate test; simulated releases never lock the checkout.
         monkeypatch.setattr(deploy, 'release_lock', nullcontext)
-        monkeypatch.setattr(deploy,'run',run)
-        monkeypatch.setattr(deploy,'describe',describe)
-        monkeypatch.setattr(deploy,'verify_images',lambda code:{'web':'new-web','worker':'new-worker'})
-        monkeypatch.setattr(deploy,'tools_control',control)
-        monkeypatch.setattr(deploy,'wait_tools_ready',ready)
-        monkeypatch.setattr(deploy,'wait_ready',lambda:record('web_ready'))
-        monkeypatch.setattr(deploy,'idle',lambda database:record('idle'))
-        monkeypatch.setattr(deploy,'fingerprints',lambda database:{'rows':'unchanged'})
-        monkeypatch.setattr(deploy,'_source_version',lambda database:21)
-        # Policy semantics use real SQLite in test_deploy.py; this fixture models orchestration only.
-        monkeypatch.setattr(deploy,'freeze_policy',lambda *a,**k:dict(required=False))
-        monkeypatch.setattr(deploy,'policy_probe',lambda **k:dict(applicable=False))
-        monkeypatch.setattr(deploy,'create_release_backup',backup)
-        monkeypatch.setattr(deploy.rollback,'assess',assess)
-        monkeypatch.setattr(deploy,'prune_backups',lambda data:[])
-        monkeypatch.setattr(deploy,'prune_images',lambda images:{})
-        state.evidence=tmp_path/'release-evidence'
+        monkeypatch.setattr(deploy, 'run', run)
+        monkeypatch.setattr(deploy, 'describe', describe)
+        def release_images(code):
+            version = 'old' if code == 'previous' else 'new'
+            return {service: f'{version}-{service}' for service in deploy.SERVICES}
+        monkeypatch.setattr(deploy, 'release_images', release_images)
+        monkeypatch.setattr(deploy, 'tools_control', control)
+        monkeypatch.setattr(deploy, 'wait_tools_ready', ready)
+        monkeypatch.setattr(deploy, 'wait_ready', lambda: state.events.append(('web_ready',)))
+        monkeypatch.setattr(deploy, 'idle', lambda database: state.events.append(('idle',)))
+        monkeypatch.setattr(deploy, 'freeze_policy', lambda *a, **k: dict(required=False))
+        monkeypatch.setattr(deploy, 'policy_probe', lambda **k: dict(applicable=False))
+        monkeypatch.setattr(deploy, 'create_release_backup', backup)
+        monkeypatch.setattr(deploy, 'prune_backups', lambda data: [])
+        monkeypatch.setattr(deploy, 'prune_images', lambda images: {})
         return state
     return setup
 
@@ -212,9 +142,6 @@ def test_existing_tools_is_automatically_included_and_not_resumed_before_verific
     assert index(state,('backup',))<index(state,('run','docker','tag','new-web'))
     assert any(event[-3:]==('web','worker','tools') for event in commands(state,'up'))
     assert index(state,('tools_ready',True))<index(state,('control','resume'))
-    assert index(state,('preflight',))<index(state,('control','resume'))
-    assert index(state,('integrity',))<index(state,('control','resume'))
-    assert index(state,('describe','tools','new-worker'))<index(state,('control','resume'))
     tags=[event for event in state.events if event[:3]==('run','docker','tag')]
     assert not any('a-share-research-tools:' in event[-1] for event in tags)
 
@@ -240,46 +167,6 @@ def test_preexisting_pause_is_not_owned_by_release(operations):
     assert not commands(state,'stop')
     assert ('control','pause') not in state.events
     assert ('control','resume') not in state.events
-
-
-@pytest.mark.parametrize('failure',['preflight','integrity'])
-def test_existing_tools_failure_rebuilds_old_services_and_restores_admission(operations,failure):
-    state=operations(failure=failure)
-    with pytest.raises(RuntimeError):
-        deploy.deploy('revision',state.evidence)
-    assert state.tags=={'web':'old-web','worker':'old-worker'}
-    assert state.containers=={'web':'old-web','worker':'old-worker','tools':'old-worker'}
-    assert not state.paused and all(state.running.values())
-    assert not commands(state,'rm')
-    assert commands(state,'up')[-1][-3:]==('web','worker','tools')
-    assert index(state,('control','resume'))>index(state,('integrity',) if failure=='integrity' else ('preflight',))
-    probe=index(state,('rollback_probe',))
-    rollback_tag=index(state,('run','docker','tag','old-web','a-share-research-web:latest'))
-    assert probe<rollback_tag<state.events.index(commands(state,'up')[-1],probe)<index(state,('control','resume'))
-    assert json.loads((state.evidence/'rollback-compatibility.json').read_text())['ok'] is True
-
-
-def test_first_tools_requires_explicit_configuration_authorization(operations):
-    state=operations(existing=False)
-    with pytest.raises(RuntimeError):
-        deploy.deploy('revision',state.evidence,with_tools=True)
-    assert not commands(state,'stop') and not commands(state,'up')
-    assert 'tools' not in state.containers
-
-
-def test_first_tools_failure_removes_only_new_container_and_own_marker(operations):
-    state=operations(existing=False,failure='integrity')
-    before=set(state.data.iterdir())
-    with pytest.raises(RuntimeError):
-        deploy.deploy('revision',state.evidence,allow_config=True,with_tools=True)
-    assert state.tags=={'web':'old-web','worker':'old-worker'}
-    assert state.containers=={'web':'old-web','worker':'old-worker'}
-    assert all(state.running.values())
-    removals=commands(state,'rm')
-    assert len(removals)==1 and removals[0][-1]=='tools'
-    assert set(state.data.iterdir())==before
-    assert commands(state,'up')[-1][-2:]==('web','worker')
-    assert index(state,('rollback_probe',))<state.events.index(removals[0])
 
 
 def test_existing_tools_must_share_old_worker_image(operations):
@@ -311,35 +198,36 @@ def test_tools_requires_the_configured_method_cards_directory_before_pause(opera
     assert not commands(state, 'stop')
 
 
-def test_lost_resume_reply_drains_again_before_rolling_back(operations):
-    state=operations(failure='resume_lost')
-    with pytest.raises(RuntimeError,match='lost resume reply'):
-        deploy.deploy('revision',state.evidence)
-    resumes=[i for i,event in enumerate(state.events) if event==('control','resume')]
-    pauses=[i for i,event in enumerate(state.events) if event==('control','pause')]
-    assert len(resumes)==len(pauses)==2
-    assert pauses[0]<resumes[0]<pauses[1]<resumes[1]
-    rollback_tag=next(i for i,event in enumerate(state.events) if i>resumes[0]
-                      and event==('run','docker','tag','old-web','a-share-research-web:latest'))
-    rollback_up=state.events.index(commands(state,'up')[-1],resumes[0])
-    assert pauses[1]<index(state,('rollback_probe',))<rollback_tag<rollback_up<resumes[1]
-    assert state.containers=={'web':'old-web','worker':'old-worker','tools':'old-worker'}
-    assert not state.paused and state.in_flight==0
+def test_lost_resume_reply_pauses_admission_again(operations):
+    state = operations(failure='resume_lost')
+    with pytest.raises(RuntimeError, match='lost resume reply'):
+        deploy.deploy('revision', state.evidence)
+    assert state.paused
+    assert state.containers['tools'] == 'new-worker'
 
 
-@pytest.mark.parametrize('first',[False,True])
-def test_failed_redrain_after_lost_resume_never_replaces_or_removes_running_tools(operations,first):
-    state=operations(existing=not first,failure='resume_lost_redrain_failed')
-    with pytest.raises(RuntimeError,match='rollback drain timeout'):
-        deploy.deploy('revision',state.evidence,allow_config=first,with_tools=first)
-    resume=index(state,('control','resume'))
-    remaining=state.events[resume+1:]
-    assert [e for e in remaining if e[0]!='describe']==[('control','pause')]
-    assert not commands(state,'rm')
-    assert len(commands(state,'up'))==1
-    assert state.tags=={'web':'new-web','worker':'new-worker'}
-    assert state.containers=={'web':'new-web','worker':'new-worker','tools':'new-worker'}
-    assert state.paused and state.in_flight==1
+@pytest.mark.parametrize('offline', [False, True])
+def test_republish_previous_commit_uses_the_restored_database_or_keeps_existing_pause(operations, local_policy, offline):
+    state = operations()
+    local = local_policy(state)
+    backup = state.data / 'pre-release.db'
+    if offline:
+        with closing(sqlite3.connect(local.database)) as source, closing(sqlite3.connect(backup)) as copy:
+            source.backup(copy)
+    deploy.deploy('revision', state.evidence, approval_path=local.approve())
+    if offline:
+        # The pre-release backup contains the predecessor activation. The failed
+        # worker must never open it before the previous image is started.
+        with closing(sqlite3.connect(backup)) as copy, closing(sqlite3.connect(local.database)) as restored:
+            copy.backup(restored)
+        state.running = dict.fromkeys(state.running, False)
+    else:
+        state.paused = True
+        local.approval.update(identity=local.old['identity'], expected_id=2, request_id='republish-previous')
+    deploy.deploy('previous', state.evidence.parent / 'republished', approval_path=local.approve())
+    assert state.containers == {'web': 'old-web', 'worker': 'old-worker', 'tools': 'old-worker'}
+    assert state.paused is (not offline)
+    assert local.count() == (1 if offline else 3)
 
 
 def test_backup_failure_restarts_existing_services_without_retagging(operations):
@@ -350,70 +238,6 @@ def test_backup_failure_restarts_existing_services_without_retagging(operations)
     assert not commands(state,'up')
     assert all(state.running.values()) and not state.paused
     assert state.tags=={'web':'old-web','worker':'old-worker'}
-    assert not any(event[0]=='rollback_probe' for event in state.events)
-    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
-    assert checkpoint['status'] == 'recovered' and checkpoint['actual'] == checkpoint['before']
-
-
-def test_first_tools_backup_failure_cleans_marker_without_removing_any_container(operations):
-    state=operations(existing=False,failure='backup')
-    with pytest.raises(RuntimeError,match='backup failure'):
-        deploy.deploy('revision',state.evidence,allow_config=True,with_tools=True)
-    assert not commands(state,'rm')
-    assert not commands(state,'up')
-    assert not (state.data/'.tools-paused').exists()
-    assert state.containers=={'web':'old-web','worker':'old-worker'}
-    assert all(state.running.values())
-    assert not any(event[0]=='rollback_probe' for event in state.events)
-
-
-@pytest.mark.parametrize('first',[False,True])
-@pytest.mark.parametrize('failure',['integrity','resume_lost'])
-def test_incompatible_old_reader_keeps_current_images_and_admission_paused(operations,first,failure):
-    state=operations(existing=not first,failure=failure,compatible=False)
-    with pytest.raises(RuntimeError,match='旧镜像读取兼容检查未通过'):
-        deploy.deploy('revision',state.evidence,allow_config=first,with_tools=first)
-    assert state.tags=={'web':'new-web','worker':'new-worker'}
-    assert state.containers=={'web':'new-web','worker':'new-worker','tools':'new-worker'}
-    assert not any(state.running.values())
-    assert state.paused and state.in_flight==0
-    assert not commands(state,'rm') and not commands(state,'start')
-    assert len(commands(state,'up'))==1
-    assert next(e for e in reversed(state.events) if e[0]!='describe')==('rollback_probe',)
-    report=json.loads((state.evidence/'rollback-compatibility.json').read_text())
-    assert report=={'ok':False,'scope':'read_only','images':{
-        service:{'ok':False,'error':'incompatible_records'} for service in ('web','worker')}}
-    resumes=[i for i,event in enumerate(state.events) if event==('control','resume')]
-    if failure=='resume_lost':
-        assert len(resumes)==1
-        assert next(e for e in state.events[resumes[0]+1:] if e[0]!='describe')==('control','pause')
-    else:
-        assert not resumes
-        if first:
-            assert (state.data/'.tools-paused').exists()
-
-
-def test_two_service_rollback_also_requires_old_reader_compatibility(operations):
-    state=operations(existing=False,failure='integrity',compatible=False)
-    with pytest.raises(RuntimeError,match='旧镜像读取兼容检查未通过'):
-        deploy.deploy('revision',state.evidence)
-    assert state.tags=={'web':'new-web','worker':'new-worker'}
-    assert state.containers=={'web':'new-web','worker':'new-worker'}
-    assert not any(state.running.values())
-    assert not any(event[0]=='control' for event in state.events)
-    assert not commands(state,'rm') and not commands(state,'start')
-    assert len(commands(state,'up'))==1
-    assert next(e for e in reversed(state.events) if e[0]!='describe')==('rollback_probe',)
-
-
-def test_first_tools_never_removes_a_preexisting_pause_marker(operations):
-    state=operations(existing=False)
-    marker=state.data/'.tools-paused'
-    marker.write_text('unrelated previous release marker')
-    with pytest.raises(RuntimeError):
-        deploy.deploy('revision',state.evidence,allow_config=True,with_tools=True)
-    assert marker.read_text()=='unrelated previous release marker'
-    assert not commands(state,'stop')
 
 
 def test_without_tools_container_ordinary_release_keeps_two_services(operations):
@@ -424,21 +248,8 @@ def test_without_tools_container_ordinary_release_keeps_two_services(operations)
     assert commands(state,'up')[-1][-2:]==('web','worker')
 
 
-def test_first_tools_starts_paused_and_only_resumes_after_checks(operations):
-    state=operations(existing=False)
-    deploy.deploy('revision',state.evidence,allow_config=True,with_tools=True)
-    assert ('first_start_marker',True) in state.events
-    assert state.containers=={'web':'new-web','worker':'new-worker','tools':'new-worker'}
-    assert not state.paused and not (state.data/'.tools-paused').exists()
-    assert index(state,('first_start_marker',True))<index(state,('tools_ready',True))
-    assert index(state,('integrity',))<index(state,('control','resume'))
-    assert index(state,('describe','tools','new-worker'))<index(state,('control','resume'))
-    assert ('control','pause') not in state.events
-    assert commands(state,'up')[-1][-3:]==('web','worker','tools')
-
-
 @pytest.mark.parametrize('allow_config', [False, True])
-def test_rollout_from_previous_mounts_and_network_requires_authorization(operations, allow_config):
+def test_changed_configuration_requires_authorization(operations, allow_config):
     state = operations(previous_config=True)
     if allow_config:
         deploy.deploy('revision', state.evidence, allow_config=True)
@@ -449,92 +260,15 @@ def test_rollout_from_previous_mounts_and_network_requires_authorization(operati
         assert not commands(state, 'stop')
 
 
-def test_completion_of_ordinary_rollback_refuses_old_images_with_new_configuration(operations):
-    state = operations(failure='preflight', previous_config=True)
-    with pytest.raises(RuntimeError, match='web 镜像、运行状态或部署配置不一致'):
-        deploy.deploy('revision', state.evidence, allow_config=True)
-    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
-    assert checkpoint['phase'] == 'rollback-policy-gate' and checkpoint['status'] == 'held'
-    assert checkpoint['allow_config'] is False
-    assert state.containers == {s: info['image'] for s, info in checkpoint['before'].items()}
-    assert checkpoint['actual']['tools']['config_hash'] == state.declared_hashes['tools']
-    with pytest.raises(RuntimeError, match='web 镜像、运行状态或部署配置不一致'):
-        deploy.complete_held(state.evidence)
-    assert state.paused and ('control', 'resume') not in state.events
-
-
 def test_same_image_with_only_a_changed_service_hash_recreates_before_resuming(operations, monkeypatch):
     state = operations()
-    monkeypatch.setattr(deploy, 'verify_images', lambda _: dict(state.tags))
+    monkeypatch.setattr(deploy, 'release_images', lambda _: dict(state.tags))
     state.declared_hashes['tools'] = 'changed-env'
     deploy.deploy('revision', state.evidence, allow_config=True)
     assert index(state, ('control', 'pause')) < index(state, ('run', 'docker', 'compose', 'up'))
     assert index(state, ('run', 'docker', 'compose', 'up')) < index(state, ('control', 'resume'))
     checkpoint = json.loads((state.evidence/'release-state.json').read_text())
-    assert checkpoint['phase'] == 'ready' and checkpoint['actual']['tools']['config_hash'] == 'changed-env'
-
-
-@pytest.mark.parametrize('service, drift', [('tools', 'missing'), ('tools', 'extra-network'),
-                                           ('tools', 'hash'), ('worker', 'hash')])
-def test_authorized_release_checks_declared_config_including_first_tools(operations, monkeypatch, service, drift):
-    state = operations(existing=False)
-    inspect = deploy.describe
-
-    def describe(name):
-        info = inspect(name)
-        if name == service and info['image'].startswith('new-'):
-            if drift == 'missing':
-                del info['mounts']['/method-cards']
-            elif drift == 'extra-network':
-                info['networks'].append('a-share-research_default')
-            else:
-                info['config_hash'] = 'different-from-declaration'
-        return info
-
-    monkeypatch.setattr(deploy, 'describe', describe)
-    with pytest.raises(RuntimeError, match=service + ' 镜像、运行状态或部署配置不一致'):
-        deploy.deploy('revision', state.evidence, allow_config=True, with_tools=True)
-    assert ('rollback_probe',) in state.events
-    assert 'tools' not in state.containers and ('control', 'resume') not in state.events
-
-
-@pytest.mark.parametrize('service, drift', [('tools', 'writable'), ('web', 'source'), ('tools', 'public-port')])
-def test_rollback_enforces_mount_and_loopback_requirements_even_if_present_before(operations, monkeypatch, service, drift):
-    state = operations()
-    inspect = deploy.describe
-
-    def describe(name):
-        info = inspect(name)
-        if name == service:
-            if drift == 'writable':
-                info['mounts']['/method-cards'][1] = True
-            elif drift == 'source':
-                info['mounts']['/method-cards'][0] += '-other'
-            else:
-                info['ports']['8621/tcp'][0]['HostIp'] = '0.0.0.0'
-        return info
-
-    monkeypatch.setattr(deploy, 'describe', describe)
-    with pytest.raises(RuntimeError, match='回环端口' if drift == 'public-port' else '/method-cards'):
-        deploy.deploy('revision', state.evidence)
-    assert ('rollback_probe',) in state.events
-    assert state.paused and ('control', 'resume') not in state.events
-
-
-@pytest.mark.parametrize('control_mount', [['tmpfs', False], ['/private/bind-control', True]])
-def test_release_rejects_non_writable_or_non_tmpfs_control_mount(operations, monkeypatch, control_mount):
-    state = operations()
-    original = deploy.describe
-    def describe(service):
-        value = original(service)
-        if service == 'tools':
-            value['mounts']['/run/ashare-tools'] = control_mount
-        return value
-    monkeypatch.setattr(deploy, 'describe', describe)
-    with pytest.raises(RuntimeError, match='tools 镜像、资源、挂载或回环端口与约定不符'):
-        deploy.deploy('revision', state.evidence)
-    assert state.tags == {'web': 'old-web', 'worker': 'old-worker'}
-    assert ('rollback_probe',) in state.events
+    assert checkpoint['status'] == 'succeeded' and not state.paused
 
 
 @pytest.mark.parametrize('approved', [False, 'standing', True])
@@ -557,32 +291,40 @@ def test_real_policy_release_approval_precedes_pause_and_gate_precedes_resume(op
     checkpoint = json.loads((state.evidence/'release-state.json').read_text())
     assert checkpoint['status'] == 'succeeded' and checkpoint['actual_policy']['installed'] is True
     assert checkpoint['actual_policy']['activation']['id'] == 2
-    assert index(state, ('integrity',)) < index(state, ('control', 'resume'))
+    assert index(state, ('tools_ready', True)) < index(state, ('control', 'resume'))
     assert (state.evidence/'policy-gate.json').exists()
     assert local.token not in ''.join(p.read_text() for p in state.evidence.glob('*.json'))
 
 
-@pytest.mark.parametrize('failure', ['integrity', 'resume_lost'])
-@pytest.mark.parametrize('restore', [False, True])
-def test_real_policy_failure_before_and_after_commit(operations, local_policy, failure, restore):
-    state = operations(failure=failure)
+def test_failed_policy_activation_keeps_tools_paused(operations, local_policy):
+    state = operations()
     local = local_policy(state)
-    with pytest.raises(RuntimeError):
-        deploy.deploy('revision', state.evidence, approval_path=local.approve(restore=restore))
-    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
-    assert state.containers['worker'] == 'old-worker'
-    if failure == 'integrity':
-        assert local.count() == 1 and not state.paused and checkpoint['status'] == 'recovered'
-    elif restore:
-        assert local.count() == 3 and not state.paused and checkpoint['status'] == 'recovered'
-    else:
-        assert local.count() == 2 and state.paused and checkpoint['status'] == 'held'
+    local.failed_writes = True
+    with pytest.raises(RuntimeError, match='activation failure'):
+        deploy.deploy('revision', state.evidence, approval_path=local.approve())
+    assert local.count() == 1 and state.paused
+    assert ('control', 'resume') not in state.events
+
+
+def test_failure_saving_success_after_resume_pauses_tools_again(operations, monkeypatch):
+    state = operations()
+    write = deploy.save_evidence
+
+    def save(directory, name, value):
+        if name == 'release-state.json' and value['status'] == 'succeeded':
+            raise OSError('injected evidence failure')
+        return write(directory, name, value)
+
+    monkeypatch.setattr(deploy, 'save_evidence', save)
+    with pytest.raises(OSError, match='evidence failure'):
+        deploy.deploy('revision', state.evidence)
+    assert ('control', 'resume') in state.events and state.paused
 
 
 def test_real_matched_same_image_never_adds_activation_or_pauses(operations, local_policy, monkeypatch):
     state = operations()
     local = local_policy(state)
-    monkeypatch.setattr(deploy, 'verify_images', lambda _: dict(web='old-web', worker='old-worker'))
+    monkeypatch.setattr(deploy, 'release_images', lambda _: dict(web='old-web', worker='old-worker'))
     deploy.deploy('revision', state.evidence)
     assert local.count() == 1 and ('control', 'pause') not in state.events
     assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'succeeded'
@@ -591,34 +333,14 @@ def test_real_matched_same_image_never_adds_activation_or_pauses(operations, loc
 def test_same_image_still_refuses_invalid_policy(operations, local_policy, monkeypatch):
     state = operations()
     local_policy(state)
-    monkeypatch.setattr(deploy, 'verify_images', lambda _: dict(web='old-web', worker='old-worker'))
+    monkeypatch.setattr(deploy, 'release_images', lambda _: dict(web='old-web', worker='old-worker'))
     original = deploy.policy_probe
     monkeypatch.setattr(deploy, 'policy_probe', lambda **k: original(**k) | dict(valid=False))
     with pytest.raises(RuntimeError): deploy.deploy('revision', state.evidence)
     assert ('control', 'resume') not in state.events
 
 
-def test_explicit_completion_only_recorded_drained_frozen_target(operations, local_policy):
-    state = operations(failure='resume_lost_redrain_failed')
-    local = local_policy(state)
-    with pytest.raises(RuntimeError, match='drain'):
-        deploy.deploy('revision', state.evidence, approval_path=local.approve())
-    assert state.paused and state.in_flight == 1 and local.count() == 2
-    assert Gate(state.data/'.tools-paused').status()['paused']
-    assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'held'
-    before = list(state.events)
-    with pytest.raises(RuntimeError, match='in_flight=0'):
-        deploy.complete_held(state.evidence)
-    assert not commands(state, 'stop')[len([e for e in before if e[:4]==('run','docker','compose','stop')]):]
-    state.in_flight = 0
-    state.failure = None
-    deploy.complete_held(state.evidence)
-    assert not state.paused and local.count() == 2
-    assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'succeeded'
-    with pytest.raises(RuntimeError, match='held'): deploy.complete_held(state.evidence)
-
-
-def test_plan_is_read_only_not_held_or_approval(operations, local_policy):
+def test_plan_is_read_only(operations, local_policy):
     state = operations()
     local = local_policy(state)
     deploy.deploy('revision', state.evidence, plan_policy=True)
@@ -628,125 +350,8 @@ def test_plan_is_read_only_not_held_or_approval(operations, local_policy):
     assert not (state.evidence/'release-state.json').exists() and local.count() == 1
 
 
-@pytest.mark.parametrize('final_probe_failed', [False, True])
-def test_both_activation_and_restore_receipts_lost_can_finish_only_saved_held(operations, local_policy, monkeypatch, final_probe_failed):
-    state = operations()
-    local = local_policy(state)
-    command, probe = deploy.policy_command, deploy.policy_probe
-    remaining = {'new-worker': 2, 'old-worker': 2}
-    def observe(**kwargs):
-        if final_probe_failed and local.count() == 3 and remaining['old-worker'] == 0:
-            raise RuntimeError('injected final observation failure')
-        return probe(**kwargs)
-    monkeypatch.setattr(deploy, 'policy_probe', observe)
-    def lost(script, payload, **kwargs):
-        result = command(script, payload, **kwargs)
-        selected = state.containers['worker']
-        if script == deploy.POLICY_ACTIVATE and remaining[selected]:
-            remaining[selected] -= 1
-            raise RuntimeError('injected committed activation reply lost')
-        return result
-    monkeypatch.setattr(deploy, 'policy_command', lost)
-    with pytest.raises(RuntimeError, match='reply lost'):
-        deploy.deploy('revision', state.evidence, approval_path=local.approve(restore=True))
-    held = json.loads((state.evidence/'release-state.json').read_text())
-    assert held['status'] == 'held' and held['policy']['committed_activation']['id'] == 2
-    assert state.paused and local.count() == 3
-    assert state.containers['worker'] == 'old-worker'
-    if final_probe_failed:
-        assert held['actual_policy']['observation'] == 'unknown'
-        assert all(held['actual_policy'][k] is None for k in ('activation', 'identity', 'installed'))
-    else:
-        assert held['actual_policy']['observation'] == 'observed'
-        assert held['actual_policy']['activation']['id'] == 3
-        assert held['actual_policy']['identity'] == local.old['identity']
-        assert held['actual_policy']['installed'] is True
-    monkeypatch.setattr(deploy, 'policy_probe', probe)
-    deploy.complete_held(state.evidence)
-    assert not state.paused and local.count() == 3
-    assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'recovered'
-
-
-@pytest.mark.parametrize('path', ['normal', 'rollback'])
-@pytest.mark.parametrize('checkpoint', ['tools-ready', 'result'])
-@pytest.mark.parametrize('redrain_failed', [False, True])
-def test_evidence_failure_cannot_prevent_redrain_or_allow_process_replacement(operations, monkeypatch, path, checkpoint, redrain_failed):
-    state = operations(failure='preflight' if path == 'rollback' else None)
-    save, control = deploy.save_evidence, deploy.tools_control
-    failed = False
-    resumed_images = None
-    def write(directory, name, value):
-        nonlocal failed
-        after_resume = ('control', 'resume') in state.events
-        trigger = (name == ('tools-ready.json' if path == 'normal' else 'rollback-tools-ready.json')
-                   if checkpoint == 'tools-ready' else
-                   name == 'release-state.json' and value.get('phase') in ('ready', 'rollback-ready'))
-        if failed or after_resume and trigger:
-            failed = True
-            raise OSError('injected persistent evidence failure')
-        return save(directory, name, value)
-    def admission(action):
-        nonlocal resumed_images
-        result = control(action)
-        if action == 'resume':
-            resumed_images = state.containers.copy()
-        elif action == 'pause' and resumed_images is not None and redrain_failed:
-            state.in_flight = 1
-            raise RuntimeError('injected second drain failure')
-        return result
-    monkeypatch.setattr(deploy, 'save_evidence', write)
-    monkeypatch.setattr(deploy, 'tools_control', admission)
-    with pytest.raises((OSError, RuntimeError)):
-        deploy.deploy('revision', state.evidence)
-    assert failed and resumed_images is not None
-    assert state.paused and state.containers == resumed_images
-    assert state.in_flight == (1 if redrain_failed else 0)
-    resumed_at = index(state, ('control', 'resume'))
-    later = state.events[resumed_at+1:]
-    assert ('control', 'pause') in later
-    assert not any(e[:3] == ('run', 'docker', 'compose') and e[3] in ('stop', 'up', 'rm', 'start') for e in later)
-
-
-@pytest.mark.parametrize('checkpoint', ['tools-ready', 'result'])
-@pytest.mark.parametrize('redrain_failed', [False, True])
-def test_completion_evidence_failure_redrains_before_any_recording(operations, monkeypatch, checkpoint, redrain_failed):
-    state = operations(failure='resume_lost_redrain_failed')
-    with pytest.raises(RuntimeError): deploy.deploy('revision', state.evidence)
-    state.failure, state.in_flight = None, 0
-    save, control = deploy.save_evidence, deploy.tools_control
-    failed = False
-    def write(directory, name, value):
-        nonlocal failed
-        trigger = (name == 'completion-tools-ready.json' if checkpoint == 'tools-ready' else
-                   name == 'release-state.json' and value.get('phase') == 'completion-ready')
-        if failed or trigger:
-            failed = True
-            raise OSError('injected completion evidence failure')
-        return save(directory, name, value)
-    def admission(action):
-        if action == 'pause':
-            # Replace the original release's persistent redrain fault with this
-            # completion attempt's own success/failure, without losing its marker.
-            state.events.append(('control', 'pause'))
-            Gate(state.data/'.tools-paused').pause(0)
-            state.paused, state.in_flight = True, 1 if redrain_failed else 0
-            if redrain_failed:
-                raise RuntimeError('injected completion redrain failure')
-            return {'paused': True, 'in_flight': 0}
-        return control(action)
-    monkeypatch.setattr(deploy, 'save_evidence', write)
-    monkeypatch.setattr(deploy, 'tools_control', admission)
-    before = state.containers.copy()
-    with pytest.raises((OSError, RuntimeError)): deploy.complete_held(state.evidence)
-    assert failed and state.paused and state.containers == before
-    assert state.in_flight == (1 if redrain_failed else 0)
-    resumed_at = [i for i, e in enumerate(state.events) if e == ('control', 'resume')][-1]
-    assert ('control', 'pause') in state.events[resumed_at+1:]
-    assert not any(e[:3] == ('run', 'docker', 'compose') for e in state.events[resumed_at+1:])
-
-
 def test_tools_ready_trusts_the_running_image_schema_check(monkeypatch):
-    # A pre-migration restart runs the previous image on the previous schema; tools itself vouches for the match.
+    # The running tools image checks its own database schema.
     answers = [dict(database_ready=False, schema_version=24, paused=True, in_flight=0),
                dict(database_ready=True, schema_version=24, paused=True, in_flight=0)]
 
@@ -757,16 +362,3 @@ def test_tools_ready_trusts_the_running_image_schema_check(monkeypatch):
     monkeypatch.setattr(deploy.time, 'sleep', lambda s: None)
     assert deploy.wait_tools_ready(paused=True)['schema_version'] == 24
     assert not answers
-
-
-def test_previous_config_held_before_switch_completes_against_its_snapshot(operations):
-    state = operations(failure='drain_timeout', previous_config=True)
-    with pytest.raises(RuntimeError):
-        deploy.deploy('revision', state.evidence, allow_config=True)
-    checkpoint = json.loads((state.evidence/'release-state.json').read_text())
-    assert checkpoint['status'] == 'held' and checkpoint['actual'] == checkpoint['before']
-    state.in_flight = 0
-    state.failure = None
-    deploy.complete_held(state.evidence)
-    assert not state.paused
-    assert json.loads((state.evidence/'release-state.json').read_text())['status'] == 'recovered'

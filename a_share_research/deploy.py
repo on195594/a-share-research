@@ -1,14 +1,8 @@
-"""Switch prebuilt local images after explicit production authorization.
-
-This is the existing release procedure, without tests, builds or browser control.
-"""
+"""Release prebuilt local images for a commit on origin/main."""
 
 import argparse
 import fcntl
-import functools
 import stat
-import hashlib
-import io
 import json
 import logging
 import os
@@ -16,7 +10,6 @@ import re
 import shutil
 import sqlite3
 import subprocess
-import tarfile
 import time
 from contextlib import closing, contextmanager
 from datetime import datetime
@@ -24,17 +17,10 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen, build_opener, ProxyHandler
 
-from a_share_research import backup as recovery, db, initial_release, rollback
+from a_share_research import backup as recovery, db
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
-TABLES = ("runs", "calls", "reports", "prices", "batches", "sessions", "api_keys")
-OPTIONAL_TABLES = (*db.ACCOUNT_TABLES, 'account_source', 'policy_activations',
-                   'external_research', 'external_submissions', 'external_reviews', 'external_operations', 'external_materials',
-                   'account_books', 'account_batches', 'account_journal', 'account_voids', 'account_observations',
-                   'account_analysis_history', 'account_position_books',
-                   'account_projection_ids', 'policy_v0_profiles', 'policy_v0_account_openings',
-                   'policy_versions', 'policy_evaluations', *db.V25_TABLES)
 log = logging.getLogger(__name__)
 
 
@@ -147,27 +133,6 @@ def prune_images(current: dict[str, str], keep: int = KEEP_ROLLBACK_IMAGES) -> d
     return result
 
 
-def fingerprints(database: Path) -> dict:
-    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
-        conn.execute("BEGIN")
-        existing = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        tables = (*TABLES, *(name for name in OPTIONAL_TABLES if name in existing))
-        return {table: _table_digest(conn, table) for table in tables}
-
-
-def _table_digest(conn, table: str) -> str:
-    # Streams rows into the hash; the bytes equal json.dumps(fetchall()) so recorded digests stay comparable.
-    digest = hashlib.sha256(b'[')
-    for index, row in enumerate(conn.execute(f"SELECT * FROM {table} ORDER BY 1")):
-        digest.update(((', ' if index else '') + json.dumps(row, ensure_ascii=False)).encode())
-    digest.update(b']')
-    return digest.hexdigest()
-
-
-def _source_version(database: Path) -> int:
-    with closing(sqlite3.connect(database.absolute().as_uri()+'?mode=ro', uri=True)) as conn:
-        return conn.execute('PRAGMA user_version').fetchone()[0]
-
 
 # Injected, bounded stdin protocol uses only APIs already present in policy-capable
 # images. It cannot import a new release helper from the host into an old image.
@@ -236,24 +201,16 @@ print(json.dumps(registry.activate(conn, principal, manifest['identity'], **p)))
 
 @contextmanager
 def release_lock():
-    """One host lock for release and explicit completion, never a stale lockfile lease."""
+    """Serialize releases on this host."""
     with (ROOT / '.git' / 'ashare-deploy.lock').open('a') as stream:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError('已有发布或完成入口正在运行') from None
+            raise RuntimeError('已有发布正在运行') from None
         yield
 
 
-def serialized(function):
-    @functools.wraps(function)
-    def locked(*args, **kwargs):
-        with release_lock():
-            return function(*args, **kwargs)
-    return locked
-
-
-def private_json(path, *, limit=65536):
+def private_json(path):
     """Read approval, not shell code; credentials never enter argv or evidence."""
     path = Path(path).absolute()
     if any(p.is_symlink() for p in (path, *path.parents)):
@@ -263,6 +220,7 @@ def private_json(path, *, limit=65536):
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
             raise RuntimeError('批准输入须为属主的 0600 常规文件')
+        limit = 65536
         raw = stream.read(limit + 1)
     try:
         if len(raw) > limit: raise ValueError
@@ -328,7 +286,7 @@ def policy_probe(*, owner_token=None):
 
 
 def save_evidence(directory, name, value):
-    """Durable, atomic evidence; a killed process leaves the last held checkpoint."""
+    """Write release evidence atomically."""
     temporary = directory / (name + '.tmp')
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w') as stream:
@@ -343,18 +301,6 @@ def policy_summary(state):
     return {k: state.get(k) for k in ('applicable', 'activation', 'identity', 'installed', 'valid')}
 
 
-def observe_held_policy(state: dict) -> None:
-    """Best-effort read-only evidence, never an admission gate or inferred approval."""
-    try:
-        observed = policy_summary(policy_probe()) | dict(observation='observed', at=db.now())
-    except Exception:
-        # A lost activation receipt can mean a committed append. Never present the
-        # earlier observation as current when the actual container cannot be read.
-        observed = dict(applicable=None, activation=None, identity=None, installed=None, valid=None,
-                        observation='unknown', at=db.now(), reason='最终只读政策探针失败；状态未确认')
-    state['actual_policy'] = observed
-
-
 def identity_diff(old, new):
     """Only hashes/paths and parameter equality; never approval credentials."""
     def changed(a, b):
@@ -366,25 +312,22 @@ def identity_diff(old, new):
                 guides=changed(old['files']['guides'], new['files']['guides']))
 
 
-def approval_for(approval, manifest, predecessor, *, rollback=False):
-    selected = approval.get('rollback') if rollback and approval else approval
+def approval_for(approval, manifest, predecessor):
     try:
-        if not isinstance(selected, dict): raise ValueError
-        allowed = {'identity', 'expected_id', 'request_id', 'reason'}
-        if not rollback: allowed |= {'owner_token', 'rollback'}
-        if (set(selected) - allowed or selected['identity'] != manifest['identity']
-                or type(selected['expected_id']) is not int or selected['expected_id'] != predecessor
+        allowed = {'identity', 'expected_id', 'request_id', 'reason', 'owner_token'}
+        if (set(approval) - allowed or approval['identity'] != manifest['identity']
+                or type(approval['expected_id']) is not int or approval['expected_id'] != predecessor
                 or not isinstance(approval['owner_token'], str) or not approval['owner_token']):
             raise ValueError
         from a_share_research.policy.registry import _text
         for key, limit in (('request_id', 128), ('reason', 1000)):
-            _text(selected[key], key, limit)
-        return {k: selected[k] for k in ('identity', 'expected_id', 'request_id', 'reason')}
+            _text(approval[key], key, limit)
+        return {k: approval[k] for k in ('identity', 'expected_id', 'request_id', 'reason')}
     except (KeyError, ValueError, TypeError):
         raise RuntimeError('缺少本次精确 identity/expected_id/request_id/reason 的明确批准') from None
 
 
-def freeze_policy(images, fallback, *, approval, not_applicable, preview=False, standing=None):
+def freeze_policy(images, *, approval, not_applicable, preview=False, standing=None):
     """``standing`` (release code) fills the empty ``approval`` dict from this plan with the owner credential."""
     current = policy_probe(owner_token=approval.get('owner_token') if approval else None)
     if current.get('applicable') is False:
@@ -410,33 +353,17 @@ def freeze_policy(images, fallback, *, approval, not_applicable, preview=False, 
                 raise RuntimeError('冻结期间生效政策已变化；请重新发布')
             current, pred = authenticated, authenticated['activation']['id']
             approval.update(identity=candidate['identity'], expected_id=pred, request_id=f'release-{standing}-after-{pred}',
-                            reason=f'所有者常设授权（2026-11-19）：发布 {standing} 时激活新政策身份，原参数不变',
-                            rollback=dict(identity=old['identity'], request_id=f'restore-{pred}-after-{standing}',
-                                          reason=f'发布 {standing} 失败时恢复激活记录 {pred} 的前驱身份'))
+                            reason=f'所有者常设授权（2026-11-19）：发布 {standing} 时激活新政策身份，原参数不变')
         elif not approval:
             raise RuntimeError(f'需要激活新政策身份：缺少常设 owner 凭据 {OWNER_CREDENTIAL} 或 --approval 批准')
         intent = approval_for(approval, candidate, current['activation']['id'])
-    restore = None
-    # Rollback approval freezes the actual fallback implementation, not host sources.
-    if approval and approval.get('rollback') is not None:
-        previous = policy_command(POLICY_PROBE, dict(action='candidate', parameters=old['parameters']), image=fallback['worker'])
-        verify(previous)
-        if previous['identity'] != old['identity'] or previous['parameters'] != old['parameters']:
-            raise RuntimeError('批准恢复须为冻结的前驱 identity；恢复镜像不匹配')
-        # The restored activation's expected_id is not known until the new append.
-        item = approval['rollback']
-        if set(item) != {'identity', 'request_id', 'reason'}:
-            raise RuntimeError('恢复批准仅接受冻结 identity、稳定 request_id 和 reason')
-        restore = approval_for(dict(owner_token=approval['owner_token'], rollback=item | {'expected_id': 0}),
-                               old, 0, rollback=True)
-        restore.pop('expected_id')
     return dict(required=True, predecessor=current['activation'], parameters=old['parameters'],
-                target_identity=candidate['identity'], target_manifest=candidate, old_identity=old['identity'],
-                intent=intent, restore=restore, owner_key_id=current.get('owner_key_id'),
+                target_identity=candidate['identity'], target_manifest=candidate,
+                intent=intent, owner_key_id=current.get('owner_key_id'),
                 diff=identity_diff(old, candidate))
 
 
-def policy_gate(images, frozen, *, approval=None, restoring=False, save=lambda *_: None, credential=None):
+def policy_gate(images, frozen, *, approval=None, save=lambda *_: None):
     """Every admission path uses actual-container state and rereads latest after idempotency."""
     for service, image in images.items():
         actual = describe(service)
@@ -452,27 +379,8 @@ def policy_gate(images, frozen, *, approval=None, restoring=False, save=lambda *
     if not current.get('applicable') or not current['valid'] or current['manifest']['parameters'] != frozen['parameters']:
         raise RuntimeError('政策门禁：状态未知、参数无效或账户不适用')
     predecessor = frozen['predecessor']
-    expected_identity = frozen['old_identity'] if restoring else frozen['target_identity']
     intent = frozen['intent']
     expected = predecessor
-    if restoring:
-        if current['activation'] != predecessor:
-            restore = frozen['restore']
-            committed = frozen.get('committed_activation')
-            resumed_restore = (restore is not None and committed is not None
-                               and _our_activation(current['activation'], restore | dict(expected_id=committed['id']), frozen))
-            # Only our exact new activation can be compensated, never another owner's switch.
-            if not resumed_restore:
-                if not intent or not _our_activation(current['activation'], intent, frozen):
-                    raise RuntimeError('恢复前驱不是本次激活；保持暂停')
-                committed = current['activation']
-                frozen['committed_activation'] = committed
-                save('policy-committed.json', committed)
-            if restore is None:
-                raise RuntimeError('新激活已提交，但本次未明确批准恢复旧 identity')
-            intent = restore | dict(expected_id=committed['id'])
-        else:
-            intent = None
     if intent is not None:
         expected = None
         if not _our_activation(current['activation'], intent, frozen):
@@ -481,16 +389,9 @@ def policy_gate(images, frozen, *, approval=None, restoring=False, save=lambda *
         else:
             expected = current['activation']
         if expected is None:
-            if not approval and credential:
-                approval = credential()
             if not approval:
                 raise RuntimeError('需要重新提供本次临时 owner 批准输入')
-            # Compare the supplied authorization against the persisted, secret-free intent.
-            if restoring:
-                supplied = approval.get('rollback')
-                if supplied != {k: intent[k] for k in ('identity', 'request_id', 'reason')}:
-                    raise RuntimeError('恢复批准与冻结目标不符')
-            elif approval_for(approval, frozen['target_manifest'], predecessor['id']) != intent:
+            if approval_for(approval, frozen['target_manifest'], predecessor['id']) != intent:
                 raise RuntimeError('激活批准与冻结目标不符')
             owner_state = policy_probe(owner_token=approval.get('owner_token'))
             if owner_state.get('owner_key_id') != frozen['owner_key_id']:
@@ -509,12 +410,9 @@ def policy_gate(images, frozen, *, approval=None, restoring=False, save=lambda *
             raise RuntimeError('激活回执与本次冻结批准不符')
         # Also reread if an earlier process committed and lost its reply.
         current = policy_probe()
-    if (current['identity'] != expected_identity or current['installed'] is not True or current['valid'] is not True
+    if (current['identity'] != frozen['target_identity'] or current['installed'] is not True or current['valid'] is not True
             or current['manifest']['parameters'] != frozen['parameters'] or current['activation'] != expected):
         raise RuntimeError('政策门禁未通过：latest activation/identity/installed 不匹配')
-    if not restoring and frozen['intent'] is not None:
-        frozen['committed_activation'] = current['activation']
-        save('policy-committed.json', current['activation'])
     save('policy-gate.json', policy_summary(current) | dict(at=db.now()))
     return current
 
@@ -526,57 +424,13 @@ def _our_activation(activation, intent, frozen):
 
 def describe(service: str) -> dict:
     container = json.loads(run("docker", "inspect", f"a-share-research-{service}"))[0]
-    mounts = {m['Destination']: ['tmpfs' if m.get('Type') == 'tmpfs' else m['Source'], m['RW']]
-              for m in container['Mounts']}
-    # Docker can list --tmpfs only in HostConfig, omitting it from Mounts even while running.
-    for target, options in (container['HostConfig'].get('Tmpfs') or {}).items():
-        mounts.setdefault(target, ['tmpfs', 'ro' not in options.split(',')])
-    networks = (container.get('NetworkSettings') or {}).get('Networks') or {}
     return {"image": container["Image"], "running": container["State"]["Running"],
-            "config_hash": container["Config"]["Labels"].get("com.docker.compose.config-hash"),
-            "cpus": container["HostConfig"]["NanoCpus"], "ports": container["HostConfig"]["PortBindings"],
-            "mounts": mounts, "networks": sorted(networks)}
+            "config_hash": container["Config"]["Labels"].get("com.docker.compose.config-hash")}
 
 
-def _compose_config() -> dict:
-    return json.loads(run('docker', 'compose', '--profile', 'tools', 'config', '--format', 'json'))
-
-
-def declared_config_hash(service: str, *, with_tools: bool) -> str:
-    profile = ('--profile', 'tools') if with_tools else ()
-    fields = run('docker', 'compose', *profile, 'config', '--hash', service).split()
-    if len(fields) != 2 or fields[0] != service:
-        raise RuntimeError(f'{service} 的 Compose 配置哈希无效')
-    return fields[1]
-
-
-def declared_mounts(service: str, configured: dict | None = None) -> dict:
-    """Mounts the committed Compose file declares for a service, in `describe` shape."""
-    if configured is None:
-        configured = _compose_config()
-    spec = configured['services'][service]
-    mounts = {v['target']: [v['source'], not v.get('read_only', False)] for v in spec.get('volumes') or []}
-    for entry in spec.get('tmpfs') or []:
-        target, _, options = entry.partition(':')
-        mounts[target] = ['tmpfs', 'ro' not in options.split(',')]
-    return mounts
-
-
-def verify_images(code: str) -> dict:
-    archive = subprocess.check_output(["git", "archive", code, "a_share_research"], cwd=ROOT)
-    with tarfile.open(fileobj=io.BytesIO(archive)) as source:
-        expected = {m.name: hashlib.sha256(source.extractfile(m).read()).hexdigest() for m in source if m.isfile()}
-    reader = ("import hashlib,json; from pathlib import Path; root=Path('/app'); "
-              "print(json.dumps({p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() "
-              "for p in (root/'a_share_research').rglob('*') if p.is_file() and '__pycache__' not in p.parts}))")
-    images = {}
-    for service in SERVICES:
-        image = run("docker", "image", "inspect", f"a-share-research-{service}:{code}", "--format", "{{.Id}}")
-        actual = json.loads(run("docker", "run", "--rm", "--network", "none", "--entrypoint", "python", image, "-c", reader))
-        if actual != expected:
-            raise RuntimeError(f"{service} 镜像源码或读取权限与提交不一致")
-        images[service] = image
-    return images
+def release_images(code: str) -> dict:
+    return {service: run("docker", "image", "inspect", f"a-share-research-{service}:{code}",
+                         "--format", "{{.Id}}") for service in SERVICES}
 
 
 def wait_ready() -> None:
@@ -634,7 +488,7 @@ def wait_tools_ready(*, paused=False) -> dict:
 
 
 def _tools_config():
-    configured = _compose_config()['services']['tools']
+    configured = json.loads(run('docker', 'compose', '--profile', 'tools', 'config', '--format', 'json'))['services']['tools']
     environment = configured.get('environment') or {}
     allowed = {'DATA_DIR', 'METHOD_CARDS_DIR', 'TUSHARE_TOKEN', 'ASHARE_TOOLS_ACCOUNT_SHADOW_ENABLED',
                'ASHARE_PUBLIC_MCP_URL'}
@@ -642,424 +496,150 @@ def _tools_config():
         raise RuntimeError('tools 环境含非许可配置；仅允许行情凭据、数据目录、方法卡目录、功能开关和公网 MCP 地址')
     if environment.get('METHOD_CARDS_DIR') != '/method-cards':
         raise RuntimeError('tools 的 METHOD_CARDS_DIR 须指向 /method-cards')
-    return configured
 
 
-def _verify_release(images, before, services, *, allow_config, save, tools_paused=True):
-    """Verify a target or compatible recovery before reopening tools admission."""
-    wait_ready()
-    if 'tools' in services:
-        save('tools-ready-paused.json', wait_tools_ready(paused=tools_paused))
-    runtime = json.loads(run('docker', 'exec', 'a-share-research-worker', 'python', '-c',
-                            'import json; from a_share_research.model import preflight; print(json.dumps(preflight()))'))
-    save('worker-preflight.json', runtime)
-    after = {service: describe(service) for service in services}
-    configured = _compose_config() if allow_config else None
-    for service in ('web', 'tools'):
-        if service not in after:
-            continue
-        cards = after[service]['mounts'].get('/method-cards')
-        if cards is not None and (cards[1] or cards != after['worker']['mounts'].get('/method-cards')):
-            raise RuntimeError(f'{service} 的 /method-cards 须只读且与 worker 同源')
-    for service, actual in after.items():
-        if configured is None:
-            expected = before[service] | {'image': images[service]}
-        else:
-            spec = configured['services'][service]
-            # Inspect reports Engine network names, while service declarations use Compose keys.
-            networks = sorted(configured['networks'][key]['name'] for key in spec.get('networks', {}))
-            expected = before.get(service, {}) | {
-                'image': images[service], 'running': True, 'mounts': declared_mounts(service, configured),
-                'networks': networks, 'config_hash': declared_config_hash(service, with_tools='tools' in services),
-            }
-        if any(actual[key] != value for key, value in expected.items()):
-            raise RuntimeError(f'{service} 镜像、运行状态或部署配置不一致')
-    if 'tools' in services:
-        tool = after['tools']
-        if (not tool['running'] or tool['image'] != images['worker']
-                or tool['mounts'].get('/data') != after['web']['mounts']['/data']
-                or not set(tool['mounts']) <= {'/data', '/run/ashare-tools', '/method-cards'}
-                or tool['mounts'].get('/run/ashare-tools') != ['tmpfs', True]
-                or tool['cpus'] != 400_000_000
-                or tool['ports'] != {'8621/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8621'}]}):
-            raise RuntimeError('tools 镜像、资源、挂载或回环端口与约定不符')
-    check = json.loads(run('docker', 'exec', 'a-share-research-worker', 'python', '-m', 'a_share_research.integrity'))
-    save('integrity-after.json', check)
-    if not check['ok']:
-        raise RuntimeError('发布后完整性检查失败')
-    return after
-
-
-@serialized
-def deploy(code: str, evidence: Path, allow_config: bool = False, with_tools: bool = False,
-           initial_recovery: str | None = None, approval_path: Path | None = None,
+def deploy(code: str, evidence: Path, allow_config: bool = False, approval_path: Path | None = None,
            policy_not_applicable: bool = False, plan_policy: bool = False) -> None:
-    # Without a file, the standing credential is read only if this release must activate.
-    approval = private_json(approval_path) if approval_path else None if plan_policy or policy_not_applicable else {}
-    revision = run("git", "rev-parse", f"{code}^{{commit}}")
-    if revision != run("git", "rev-parse", "HEAD") or revision != run("git", "rev-parse", "origin/main"):
-        raise RuntimeError("只能发布已提交并已推送到 origin/main 的 HEAD")
-    if run("git", "status", "--porcelain", "--", "a_share_research", "Dockerfile", "compose.yaml", "pyproject.toml", "uv.lock"):
-        raise RuntimeError("应用或部署文件有未提交修改；无关文档改动不阻断发布")
-    has_tools = bool(run('docker','ps','-a','--filter','name=^/a-share-research-tools$','--format','{{.ID}}'))
-    if initial_recovery is not None and (has_tools or not with_tools or not allow_config):
-        raise RuntimeError('首次迁移恢复入口仅用于尚无 tools 的部署，且须同时指定 --with-tools --allow-config')
-    include_tools = with_tools or has_tools
-    services = (*SERVICES,'tools') if include_tools else SERVICES
-    existing = (*SERVICES,'tools') if has_tools else SERVICES
-    if with_tools and not has_tools and not allow_config:
-        raise RuntimeError('首次纳入 tools 须使用已授权配置变更入口 --allow-config')
-    if include_tools:
-        _tools_config()
-    images = verify_images(code)
-    recovery_images = verify_images(initial_recovery) if initial_recovery is not None else None
-    if include_tools:
-        images['tools'] = images['worker']
-    before = {service: describe(service) for service in existing}
-    if not all(item["running"] for item in before.values()):
-        raise RuntimeError("现有服务未同时运行，请先查明状态")
-    config_matches = True
-    for service in existing:
-        if declared_config_hash(service, with_tools=include_tools) != before[service]['config_hash']:
-            config_matches = False
-            if not allow_config:
-                raise RuntimeError(f"{service} 的 Compose 或环境配置发生变化；须另行准备配置回退")
-    if has_tools:
-        if before['tools']['image'] != before['worker']['image']:
+    with release_lock():
+        revision = run('git', 'rev-parse', f'{code}^{{commit}}')
+        head = run('git', 'rev-parse', 'HEAD')
+        if (head != run('git', 'rev-parse', 'origin/main') or not revision.startswith(code)
+                or run('git', 'merge-base', revision, head) != revision):
+            raise RuntimeError('须在 origin/main 的 HEAD 上按已推送的提交号发布预构建镜像')
+        if run('git', 'status', '--porcelain', '--', 'a_share_research', 'Dockerfile', 'compose.yaml',
+               'pyproject.toml', 'uv.lock'):
+            raise RuntimeError('应用或部署文件有未提交修改')
+        has_tools = bool(run('docker', 'ps', '-a', '--filter', 'name=^/a-share-research-tools$', '--format', '{{.ID}}'))
+        services = (*SERVICES, 'tools') if has_tools else SERVICES
+        images = release_images(code)
+        if has_tools:
+            _tools_config()
+            images['tools'] = images['worker']
+        before = {service: describe(service) for service in services}
+        # A database restore leaves all services stopped. The previous worker must be
+        # the first one to open that database, so the failed image cannot migrate it again.
+        offline = not any(info['running'] for info in before.values())
+        if not all(info['running'] for info in before.values()) and not (offline and revision != head and not plan_policy):
+            raise RuntimeError('现有服务未同时运行；恢复发布前备份后，可在全部停服时重新发布上一个提交的镜像')
+
+        def compose(*args):
+            profile = ('--profile', 'tools') if has_tools else ()
+            return run('docker', 'compose', *profile, *args)
+
+        config_changed = any(compose('config', '--hash', s).split() != [s, before[s]['config_hash']] for s in services)
+        if config_changed and not allow_config:
+            raise RuntimeError('Compose 或环境配置发生变化；须指定 --allow-config')
+        if has_tools and not offline and before['tools']['image'] != before['worker']['image']:
             raise RuntimeError('现有 tools 与 worker 不同镜像，须先核对部分发布状态')
-        if tools_control('status')['paused']:
+        data = Path(run('docker', 'inspect', '--format',
+                        '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}',
+                        'a-share-research-web'))
+        already_paused = False
+        if has_tools:
+            already_paused = (data / '.tools-paused').exists() if offline else tools_control('status')['paused']
+        if already_paused and revision == head:
             raise RuntimeError('tools 已被暂停；本次发布不接管已有暂停状态')
-    data = Path(before["web"]["mounts"]["/data"][0])
-    if before["web"]["mounts"]["/data"] != before["worker"]["mounts"]["/data"]:
-        raise RuntimeError("web/worker 数据目录不一致")
-    database = data / "app.db"
-    if initial_recovery is None and _source_version(database) == 9:
-        raise RuntimeError('v9→当前版本 首次发布须指定 --initial-recovery；不能使用日常回退路径')
-    if has_tools and before['tools']['mounts'].get('/data') != before['web']['mounts']['/data']:
-        raise RuntimeError('tools 数据目录与 web/worker 不一致')
-    marker = data/'.tools-paused'
-    if include_tools and not has_tools and (marker.exists() or marker.is_symlink()):
-        raise RuntimeError('首次启动前存在 tools 暂停标记，须先核对未完成发布')
-    fallback_images = recovery_images or {service: before[service]['image'] for service in existing}
-    frozen = freeze_policy(images, fallback_images, approval=approval, not_applicable=policy_not_applicable,
-                           preview=plan_policy, standing=None if approval_path else code)
-    idle(database)
-    evidence.mkdir(mode=0o700, parents=True, exist_ok=False)
-    if plan_policy:
-        save_evidence(evidence, 'policy-plan.json', dict(status='planned', code=revision, before=before,
-                                                       images=images, policy=frozen, at=db.now()))
-        log.info('只读政策计划已保存；未暂停、切换或激活')
-        return
-    backup = data / f"backup-pre-{code}-{datetime.now(db.SHANGHAI):%Y%m%d-%H%M%S}.db"
+        database = data / 'app.db'
+        idle(database)
+        approval = private_json(approval_path) if approval_path else None if plan_policy or policy_not_applicable else {}
 
-    def save(name, value):
-        save_evidence(evidence, name, value)
-        if name.endswith(('policy-observed.json', 'policy-gate.json')):
-            state['actual_policy'] = value
-        if name.endswith(('policy-committed.json', 'policy-observed.json', 'policy-gate.json')):
-            save_evidence(evidence, 'release-state.json', state)
+        def freeze():
+            return freeze_policy(images, approval=approval, not_applicable=policy_not_applicable,
+                                 preview=plan_policy, standing=None if approval_path else code)
 
-    state = dict(format='ashare-release-v1', code=revision, status='held', phase='prepared',
-                 before=before, images=images, services=list(services), allow_config=allow_config,
-                 policy=frozen, restoring=False, at=db.now())
-    def record(phase, status='held', reason=None):
-        state.update(phase=phase, status=status, reason=reason, at=db.now())
-        try:
-            state['actual'] = {s: describe(s) for s in state['services']}
-        except Exception:
-            state['actual'] = None
-        save('release-state.json', state)
-    record('prepared')
-    if config_matches and set(existing) == set(services) and all(before[s]['image'] == images[s] for s in existing):
-        # No activation append without pause, even when the image need not change.
-        if frozen.get('intent') is None:
-            _verify_release(images, before, services, allow_config=allow_config, save=save,
-                            tools_paused=False)
-            policy_gate(images, frozen, approval=approval, save=save)
-            record('same-image', 'succeeded')
-            log.info('目标镜像和政策均已就绪，无需重复切换')
+        frozen = None if offline else freeze()
+        evidence.mkdir(mode=0o700, parents=True, exist_ok=False)
+
+        def save(name, value):
+            save_evidence(evidence, name, value)
+
+        state = dict(code=revision, before=before, images=images, policy=frozen, at=db.now())
+        if plan_policy:
+            save('policy-plan.json', state | dict(status='planned'))
             return
 
-    if recovery_images is not None:
-        save('initial-preparation.json', initial_release.prepare(database, images, recovery_images,
-                                                                evidence/'initial-preparation'))
-        idle(database)  # Real work may have arrived while the private copy was checked.
-    for service in SERVICES:
-        fallback = recovery_images[service] if recovery_images is not None else before[service]['image']
-        run("docker", "tag", fallback, f"a-share-research-{service}:rollback-{code}")
-    save("manifest.json", {"code": revision, "before": before, "new": images, "backup": str(backup),
-                           "backup_bundle": str(backup.with_suffix('.bundle')),
-                           "initial_recovery": recovery_images})
-    paused = switched = tools_paused = new_tools_started = False
-    migration_verified = False
-    def compose(*args):
-        return run('docker','compose',*(('--profile','tools') if include_tools else ()),*args)
-    try:
-        record('pausing')
-        if include_tools:
-            tools_paused = True
+        def check_ready(paused):
+            wait_ready()
             if has_tools:
-                drained = tools_control('pause')
-                if drained != {'paused':True,'in_flight':0}:
-                    raise RuntimeError('tools 尚未排空，不得停服')
-            else:
-                from a_share_research.tools.control import pause_offline
-                pause_offline(marker)
-        record('drained')
-        paused = True
-        compose("stop", "-t", "30", "web")
-        idle(database)
-        compose("stop", "-t", "30", "worker")
-        if has_tools:
-            compose('stop','-t','60','tools')
-        idle(database)
-        original = fingerprints(database)
-        expected = original
-        save("tables-before.json", original)
-        if backup.exists():
-            raise FileExistsError(backup)
-        counts = create_release_backup(database,backup)
-        record('switching')
-        switched = True  # Restore both tags even if only the first replacement succeeds.
-        if recovery_images is not None:
-            # No application writer runs until the actual stopped database passes conservation.
-            initial_release.migrate(database, images['worker'], evidence/'initial-migration')
-            migration_verified = True
-            expected = fingerprints(database)
-            save('tables-migrated.json', expected)
-        for service in SERVICES:
-            run("docker", "tag", images[service], f"a-share-research-{service}:latest")
-        final = fingerprints(database)
-        save("tables-after.json", final)
-        if final != expected:
-            migration_verified = False
-            raise RuntimeError("停服窗口内业务表发生变化；保留数据供核对")
-        new_tools_started = include_tools and not has_tools
-        compose("up", "-d", "--no-build", "--no-deps", *services)
-        after = _verify_release(images, before, services, allow_config=allow_config, save=save)
-        record('policy-gate')
-        policy_state = policy_gate(images, frozen, approval=approval, save=save)
-        state['actual_policy'] = policy_summary(policy_state)
-        record('resuming')
-        if include_tools:
-            tools_paused = False  # Even a lost resume reply may have admitted requests; rollback must drain again.
-            if tools_control('resume')['paused']:
-                raise RuntimeError('tools 未恢复受理')
-            save('tools-ready.json',wait_tools_ready())
-        record('ready', 'succeeded')
-        # The first migration retains all preparation/recovery evidence and images.
-        pruned = prune_backups(data) if recovery_images is None else []
-        pruned_images = prune_images(images) if recovery_images is None else {}
-        save("manifest.json", {"code": revision, "before": before, "after": after, "new": images,
-                               "backup": str(backup), "backup_bundle": str(backup.with_suffix('.bundle')),
-                               "backup_counts": counts, "pruned_backups": pruned,
-                               "pruned_images": pruned_images, "initial_recovery": recovery_images,
-                               "policy": policy_summary(policy_state), "at": db.now()})
-        log.info("切换完成，备份 %s；继续用真实浏览器验收受影响页面与一个正常案例", backup)
-    except BaseException:
-        state.update(status='held', phase='release-failed', reason='发布失败；须核对兼容性和政策后恢复')
-        # Safety cannot depend on an evidence filesystem that may itself have failed.
-        if include_tools and switched and not tools_paused:
-            # Never replace a process that may now be handling a newly admitted financial call.
-            drained = tools_control('pause')
-            if drained != {'paused':True,'in_flight':0}:
-                raise RuntimeError('tools 回退前排空失败；保持当前镜像和暂停状态')
-            tools_paused = True
-        record('release-failed', reason=state['reason'])
-        log.error('发布失败，核对兼容性和政策后回退；保留数据、备份与证据')
-        if recovery_images is not None and switched and not migration_verified:
-            raise RuntimeError('首次迁移未通过守恒核对；保持停服和暂停标记，不自动恢复任何镜像')
-        # Default rollback requires the old image; an initial release pins a separate compatible baseline.
-        if switched:
-            # Pin the post-failure state, including writes admitted after a lost resume reply.
+                save('tools-ready-paused.json' if paused else 'tools-ready.json', wait_tools_ready(paused=paused))
+
+        same_images = all(before[s]['image'] == images[s] for s in services)
+        if not offline and same_images and not config_changed and not frozen.get('intent'):
+            check_ready(already_paused)
+            current = policy_gate(images, frozen, approval=approval, save=save)
+            save('release-state.json', state | dict(status='succeeded', tools_paused=already_paused, actual_policy=policy_summary(current)))
+            return
+
+        backup = data / f"backup-pre-{code}-{datetime.now(db.SHANGHAI):%Y%m%d-%H%M%S}.db"
+        manifest = dict(code=revision, before=before, new=images, backup=str(backup),
+                        backup_bundle=str(backup.with_suffix('.bundle')))
+        save('manifest.json', manifest)
+        save('release-state.json', state | dict(status='switching'))
+        if has_tools and not offline and tools_control('pause') != {'paused': True, 'in_flight': 0}:
+            raise RuntimeError('tools 尚未排空，不得停服')
+        try:
             compose('stop', '-t', '30', 'web')
             idle(database)
             compose('stop', '-t', '30', 'worker')
-            if include_tools:
+            if has_tools:
                 compose('stop', '-t', '60', 'tools')
             idle(database)
-            fallback = recovery_images or {service: before[service]['image'] for service in SERVICES}
-            compatibility = rollback.assess(fallback,
-                                            database, evidence / 'rollback-probe')
-            save('rollback-compatibility.json', compatibility)
-            if compatibility['ok'] is not True:
-                label = '指定恢复镜像' if recovery_images is not None else '旧镜像'
-                raise RuntimeError(f'{label}读取兼容检查未通过；保持当前镜像、停服和 tools 暂停状态，'
-                                   '请核对 rollback-compatibility.json')
-        if switched and recovery_images is not None:
-            # Keep the new tools service and all post-migration writes. This is
-            # compatible recovery, never a return to the old v9 application.
-            recovery_images = recovery_images | {'tools': recovery_images['worker']}
-            def recovery_save(name, value):
-                save('recovery-'+name, value)
-            try:
-                for service in SERVICES:
-                    run('docker', 'tag', recovery_images[service], f'a-share-research-{service}:latest')
-                compose('up', '-d', '--no-build', '--no-deps', *services)
-                recovered = _verify_release(recovery_images, before, services, allow_config=allow_config,
-                                            save=recovery_save)
-                state.update(images=recovery_images, services=list(services), restoring=True)
-                record('recovery-policy-gate')
-                policy_state = policy_gate(recovery_images, frozen, approval=approval, restoring=True, save=recovery_save)
-                state['actual_policy'] = policy_summary(policy_state)
-                record('recovery-resuming')
-                tools_paused = False
-                if tools_control('resume')['paused']:
-                    raise RuntimeError('兼容恢复后 tools 未恢复受理')
-                recovery_save('tools-ready.json', wait_tools_ready())
-                recovery_save('result.json', dict(status='recovered', images=recovery_images, after=recovered))
-                record('recovery-ready', 'recovered')
-            except BaseException:
-                state.update(status='held', phase='recovery-held', reason='兼容恢复未完成')
-                if not tools_paused:
-                    if tools_control('pause') != {'paused': True, 'in_flight': 0}:
-                        raise RuntimeError('兼容恢复失败且未确认排空；不替换当前服务')
-                    tools_paused = True
-                compose('stop', '-t', '30', 'web')
-                idle(database)
-                compose('stop', '-t', '30', 'worker')
-                compose('stop', '-t', '60', 'tools')
-                recovery_save('result.json', dict(status='held', images=recovery_images))
-                record('recovery-held', reason='兼容恢复未通过政策门禁或就绪')
-                raise
-            raise  # The requested release still failed, even when compatible recovery succeeded.
-        if new_tools_started:
-            compose('rm','-f','-s','tools')
-        if switched:
+            manifest['backup_counts'] = create_release_backup(database, backup)
             for service in SERVICES:
-                run("docker", "tag", before[service]["image"], f"a-share-research-{service}:latest")
-            compose("up", "-d", "--no-build", "--no-deps", *existing)
-        elif paused:
-            compose("start", *existing)
-        # Ordinary rollback and pre-switch restart use the same full gate as release.
-        old_images = {s: before[s]['image'] for s in existing}
-        state.update(images=old_images, services=list(existing), restoring=True, allow_config=False)
-        record('rollback-policy-gate')
-        _verify_release(old_images, before, existing, allow_config=False, save=save)
-        policy_state = policy_gate(old_images, frozen, approval=approval, restoring=True, save=save)
-        state['actual_policy'] = policy_summary(policy_state)
-        record('rollback-resuming')
-        try:
-            if tools_paused:
-                if has_tools:
-                    tools_paused = False
-                    if tools_control('resume')['paused']:
-                        raise RuntimeError('回退后 tools 未恢复受理')
-                    save('rollback-tools-ready.json', wait_tools_ready())
-                else:
-                    from a_share_research.tools.control import Gate
-                    Gate(marker=marker).resume()
-            record('rollback-ready', 'recovered')
+                run('docker', 'tag', before[service]['image'], f'a-share-research-{service}:rollback-{code}')
+            for service in SERVICES:
+                run('docker', 'tag', images[service], f'a-share-research-{service}:latest')
         except BaseException:
-            state.update(status='held', phase='rollback-held', reason='回退 resume/ready 或证据未完成')
-            if has_tools and not tools_paused:
-                if tools_control('pause') != {'paused': True, 'in_flight': 0}:
-                    raise RuntimeError('回退后二次排空失败；不替换当前进程')
-                tools_paused = True
+            # No replacement container has started. Restart only the original containers.
+            if not offline:
+                compose('start', *services)
+                check_ready(has_tools)
+                if has_tools and not already_paused:
+                    tools_control('resume')
             raise
-        raise
-    finally:
-        if state['status'] == 'held':
-            # Reobserve possible committed activation/compensation after lost receipts.
-            observe_held_policy(state)
-            try:
-                record(state['phase'], reason=state.get('reason') or '核验未完成；保持暂停，不报成功')
-            except OSError:
-                log.error('最终 held 证据写入失败；旧证据可能过时，不能据此宣称发布成功')
 
-
-@serialized
-def complete_held(evidence: Path, *, approval_path: Path | None = None):
-    """Explicit operator consent to finish one tool-recorded held target, never switch."""
-    state = private_json(evidence / 'release-state.json', limit=4*1024*1024)
-    if (not isinstance(state, dict) or state.get('format') != 'ashare-release-v1'
-            or state.get('status') != 'held' or state.get('phase') == 'prepared'):
-        raise RuntimeError('只接受本工具记录的 held 发布证据')
-    images, services, before = state['images'], state['services'], state['before']
-    if set(images) != set(services) or not set(services) <= {'web', 'worker', 'tools'} or not set(SERVICES) <= set(services):
-        raise RuntimeError('冻结服务/镜像无效')
-    data = Path(before['web']['mounts']['/data'][0])
-    marker = data / '.tools-paused'
-    if not marker.is_file() or marker.is_symlink():
-        raise RuntimeError('缺少持久暂停；不接管未知状态')
-    # The marker has no release_id and proves no ownership. Explicit held selection
-    # plus unchanged actual target/configuration and live drained status are required.
-    if {s: describe(s) for s in services} != state.get('actual'):
-        raise RuntimeError('实际服务已偏离 held 证据；不得自动接管')
-    if 'tools' not in services or tools_control('status') != {'paused': True, 'in_flight': 0}:
-        raise RuntimeError('完成入口要求 tools paused=true 且 in_flight=0')
-    # A held restore of the pre-release services is checked against their snapshot below, not the new Compose.
-    if state['allow_config'] or not state.get('restoring'):
-        _tools_config()
-        for service in services:
-            if declared_config_hash(service, with_tools=True) != state['actual'][service]['config_hash']:
-                raise RuntimeError('完成入口的 Compose/环境配置偏离 held 目标')
-    def save(name, value):
-        save_evidence(evidence, 'completion-' + name, value)
-        if name in ('policy-observed.json', 'policy-gate.json'):
-            state['actual_policy'] = value
-        if name in ('policy-committed.json', 'policy-observed.json', 'policy-gate.json'):
-            save_evidence(evidence, 'release-state.json', state)
-    approval = private_json(approval_path) if approval_path else None
-    def credential():
-        # Only when the gate must append: the frozen intent itself, signed with the standing credential.
-        frozen = state['policy']
-        return frozen['intent'] | dict(owner_token=owner_token(), rollback=frozen.get('restore'))
-    idle(data / 'app.db')
-    _verify_release(images, before, services, allow_config=state['allow_config'], save=save)
-    resume_attempted = False
-    try:
-        current = policy_gate(images, state['policy'], approval=approval, restoring=state['restoring'], save=save,
-                              credential=None if approval_path else credential)
-        state.update(actual_policy=policy_summary(current), phase='completion-resuming', at=db.now())
-        save_evidence(evidence, 'release-state.json', state)
-        resume_attempted = True
-        if tools_control('resume')['paused']:
-            raise RuntimeError('完成入口未恢复受理')
-        save('tools-ready.json', wait_tools_ready())
-        state.update(status='recovered' if state['restoring'] else 'succeeded', phase='completion-ready', at=db.now())
-        save_evidence(evidence, 'release-state.json', state)
-    except BaseException:
-        state.update(status='held', phase='completion-held', at=db.now(), reason='政策、resume/ready 或证据未完成')
-        # Never let an evidence error prevent redrain; never switch processes here.
-        if resume_attempted and tools_control('pause') != {'paused': True, 'in_flight': 0}:
-            raise RuntimeError('完成入口二次排空失败；不替换进程')
-        raise
-    finally:
-        if state['status'] == 'held':
-            observe_held_policy(state)
-            try:
-                save_evidence(evidence, 'release-state.json', state)
-            except OSError:
-                log.error('完成入口 held 证据写入失败；旧证据可能过时，不能据此宣称成功')
+        if offline:
+            if has_tools:
+                from a_share_research.tools.control import pause_offline
+                pause_offline(data / '.tools-paused')
+            compose('up', '-d', '--no-build', '--no-deps', 'worker')
+            frozen = freeze()
+            state['policy'] = frozen
+            save('release-state.json', state | dict(status='switching'))
+        compose('up', '-d', '--no-build', '--no-deps', *services)
+        check_ready(has_tools)
+        current = policy_gate(images, frozen, approval=approval, save=save)
+        resume = has_tools and not already_paused
+        try:
+            if resume:
+                if tools_control('resume')['paused']:
+                    raise RuntimeError('tools 未恢复受理')
+                save('tools-ready.json', wait_tools_ready())
+            save('release-state.json', state | dict(status='succeeded', tools_paused=already_paused,
+                                                    actual_policy=policy_summary(current)))
+        except BaseException:
+            if resume:
+                tools_control('pause')
+            raise
+        manifest.update(pruned_backups=prune_backups(data), pruned_images=prune_images(images))
+        save('manifest.json', manifest)
+        log.info('切换完成，发布前备份 %s', backup)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('code', nargs='?', help='short commit used as the prebuilt image tag')
-    parser.add_argument('evidence', nargs='?', type=Path, help='new private directory for release evidence')
+    parser.add_argument('code', help='short commit used as the prebuilt image tag')
+    parser.add_argument('evidence', type=Path, help='new private directory for release evidence')
     parser.add_argument('--approval', type=Path, help='override: 0600 one-release approval instead of the standing owner credential')
     parser.add_argument('--policy-not-applicable', action='store_true', help='explicit policy-free research instance only')
     parser.add_argument('--plan-policy', action='store_true', help='read-only exact candidate and diff; no pause/switch/activation')
-    parser.add_argument('--complete-held', type=Path, help='explicitly finish this recorded held target without switching images')
     parser.add_argument("--allow-config", action="store_true",
                         help="allow authorized Compose or environment configuration changes")
-    parser.add_argument('--with-tools',action='store_true',help='include the tools service on its first authorized rollout')
-    parser.add_argument('--initial-recovery', metavar='CODE',
-                        help='first v9→当前版本 release only: verify this compatible recovery build before stopping services')
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    if args.complete_held:
-        if args.code or args.evidence or args.allow_config or args.with_tools or args.initial_recovery or args.policy_not_applicable or args.plan_policy:
-            parser.error('--complete-held 仅接受 --approval，不接受新的切换目标或配置')
-        complete_held(args.complete_held, approval_path=args.approval)
-    else:
-        if not args.code or not args.evidence:
-            parser.error('发布须指定 code 和 evidence')
-        deploy(args.code, args.evidence, allow_config=args.allow_config, with_tools=args.with_tools,
-               initial_recovery=args.initial_recovery, approval_path=args.approval,
-               policy_not_applicable=args.policy_not_applicable, plan_policy=args.plan_policy)
+    deploy(args.code, args.evidence, allow_config=args.allow_config, approval_path=args.approval,
+           policy_not_applicable=args.policy_not_applicable, plan_policy=args.plan_policy)
 
 
 if __name__ == "__main__":

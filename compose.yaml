@@ -41,7 +41,7 @@ services:
       # Reviewed analysis method cards maintained in the shared wiki; read-only, single-stock runs only.
       - ${METHOD_CARDS_SOURCE:-/home/lin/wiki/concepts/company-analysis}:/method-cards:ro
 
-  # Opt in on first rollout; deploy includes an existing tools container on later releases.
+  # Deploy includes tools when its container is present.
   tools:
     profiles: ["tools"]
     image: a-share-research-worker

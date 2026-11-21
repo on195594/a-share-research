@@ -21,7 +21,7 @@ nice -n 15 uv run pytest -x -q tests/test_account_ledger.py
 | 初筛、月批与判断记分 | `test_screening.py`、`test_monthly_batch.py`、`test_backtest.py`、`test_validation.py`、`test_judgment_contract.py`、`test_stability.py` |
 | 账户、政策与监控 | `test_account_ledger.py`、`test_account_reconciliation.py`、`test_account_nav.py`、`test_policy_ledger_monitor.py`、`policy_v0/` |
 | Web、MCP 与客户端 | `test_web_reading.py`、`test_web_account_forms.py`、`test_web_oauth.py`、`test_tools_remote_mcp.py`、`test_tools_cli.py` |
-| 数据库、完整性、发布与宿主 | `test_db.py`、`test_integrity.py`、`test_deploy.py`、`test_rollback.py`、`test_ops_hermes.py` |
+| 数据库、完整性、发布与宿主 | `test_db.py`、`test_integrity.py`、`test_deploy.py`、`test_ops_hermes.py` |
 
 需要跨模块离线回归时运行 `nice -n 15 uv run pytest -x -q tests`。已有项目环境可用 `uv run --no-sync --offline pytest ...`。各类变更的真实样本、浏览器与模型验证要求见[验证与交付](../AGENTS.md#验证与交付)。
 

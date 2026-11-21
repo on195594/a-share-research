@@ -27,8 +27,8 @@ def local_policy(tmp_path, monkeypatch):
     shutil.copytree(deploy.ROOT / 'a_share_research', old / 'a_share_research',
                     ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copyfile(deploy.ROOT / 'uv.lock', old / 'uv.lock')
-    with (old / 'a_share_research/gate.py').open('a') as stream:
-        stream.write('\n# Synthetic predecessor installation of shared policy code.\n')
+    with (old / 'a_share_research/policy/v0/RULES.md').open('a') as stream:
+        stream.write('\nPrevious policy rules fixture.\n')
     config = tmp_path / 'empty.env'
     config.touch(mode=0o600)
 
@@ -42,13 +42,12 @@ def local_policy(tmp_path, monkeypatch):
             token = api_keys.create(conn, 'isolated-owner', role='owner')
             conn.execute('INSERT INTO account_source VALUES (1,?,?,?,?)',
                          ('mirror', mirror.digest(mirror._read(conn, data)), db.now(), '{}'))
-        local = SimpleNamespace(current='old-worker', events=[], database=database,
+        local = SimpleNamespace(current='old-worker', database=database,
                                 token=token, lose_reply=False, failed_writes=False, after_activate=None, probe_time=None)
         def command(script, payload, *, image=None):
             selected = image or (state.containers['worker'] if state else local.current)
             root = old if selected == 'old-worker' else deploy.ROOT
             action = 'activate' if script == deploy.POLICY_ACTIVATE else payload['action']
-            local.events.append((action, selected))
             if action == 'activate' and local.failed_writes:
                 raise RuntimeError('injected activation failure')
             script = script.replace("Path('/data/app.db')", f'Path({str(database)!r})')
@@ -80,10 +79,7 @@ def local_policy(tmp_path, monkeypatch):
         local.approval = dict(identity=local.target['identity'], expected_id=local.activation['id'],
                              request_id='approved-release-once', reason='isolated exact release approval', owner_token=token)
         local.approval_path = tmp_path / 'approval.json'
-        def approve(*, restore=False):
-            if restore:
-                local.approval['rollback'] = dict(identity=local.old['identity'], request_id='approved-restore-once',
-                                                  reason='isolated exact predecessor restoration')
+        def approve():
             local.approval_path.write_text(json.dumps(local.approval))
             local.approval_path.chmod(0o600)
             return local.approval_path
@@ -99,7 +95,7 @@ def local_policy(tmp_path, monkeypatch):
 
 
 def freeze(local):
-    return deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'},
+    return deploy.freeze_policy({'worker': 'new-worker'},
                                 approval=local.approval, not_applicable=False)
 
 
@@ -108,14 +104,14 @@ def test_exact_approval_and_matched_gate_are_idempotent(local_policy):
     frozen = freeze(local)
     assert frozen['parameters'] == local.old['parameters'] == local.target['parameters']
     assert frozen['diff']['parameters_changed'] is False
-    assert frozen['diff']['code'] == ['a_share_research/gate.py']
+    assert frozen['diff']['rules'] == [local.old['rules_hash'], local.target['rules_hash']]
     local.current = 'new-worker'
     result = deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=local.approval)
     assert result['installed'] is True and local.count() == 2
     assert deploy.policy_gate({'worker': 'new-worker'}, frozen) == result
     assert local.count() == 2
     # A release of a fully matched actual installation needs no owner token or append.
-    frozen = deploy.freeze_policy({'worker': 'new-worker'}, {}, approval=None, not_applicable=False)
+    frozen = deploy.freeze_policy({'worker': 'new-worker'}, approval=None, not_applicable=False)
     deploy.policy_gate({'worker': 'new-worker'}, frozen)
     assert local.count() == 2
 
@@ -134,7 +130,7 @@ def test_unapproved_or_bad_owner_refuses_before_switch(local_policy, case):
         with pytest.raises(RuntimeError): deploy.private_json(path)
         return
     with pytest.raises(RuntimeError):
-        deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'},
+        deploy.freeze_policy({'worker': 'new-worker'},
                              approval=approval, not_applicable=False)
     assert local.count() == 1
 
@@ -170,28 +166,6 @@ def test_lost_activation_reply_retries_same_request_then_reads_latest(local_poli
     local.lose_reply = True
     current = deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=local.approval)
     assert current['activation']['id'] == 2 and local.count() == 2
-    assert local.events[-4:] == [('activate', 'new-worker'), ('activate', 'new-worker'),
-                                 ('probe', 'new-worker'), ('probe', 'new-worker')]
-
-
-@pytest.mark.parametrize('restore', [False, True])
-def test_append_only_rollback_requires_this_release_approval(local_policy, restore):
-    local = local_policy()
-    if restore: local.approve(restore=True)
-    frozen = freeze(local)
-    local.current = 'new-worker'
-    deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=local.approval)
-    local.current = 'old-worker'
-    if not restore:
-        with pytest.raises(RuntimeError, match='未明确批准'):
-            deploy.policy_gate({'worker': 'old-worker'}, frozen, approval=local.approval, restoring=True)
-        assert local.count() == 2
-    else:
-        current = deploy.policy_gate({'worker': 'old-worker'}, frozen, approval=local.approval, restoring=True)
-        assert current['activation']['id'] == 3 and current['identity'] == local.old['identity']
-        assert current['activation']['expected_id'] == 2 and local.count() == 3
-        deploy.policy_gate({'worker': 'old-worker'}, frozen, restoring=True)
-        assert local.count() == 3
 
 
 def standing(local, tmp_path, monkeypatch, token=None):
@@ -203,11 +177,11 @@ def standing(local, tmp_path, monkeypatch, token=None):
 
 
 def freeze_standing(approval):
-    return deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'},
+    return deploy.freeze_policy({'worker': 'new-worker'},
                                 approval=approval, not_applicable=False, standing='abc1234')
 
 
-def test_standing_owner_credential_activates_and_can_restore_without_an_approval_file(local_policy, tmp_path, monkeypatch):
+def test_standing_owner_credential_activates_without_an_approval_file(local_policy, tmp_path, monkeypatch):
     local = local_policy()
     standing(local, tmp_path, monkeypatch)
     approval = {}
@@ -217,9 +191,7 @@ def test_standing_owner_credential_activates_and_can_restore_without_an_approval
     assert local.token not in json.dumps(frozen)
     local.current = 'new-worker'
     assert deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=approval)['installed'] is True
-    local.current = 'old-worker'
-    current = deploy.policy_gate({'worker': 'old-worker'}, frozen, approval=approval, restoring=True)
-    assert current['identity'] == local.old['identity'] and local.count() == 3
+    assert local.count() == 2
 
 
 def test_release_without_activation_never_reads_the_standing_credential(local_policy, tmp_path, monkeypatch):
@@ -229,7 +201,7 @@ def test_release_without_activation_never_reads_the_standing_credential(local_po
     deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=local.approval)
     standing(local, tmp_path, monkeypatch).write_text('not json')  # a broken credential must not matter
     approval = {}
-    frozen = deploy.freeze_policy({'worker': 'new-worker'}, {}, approval=approval, not_applicable=False, standing='abc1234')
+    frozen = deploy.freeze_policy({'worker': 'new-worker'}, approval=approval, not_applicable=False, standing='abc1234')
     assert frozen['intent'] is None and approval == {}
     deploy.policy_gate({'worker': 'new-worker'}, frozen, approval=approval)
     assert local.count() == 2
@@ -240,7 +212,7 @@ def test_explicit_approval_is_checked_as_written_even_with_a_standing_credential
     standing(local, tmp_path, monkeypatch)
     local.approval |= dict(expected_id=99, standing='abc1234')
     with pytest.raises(RuntimeError, match='明确批准'):
-        deploy.freeze_policy({'worker': 'new-worker'}, {'worker': 'old-worker'}, approval=local.approval, not_applicable=False)
+        deploy.freeze_policy({'worker': 'new-worker'}, approval=local.approval, not_applicable=False)
     assert local.count() == 1
 
 
@@ -251,15 +223,8 @@ def test_standing_approval_still_needs_the_private_owner_credential(local_policy
         standing(local, tmp_path, monkeypatch).chmod(0o644)
     elif case == 'bad-owner':
         standing(local, tmp_path, monkeypatch, token='invalid-fixture-token')
-    with pytest.raises(RuntimeError, match={'missing': '常设 owner 凭据', 'shared-mode': '0600', 'bad-owner': ''}[case]):
+    with pytest.raises(RuntimeError, match={'missing': '常设 owner 凭据', 'shared-mode': '0600', 'bad-owner': None}[case]):
         freeze_standing({})
-    assert local.count() == 1
-
-
-def test_rollback_before_activation_preserves_original_pointer(local_policy):
-    local = local_policy()
-    frozen = freeze(local)
-    deploy.policy_gate({'worker': 'old-worker'}, frozen, restoring=True)
     assert local.count() == 1
 
 
@@ -268,15 +233,13 @@ def test_required_unknown_state_is_not_not_applicable(local_policy, monkeypatch,
     local_policy()
     monkeypatch.setattr(deploy, 'policy_command', lambda *a, **k: output)
     with pytest.raises((RuntimeError, AttributeError)):
-        deploy.freeze_policy({'worker': 'new-worker'}, {}, approval=None, not_applicable=False)
+        deploy.freeze_policy({'worker': 'new-worker'}, approval=None, not_applicable=False)
 
 
-def test_host_flock_serializes_release_and_completion(tmp_path, monkeypatch):
+def test_host_flock_serializes_releases(tmp_path, monkeypatch):
     (tmp_path / '.git').mkdir()
     monkeypatch.setattr(deploy, 'ROOT', tmp_path)
     with deploy.release_lock():
-        with pytest.raises(RuntimeError, match='正在运行'):
-            deploy.complete_held(tmp_path)
         with pytest.raises(RuntimeError, match='正在运行'):
             deploy.deploy('not-even-inspected', tmp_path / 'release')
     with deploy.release_lock(): pass
@@ -304,15 +267,16 @@ def test_real_expiry_and_account_scope_reject_without_altering_parameters(local_
     frozen = freeze(local)
     local.probe_time = (now+timedelta(hours=2)).isoformat()
     with pytest.raises(RuntimeError, match='参数'):
-        deploy.freeze_policy({'worker':'new-worker'}, {}, approval=local.approval, not_applicable=False)
+        deploy.freeze_policy({'worker':'new-worker'}, approval=local.approval, not_applicable=False)
+    local.current = 'new-worker'
     with pytest.raises(RuntimeError, match='参数'):
-        deploy.policy_gate({'worker':'old-worker'}, frozen, restoring=True)
+        deploy.policy_gate({'worker':'new-worker'}, frozen, approval=local.approval)
     local.probe_time = None
     with closing(sqlite3.connect(local.database)) as conn:
         conn.execute("UPDATE account_source SET mode='ledger',watermark=?", (json.dumps({'account_scope':'other-account'}),))
         conn.commit()
     with pytest.raises(RuntimeError, match='账户'):
-        deploy.policy_gate({'worker':'old-worker'}, frozen, restoring=True)
+        deploy.policy_gate({'worker':'new-worker'}, frozen, approval=local.approval)
     assert local.count() == 1
 
 
@@ -326,9 +290,8 @@ def test_real_activation_insert_failure_does_not_move_pointer(local_policy):
     assert local.count() == 1
 
 
-def test_historical_success_receipt_is_not_latest_and_other_switch_cannot_be_compensated(local_policy):
+def test_historical_success_receipt_is_not_latest(local_policy):
     local = local_policy()
-    local.approve(restore=True)
     frozen = freeze(local)
     local.current = 'new-worker'
     def intervening_choice():
@@ -342,40 +305,13 @@ def test_historical_success_receipt_is_not_latest_and_other_switch_cannot_be_com
     receipt = local.command(deploy.POLICY_ACTIVATE, dict(identity=local.target['identity'], parameters=local.target['parameters'],
         owner_token=local.token, expected_id=1, request_id=local.approval['request_id'], reason=local.approval['reason']))
     assert receipt['id'] == 2
-    local.current = 'old-worker'
-    with pytest.raises(RuntimeError, match='不是本次'):
-        deploy.policy_gate({'worker':'old-worker'}, frozen, approval=local.approval, restoring=True)
-    assert local.count() == 3
-
-
-def test_killed_process_leaves_durable_pause_and_held_checkpoint(tmp_path):
-    from a_share_research.tools.control import Gate, ControlError
-    marker = tmp_path/'data'/'.tools-paused'
-    evidence = tmp_path/'held'
-    evidence.mkdir()
-    script = """
-import os
-from pathlib import Path
-from a_share_research.deploy import save_evidence
-from a_share_research.tools.control import Gate
-save_evidence(Path(EVIDENCE), 'release-state.json', dict(format='ashare-release-v1', status='held', phase='pausing'))
-Gate(Path(MARKER)).pause(0)
-os._exit(77)
-""".replace('EVIDENCE', repr(str(evidence))).replace('MARKER', repr(str(marker)))
-    process = subprocess.run([sys.executable, '-c', script], capture_output=True, timeout=10)
-    assert process.returncode == 77
-    assert json.loads((evidence/'release-state.json').read_text())['status'] == 'held'
-    rebuilt = Gate(marker)
-    assert rebuilt.status() == {'paused': True, 'in_flight': 0}
-    with pytest.raises(ControlError):
-        with rebuilt.acquire(): pytest.fail('paused work was admitted')
 
 
 def test_target_already_matches_pointer_repairs_installation_without_new_activation(local_policy):
     local = local_policy()
     local.current = 'new-worker'  # Simulate an existing incorrectly installed release.
     assert deploy.policy_probe()['installed'] is False
-    frozen = deploy.freeze_policy({'worker':'old-worker'}, {}, approval=None, not_applicable=False)
+    frozen = deploy.freeze_policy({'worker':'old-worker'}, approval=None, not_applicable=False)
     assert frozen['intent'] is None
     local.current = 'old-worker'
     result = deploy.policy_gate({'worker':'old-worker'}, frozen)

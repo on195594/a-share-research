@@ -20,7 +20,7 @@ ASHARE_PUBLIC_MCP_URL=http://127.0.0.1:8610/mcp DATA_DIR=/absolute/private/copy 
 
 控制目录须由当前用户持有，权限为 0700，socket 为 0600。进程退出且 socket 文件残留时，清理该文件后再启动。`/health` 查询进程存活状态；`/ready` 核对数据库版本、所需表及暂停状态，返回 `database_ready`、`schema_version`、`paused`、`in_flight`。暂停或数据库未就绪时返回 503；启动与检查均不创建或迁移数据库。
 
-读操作用只读连接。写入和采集共用两个并发名额；名额用尽返回 `busy`。运维经本地 socket 执行 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`。`pause` 停止受理并等待在途操作结束，超时后仍保持暂停。`DATA_DIR/.tools-paused` 使暂停状态跨重启生效。生产发布由[发布工具](../../README.md#发布批准与暂停完成)在政策门禁通过后恢复受理。
+读操作用只读连接。写入和采集共用两个并发名额；名额用尽返回 `busy`。运维经本地 socket 执行 `python -m a_share_research.tools.control status|pause|resume --socket 路径 --timeout 30`。`pause` 停止受理并等待在途操作结束，超时后仍保持暂停。`DATA_DIR/.tools-paused` 使暂停状态跨重启生效。生产发布由[发布工具](../../README.md#发布与政策激活)在政策门禁通过后恢复受理。
 
 ## 研究、订阅与扫描
 

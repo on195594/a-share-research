@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from a_share_research import db, rollback
+from a_share_research import db
 
 pytestmark = pytest.mark.skipif(os.environ.get('ASHARE_ISOLATED_IMAGE_TEST') != '1',
                                 reason='explicit isolated local Docker image test only')
@@ -44,7 +44,7 @@ print(json.dumps(result))
 '''
 
 
-def test_real_v23_readers_and_full_tools_readiness(tmp_path, monkeypatch):
+def test_tools_readiness_on_isolated_v23_database(tmp_path, monkeypatch):
     data = tmp_path/'data'
     data.mkdir()
     database = data/'app.db'
@@ -55,24 +55,20 @@ def test_real_v23_readers_and_full_tools_readiness(tmp_path, monkeypatch):
             assert conn.execute('PRAGMA user_version').fetchone()[0] == 23
     reports = {}
     for code, expected in (('f480507', False), ('cb9a035', True)):
-        images = {}
-        for service in ('web', 'worker'):
-            result = subprocess.run(['docker', 'image', 'inspect', f'a-share-research-{service}:{code}',
-                                     '--format', '{{.Id}}'], capture_output=True, text=True, timeout=10)
-            assert result.returncode == 0, 'required local image missing (never pull implicitly)'
-            images[service] = result.stdout.strip()
-        probe = rollback.assess(images, database, tmp_path/('probe-'+code))
+        result = subprocess.run(['docker', 'image', 'inspect', f'a-share-research-worker:{code}',
+                                 '--format', '{{.Id}}'], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, 'required local image missing (never pull implicitly)'
+        image = result.stdout.strip()
         result = subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--read-only',
             '--tmpfs', '/tmp:rw,mode=1777', '--mount', f'type=bind,src={data},dst=/data,readonly',
-            '--entrypoint', 'python', images['worker'], '-c', READY], capture_output=True, text=True, timeout=30)
+            '--entrypoint', 'python', image, '-c', READY], capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, 'isolated tools server probe failed'
         ready = json.loads(result.stdout)
-        assert probe['ok'] is expected
         assert ready['ready']['http'] == (200 if expected else 503)
         assert ready['ready']['body']['database_ready'] is expected
         assert ready['paused_ready']['http'] == 503 and ready['paused_ready']['body']['paused'] is True
         assert ready['paused_ready']['body']['database_ready'] is expected
-        reports[code] = dict(images=images, read_compatibility=probe, tools=ready)
+        reports[code] = dict(images={'worker': image}, tools=ready)
     report = dict(scope='isolated_empty_v23_only', production_acceptance=False,
                   policy_activation_and_orchestration='covered separately by local registry and simulated Docker tests',
                   reports=reports)

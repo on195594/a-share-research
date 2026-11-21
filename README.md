@@ -156,13 +156,13 @@ DATA_DIR="$score_dir" uv run --env-file .env python -m a_share_research.zones --
 Web、worker 与 tools 共用 `DATA_DIR`（默认 `/home/lin/a-share-research-data`），并将 `METHOD_CARDS_SOURCE`（默认 `/home/lin/wiki/concepts/company-analysis`）只读挂载到 `/method-cards`。生产基线和可用回退范围见[当前部署](docs/implementation-plan.md#当前部署)。
 
 - Web 监听宿主 `127.0.0.1:8620`，从 `.env.web` 读取配置。worker 从 `.env` 读取配置，挂载 `~/.pi`。留空 `PI_RUNTIME` 时使用 pi 托管安装的 `current-version`。
-- tools 复用 worker 镜像，使用 Compose 的 `tools` profile，宿主映射 `127.0.0.1:8621`。行情凭据来自独立的 `.env.tools`（0600，模板为 `.env.tools.example`）。账户工具开关见[工具手册](a_share_research/tools/README.md)。首次纳入发布使用 `--with-tools --allow-config`，后续发布自动纳入现有 tools 容器。
+- tools 复用 worker 镜像，使用 Compose 的 `tools` profile，宿主映射 `127.0.0.1:8621`。行情凭据来自独立的 `.env.tools`（0600，模板为 `.env.tools.example`）。账户工具开关见[工具手册](a_share_research/tools/README.md)。发布自动纳入现有 tools 容器。
 - 在根目录 `.env` 或发布命令的环境设置 `ASHARE_PUBLIC_MCP_URL=https://stock.keyi.win/mcp`。tools 用它启用端点并校验 Host、Origin 与 OAuth 资源。Web 的 `PUBLIC_BASE_URL` 须对应同一站点。
 - nginx 经 `nginx-network` 将 `location = /mcp` 转发到 `http://a-share-research-tools:8621`，保留路径、公网 Host（含非默认端口）和 Authorization，请求体上限为 28m。网页、OAuth 端点和发现文档转给 Web。由应用设置响应 CSP，确保 OAuth 同意页的 `form-action` 允许已登记的客户端来源。
 
-### 发布、批准与暂停完成
+### 发布与政策激活
 
-按[开发规则](AGENTS.md#验证与交付)完成对应验证，纯文档无须发布。目标提交须同时等于 `HEAD` 与 `origin/main`，从构建到切换使用同一提交。在仓库根目录运行固定入口：
+按[开发规则](AGENTS.md#验证与交付)完成对应验证，纯文档无须发布。在与 `origin/main` 同步的 `HEAD` 上运行发布工具，使用目标提交号作为镜像标签。在仓库根目录运行固定入口：
 
 ```bash
 set -o pipefail
@@ -173,31 +173,23 @@ uv run python -m a_share_research.deploy "$release_code" \
   "$HOME/.local/share/a-share-research-evaluations/deploy-$release_code-$(date +%Y%m%d-%H%M%S)"
 ```
 
-已获授权的配置变更追加 `--allow-config`。发布与 `--complete-held` 共用 `.git/ashare-deploy.lock`。生产政策门禁要求有可核对的有效激活；只有从未启用政策的纯研究实例可用 `--policy-not-applicable`。
+已获授权的配置变更追加 `--allow-config`。生产政策门禁要求有可核对的有效激活；只有从未启用政策的纯研究实例可用 `--policy-not-applicable`。
 
-发布工具核对空闲状态，暂停并排空 tools，停服备份并校验指纹，切换镜像后保持暂停。网页、worker、容器配置、数据库与完整性检查通过后，工具核对实际安装的政策身份、激活编号、参数有效期和账户范围；门禁通过才恢复受理并检查 tools 就绪。过程与差异写入私有证据目录的 `manifest.json`、`release-state.json` 和 `policy-*.json`。
+发布工具核对空闲状态，暂停并排空 tools，停服后备份数据库和原始证据，再切换镜像。确认网页可用且 tools 的 `/ready` 返回数据库就绪后，工具核对政策身份、激活编号、参数有效期和账户范围，恢复受理后再检查 tools 就绪。过程与差异写入私有证据目录的 `manifest.json`、`release-state.json` 和 `policy-*.json`。
 
-政策身份变化时，工具使用常设 owner 凭据 `~/.config/a-share-research/owner.json`（当前用户持有的 0600 JSON，字段 `owner_token`），按原参数和预期激活编号登记并激活目标身份，同时批准失败时恢复被冻结的前驱。凭据缺失或无效时在暂停前拒绝。需要预览时，可用新目录生成只读计划并核对 `policy-plan.json` 中的镜像、前驱、目标身份、参数与差异。
+政策身份变化时，工具使用常设 owner 凭据 `~/.config/a-share-research/owner.json`（当前用户持有的 0600 JSON，字段 `owner_token`），按原参数和预期激活编号登记并激活目标身份。凭据缺失或无效时在暂停前拒绝。需要预览时，可用新目录生成只读计划并核对 `policy-plan.json` 中的镜像、前驱、目标身份、参数与差异。
 
 ```bash
 uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目录>" --plan-policy
 ```
 
-显式批准文件通过 `--approval "<0600 文件>"` 指定，字段为 `identity`、`expected_id`、`request_id`、`reason`、`owner_token`，可选 `rollback`。激活回执丢失时沿用原 `request_id` 与 `expected_id`。
-
-### 回退前置条件与 held 恢复
-
-回退前，工具冻结实际镜像与配置，确认 worker 空闲且 tools 暂停、在途请求为零，停服后备份数据库与原始证据。旧 web、worker 镜像须先禁网只读执行 `rollback.assess`。查看 `rollback-compatibility.json` 和 `rollback-probe/` 核对结果。迁移的兼容验证及发布授权范围见[开发规则](AGENTS.md)。
-
-- 新激活提交前失败时，只有旧镜像读兼容、完整性检查和政策门禁均通过才恢复。新激活提交后，还须本次批准涵盖冻结前驱，且最新记录仍是本次激活，才能按预期编号追加恢复记录。保留当前账本和激活历史，禁止降库或用旧数据库覆盖写入。
-- 门禁未通过时保留暂停。回退成功记为 `recovered`，原发布仍以失败退出。恢复受理后若再遇异常，工具再次暂停、排空并留存证据。
-- 对发布工具留下的 held，先核对证据，再用下面的命令重核同一目标，完成原发布。未知来源的暂停不能接管。
-
-```bash
-uv run python -m a_share_research.deploy --complete-held "<该发布证据目录>"
-```
+显式批准文件通过 `--approval "<0600 文件>"` 指定，字段为 `identity`、`expected_id`、`request_id`、`reason`、`owner_token`。激活回执丢失时沿用原 `request_id` 与 `expected_id`。
 
 完整就绪后，工具保留最近三份发布备份及配套证据包，镜像保留当前与两级回退。发布暂停期间，Hermes 保留待查请求，错过的定时任务不会自动补发。
+
+### 回退
+
+用上一个提交的镜像重新发布，将其提交号作为发布命令的第一个参数。发布带库迁移时，先停服并恢复发布前备份，再重新发布，补回备份之后的新增写入。若回退前 tools 已暂停，发布保留该暂停；确认政策门禁通过后，用 tools 的 `resume` 恢复受理。
 
 ### 服务端与宿主客户端同步顺序
 
