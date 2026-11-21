@@ -1,4 +1,4 @@
-"""One company's financial-report research: gather → compose → check → review → (repair, at most twice) → save."""
+"""Gather one company's evidence, run its research agent and atomically publish the reviewed result."""
 
 import argparse
 import json
@@ -11,313 +11,19 @@ from datetime import date
 
 from a_share_research import eval_report
 from a_share_research import report as report_body
-from a_share_research import db, market, model, sources, evidence, stance as stances, valuation, stock_codes
+from a_share_research import db, evidence, market, model_profile, runner_process, sources, stance as stances, stock_codes, valuation
 from a_share_research.core.providers.tushare_common import TushareHTTPError
-from a_share_research.limits import CALL_TIMEOUT_SECONDS, DRAFT_CALLS, MAX_CALLS, RUN_SECONDS
+from a_share_research.research_mcp import ResearchSession
 from a_share_research.service import research_call_limit
-from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
+from a_share_research.reviewing import ReviewLedger, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
-from a_share_research.checking import SECTIONS, check
-from a_share_research.prompts import RULES, output_schema, parse_json
-from a_share_research.research_tools import Acquisition, active_methods_digest, explore, run_method_catalog
+from a_share_research.drafts import _verified_facts, open_questions, published
+from a_share_research.checking import SECTIONS
+from a_share_research.research_tools import active_methods_digest, run_method_catalog
 
 log = logging.getLogger(__name__)
 
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
-
-
-class ModelStageError(Exception):
-    """Public exception deliberately excludes provider payloads and credentials."""
-
-
-class Runner:
-    def __init__(self, conn, run_id: int, *, max_calls: int = MAX_CALLS):
-        self.conn, self.run_id, self.calls = conn, run_id, 0
-        self.max_calls = min(max_calls, research_call_limit(conn, run_id))
-        self.deadline = time.monotonic() + RUN_SECONDS
-        self.stage = "gather"
-        self.chain = None  # (call id, full prompt) of the last tool-loop round, so the next stores only its additions
-        self.material = None  # set once gathered; its prompt block is stored once however many prompts carry it
-
-    def call(self, step: str, prompt: str, *, messages=None, tools=None):
-        self.stage = step
-        if self.calls >= self.max_calls:
-            raise ResearchError("模型调用次数超过上限")
-        timeout = int(min(CALL_TIMEOUT_SECONDS, self.deadline - time.monotonic()))
-        if timeout <= 0:
-            raise ResearchError("研究超过整体时限，已保存取得的材料")
-        self.calls += 1
-        db.update_run(self.conn, self.run_id, step=step)
-        try:
-            result = model.complete(prompt, timeout=timeout, messages=messages, tools=tools, role=step)
-        except Exception as exc:
-            kind = getattr(exc, "kind", "unknown")
-            db.log_call(self.conn, self.run_id, step, prompt,
-                        error=f"{type(exc).__name__}: 模型阶段未完成（{kind}；未保存供应商异常原文）",
-                        identity=getattr(exc, "identity", None), seconds=getattr(exc, "seconds", None),
-                        base=self.chain if messages is not None else None, block=self.block())
-            log.warning("run %s %s model call failed: %s", self.run_id, step, kind)
-            raise ModelStageError(kind) from exc
-        call_id = db.log_call(self.conn, self.run_id, step, prompt,
-                              response=json.dumps(result.message, ensure_ascii=False) if messages is not None else result.text,
-                              usage=result.usage, seconds=result.seconds, identity=result.identity,
-                              base=self.chain if messages is not None else None, block=self.block())
-        if messages is not None:
-            self.chain = (call_id, prompt)
-        log.info("run %s %s: %.0fs", self.run_id, step, result.seconds)
-        return result
-
-    def block(self) -> str | None:
-        return self.material.prompt_block() if self.material is not None else None
-
-    def ask(self, step: str, prompt: str) -> str:
-        return self.call(step, prompt).text
-
-
-def compose(runner: Runner, material: Material) -> dict | None:
-    prompt = f"你是 A 股财报研究员，为普通投资者写一份研究报告。\n\n{RULES}\n\n{output_schema(material)}\n\n# 资料\n{material.prompt_block()}"
-    return parse_json(runner.ask("compose", prompt))
-
-
-def program_valuation(report: dict | None, material: Material) -> str:
-    """The valuation the report page shows for this draft, so judgments about price use the program's numbers."""
-    summary = valuation.program_summary((report or {}).get("valuation"), material.table, material.market_date)
-    if summary is None:
-        return ""
-    return ("\n# 程序估值测算（按本稿 valuation 计算，通过复核后随结论在报告页展示）\n"
-            + json.dumps(summary, ensure_ascii=False)
-            + "\nhurdle_price 是期望回报门槛价（等价格所等的价格）。这是程序输出，不是报告论断：报告以它作为参考价格时，"
-              "text 不重复数字也已给出价格；text 写出的价格与回报数字仍须引用 valuation 工具生成的 C.n。\n")
-
-
-def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedger) -> list[dict]:
-    prompt = f"""你是独立复核员。检查下面这份研究报告是否忠实于资料。
-
-逐条检查：
-1. 每条论断是否被它所引的出处支持：数字、期间、增减方向、主体是否正确，是否夸大或曲解。
-2. 资料中是否有足以改变结论的重大风险或不利变化被遗漏（只依据资料判断，次要项不算）。
-3. verdict 与 summary 是否和报告内容一致。
-4. 有具体问题时，answer 是否回答了它；纠错是否核对了所指原文。
-5. checkpoints 是对下一期的观察条件：只核查其基期事实（数字、期间、主体、单位）是否被出处支持、阈值是否来自出处或计算、条件是否与本报告的判断相关；不要求原文证明未来方向。其中 forecast 是对下一期财务表数值的区间预测，不要求出处证明预测值，不评判区间宽窄；只核查所选行与 text 所述事项、本报告判断相关，且 text 中的基期事实正确。
-6. valuation 的 rationale 与 not_priced 照常核查事实和数字；检查情景假设间的经济关系与口径是否自洽（如周期高点用高利润配高倍数、保守利润高于基期却无证据），不评判贵贱与区间宽窄；相关问题统一定位 where="valuation"，修复时顶层替换整个 valuation。
-7. stance 是研究立场：核查 text 的事实与数字（包括引用的行业、宏观、政策与外部价格）有出处，以及立场是否与 verdict、主要风险和估值测算一致（如期望回报已高于门槛却等价格、结论暂不值得却现在分批而无理由）；不评判立场本身的激进或保守。现在分批的可选 add_trigger 只核查所选行与理由相关，不要求原文证明未来值；它是加仓参考，不阻止首批。相关问题定位 where="stance"，修复时顶层替换整个 stance。
-8. prior_status 是对 prior 旧议程的逐项状态：核查状态是否被本次出处支持，已发生（不利结果已体现）与仍存在（条件还在、结果未体现）的区分是否合理；旧报告文字不是证据。未到期核对其等待的披露确实尚未发生。无法判断分三种：资料已有证据却未用，用 claim；可补读但还没读，用 question；确实无法取得，text 写明缺口即可，不算问题。定位 where="prior_status[i]"。
-原文论断结合所引页的表头、行名和上下文核查。数字、主体、期间和含义已被所引页支持时，不因摘录未重复表头而判失败；截断引文造成曲解、或所引页不支持论断，仍须指出。
-通读完整资料及报告，一次列全发现的实质问题，避免分轮逐项补报；不挑措辞、格式或条数。
-
-{PROTOCOL}
-
-# 当前复核绑定与必须逐项决定的旧问题/风险
-{json.dumps(ledger.request(report, material.snapshot()["sha256"]), ensure_ascii=False)}
-
-# 待复核的报告
-{json.dumps(report, ensure_ascii=False, indent=1)}
-{program_valuation(report, material)}
-# 资料
-{material.prompt_block()}"""
-    registry, material_sha256 = material.source_registry(), material.snapshot()["sha256"]
-    try:
-        return ledger.accept(parse_json(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
-    except ReviewFormatError as exc:
-        # The ledger is unchanged on rejection; the reviewer gets the exact defect once, as with tool errors.
-        prompt += f"\n\n# 上一次复核输出被拒\n{exc}\n请修正该处后重新输出完整 JSON 对象，其余判断不必因此改变。"
-        return ledger.accept(parse_json(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
-
-
-REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods", "prior_status")
-
-
-def published(report: dict) -> dict:
-    """Fields of a passed report that are saved; optional judgment fields only when the contract produced them."""
-    return {k: report[k] for k in report_body.PUBLISHED_REQUIRED_FIELDS} | {
-        k: report[k] for k in report_body.PUBLISHED_FIELDS if k not in report_body.PUBLISHED_REQUIRED_FIELDS and k in report}
-PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
-{"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
-ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
-add 的 where 是章节名，按补丁顺序追加到末尾；可补建缺失的合法章节。合法章节仅 risks/business/financial/answer/checkpoints/methods/prior_status；不能整段替换。value 是完整条目 {"text": "论断", "cites": [出处]}；checkpoints 条目可再带 forecast（格式同原报告），替换带 forecast 的检查点时须保留或修正它；prior_status 条目必须带 ref 和 status，缺项用 add 补齐。
-出处格式：原文 {"source": "实际文档标识", "page": 页码, "quote": "该页连续原文，逐字复制，20–200 字"}；表格/程序计算 {"ref": "实际行标识", "period": "实际期间键，跨期论断可省略"}。
-verdict、summary、gaps、valuation、stance 可在补丁顶层选择性替换：verdict 为值得继续研究/需要谨慎/暂不值得之一，summary 以 verdict 开头且带至少一个关键数字，gaps 为缺口字符串数组，valuation、stance 格式同原报告（整体替换）；未提到的字段与条目由程序逐字保留。
-可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
-程序将 rebuttals 放入合并稿的 repair_rebuttals，供独立复核员作为待核查数据阅读；它不是解决声明，不接受 status/resolutions/risk_resolutions，也不能关闭问题或豁免旧风险去向复核。
-"""
-
-
-class RepairFormatError(ValueError):
-    pass
-
-
-def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material: Material) -> dict:
-    """Apply an atomic patch against original positions without mutating either input."""
-    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "valuation", "stance", "rebuttals"}:
-        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、valuation、stance、rebuttals；不要输出完整报告")
-    if not isinstance(patch.get("ops", []), list):
-        raise RepairFormatError("补丁 ops 必须是数组；无需改动条目时可省略或用 []")
-    replacements, additions = {}, {}
-    for i, op in enumerate(patch.get("ops", [])):
-        label = f"ops[{i}]："
-        if not isinstance(op, dict) or op.get("op") not in ("replace", "delete", "add"):
-            raise RepairFormatError(label + "op 必须是 replace/delete/add")
-        kind, where = op["op"], op.get("where")
-        keys = {"op", "where"} if kind == "delete" else {"op", "where", "value"}
-        if not keys <= op.keys():
-            raise RepairFormatError(label + f"{kind} 必须包含字段 {sorted(keys)}")
-        match = re.fullmatch(r"([a-z_]+)\[(0|[1-9]\d*)\]", where) if isinstance(where, str) else None
-        section = where if kind == "add" else match[1] if match else None
-        if not isinstance(section, str) or section not in REPAIR_SECTIONS:
-            raise RepairFormatError(label + f"章节或位置不存在：{where}；replace/delete 用章节[序号]，add 用章节名；章节仅 {', '.join(REPAIR_SECTIONS)}")
-        items = report.get(section, [])
-        if kind == "add" and items is None:
-            items = []
-        if not isinstance(items, list):
-            raise RepairFormatError(label + f"原报告 {section} 不是条目数组，不能按序号操作")
-        if kind != "delete":
-            item = op["value"]
-            if not isinstance(item, dict):
-                raise RepairFormatError(label + "value 必须是条目对象")
-        if kind == "add":
-            additions.setdefault(section, []).append(op["value"])
-            continue
-        index = int(match[2])
-        if index >= len(items):
-            raise RepairFormatError(label + f"{where} 越界；原报告 {section} 共 {len(items)} 条，序号从 0 开始；新增用 add")
-        target = (section, index)
-        if target in replacements:
-            raise RepairFormatError(label + f"{where} 重复操作（包括既删又改）；同一原条目只允许一次 replace 或 delete")
-        replacements[target] = None if kind == "delete" else op["value"]
-    if "rebuttals" in patch:
-        pending_ids = {p["id"] for p in problems if p.get("id")}
-        seen = set()
-        if not isinstance(patch["rebuttals"], list):
-            raise RepairFormatError("rebuttals 必须是数组")
-        for i, note in enumerate(patch["rebuttals"]):
-            if (not isinstance(note, dict) or set(note) != {"id", "reason", "evidence"}
-                    or not isinstance(note["id"], str) or note["id"] not in pending_ids or note["id"] in seen
-                    or not isinstance(note["reason"], str) or not note["reason"].strip()
-                    or not isinstance(note["evidence"], list) or not note["evidence"]
-                    or not all(isinstance(cite, dict) for cite in note["evidence"])):
-                raise RepairFormatError(f"rebuttals[{i}] 须含唯一的未解决问题 id、非空 reason、非空出处对象数组 evidence；不能自行指定解决状态")
-            seen.add(note["id"])
-    merged = deepcopy(report)
-    merged.pop("repair_rebuttals", None)
-    required = {*SECTIONS}
-    if material.extra.get("question"):
-        required.add("answer")
-    if material.extra.get("feedback"):
-        required.add("methods")
-        if merged.get("methods") is None:
-            merged["methods"] = []
-    else:
-        required.add("checkpoints")
-    if material.extra.get("prior"):
-        required.add("prior_status")
-    for section in {s for s, _ in replacements} | additions.keys():
-        merged[section] = [deepcopy(replacements.get((section, i), item))
-                           for i, item in enumerate(report.get(section) or [])
-                           if (section, i) not in replacements or replacements[section, i] is not None]
-        merged[section].extend(deepcopy(additions.get(section, [])))
-        if not merged[section] and section not in required:
-            merged.pop(section)
-    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps", "valuation", "stance") if k in patch})
-    if patch.get("rebuttals"):
-        merged["repair_rebuttals"] = deepcopy(patch["rebuttals"])
-    return merged
-
-
-def repair_result(report: dict | None, response: str, problems: list[dict], material: Material) -> dict | None:
-    if report is None:
-        return parse_json(response)
-
-    patch = parse_json(response)
-    if patch is None:
-        raise RepairFormatError("补丁输出不是合法 JSON 对象")
-    return merge_repair_patch(report, patch, problems, material)
-
-
-def repair_prompt(material: Material, report: dict | None, problems: list[dict]) -> str:
-    if report is None:
-        output = "请修正后输出完整的新报告。\n" + output_schema(material)
-        original = "（上一次输出不是合法 JSON）"
-    else:
-        output = PATCH_SCHEMA
-        indexed = {key: {f"{key}[{i}]": item for i, item in enumerate(value)}
-                   if key in REPAIR_SECTIONS and isinstance(value, list) else value
-                   for key, value in report.items() if key != "repair_rebuttals"}
-        original = json.dumps(indexed, ensure_ascii=False, indent=1)
-    return f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请按本轮输出格式修正。
-可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
-补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
-以下是内部质量检查，不是用户对另一份报告提出的纠错；正文只完成原研究任务。
-下方未解决问题 ID 仅用于复核追踪，你不能自行把它们标为解决。可据证反驳错误批评；独立复核员将核对新版去向及理由。
-
-{RULES}
-
-{output}
-
-# 问题
-{json.dumps(problems, ensure_ascii=False, indent=1)}
-
-# 原报告
-{original}
-{program_valuation(report, material)}
-# 资料
-{material.prompt_block()}"""
-
-
-def repair(runner: Runner, material: Material, report: dict | None, problems: list[dict], *, acquisition=None) -> dict | None:
-    def response(original):
-        prompt = repair_prompt(material, original, problems)
-        if acquisition is None:
-            return runner.ask("repair", prompt)  # Frozen replay never acquires evidence.
-        prompt += """
-# 补证与引用
-先区分已有原文未引用、需要补读、仍无法取得的证据。已有页直接给支持主张的 cites；
-缺页或跨期/同业口径不全时可用只读披露工具补证及 calculate，不凭表值伪造原文。
-补证、补丁及格式失败后的完整改写共用剩余额度；工具失败或无新证据时明确缺口。
-重要遗漏与用户要求不能靠一句“未知”自动关闭，仍须独立复核。按本轮输出格式作答。"""
-        return json.dumps(acquisition.write(prompt, "repair"), ensure_ascii=False)
-
-    try:
-        return repair_result(report, response(report), problems, material)
-    except RepairFormatError as exc:
-        log.warning("Invalid repair patch; falling back to full rewrite: %s", exc)
-        return parse_json(response(None))
-
-
-# ---------- run ----------
-
-def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool = False) -> dict:
-    """Retain unflagged claims only after semantic review of this exact report completed."""
-    if not report or not reviewed or any(p["where"] == "review" for p in problems):
-        return {}
-    # A carried issue retains its original target. Reordering/replacing a draft can move that
-    # disputed claim; without a new position mapping no subset is safe to endorse.
-    if any(p.get("id") and p.get("draft_sha256") != digest(report) for p in problems):
-        return {}
-    flagged = set()
-    for problem in problems:
-        targets = set()
-        for location in problem["where"].split("/"):
-            location = location.strip()
-            if location == "missing":
-                continue
-            match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|prior_status)(?:\[(\d+)\])?", location)
-            if not match:
-                return {}
-            section, index = match.groups()
-            items = report.get(section)
-            if not isinstance(items, list) or not items or (index is not None and int(index) >= len(items)):
-                return {}
-            targets.add(section if index is None else f"{section}[{int(index)}]")
-        # A global or unlocatable finding cannot establish which claims were unaffected.
-        if not targets:
-            return {}
-        flagged.update(targets)
-    facts = {
-        section: [item for i, item in enumerate(report.get(section) or [])
-                  if isinstance(item, dict) and section not in flagged and f"{section}[{i}]" not in flagged]
-        for section in (*SECTIONS, "answer")
-    }
-    return facts if any(facts.values()) else {}
 
 
 def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
@@ -441,10 +147,10 @@ def prior_question(prior: dict) -> str:
 
 
 def publish(conn, run_id: int, material: Material, period: str, passed: bool,
-            verdict: str | None, body: dict) -> None:
+            verdict: str | None, body: dict, *, judgment: dict) -> None:
     """Save the report and finish its run together, so a crash never leaves one without the other."""
     body["schema_version"] = report_body.SCHEMA_VERSION
-    body["judgment"] = model.judgment_identity()
+    body["judgment"] = judgment
     report_body.validate(body)
     with db.transaction(conn):
         db.save_report(conn, run_id, material.code, material.name, period, passed, verdict, body)
@@ -453,58 +159,6 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
         else:
             db.update_run(conn, run_id, status="failed", step=None, finished_at=db.now(),
                           error="研究核查未通过，不展示结论")
-
-
-# Where an unanswered part of the user's question can stay open without withholding the verified rest.
-OPEN_QUESTION_WHERE = re.compile(r"answer\[\d+\]|prior_status\[\d+\]|valuation|missing|gaps\[\d+\]")
-
-
-def open_questions(problems: list[dict], reviewed: bool) -> list[dict] | None:
-    """Unresolved review issues that may ship as named gaps, or None when any of them must block.
-
-    Only a completed review of the final draft qualifies, and only `question` issues about the answer,
-    a prior item's status, the scenario valuation, or evidence still missing: the reviewer found the work
-    incomplete, not wrong.
-    A disputed claim, an omitted material risk, or doubt about a fact, verdict or stance still blocks."""
-    if not problems or not reviewed:
-        return None
-    if all(p.get("id") and p.get("type") == "question" and OPEN_QUESTION_WHERE.fullmatch(str(p.get("where")))
-           for p in problems):
-        return problems
-    return None
-
-
-def revise(runner, material, report, ledger, *, acquisition=None):
-    """Check and independently review each draft; keep one ledger across evidence additions."""
-    problems: list[dict] = []
-    # Repairs may add evidence within the original session's remaining limits.
-    # Every check and review binds to the current persisted material, never the first draft's hash.
-    for attempt in range(3):
-        reviewed = False  # A changed draft never inherits an earlier independent endorsement.
-        runner.stage = "check"
-        problems = check(report, material) if report else [{"where": "report", "problem": "输出不是合法 JSON",
-                                                             "type": "generation_format"}]
-        if any(p.get("type") == "source_input" for p in problems):
-            problems += ledger.pending()
-            break  # Source identity conflicts cannot be repaired by rewriting prose.
-        if not problems:
-            try:
-                problems = review(runner, material, report, ledger)
-                reviewed = True
-            except ReviewFormatError as exc:
-                problems = ledger.pending() + [{"where": "review", "problem": str(exc), "type": "review_format"}]
-                break  # A malformed reviewer cannot be fixed by asking the writer again.
-        else:
-            problems += ledger.pending()
-        if not problems or attempt == 2:
-            break
-        # A repair needs a writer call, possibly one declined tool turn, and up to two review calls.
-        # Keep the unresolved draft rather than start a repair we cannot verify.
-        if runner.max_calls - runner.calls < DRAFT_CALLS:
-            break
-        ledger.protect_risks(report)
-        report = repair(runner, material, report, problems, acquisition=acquisition)
-    return report, problems, reviewed
 
 
 def calculate_valuation(value: dict, material: Material, *, replay: bool = False) -> dict:
@@ -557,14 +211,18 @@ def _causes(exc: BaseException | None):
 def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
     run = conn.execute("SELECT code, company_key, request, request_id, started_at, batch_id FROM runs WHERE id = ?", (run_id,)).fetchone()
     code, request = run["code"], json.loads(run["request"] or "{}")
-    db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now())
-    runner = Runner(conn, run_id)
-    identity: dict = {}
+    deadline = time.monotonic() + model_profile.PROFILE.limits.run_seconds
+    identity = {}
+    session = None
+    material = None
 
     try:
-        identity = model.application_identity() | {"replay_of": replay_of, "material_sha256": None}
-        db.update_run(conn, run_id, identity=json.dumps(identity))
-        material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
+        limit = research_call_limit(conn, run_id)
+        identity = model_profile.run_identity(limit) | {"replay_of": replay_of, "material_sha256": None}
+        db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now(),
+                      identity=json.dumps(identity))
+        with runner_process.time_left(deadline):
+            material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
         if stock_codes.normalize_key(material.code) != run["company_key"] or material.doc.code != material.code:
             raise ResearchError("重放材料与目标公司不一致")
         if replay_of is None:
@@ -584,32 +242,36 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                         material.extra["question"] = EVENT_QUESTION
             cutoff = run["started_at"] or conn.execute("SELECT started_at FROM runs WHERE id=?", (run_id,)).fetchone()[0]
             if batch := re.fullmatch(r"batch-(\d+)-.+", run["request_id"] or ""):
-                frozen = conn.execute("SELECT created_at FROM batches WHERE id=?", (int(batch[1]),)).fetchone()
-                if frozen:
-                    cutoff = frozen["created_at"]
+                batch_row = conn.execute("SELECT created_at FROM batches WHERE id=?", (int(batch[1]),)).fetchone()
+                if batch_row:
+                    cutoff = batch_row["created_at"]
             material.extra["method_catalog"] = run_method_catalog(
                 conn, before=cutoff, batch=bool(batch) or run["batch_id"] is not None,
                 cards_dir=os.environ.get("METHOD_CARDS_DIR"))
         identity["methods_sha256"] = active_methods_digest(conn, catalog=material.extra.get("method_catalog", []))
         db.update_run(conn, run_id, identity=json.dumps(identity))
         db.update_run(conn, run_id, code=material.code, name=material.name)
+        source_sha = None
+        if replay_of is not None:
+            source_sha = conn.execute("SELECT json_extract(material, '$.sha256') FROM runs WHERE id=?",
+                                      (replay_of,)).fetchone()[0]
         db.save_material(conn, run_id, material.snapshot())
-        runner.material = material
-        acquisition = None
-        if replay_of is None:
-            acquisition = Acquisition(runner, material)
-            report = explore(runner, material, acquisition=acquisition)
-        else:
-            report = compose(runner, material)
         ledger = ReviewLedger()
-        report, problems, reviewed = revise(runner, material, report, ledger, acquisition=acquisition)
+        recorded = conn.execute("SELECT count(*) FROM calls WHERE run_id=?", (run_id,)).fetchone()[0]
+        session = ResearchSession(conn, run_id, material, ledger, deadline=deadline,
+                                  replay_sha256=source_sha,
+                                  effective_model_call_limit=max(0, limit - recorded),
+                                  profile_sha256=identity["profile_sha256"])
+        runner_process.run_research(session, replay_of=replay_of)
+        state = session.result()
+        report, problems, reviewed = state["draft"], state["problems"], state["reviewed"]
         material_sha256 = db.save_material(conn, run_id, material.snapshot())
         period = max([material.doc.period] + [p for r in material.table if r["id"].startswith("T.") for p in r["values"]])
         body = {
             "code": material.code, "name": material.name, "period": period,
             "document": material.doc.info(),
             "pages": sorted(material.pages), "table": material.table, "market_date": material.market_date,
-            "calls": runner.calls,
+            "calls": conn.execute("SELECT count(*) FROM calls WHERE run_id=?", (run_id,)).fetchone()[0],
             "review_audit": ledger.snapshot(),
             "review_binding": {"draft_sha256": digest(report), "material_sha256": material_sha256,
                                "completed": reviewed,
@@ -618,7 +280,7 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
             "question": material.extra.get("question", ""), "parent_report_id": request.get("parent_report_id"),
             "sources": {k: {"document": v["document"], "pages": sorted(map(int, v["pages"]))}
                         for k, v in material.extra.get("sources", {}).items()},
-            "gaps": material.extra.get("gaps", []) + (report.get("gaps", []) if report and isinstance(report.get("gaps", []), list) else []),
+            "gaps": material.extra.get("gaps", []) + (report.get("gaps", []) if isinstance(report.get("gaps"), list) else []),
             "tool_calls": len(material.extra.get("tools", [])),
             "announcement_searches": material.extra.get("announcement_searches", []),
             "methods_used": material.extra.get("methods_used", []),
@@ -645,7 +307,6 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                                else "substantive_review" if reviewed else "citation_calculation"}
             body |= {"facts": _verified_facts(report, problems, reviewed=reviewed),
                      "facts_reviewed": reviewed, "problems": problems}
-            publish(conn, run_id, material, period, False, None, body)
         else:
             body |= published(report)
             if material.extra.get("feedback"):
@@ -656,39 +317,43 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                 # The per-event outcome and the sources actually read, judged from the final body.
                 body["events"] = [e | {"evidence": scans.event_evidence(body, e)} for e in events]
             if "valuation" in report:
-                body["valuation_calc"] = calculate_valuation(report["valuation"], material, replay=replay_of is not None)
+                with runner_process.time_left(deadline):
+                    body["valuation_calc"] = calculate_valuation(report["valuation"], material, replay=replay_of is not None)
             if "stance" in report:
                 body["stance_calc"] = stance_calc(report["stance"], body.get("valuation_calc"), material.market_date)
-            publish(conn, run_id, material, period, True, report["verdict"], body)
+        publish(conn, run_id, material, period, not problems, None if problems else report["verdict"], body,
+                judgment=model_profile.judgment_identity(identity))
     except Exception as exc:
+        stage = session.stage if session is not None else "gather"
         if isinstance(exc, sources.SourceError | evidence.EvidenceError):
-            log.warning("run %s source input failed at %s: %s", run_id, runner.stage, market.redact_error(exc))
-        elif not isinstance(exc, ScopeError | ResearchError | ModelStageError):
+            log.warning("run %s source input failed at %s: %s", run_id, stage, market.redact_error(exc))
+        elif not isinstance(exc, ScopeError | ResearchError | runner_process.RunnerError):
             log.exception("run %s failed", run_id)
-        category = ("out_of_scope" if isinstance(exc, ScopeError)
-                    else "source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or runner.stage == "gather"
+        category = (exc.category if isinstance(exc, runner_process.RunnerError)
+                    else "out_of_scope" if isinstance(exc, ScopeError)
+                    else "source_input" if isinstance(exc, evidence.EvidenceError | sources.SourceError) or stage == "gather"
                     else "run_limit" if isinstance(exc, ResearchError)
-                    else "model_error" if isinstance(exc, ModelStageError) else "pipeline_error")
+                    else "pipeline_error")
         # Errors whose text this code writes itself are actionable and kept. SourceError can wrap provider
         # text, and model/transport exceptions can contain internal details; those get the generic notice.
-        own = isinstance(exc, ScopeError | ResearchError | evidence.EvidenceError) and str(exc)
+        own = isinstance(exc, ScopeError | ResearchError | evidence.EvidenceError | runner_process.RunnerError) and str(exc)
         upstream = next((e for e in _causes(exc) if isinstance(e, TushareHTTPError)), None)
-        failure = {"stage": runner.stage, "category": category,
+        failure = {"stage": stage, "category": category,
                    "message": str(exc) if own else str(upstream) if upstream
                    else "来源输入未能完成，请核对已保存资料。" if category == "source_input"
-                   else f"研究阶段未能完成（{model.FAILURES.get(str(exc), str(exc))}）；请核对阶段记录，不自动重试。"
-                   if category == "model_error"
                    else "研究阶段未能完成；请核对阶段记录，不自动重试。"}
-        if category == "model_error":
-            failure["kind"] = str(exc)
-        db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=failure["message"])
+        if isinstance(exc, runner_process.RunnerError) and exc.kind:
+            failure["kind"] = exc.kind
+        if session is not None and session.failure:
+            failure = session.failure
         identity["failure"] = failure
-        if "ledger" in locals():
-            identity["review_audit"] = ledger.snapshot()
-        db.update_run(conn, run_id, identity=json.dumps(identity, ensure_ascii=False))
-        if "material" in locals():
-            # Diagnostics belong to run metadata, not the evidence hashed by the reviewer.
-            db.save_material(conn, run_id, material.snapshot())
+        if session is not None:
+            identity["review_audit"] = session.ledger.snapshot()
+        with db.transaction(conn):
+            db.update_run(conn, run_id, status="failed", finished_at=db.now(), error=failure["message"],
+                          identity=json.dumps(identity, ensure_ascii=False))
+            if material is not None:
+                db.save_material(conn, run_id, material.snapshot())
 
 
 def main() -> None:

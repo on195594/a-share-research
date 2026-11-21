@@ -223,13 +223,19 @@ def test_scan_request_reaches_research_and_records_per_event_outcome(tmp_path, m
     snapshot = material.snapshot()
     seen = {}
 
-    def explore(runner, material, acquisition):
+    def reviewed(session, *, replay_of):
+        material = session.material
         seen['question'], seen['events'] = material.extra['question'], material.extra['events']
         seen['prompt'] = material.prompt_block()
-        return report()
+        draft = report(answer=report()['risks'])
+        receipt = session._submit(draft)
+        assert receipt['status'] == 'review', receipt
+        binding = receipt['binding']
+        session._review(dict(version=1, draft_sha256=binding['draft_sha256'], material_sha256=binding['material_sha256'],
+                             issues=[], resolutions=[], risk_resolutions=[]))
+
     monkeypatch.setattr(research, 'gather', lambda code: research.Material.from_snapshot(deepcopy(snapshot)))
-    monkeypatch.setattr(research, 'explore', explore)
-    monkeypatch.setattr(research, 'revise', lambda runner, material, rep, ledger, acquisition: (rep, [], True))
+    monkeypatch.setattr(research.runner_process, 'run_research', reviewed)
     research.execute(connection, run)
     body = json.loads(connection.execute('SELECT body FROM reports WHERE run_id=?', (run,)).fetchone()[0])
     assert seen['question'] == research.EVENT_QUESTION

@@ -10,7 +10,8 @@ from a_share_research import agenda, db, reading, service, validation
 from a_share_research.checking import check
 from a_share_research.material import Material
 from a_share_research.prompts import output_schema
-from a_share_research.research import _research_context, _verified_facts, merge_repair_patch, open_questions, published
+from a_share_research.drafts import _verified_facts, merge_repair_patch, open_questions, published
+from a_share_research.research import _research_context
 from a_share_research.reviewing import target_exists
 from support.continuation import BODY, load
 from support.reports import CASH, MATERIAL, report

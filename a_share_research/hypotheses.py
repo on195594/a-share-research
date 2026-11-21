@@ -59,7 +59,8 @@ def group_stats(values: list[float]) -> dict:
 def score_batch(batch: dict, trade_days: list[str], bench: dict, stocks: dict) -> dict:
     entry = batch['entry']
     groups = dict(zip(('TOP', 'BOTTOM'), batches.ranking_halves(batch)))
-    out = {'batch': batch['id'], 'contract': validation.judgment_contract((batch.get('selection') or {}).get('ranking') or {}), 'entry': entry['date'], 'rows': [], 'horizons': {},
+    identity = validation.scoring_identity((batch.get('selection') or {}).get('ranking') or {})
+    out = {'batch': batch['id'], **identity, 'entry': entry['date'], 'rows': [], 'horizons': {},
            'configured_horizons': [f'{m}m' for m in batch['rule']['horizons_months']],
            'unfilled': {g: sum(not entry['prices'].get(c, {}).get('filled') for c in codes)
                         for g, codes in groups.items()}}
@@ -127,7 +128,7 @@ def load_samples(conn) -> list[dict]:
                 "ORDER BY r.created_at DESC,r.id DESC LIMIT 1", (r['company_key'], r['created'])).fetchone()
             grouped[r['report']] = {k: r[k] for k in ('report', 'run_id', 'code', 'created', 'completed', 'announced')}
             body = report_body.load(r['body'])
-            grouped[r['report']].update(contract=validation.judgment_contract(body), doc_keys=[], prior_report=prior['id'] if prior else None,
+            grouped[r['report']].update(**validation.scoring_identity(body), doc_keys=[], prior_report=prior['id'] if prior else None,
                                        prior_calc=report_body.load(prior['body']).get('valuation_calc') if prior else None,
                                        followup_calc=body.get('valuation_calc'))
         if r['doc_key'] not in grouped[r['report']]['doc_keys']:
@@ -188,7 +189,7 @@ def score(database: str, pro, today: date, contract: int | None = None) -> dict:
         conn.row_factory = sqlite3.Row
         selected = [b for r in conn.execute("SELECT * FROM batches WHERE status IN (?, ?)", batches.ENTERED)
                     if (b := batches.load(r)).get('entry') and batches.ranking_halves(b)]
-        selected = [b | {'contract': validation.judgment_contract((b.get('selection') or {}).get('ranking') or {})}
+        selected = [b | validation.scoring_identity((b.get('selection') or {}).get('ranking') or {})
                     for b in selected]
         selected = validation.filter_contract(selected, contract)
         samples = validation.filter_contract(load_samples(conn), contract)
@@ -214,6 +215,8 @@ def score(database: str, pro, today: date, contract: int | None = None) -> dict:
     h3 = [score_sample(s, trade_days, bench, raw.get(s['code'], {}), adjusted.get(s['code'], {})) for s in samples]
     return {'benchmark': validation.BENCHMARK, 'benchmark_last': max(bench, default=None), 'note': NOTE,
             'contracts': {'h1': validation.contract_counts(h1), 'h3': validation.contract_counts(h3)},
+            'profile_groups': {kind: [identity | {'summary': summarize(group)} for identity, group in validation.profile_groups(rows)]
+                               for kind, rows, summarize in (('h1', h1, summarize_h1), ('h3', h3, summarize_h3))},
             'rows': {'h1': h1, 'h3': h3}, 'summary': {'h1': summarize_h1(h1), 'h3': summarize_h3(h3),
             'h3_total': len(h3), 'h3_excluded': sum(bool(r.get('reason')) for r in h3),
             'h3_pending_direction': sum('direction' not in r and not r.get('reason') for r in h3)}}
@@ -228,6 +231,9 @@ def run(database: str, output: str | None, contract: int | None = None) -> None:
     log.info('V3 假设检验：基准 %s 最新 %s；%s', result['benchmark'], result['benchmark_last'], NOTE)
     for kind in ('h1', 'h3'):
         log.info('%s %s', kind.upper(), validation.contract_line(result['rows'][kind]))
+        for group in result['profile_groups'][kind]:
+            log.info('%s 配置档 %s 契约 %s %s', kind.upper(), group['profile_sha256'], group['contract'],
+                     json.dumps(group['summary'], ensure_ascii=False))
     for b in result['rows']['h1']:
         log.info('H1 批次 #%s 未成交 %s%s', b['batch'], b['unfilled'], ' 排除：' + b['reason'] if b.get('reason') else '')
         for h, stats in b['horizons'].items():

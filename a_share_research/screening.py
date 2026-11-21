@@ -9,12 +9,13 @@ import logging
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
 
 import pandas as pd
 
 from a_share_research import report as report_body
-from a_share_research import market, db, model, service, sources, stock_codes
+from a_share_research import market, db, model_profile, runner_process, service, sources, stock_codes
 from a_share_research.db import SHANGHAI
 from a_share_research.market import ScreenError
 from a_share_research.batches import POLL_COLUMNS, horizons_complete, load, group_return, returns, small_rule
@@ -368,21 +369,6 @@ def ranking_problems(draft: dict | None, candidates: list[dict]) -> list[str]:
     return problems
 
 
-def rank(candidates: list[dict], rule: dict) -> dict:
-    """Separate forced ranking (V2 for batches); kept out of the selection prompt so picks are not shifted."""
-    prompt, attempts = ranking_prompt(candidates, rule), []
-    for _ in range(2):
-        completion = model.complete(prompt, timeout=600)
-        draft = parse_json(completion.text)
-        problems = ranking_problems(draft, candidates)
-        attempts.append({"identity": completion.identity, "usage": completion.usage,
-                         "seconds": round(completion.seconds, 1), "problems": problems})
-        if not problems:
-            return {"judgment": model.judgment_identity(), "order": draft["order"], "basis": draft["basis"], "attempts": attempts}
-        prompt += f"\n\n# 上一次输出的问题，请修正后完整重新输出\n{json.dumps(problems, ensure_ascii=False)}\n\n# 上一次输出\n{completion.text[:8000]}"
-    return {"judgment": model.judgment_identity(), "order": None, "attempts": attempts, "error": "；".join(problems)}
-
-
 def candidate_digests(conn, batch: dict) -> list[dict]:
     return [{"code": r["code"], "name": r["name"], "industry": r["industry"], "rank": i + 1,
              "score": round(r["score"], 3), "roe_dt_3y": round(r["roe"], 2), "cash_ratio_3y": round(r["cash"], 2),
@@ -393,43 +379,130 @@ def candidate_digests(conn, batch: dict) -> list[dict]:
             for i, r in enumerate(batch["q20"])]
 
 
-def select(conn, batch: dict) -> dict:
-    """One model comparison across researched candidates (one retry on invalid output), then the forced ranking."""
-    rule = batch["rule"]
-    candidates = candidate_digests(conn, batch)
-    selection = _select(candidates, rule)
-    try:
-        selection["ranking"] = rank(candidates, rule)
-    except Exception as exc:  # the ranking is scored separately and never blocks the watchlist
-        log.exception("batch %s ranking failed", batch.get("id"))
-        selection["ranking"] = {"judgment": model.judgment_identity(), "order": None, "error": str(exc) or type(exc).__name__}
-    return selection
+@contextmanager
+def _comparison_requests(conn, batch: dict, judgment: dict):
+    """Open one runner on the first paid request and count calls across the monthly batch."""
+    remaining = None
+    if str(batch.get("request_id") or "").startswith("monthly:"):
+        research_calls = conn.execute("SELECT count(*) FROM calls c JOIN runs r ON r.id = c.run_id"
+                                      " WHERE r.batch_id = ?", (batch["id"],)).fetchone()[0]
+        selection = batch.get("selection") or {}
+        saved = [selection, selection.get("ranking") or {}, batch.get("small_selection") or {}]
+        remaining = (model_profile.PROFILE.limits.monthly_batch_model_calls - research_calls
+                     - sum(len(task.get("attempts", [])) for task in saved))
+    with ExitStack() as processes:
+        single = None
+
+        def request(task, attempt, prompt):
+            nonlocal single, remaining
+            if remaining is not None:
+                if remaining <= 0:
+                    raise ScreenError("自动月批模型调用已达整批上限")
+                remaining -= 1
+            if single is None:
+                if judgment != model_profile.judgment_identity():
+                    raise ScreenError("批次开始时冻结的判断配置已变更，无法继续比较")
+                single = processes.enter_context(runner_process.single_batch(batch["id"]))
+            return single(task, attempt, prompt)
+
+        yield request
 
 
-def select_small(conn, batch: dict) -> dict:
-    """An independent S10 comparison; no forced ranking is required for this group."""
-    rule = small_rule(batch["rule"])
-    candidates = candidate_digests(conn, batch | {"q20": batch["s10"], "rule": rule})
-    if not any(selectable(c["report"]) for c in candidates):
-        return {"judgment": model.judgment_identity(), "draft": {"picks": [], "rejected": [], "concentration": "",
-                          "gaps": ["小市值组没有研究通过且可选的候选，全部席位留现金"]}, "attempts": []}
-    return _select(candidates, rule)
-
-
-def _select(candidates: list[dict], rule: dict) -> dict:
-    prompt = selection_prompt(candidates, rule)
-    log.info("comparison: %s candidates, %s prompt characters", len(candidates), len(prompt))
-    attempts = []
-    for _ in range(2):
-        completion = model.complete(prompt, timeout=600)
-        draft = parse_json(completion.text)
-        problems = selection_problems(draft, candidates, rule)
-        attempts.append({"identity": completion.identity, "usage": completion.usage,
-                         "seconds": round(completion.seconds, 1), "problems": problems})
+def _compare(task, candidates, rule, request, judgment, previous, save):
+    ranking = task == "q20_rank"
+    prompt = ranking_prompt(candidates, rule) if ranking else selection_prompt(candidates, rule)
+    log.info("batch comparison %s: %s candidates, %s prompt characters", task, len(candidates), len(prompt))
+    attempts = list(previous.get("attempts", []))
+    limit = model_profile.PROFILE.limits.comparison_attempts_per_task
+    result = {"judgment": judgment, "attempts": attempts, "order" if ranking else "draft": None}
+    if len(attempts) >= limit:
+        return previous
+    correction = previous.get("correction")
+    for attempt in range(len(attempts) + 1, limit + 1):
+        if correction is not None:
+            problems = json.dumps(attempts[-1]["problems"], ensure_ascii=False)
+            prompt += f"\n\n# 上一次输出的问题，请修正后完整重新输出\n{problems}\n\n# 上一次输出\n{correction}"
+        reply = request(task, attempt, prompt)
+        detail = {key: reply[key] for key in ("identity", "usage", "seconds")}
+        attempts.append(detail)
+        if "error_kind" in reply:
+            detail["error_kind"] = reply["error_kind"]
+            return result | {"error_kind": reply["error_kind"], "error": reply["error_kind"]}
+        text = reply["text"]
+        draft = parse_json(text)
+        problems = ranking_problems(draft, candidates) if ranking else selection_problems(draft, candidates, rule)
+        detail["problems"] = problems
         if not problems:
-            return {"judgment": model.judgment_identity(), "draft": draft, "attempts": attempts, "prompt_sha256": completion.identity["prompt_sha256"]}
-        prompt += f"\n\n# 上一次输出的问题，请修正后完整重新输出\n{json.dumps(problems, ensure_ascii=False)}\n\n# 上一次输出\n{completion.text[:20000]}"
-    return {"judgment": model.judgment_identity(), "draft": None, "attempts": attempts, "error": "；".join(problems)}
+            if ranking:
+                return result | {"order": draft["order"], "basis": draft["basis"]}
+            return result | {"draft": draft, "prompt_sha256": detail["identity"]["prompt_sha256"]}
+        if attempt < limit:
+            correction = text[:8000 if ranking else 20000]
+            save(task, result | {"correction": correction})
+    return result | {"error": "；".join(problems)}
+
+
+class _BatchChanged(Exception):
+    """Another writer won the batch while a comparison was running."""
+
+
+def _compare_groups(conn, batch, large_selectable, small):
+    selection = batch.get("selection") or {}
+    judgment = selection.get("judgment") or (batch.get("marks") or {}).get("judgment") or model_profile.judgment_identity()
+
+    def save(task, result):
+        nonlocal selection
+        field = "small_selection" if task == "s10_select" else "selection"
+        if task == "q20_rank":
+            selection = selection | {"ranking": result}
+        elif task == "q20_select":
+            selection = result
+        value = result if field == "small_selection" else selection
+        row = conn.execute(f"UPDATE batches SET {field}=?, updated_at=? WHERE id=? AND status='selecting' RETURNING id",
+                           (json.dumps(value, ensure_ascii=False), db.now(), batch["id"])).fetchone()
+        if row is None:
+            raise _BatchChanged
+
+    candidates = None
+    with _comparison_requests(conn, batch, judgment) as request:
+        if not large_selectable:
+            selection = {"judgment": judgment, "draft": {"picks": [], "rejected": [], "concentration": "",
+                         "gaps": ["大市值组没有研究通过的候选，全部席位留现金"]}, "attempts": []}
+            save("q20_select", selection)
+        elif "draft" not in selection or "correction" in selection or selection.get("error_kind"):
+            candidates = candidate_digests(conn, batch)
+            selection = _compare("q20_select", candidates, batch["rule"], request, judgment, selection, save)
+            if selection.get("error_kind"):
+                save("q20_select", selection)
+                raise ScreenError(selection["error"])
+            selection["ranking"] = None
+            save("q20_select", selection)
+        ranking = selection.get("ranking")
+        if "ranking" in selection and (ranking is None or "correction" in ranking):
+            # Ranking is scored separately and its failure never discards the watchlist.
+            try:
+                ranking = _compare("q20_rank", candidates or candidate_digests(conn, batch),
+                                   batch["rule"], request, judgment, ranking or {}, save)
+            except _BatchChanged:
+                raise
+            except Exception as exc:
+                log.exception("batch %s ranking failed", batch["id"])
+                recorded = (selection.get("ranking") or {}).get("attempts", [])
+                ranking = {"judgment": judgment, "order": None, "error": str(exc), "attempts": recorded}
+            save("q20_rank", ranking)
+        small_selection = batch.get("small_selection") or {}
+        if small and not small_selection.get("draft"):
+            rule = small_rule(batch["rule"])
+            candidates = candidate_digests(conn, batch | {"q20": batch["s10"]})
+            if any(selectable(c["report"]) for c in candidates):
+                small_selection = _compare("s10_select", candidates, rule, request, judgment, small_selection, save)
+            else:
+                small_selection = {"judgment": judgment, "draft": {"picks": [], "rejected": [], "concentration": "",
+                                   "gaps": ["小市值组没有研究通过且可选的候选，全部席位留现金"]}, "attempts": []}
+            save("s10_select", small_selection)
+            if small_selection["draft"] is None:
+                raise ScreenError(small_selection["error"])
+    return selection
 
 
 # ---------- simulation ----------
@@ -685,9 +758,9 @@ def tick(conn) -> bool:
                 request_id = str(batch.get("request_id") or "")
                 if request_id.startswith("monthly:") and request_id != f"monthly:{now:%Y-%m}":
                     raise ScreenError("自动月批已错过发起月份，不使用后来数据补跑")
-                started = conn.execute("UPDATE batches SET status = 'screening', step = 'screen', updated_at = ?"
+                started = conn.execute("UPDATE batches SET status = 'screening', step = 'screen', marks = ?, updated_at = ?"
                                        " WHERE id = ? AND status = 'queued' RETURNING id",
-                                       (db.now(), batch["id"])).fetchone()
+                                       (json.dumps({"judgment": model_profile.judgment_identity()}), db.now(), batch["id"])).fetchone()
                 if started is None:
                     return False
                 result = screen(rule=batch["rule"])
@@ -732,37 +805,28 @@ def tick(conn) -> bool:
                 large_selectable = any(r["verdict"] and r["verdict"] != "暂不值得" for r in q20)
                 if not large_selectable and not (small and any(r["verdict"] and r["verdict"] != "暂不值得" for r in s10)):
                     raise ScreenError("没有研究通过的候选，无法比较；可重新开始本月批次")
-                started = conn.execute("UPDATE batches SET status = 'selecting', q20 = ?, updated_at = ?"
-                                       " WHERE id = ? AND status = 'researching' AND q20 = ? RETURNING id",
-                                       (json.dumps(q20, ensure_ascii=False), db.now(), batch["id"], r["q20"])).fetchone()
+                # Stage the start identity in marks until a comparison actually exists. Readers
+                # treat a nonempty selection during research as an already returned model draft.
+                selection = batch.get("selection") or {"judgment": (batch.get("marks") or {}).get("judgment")
+                                                       or model_profile.judgment_identity()}
+                batch.update(q20=q20, s10=s10, selection=selection)
+                started = conn.execute("UPDATE batches SET status='selecting', q20=?, s10=?, selection=?, updated_at=?"
+                                       " WHERE id=? AND status='researching' AND q20=? RETURNING id",
+                                       (json.dumps(q20, ensure_ascii=False), json.dumps(s10, ensure_ascii=False) if small else r["s10"],
+                                        json.dumps(selection, ensure_ascii=False), db.now(), batch["id"], r["q20"])).fetchone()
                 if started is None:
                     return False
-                if small:
-                    _save(conn, batch["id"], s10=s10)
-                    batch = batch | {"s10": s10}
                 try:
-                    selection = batch.get("selection") if small else None
-                    if not large_selectable:
-                        selection = {"judgment": model.judgment_identity(),
-                                     "draft": {"picks": [], "rejected": [], "concentration": "",
-                                               "gaps": ["大市值组没有研究通过的候选，全部席位留现金"]},
-                                     "attempts": []}
-                    elif not selection or "draft" not in selection:
-                        selection = select(conn, batch | {"q20": q20})
-                    if small:
-                        _save(conn, batch["id"], selection=selection)
-                        small_selection = batch.get("small_selection")
-                        if not small_selection or not small_selection.get("draft"):
-                            small_selection = select_small(conn, batch)
-                            _save(conn, batch["id"], small_selection=small_selection)
-                            if small_selection.get("draft") is None:
-                                raise ScreenError(small_selection.get("error") or "小市值比较没有有效草案")
+                    selection = _compare_groups(conn, batch, large_selectable, small)
+                except _BatchChanged:
+                    return False
                 except Exception as exc:  # the researched candidates stay; retry the comparison later
                     log.exception("batch %s comparison failed", batch["id"])
                     failures = ((batch["selection"] or {}).get("failures") or 0) + 1
                     if str(batch.get("request_id") or "").startswith("monthly:") or failures >= 3:
                         raise ScreenError(f"跨公司比较连续 {failures} 次失败：{exc}") from exc
-                    saved_selection = (selection or {}) if small else {}
+                    saved_selection = json.loads(conn.execute("SELECT selection FROM batches WHERE id = ?",
+                                                              (batch["id"],)).fetchone()[0] or "{}")
                     updated = conn.execute("UPDATE batches SET status = 'researching', error = ?, selection = ?,"
                                            " marks = ?, updated_at = ? WHERE id = ? AND status = 'selecting' RETURNING id",
                                            (f"跨公司比较失败，稍后重试：{exc}", json.dumps(saved_selection | {"failures": failures}),

@@ -1,13 +1,15 @@
 """Batch C storage, sequencing and accounting using captured screening/report/market rows."""
 import copy
+import hashlib
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from a_share_research import market, batches, charts, db, model, reading, screening, service, sources
+from a_share_research import market, batches, charts, db, model_profile, reading, screening, service, sources
 from support.templates import ENV
 from test_advisor_sources import DailyReports, budget_calls
 
@@ -161,7 +163,7 @@ def completed_pools(conn, *, large_passed, small_passed, rule=batches.NEW_RULE, 
     Saved small picks exercise restart/resume without a live model completion.
     """
     captured = json.loads((DATA / 'batch-candidate-matrix.json').read_text())
-    large, small = copy.deepcopy(captured['rows'][1:2]), copy.deepcopy(captured['rows'][:1])
+    large, small = copy.deepcopy(captured['rows'][3:4]), copy.deepcopy(captured['rows'][:1])
     for rows, passed in ((large, large_passed), (small, small_passed)):
         for row in rows:
             row['run_id'] = db.create_run(conn, row['code'], None, name=row['name'])
@@ -186,7 +188,7 @@ def test_zero_passed_large_resumes_small_comparison_and_auto_freezes(tmp_path, m
     assert screening.tick(conn)
     frozen = batches.load(conn.execute('SELECT * FROM batches').fetchone())
     assert frozen['status'] == 'frozen' and frozen['error'] is None
-    assert frozen['selection']['judgment'] == model.judgment_identity()
+    assert frozen['selection']['judgment'] == model_profile.judgment_identity()
     assert frozen['selection']['draft'] == {
         'picks': [], 'rejected': [], 'concentration': '',
         'gaps': ['大市值组没有研究通过的候选，全部席位留现金']}
@@ -220,6 +222,52 @@ def test_small_comparison_still_runs_when_large_selection_is_saved(tmp_path, mon
     assert frozen['status'] == 'frozen'
     assert frozen['small_selection']['draft']['gaps'] == ['小市值组没有研究通过且可选的候选，全部席位留现金']
     assert frozen['sl3']['codes'] == [] and frozen['l5']['codes'] == [large[0]['code']]
+    conn.close()
+
+
+def test_q20_ranking_and_small_corrections_share_one_runner_and_freeze(tmp_path, monkeypatch):
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    large, small = completed_pools(conn, large_passed=True, small_passed=True, small_draft=False)
+    db.update_batch(conn, 1, request_id='monthly:2026-12')
+    # Public excerpts of batch 1 picks, batch 2 ranking. Pool assignment exercises workflow only.
+    replies = {
+        'q20_select': {'picks': [{'code': '300750.SZ', 'return_source': '盈利继续增长、后续现金分红及实际完成的注销式回购',
+                                 'why_over_higher_ranked': '其前三季度扣非增长32.68%，且有可跟踪的注销回购执行窗口。',
+                                 'invalidation': '单位盈利继续承压、成本无法传导'}]},
+        'q20_rank': {'order': ['300750.SZ'], 'basis': '宁德时代居首：12.29倍估值、份额提升和利润增长'},
+        's10_select': {'picks': [{'code': '002648.SZ', 'return_source': '现有盈利延续、市场提高对可持续利润的认可',
+                                 'why_over_higher_ranked': '相比株冶集团、中国铝业，保留其盈利观察价值',
+                                 'invalidation': '收入增长但毛利率、扣非利润明显下降'}]},
+    }
+    starts, calls = [], []
+    malformed = '无效输出' * 5001
+
+    @contextmanager
+    def single(batch_id):
+        starts.append(batch_id)
+
+        def request(task, attempt, prompt):
+            calls.append((task, attempt))
+            if attempt == 2:
+                assert prompt.split('# 上一次输出\n')[1] == malformed[:8000 if task == 'q20_rank' else 20000]
+            return {'text': malformed if attempt == 1 else json.dumps(replies[task]),
+                    'identity': {'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()},
+                    'usage': None, 'seconds': 0}
+
+        yield request
+
+    monkeypatch.setattr(screening.runner_process, 'single_batch', single)
+    assert screening.tick(conn)
+    saved = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert saved['status'] == 'frozen' and starts == [1]
+    assert calls == [(task, attempt) for task in replies for attempt in (1, 2)]
+    assert saved['l5']['codes'] == [large[0]['code']] and saved['sl3']['codes'] == [small[0]['code']]
+    for task in (saved['selection'], saved['selection']['ranking'], saved['small_selection']):
+        assert task['judgment'] == model_profile.judgment_identity()
+        invalid, valid = task['attempts']
+        assert invalid['problems'] and not valid['problems']
+        assert all(key in valid for key in ('identity', 'seconds', 'usage'))
     conn.close()
 
 
@@ -339,15 +387,23 @@ def test_automatic_monthly_comparison_failure_never_requeues_paid_work(tmp_path,
     db.update_batch(conn, 1, request_id='monthly:2026-12')
     calls = []
 
-    def failed_comparison(*args):
-        # Transport-failure injection only; never call a model or invent a successful output.
-        calls.append(1)
-        raise screening.ScreenError('offline comparison transport failure')
+    @contextmanager
+    def single(batch_id):
+        def request(task, attempt, prompt):
+            calls.append(attempt)
+            if attempt == 2:
+                raise screening.ScreenError('offline comparison transport failure')
+            return {'text': 'malformed', 'identity': {'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()},
+                    'usage': None, 'seconds': 0}
 
-    monkeypatch.setattr(screening, 'select', failed_comparison)
+        yield request
+
+    monkeypatch.setattr(screening.runner_process, 'single_batch', single)
     assert screening.tick(conn)
-    assert conn.execute('SELECT status FROM batches').fetchone()[0] == 'failed'
-    assert not screening.tick(conn) and len(calls) == 1
+    failed = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert failed['status'] == 'failed' and 'offline comparison transport failure' in failed['error']
+    assert len(failed['selection']['attempts']) == 1 and failed['selection']['attempts'][0]['problems']
+    assert not screening.tick(conn) and calls == [1, 2]
     conn.close()
 
 

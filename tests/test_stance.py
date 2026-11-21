@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import checking, db, prompts, reading, research, reviewing, service, stance, validation, valuation
+from a_share_research import checking, db, drafts, prompts, reading, research, reviewing, service, stance, validation, valuation
 from a_share_research.material import Material
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
@@ -130,8 +130,8 @@ def test_trigger_met_against_disclosed_text_values():
 
 
 def test_patch_publish_review_target_and_describe():
-    merged = research.merge_repair_patch(report(), {'stance': deepcopy(EVIDENCE)}, [], MATERIAL)
-    assert merged['stance'] == EVIDENCE and research.published(merged)['stance'] == EVIDENCE
+    merged = drafts.merge_repair_patch(report(), {'stance': deepcopy(EVIDENCE)}, [], MATERIAL)
+    assert merged['stance'] == EVIDENCE and drafts.published(merged)['stance'] == EVIDENCE
     assert reviewing.target_exists('stance', merged)
     assert stance.describe(EVIDENCE, BODY['table']).startswith('等证据：2026-09-30 ')
     assert '≥ 0' in stance.describe(EVIDENCE, BODY['table'])

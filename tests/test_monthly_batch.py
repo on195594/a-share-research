@@ -4,11 +4,10 @@ from datetime import datetime
 import json
 from pathlib import Path
 from threading import Barrier
-from types import SimpleNamespace
 
 import pytest
 
-from a_share_research import batches, db, research, service, worker
+from a_share_research import batches, db, research, service
 
 
 def test_concurrent_monthly_requests_are_one_batch(tmp_path):
@@ -165,31 +164,19 @@ def test_monthly_status_uses_candidate_run_links_for_captured_failures(tmp_path,
 
 
 @pytest.mark.parametrize('request_id, expected', [('monthly:2026-12', 21), ('manual-december', 30)])
-def test_batch_run_limit_is_enforced_and_reported(tmp_path, monkeypatch, request_id, expected):
+def test_batch_run_limit_is_frozen_before_material_and_reported(tmp_path, request_id, expected):
     conn = db.connect(tmp_path / 'budget.db')
     batch_id = service.create_batch(conn, request_id)
     run_id = db.create_run(conn, '600519', request_id=f'batch-{batch_id}-600519', status='running')
-    invocations = []
-
-    def complete(*args, **kwargs):
-        invocations.append(1)
-        return SimpleNamespace(text='{}', message={}, usage=None, seconds=0, identity=None)
-
-    monkeypatch.setattr(research.model, 'complete', complete)
-    runner = research.Runner(conn, run_id, max_calls=99)
-    assert runner.max_calls == expected
-    assert research.Runner(conn, run_id, max_calls=5).max_calls == 5
-    for _ in range(expected):
-        runner.ask('review', 'offline fixture')
-    with pytest.raises(research.ResearchError, match='模型调用次数超过上限'):
-        runner.ask('review', 'must not reach provider')
+    assert service.research_call_limit(conn, run_id, max_calls=99) == expected
+    assert service.research_call_limit(conn, run_id, max_calls=5) == 5
+    # A missing replay snapshot fails before model access, after the worker freezes the effective budget.
+    research.execute(conn, run_id, replay_of=run_id)
+    row = conn.execute('SELECT status, identity FROM runs WHERE id=?', (run_id,)).fetchone()
+    identity = json.loads(row['identity'])
+    assert row['status'] == 'failed' and identity['effective_model_call_limit'] == expected
     budget = service.run_budget(conn, run_id)
-    assert budget['model_call_limit'] == budget['model_calls_recorded'] == expected
-    assert len(invocations) == expected
-    worker.recover(conn)
-    state = conn.execute('SELECT status FROM runs WHERE id=?', (run_id,)).fetchone()[0]
-    assert state == ('failed' if expected == 21 else 'queued')
-    standalone = db.create_run(conn, '600519')
-    assert research.Runner(conn, standalone).max_calls == 30
+    assert budget['model_call_limit'] == expected and budget['model_calls_recorded'] == 0
+    assert budget['profile_sha256'] == identity['profile_sha256']
     assert service.run_budget(conn)['model_call_limit'] == 30
     conn.close()

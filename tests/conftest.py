@@ -27,14 +27,6 @@ def narrow_scan_scope(request, monkeypatch):
         monkeypatch.setattr(scans, "scan_scope", lambda conn, **_: scans.subscriptions(conn))
 
 
-@pytest.fixture
-def configured():
-    """Installed Pi environment shared by offline runtime and opt-in live tests."""
-    if not all(os.environ.get(key) for key in ("MODEL_PROVIDER", "MODEL_ID", "PI_AGENT_DIR")):
-        pytest.skip("Run with the existing worker environment for installed Pi checks")
-    return dict(os.environ)
-
-
 @pytest.fixture(autouse=True)
 def isolate_tushare_cache(monkeypatch, tmp_path):
     # Offline market replays may change between calls; never read/write the owner's cache.

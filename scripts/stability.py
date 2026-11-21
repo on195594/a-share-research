@@ -9,8 +9,7 @@ controlled, so they describe production noise, not one configuration.
 Active experiment (--runs): exactly the listed runs form one repeated trial, whatever else the
 database holds. Every listed run gets an outcome (priced, not_priced, no_stance, unpassed, failed,
 unfinished, excluded, missing), so failures count against a configuration instead of vanishing.
-Run the old and the new configuration as separate groups on the same companies, call the script
-once per group (--label old / --label new) and compare the two outputs. Controls are read back
+Runs from different frozen profiles can be listed together; each profile has its own summary. Controls are read back
 from each run's request, material snapshot and report and reported per company, never assumed:
 
 - market: the material's market date and the report's close. Run every repeat on one trading day
@@ -98,7 +97,8 @@ def _explore_model(conn, run_id: int) -> str | None:
 
 def observed(conn, since: str, code: str | None) -> dict:
     rows = conn.execute(
-        "SELECT r.id, r.code, r.created_at, r.body, c.identity FROM reports r "
+        "SELECT r.id, r.code, r.created_at, r.body, c.identity, json_extract(u.identity, '$.profile_sha256') AS profile, "
+        "json_extract(u.identity, '$.code_commit') AS code_commit FROM reports r JOIN runs u ON u.id = r.run_id "
         "LEFT JOIN calls c ON c.id = (SELECT max(id) FROM calls WHERE run_id = r.run_id AND step = 'explore') "
         "WHERE r.passed = 1 AND r.created_at >= ? AND (? IS NULL OR r.code LIKE ? || '%') "
         "ORDER BY substr(r.code, 1, 6), r.id", (since, code, company_key(code) or code)).fetchall()
@@ -108,16 +108,16 @@ def observed(conn, since: str, code: str | None) -> dict:
         if not body.get('stance') or body.get('replay_of') is not None:
             continue
         # 600900 and 600900.SH are one company; grouping on the raw code would split it.
-        groups.setdefault((company_key(row['code']) or row['code'], body.get('period')), []).append(dict(
-            report=row['id'], date=row['created_at'][:10], model=((_object(row['identity']) or {}).get('actual') or {}).get('model'),
+        groups.setdefault((company_key(row['code']) or row['code'], body.get('period'), row['profile'] or '未记录'), []).append(dict(
+            report=row['id'], date=row['created_at'][:10], code_commit=row['code_commit'], model=((_object(row['identity']) or {}).get('actual') or {}).get('model'),
             close=(body.get('valuation_calc') or {}).get('close'), action=body['stance'].get('action'),
             hurdle=hurdle_of(body)))
     result = []
-    for (company, period), items in groups.items():
+    for (company, period, profile), items in groups.items():
         if len(items) < 2:
             continue
         actions = [item['action'] for item in items]
-        result.append(dict(code=company, period=period, reports=items,
+        result.append(dict(code=company, period=period, profile_sha256=profile, reports=items,
                            flips=sum(a != b for a, b in zip(actions, actions[1:])),
                            hurdle=spread([item['hurdle'] for item in items])))
     ranges = [group['hurdle']['range_pct'] for group in result if group['hurdle'].get('n', 0) >= 2]
@@ -202,8 +202,11 @@ def trial(conn, run_id: int) -> dict:
     kind = run['kind'] if 'kind' in columns else 'research'
     record = dict(run=run_id, code=company_key(run['code']), status=run['status'],
                   report=report['id'] if report else None, outcome=None, action=None, hurdle=None,
-                  config=dict(application_sha256=identity.get('application_sha256'), contract=judgment.get('contract'),
-                              author=judgment.get('author'), reviewer=judgment.get('reviewer'),
+                  config=dict(application_sha256=identity.get('application_sha256'), code_commit=identity.get('code_commit'),
+                              profile_sha256=identity.get('profile_sha256') or '未记录',
+                              contract=identity.get('contract', judgment.get('contract')),
+                              author=identity.get('author', judgment.get('author')),
+                              reviewer=identity.get('reviewer', judgment.get('reviewer')),
                               explore_model=_explore_model(conn, run_id)),
                   controls=_controls(request, data, body, calc))
     action = (body.get('stance') or {}).get('action') if isinstance(body.get('stance'), dict) else None
@@ -248,10 +251,28 @@ def experiment(targets: list[tuple[Path, int]], label: str | None = None) -> dic
     finally:
         for conn in connections.values():
             conn.close()
-    companies = {}
+    cohorts = {}
     for record in records:
         if record['code'] is not None:
-            companies.setdefault(record['code'], []).append(record)
+            cohorts.setdefault(record['config']['profile_sha256'], []).append(record)
+    profiles, groups = [], []
+    for profile, items in cohorts.items():
+        summary, companies = _profile_summary(items)
+        profiles.append(dict(profile_sha256=profile, **summary))
+        groups.extend(companies)
+    # Across different profiles only sample counts can be combined.
+    summary = profiles[0].copy() if len(profiles) == 1 else dict(
+        mixed_config=len(profiles) > 1, configs=[c for p in profiles for c in p['configs']])
+    summary.update(label=label, requested=len(records), companies=len({g['code'] for g in groups}),
+                   outcomes=dict(Counter(r['outcome'] for r in records)),
+                   unassigned=[r['run'] for r in records if r['code'] is None])
+    return dict(label=label, runs=records, companies=groups, profiles=profiles, summary=summary)
+
+
+def _profile_summary(records: list[dict]) -> tuple[dict, list[dict]]:
+    companies = {}
+    for record in records:
+        companies.setdefault(record['code'], []).append(record)
     groups = []
     for code, items in companies.items():
         judged = [item for item in items if item['action']]
@@ -261,31 +282,32 @@ def experiment(targets: list[tuple[Path, int]], label: str | None = None) -> dic
         pairs = len(actions) * (len(actions) - 1) // 2
         agreeing = sum(n * (n - 1) // 2 for n in counts.values())
         groups.append(dict(
-            code=code, runs=[item['run'] for item in items],
+            code=code, profile_sha256=items[0]['config']['profile_sha256'], runs=[item['run'] for item in items],
             outcomes={o: n for o in OUTCOMES if (n := sum(item['outcome'] == o for item in items))},
             actions=dict(counts), agreement=round(agreeing / pairs, 3) if pairs else None,
             flips=sum(a != b for a, b in zip(actions, actions[1:])),
             hurdle=spread([item['hurdle'] for item in items if item['outcome'] == 'priced']),
             controls=controls, controlled=all(c['same'] for c in controls.values())))
-    configs = sorted({json.dumps(r['config'], ensure_ascii=False, sort_keys=True) for r in records if 'config' in r
-                      and any(v is not None for v in r['config'].values())})
-    # An incomplete identity on a failed run does not establish a different configuration.
+    configs = sorted({json.dumps(r['config'], ensure_ascii=False, sort_keys=True) for r in records})
     profiles = [json.loads(config) for config in configs]
-    mixed = any(len({json.dumps(p[key], sort_keys=True) for p in profiles if p[key] is not None}) > 1
-                for key in profiles[0]) if profiles else False
+    keys = ['contract', 'author', 'reviewer', 'explore_model']
+    if profiles[0]['profile_sha256'] == '未记录':
+        keys.append('application_sha256')
+    # Missing audit fields on a failed run do not establish a different configuration.
+    mixed = any(len({json.dumps(p[key], sort_keys=True) for p in profiles if p[key] is not None}) > 1 for key in keys)
     comparable = [g for g in groups if g['controlled'] and not mixed]
     ranges = [g['hurdle']['range_pct'] for g in comparable if g['hurdle'].get('n', 0) >= 2]
     agreements = [g['agreement'] for g in comparable if g['agreement'] is not None]
-    return dict(label=label, runs=records, companies=groups, summary=dict(
-        label=label, requested=len(records),
+    return dict(
+        requested=len(records),
         outcomes={o: n for o in OUTCOMES if (n := sum(r['outcome'] == o for r in records))},
-        companies=len(groups), unassigned=[r['run'] for r in records if r['code'] is None],
+        companies=len(groups),
         with_disagreement=sum(1 for a in agreements if a < 1),
         median_agreement=statistics.median(agreements) if agreements else None,
         compared=len(ranges), median_range_pct=statistics.median(ranges) if ranges else None,
         uncontrolled={g['code']: [n for n, c in g['controls'].items() if not c['same']]
                       for g in groups if not g['controlled']},
-        configs=profiles, mixed_config=mixed))
+        configs=profiles, mixed_config=mixed), groups
 
 
 def main(argv=None) -> int:
@@ -294,7 +316,7 @@ def main(argv=None) -> int:
     parser.add_argument('--since', help=f'自然观测起始日，默认 {NATURAL_SINCE}')
     parser.add_argument('--code')
     parser.add_argument('--runs', nargs='+', metavar='[PATH:]RUN_ID',
-                        help='主动实验：只统计列出的任务（一组配置的重复试验），PATH 省略时取 --db')
+                        help='主动实验：按冻结配置档统计列出的独立重复试验，PATH 省略时取 --db')
     parser.add_argument('--label', help='主动实验组名，如 old/new，原样写入输出')
     args = parser.parse_args(argv)
     if not args.runs:

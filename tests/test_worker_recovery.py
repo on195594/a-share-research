@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from a_share_research import db, research, service, worker
+from a_share_research import db, model_profile, research, service, worker
 from support.continuation import RECORDS
 from support.reports import MATERIAL
 
@@ -156,7 +156,9 @@ def test_resumed_run_clears_error_on_success(conn):
     worker.recover(conn)
     assert row(conn, run_id)["error"] == worker.AUTO_RESUME_ERROR
     # Research passed branch clears error
-    research.publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "summary": "值得继续研究"})
+    research.publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究",
+                     {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "summary": "值得继续研究"},
+                     judgment=model_profile.judgment_identity())
     finished = row(conn, run_id)
     assert finished["status"] == "done"
     assert finished["error"] is None
@@ -168,3 +170,17 @@ def test_resumed_run_clears_error_on_success(conn):
     finished_price = row(conn, price_run)
     assert finished_price["status"] == "done"
     assert finished_price["error"] is None
+
+
+def test_offline_preflight_failure_leaves_queue_and_recovery_untouched(conn, tmp_path, monkeypatch):
+    pending = db.create_run(conn, MATERIAL.code, request_id="pending-check", status="queued")
+    running, _ = interrupted(conn)
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    # Use an absent pi installation. The real Node preflight exits before model access.
+    monkeypatch.setenv("PI_RUNTIME", str(tmp_path / "absent-pi"))
+    monkeypatch.setenv("PI_AGENT_DIR", str(tmp_path))
+    with pytest.raises(SystemExit) as exc:
+        worker.main()
+    assert exc.value.code == 1
+    assert row(conn, pending)["status"] == "queued" and row(conn, running)["status"] == "running"
+    assert not (tmp_path / "app.db").exists()

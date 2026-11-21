@@ -1,0 +1,46 @@
+{
+  "roles": {
+    "author": {"provider": "openai-codex", "model": "gpt-6.2-sol", "reasoning": "medium", "max_tokens": 48000},
+    "reviewer": {"provider": "openai-codex", "model": "gpt-6.1-sol", "reasoning": "high", "max_tokens": 48000}
+  },
+  "role_for": {
+    "explore": "author", "compose": "author", "repair": "author", "review": "reviewer",
+    "q20_select": "author", "q20_rank": "author", "s10_select": "author"
+  },
+  "limits": {
+    "model_calls": 30,
+    "monthly_model_calls": 21,
+    "run_seconds": 1800,
+    "model_call_seconds": 600,
+    "acquisition_seconds": 1200,
+    "acquisition_rounds": 24,
+    "fetch_calls": 48,
+    "explore_tool_calls": 120,
+    "repair_extra_tool_calls": 48,
+    "draft_call_reserve": 4,
+    "no_progress_rounds": 2,
+    "review_rounds": 3,
+    "review_format_corrections": 1,
+    "full_rewrites_per_invalid_patch": 1,
+    "comparison_attempts_per_task": 2,
+    "monthly_batch_model_calls": 636
+  },
+  "rationale": {
+    "model_calls": "The ordinary research loop allowed 30 model calls as a runaway guard.",
+    "monthly_model_calls": "The owner authorized 21 calls per company for the automatic monthly batch.",
+    "run_seconds": "The research deadline starts before gather and leaves time for review and repair after acquisition.",
+    "model_call_seconds": "Research and batch comparisons both allowed a single model request up to 600 seconds.",
+    "acquisition_seconds": "Report 108 used 562 seconds for 72 tool calls; the shared acquisition window leaves time for final writing and review.",
+    "acquisition_rounds": "Report 83 (688578) hit the old 12-round guard during normal repair; exploration and repairs share 24 rounds.",
+    "fetch_calls": "The 601600 external-condition study needed more than 24 ordinary evidence fetches.",
+    "explore_tool_calls": "The exploration guard bounds prompt growth from calculations as well as fetches.",
+    "repair_extra_tool_calls": "Both repairs share 48 extra tool calls that exploration cannot consume.",
+    "draft_call_reserve": "Reserve calls for writing, one declined tool turn, review and one format correction.",
+    "no_progress_rounds": "Acquisition stopped after two consecutive rounds added no evidence.",
+    "review_rounds": "The author could submit an initial draft and two repairs for independent review.",
+    "review_format_corrections": "Each independent review allowed one correction of a malformed decision.",
+    "full_rewrites_per_invalid_patch": "An invalid repair patch allowed one full replacement draft.",
+    "comparison_attempts_per_task": "Each batch comparison allowed an initial response and one correction.",
+    "monthly_batch_model_calls": "Thirty companies at 21 calls plus three comparisons at two attempts total 636 calls."
+  }
+}

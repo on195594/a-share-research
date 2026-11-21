@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from a_share_research import checking, prompts, research, reviewing, stance, valuation
+from a_share_research import checking, drafts, prompts, research, reviewing, stance, valuation
 from a_share_research.material import Material
-from a_share_research.research_tools import ResearchTools, _fetches
+from a_share_research.research_tools import ResearchTools
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
 from support.valuation import BODY, ROWS, STORED, assumptions, with_probabilities
@@ -221,9 +221,9 @@ def test_missing_contract_and_feedback_exemption():
 
 def test_patch_publish_and_review_target():
     before = report()
-    merged = research.merge_repair_patch(before, {'valuation': assumptions()}, [], MATERIAL)
+    merged = drafts.merge_repair_patch(before, {'valuation': assumptions()}, [], MATERIAL)
     assert merged['valuation'] == assumptions() and before == report()
-    assert research.published(merged)['valuation'] == assumptions()
+    assert drafts.published(merged)['valuation'] == assumptions()
     assert reviewing.target_exists('valuation', merged)
     assert not reviewing.target_exists('valuation', {'summary': '旧报告'})
 
@@ -393,7 +393,7 @@ def test_stale_price_through_a_derived_calculation_is_caught():
     assert any(hurdle['id'] in p['problem'] for p in _answer_problems(rep, mat))
 
 
-def test_tool_errors_are_actionable_and_not_fetches():
+def test_tool_errors_are_actionable():
     mat = _tool_material()
     with pytest.raises(ValueError, match='not_priced'):
         ResearchTools(mat, None).run('valuation', {'valuation': {'not_priced': {'text': 'x', 'cites': []}}})
@@ -401,13 +401,11 @@ def test_tool_errors_are_actionable_and_not_fetches():
     broken['scenarios']['保守']['probability'] = 80
     with pytest.raises(ValueError, match='probability'):
         ResearchTools(mat, None).run('valuation', {'valuation': broken})
-    assert _fetches([{'tool': 'valuation'}, {'tool': 'calculate'}, {'tool': 'read_disclosure'}]) == 1
 
 
-def test_reviewer_and_repair_see_the_page_price():
+def test_program_summary_matches_the_page_price():
     mat = _tool_material()
     rep = _tool_draft([], '参考买入上限采用程序生成的门槛价。')
-    block = research.program_valuation(rep, mat)
+    block = drafts.program_valuation(rep, mat)
     assert '"hurdle_price": 30.5' in block and '"close": 36.03' in block
-    assert research.program_valuation(rep, mat) in research.repair_prompt(mat, rep, [])
-    assert research.program_valuation({'valuation': {'not_priced': {}}}, mat) == ''
+    assert drafts.program_valuation({'valuation': {'not_priced': {}}}, mat) == ''

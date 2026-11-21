@@ -52,13 +52,13 @@ def test_batch_contract_is_taken_from_scored_ranking():
     from copy import deepcopy
     from pathlib import Path
 
-    from a_share_research import hypotheses, validation
+    from a_share_research import hypotheses, model_profile, validation
 
     capture = json.loads(Path(__file__).with_name('data').joinpath('hypotheses_v3.json').read_text())
     batch = deepcopy(capture['batch'])
-    batch['selection']['ranking']['judgment'] = {'contract': 1}
+    batch['selection']['ranking']['judgment'] = model_profile.judgment_identity() | {'contract': 1}
     result = hypotheses.score_batch(batch, [], {}, {})
-    assert result['contract'] == 1
+    assert result['contract'] == 1 and result['profile_sha256'] == model_profile.PROFILE_SHA256
     assert validation.contract_counts([result]) == [{'contract': 1, 'label': '1', 'count': 1}]
 
 

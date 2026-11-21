@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, reading, service
-from a_share_research.limits import MAX_CALLS
+from a_share_research.model_profile import PROFILE, PROFILE_PATH, judgment_identity, run_identity
 from support.reports import MATERIAL
 from support.continuation import load
 
@@ -36,7 +36,7 @@ def test_read_only_request_recovery_does_not_duplicate_or_restart(tmp_path):
     assert view["id"] == run and view["status"] == "queued"
     assert view["budget"]["model_calls_recorded"] == 0
     assert view["budget"]["cost"] is None
-    assert view["budget"]["model_call_limit"] == MAX_CALLS
+    assert view["budget"]["model_call_limit"] == PROFILE.limits.model_calls
     assert conn.total_changes == before
     with pytest.raises(service.RequestError) as exc:
         service.run_view(conn, request_id="not submitted")
@@ -270,6 +270,31 @@ def test_configuration_budget_does_not_claim_zero_observed_calls(records):
     assert observed["scope"] == "run" and observed["run_id"] == run
     assert observed["model_calls_recorded"] == 1 and observed["cost"] is None
     assert records.total_changes == before
+
+
+def test_frozen_budget_and_models_survive_a_failed_run(tmp_path, monkeypatch):
+    import hashlib
+
+    conn = db.connect(tmp_path / "app.db")
+    run, report_id = saved(conn, passed=False)
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+    assert run_identity(12)["code_commit"] is None
+    monkeypatch.setenv("GIT_COMMIT", "c" * 40)
+    identity = run_identity(service.research_call_limit(conn, run, max_calls=12))
+    db.update_run(conn, run, identity=json.dumps(identity))
+    full = service.report_view(conn, report_id)
+    assert full["identity"]["profile_sha256"] == hashlib.sha256(PROFILE_PATH.read_bytes()).hexdigest()
+    assert full["identity"]["code_commit"] == "c" * 40
+    profile = json.loads(PROFILE_PATH.read_bytes())
+    for stage, role in (("explore", "author"), ("review", "reviewer")):
+        assert full["identity"][role] == profile["roles"][profile["role_for"][stage]]
+    # A report published from an earlier run must keep that run's original profile.
+    archived = identity | {"profile_sha256": "b" * 64}
+    judgment = judgment_identity(archived)
+    assert judgment == {key: archived[key] for key in ("contract", "profile_sha256", "author", "reviewer")}
+    assert service.run_view(conn, run_id=run)["budget"]["model_call_limit"] == 12
+    assert service.run_budget(conn)["model_call_limit"] == 30
+    conn.close()
 
 
 def test_compact_existing_fields_keep_their_captured_values(records):

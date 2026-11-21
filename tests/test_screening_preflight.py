@@ -2,6 +2,7 @@
 import copy
 import json
 import sqlite3
+from contextlib import contextmanager
 
 import pandas as pd
 import pytest
@@ -134,31 +135,40 @@ def test_stale_exception_after_owner_freeze_cannot_overwrite_marks(connections, 
     assert snapshot(worker) == after_owner[0]
 
 
-def test_stale_comparison_failure_cannot_unfreeze_winner(connections, monkeypatch):
+@pytest.mark.parametrize("reply", ["success", "failure"])
+def test_stale_comparison_cannot_overwrite_winning_freeze(connections, monkeypatch, reply):
+    from test_batch_c import completed_pools
+
     worker, web = connections
-    candidates, _ = proposed(worker)
-    worker.execute("UPDATE batches SET status='researching' WHERE id=1")
-    monkeypatch.setattr(s, 'research_state', lambda conn, q20: (True, q20))
+    candidates, _ = completed_pools(worker, large_passed=True, small_passed=False, rule=s.RULE)
     after_owner = []
-    def lose_race(*args):
-        web.execute("UPDATE batches SET status='proposed' WHERE id=1")
-        s.freeze(web, 1, [candidates[1]['code']], 'owner')
-        after_owner.append(snapshot(web))
-        raise RuntimeError('synthetic comparison failure')
-    monkeypatch.setattr(s, 'select', lose_race)
+
+    @contextmanager
+    def single(batch_id):
+        def request(task, attempt, prompt):
+            web.execute("UPDATE batches SET status='proposed' WHERE id=?", (batch_id,))
+            s.freeze(web, batch_id, [candidates[0]['code']], 'owner')
+            after_owner.append(snapshot(web))
+            if reply == "failure":
+                raise RuntimeError('synthetic comparison failure')
+            return {'text': '{"picks":[]}', 'identity': {'prompt_sha256': 'test'}, 'seconds': 0, 'usage': None}
+
+        yield request
+
+    monkeypatch.setattr(s.runner_process, 'single_batch', single)
     assert s.tick(worker) is False
     assert snapshot(worker) == after_owner[0]
 
 
 def test_comparison_failure_still_retries_then_fails(connections, monkeypatch):
+    from test_batch_c import completed_pools
+
     worker, _ = connections
-    proposed(worker)
-    worker.execute("UPDATE batches SET status='researching',selection=NULL WHERE id=1")
-    monkeypatch.setattr(s, 'research_state', lambda conn, q20: (True, q20))
+    completed_pools(worker, large_passed=True, small_passed=False, rule=s.RULE)
     monkeypatch.setattr(s, '_waiting', lambda *args: False)
     def fail(*args):
         raise RuntimeError('synthetic comparison failure')
-    monkeypatch.setattr(s, 'select', fail)
+    monkeypatch.setattr(s.runner_process, 'single_batch', fail)
     for count in (1, 2):
         assert s.tick(worker)
         b = s.load(worker.execute('SELECT * FROM batches').fetchone())
@@ -219,6 +229,7 @@ def test_queued_batch_uses_saved_rule_through_screen(connections, monkeypatch):
     assert s.tick(worker)
     batch = s.load(worker.execute('SELECT * FROM batches').fetchone())
     assert batch['status'] == 'researching' and batch['rule'] == saved == seen[0]
+    assert batch['marks']['judgment'] == s.model_profile.judgment_identity() and batch['selection'] is None
     assert [r['code'] for r in batch['q20']] == list(reversed(codes))
     assert batch['q5'] == list(reversed(codes))[:2]
     assert all(r['windfall'] == saved['windfall_flag'] for r in batch['q20'])

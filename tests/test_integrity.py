@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from a_share_research import db, integrity, price, sources
+from a_share_research.model_profile import judgment_identity
 from a_share_research.research import publish
 from a_share_research.evidence import material_hash
 from support.reports import MATERIAL
@@ -89,16 +90,30 @@ def research_db(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
     return conn, run_id
 
 
+def test_invalid_final_body_never_finishes_a_run(tmp_path):
+    from pydantic import ValidationError
+
+    conn, run_id = research_db(tmp_path)
+    with pytest.raises(ValidationError, match="undeclared_program_field"):
+        publish(conn, run_id, MATERIAL, MATERIAL.doc.period, True, "需要谨慎",
+                {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period,
+                 "undeclared_program_field": True}, judgment=judgment_identity())
+    assert conn.execute("SELECT count(*) FROM reports").fetchone()[0] == 0
+    assert conn.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()[0] == "running"
+
+
 def test_report_and_run_status_commit_together(tmp_path):
     conn, run_id = research_db(tmp_path)
     conn.execute("CREATE TRIGGER fail_finish BEFORE UPDATE OF status ON runs"
                  " BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
     with pytest.raises(sqlite3.IntegrityError, match="injected failure"):
-        publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
+        publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period},
+                judgment=judgment_identity())
     assert conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
     assert conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()[0] == "running"
     conn.execute("DROP TRIGGER fail_finish")
-    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
+    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period},
+            judgment=judgment_identity())
     assert conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()[0] == "done"
 
 
@@ -106,7 +121,8 @@ def test_integrity_check_lists_each_injected_corruption_and_writes_nothing(tmp_p
     conn, run_id = research_db(tmp_path)
     material_sha = MATERIAL.snapshot()["sha256"]
     publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究",
-            {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "material_sha256": material_sha})
+            {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "material_sha256": material_sha},
+            judgment=judgment_identity())
     pdf_dir = tmp_path / "pdf"
     stored(pdf_dir)
     conn.close()
@@ -168,7 +184,8 @@ def test_legacy_diagnostic_metadata_survives_snapshot_reading_and_integrity(tmp_
 
 def test_report_pointing_at_another_material_snapshot_is_listed(tmp_path):
     conn, run_id = research_db(tmp_path)
-    publish(conn, run_id, MATERIAL, "2025-12-31", False, None, {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "material_sha256": "f" * 64})
+    publish(conn, run_id, MATERIAL, "2025-12-31", False, None, {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period, "material_sha256": "f" * 64},
+            judgment=judgment_identity())
     conn.close()
     problems, _ = integrity.check(tmp_path / "app.db", tmp_path / "pdf")
     assert problems == [f"报告 1：引用的材料快照与任务 {run_id} 记录不符"]
@@ -214,9 +231,11 @@ def test_exploration_progress_keeps_the_identity_hash_in_step(tmp_path):
 
 def test_wrongly_typed_json_is_listed_and_the_check_carries_on(tmp_path):
     conn, run_id = research_db(tmp_path)
-    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
+    publish(conn, run_id, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period},
+            judgment=judgment_identity())
     second = db.create_run(conn, MATERIAL.code, status="running")
-    publish(conn, second, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period})
+    publish(conn, second, MATERIAL, "2025-12-31", True, "值得继续研究", {"code": MATERIAL.code, "name": MATERIAL.name, "period": MATERIAL.doc.period},
+            judgment=judgment_identity())
     conn.execute("UPDATE reports SET body = 'null' WHERE id = 1")
     conn.execute("UPDATE runs SET identity = '[]' WHERE id = ?", (run_id,))
     conn.close()

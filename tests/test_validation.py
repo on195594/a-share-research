@@ -182,7 +182,7 @@ def test_output_schema_does_not_contain_relative():
 
 
 def test_repair_patch_rejects_relative_call():
-    from a_share_research.research import merge_repair_patch, RepairFormatError
+    from a_share_research.drafts import merge_repair_patch, RepairFormatError
     with pytest.raises(RepairFormatError, match="只允许 ops、verdict、summary、gaps、valuation、stance、rebuttals"):
         merge_repair_patch(report(), {"relative": {"call": "跑赢", "confidence": 55}}, [], MATERIAL)
 
@@ -198,7 +198,7 @@ def test_report_header_shows_relative_call():
 
 
 def test_passed_report_saves_checkpoints_and_strips_extra_relative():
-    from a_share_research.research import published
+    from a_share_research.drafts import published
     draft = report(relative={"call": "跑输", "confidence": 60})
     assert check(draft, MATERIAL) == []
     saved = published(draft)

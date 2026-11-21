@@ -6,11 +6,8 @@ from pathlib import Path
 import pytest
 
 from a_share_research.checking import check
+from a_share_research.drafts import RepairFormatError, indexed_draft, merge_repair_patch
 from a_share_research.material import Material
-from a_share_research.prompts import RULES, output_schema
-from a_share_research.research import (
-    PATCH_SCHEMA, RepairFormatError, merge_repair_patch, repair, repair_prompt, repair_result,
-)
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from a_share_research.sources import Document
 
@@ -139,68 +136,10 @@ def test_invalid_late_operation_does_not_apply_earlier_valid_operations():
         merge_repair_patch(draft | {"risks": ITEM}, {"ops": [replace()]}, [], MATERIAL)
 
 
-def test_patch_parser_rejects_invalid_objects_and_full_report_parser_is_unchanged():
-    for response in ("not JSON", "[]", "null", json.dumps(BODY)):
-        with pytest.raises(RepairFormatError):
-            repair_result(BODY, response, [], MATERIAL)
-    assert repair_result(None, json.dumps(BODY), [], MATERIAL) == BODY
-    assert repair_result(None, "not JSON", [], MATERIAL) is None
-    assert repair_result({}, '{"ops": []}', [], MATERIAL) == {}
-    assert repair_result(BODY, '{"ops": [], "ops": []}', [], MATERIAL) == BODY
-    # A valid patch still targets the captured original position.
-    assert repair_result(BODY, json.dumps({"ops": [replace()]}), [REVIEW["problems"][0]], MATERIAL)["risks"][2] == ITEM
-
-
-def test_prompt_indexes_original_items_and_keeps_rules_and_full_report_fallback():
-    prompt = repair_prompt(MATERIAL, BODY, REVIEW["problems"])
-    indexed = json.loads(prompt.split("# 原报告\n")[1].split("\n\n# 资料")[0])
-    assert indexed["risks"]["risks[2]"] == BODY["risks"][2]
-    assert indexed["business"]["business[0]"] == BODY["business"][0]
-    assert RULES in prompt and output_schema(MATERIAL) not in prompt and PATCH_SCHEMA in prompt
-    assert "输出且只输出一个 JSON 对象" not in prompt
-    assert "不得用新风险替换另一项重大风险" in prompt
-    full = repair_prompt(MATERIAL, None, [])
-    assert "请修正后输出完整的新报告" in full and PATCH_SCHEMA not in full
-    assert RULES in full and output_schema(MATERIAL) in full
-
-
-class CapturedReplies:
-    """Offline replay of captured report text and protocol mutations; no provider or verdict simulation."""
-
-    def __init__(self, *responses):
-        self.responses = iter(responses)
-        self.calls = []
-
-    def ask(self, step, prompt):
-        self.calls.append((step, prompt))
-        return next(self.responses)
-
-
-@pytest.mark.parametrize("original", [BODY, NORMAL, BODY | {"risks": ITEM}])
-@pytest.mark.parametrize("patch", ["not JSON", json.dumps({"ops": [replace("risks[999]")]}), json.dumps(BODY)])
-def test_invalid_patch_rewrites_in_the_same_repair_call(original, patch, caplog):
-    before = deepcopy(original)
-    runner = CapturedReplies(patch, "```json\n" + json.dumps(NORMAL) + "\n```")
-    result = repair(runner, MATERIAL, original, REVIEW["problems"])
-    assert result == NORMAL and original == before
-    assert runner.calls == [
-        ("repair", repair_prompt(MATERIAL, original, REVIEW["problems"])),
-        ("repair", repair_prompt(MATERIAL, None, REVIEW["problems"])),
-    ]
-    assert "请修正后输出完整的新报告" in runner.calls[1][1]
-    assert output_schema(MATERIAL) in runner.calls[1][1] and PATCH_SCHEMA not in runner.calls[1][1]
-    assert len(caplog.records) == 1 and caplog.records[0].levelname == "WARNING"
-    assert "Invalid repair patch; falling back to full rewrite:" in caplog.text
-
-
-@pytest.mark.parametrize("prefix,suffix", [("```json\n", "\n```"), ("修正如下：\n", "\n以上为补丁。")])
-def test_wrapped_patch_uses_one_call_and_still_rejects_invalid_operations(prefix, suffix):
-    response = prefix + json.dumps({"summary": NORMAL["summary"]}) + suffix
-    runner = CapturedReplies(response)
-    assert repair(runner, MATERIAL, BODY, []) == BODY | {"summary": NORMAL["summary"]}
-    assert len(runner.calls) == 1
-    with pytest.raises(RepairFormatError, match="越界"):
-        repair_result(BODY, prefix + json.dumps({"ops": [replace("risks[999]")]}) + suffix, [], MATERIAL)
+def test_repair_positions_identify_original_items():
+    original = indexed_draft(BODY)
+    assert original["risks"]["risks[2]"] == BODY["risks"][2]
+    assert original["business"]["business[0]"] == BODY["business"][0]
 
 
 @pytest.mark.parametrize("section,item", [("answer", NORMAL["answer"][0]), ("methods", METHODS[0]),
@@ -290,12 +229,10 @@ def rebuttal(ledger):
 
 
 @pytest.mark.parametrize("next_patch", [{}, {"rebuttals": []}, {"ops": [replace()]}])
-def test_rebuttals_do_not_survive_the_next_merge_or_appear_in_original_prompt(next_patch):
+def test_rebuttals_do_not_survive_the_next_merge_or_appear_in_indexed_draft(next_patch):
     ledger = pending_ledger()
     draft = merge_repair_patch(BODY, {"rebuttals": [rebuttal(ledger)]}, ledger.pending(), MATERIAL)
-    prompt = repair_prompt(MATERIAL, draft, ledger.pending())
-    original = json.loads(prompt.split("# 原报告\n")[1].split("\n\n# 资料")[0])
-    assert "repair_rebuttals" not in original
+    assert "repair_rebuttals" not in indexed_draft(draft)
     merged = merge_repair_patch(draft, next_patch, ledger.pending(), MATERIAL)
     assert "repair_rebuttals" not in merged
     assert draft["repair_rebuttals"] == [rebuttal(ledger)]

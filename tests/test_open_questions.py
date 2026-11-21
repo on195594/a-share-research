@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research.research import open_questions
+from a_share_research.drafts import open_questions
 
 CAPTURED = json.loads((Path(__file__).parent / "data/review-open-questions-20261105.json").read_text())
 
@@ -48,10 +48,18 @@ def _execute(tmp_path, monkeypatch, problems):
     run = db.create_run(conn, MATERIAL.code)
     draft = report()
     monkeypatch.setattr(research, "gather", lambda code: research.Material.from_snapshot(deepcopy(MATERIAL.snapshot())))
-    monkeypatch.setattr(research, "explore", lambda runner, material, acquisition: draft)
-    monkeypatch.setattr(research, "revise", lambda runner, material, rep, ledger, acquisition: (rep, deepcopy(problems), True))
+    def reviewed(session, *, replay_of):
+        # Reuse the captured, already-adjudicated issues to exercise the delivery gate.
+        session.draft = draft
+        session.problems = deepcopy(problems)
+        session.reviewed_binding = (research.digest(draft), session.material.snapshot()["sha256"])
+
+    monkeypatch.setattr(research.runner_process, "run_research", reviewed)
     research.execute(conn, run)
     row = conn.execute("SELECT r.status, p.passed, p.body FROM runs r JOIN reports p ON p.run_id = r.id").fetchone()
+    from a_share_research.model_profile import judgment_identity
+    frozen = json.loads(conn.execute("SELECT identity FROM runs WHERE id=?", (run,)).fetchone()[0])
+    assert json.loads(row["body"])["judgment"] == judgment_identity(frozen)
     conn.close()
     return row["status"], row["passed"], json.loads(row["body"])
 
