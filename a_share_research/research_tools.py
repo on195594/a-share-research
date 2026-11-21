@@ -10,7 +10,7 @@ from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 
 from a_share_research import report as report_body
-from a_share_research import db, sources, evidence, stock_codes, valuation as valuations
+from a_share_research import db, sources, evidence, market, stock_codes, valuation as valuations
 from a_share_research.limits import (
     ACQUISITION_SECONDS, CALL_LIMIT, DRAFT_CALLS, FETCH_LIMIT, REPAIR_CALL_RESERVE, ROUND_LIMIT,
 )
@@ -361,18 +361,35 @@ class ResearchTools:
         self.disclosure_cache = {stock_codes.normalize_key(material.code): dict(material.extra.get("catalog", {}))}
         self.financial_cache = {stock_codes.normalize_key(material.code): [r for r in material.table if not r["id"].startswith("C.")]}
 
-    def _register(self, doc: sources.Document) -> str:
-        """Catalog key for a document, adding it on first sight so read_disclosure can open it."""
+    def _register_documents(self, docs: list[sources.Document]) -> dict:
+        """Validate a whole search result before adding any document to the held evidence."""
         catalog = self.material.extra["catalog"]
-        key = next((k for k, v in catalog.items() if v["url"] == doc.url), None)
-        if key is not None and (field := evidence.identity_conflict(
-                catalog[key], doc.info(), ("code", "period", "url", "sha256"), partial=True)):
-            raise evidence.EvidenceError(f"来源 {key} 的 {field} 与既有身份冲突")
-        if key is None:
-            key = f"D{max([int(k[1:]) for k in catalog] + [0]) + 1}"
-            catalog[key] = doc.info()
-            self.documents[key] = doc
-        return key
+        by_url = {}
+        for key, info in catalog.items():
+            by_url.setdefault(info["url"], key)
+        next_id = max((int(k[1:]) for k in catalog), default=0) + 1
+        found, additions = {}, {}
+        for doc in docs:
+            key = by_url.get(doc.url)
+            if key is None:
+                key = by_url[doc.url] = f"D{next_id}"
+                next_id += 1
+                additions[key] = doc
+                found[key] = doc.info()
+            else:
+                previous = found[key] if key in found else catalog[key]
+                if field := evidence.identity_conflict(previous, doc.info(), ("code", "period", "url", "sha256"), partial=True):
+                    raise evidence.EvidenceError(f"来源 {key} 的 {field} 与既有身份冲突")
+                found[key] = previous
+        if additions:
+            evidence.source_registry(self.material.doc.info(), self.material.pages, self.material.raw_pages,
+                                     self.material.extra.get("sources"), catalog | found)
+            catalog.update(found)
+            self.documents.update(additions)
+        return found
+
+    def _register(self, doc: sources.Document) -> str:
+        return next(iter(self._register_documents([doc])))
 
     def run(self, name: str, args: dict) -> dict | list:
         if not isinstance(args, dict):
@@ -458,15 +475,13 @@ class ResearchTools:
     def disclosures(self, code: str):
         code = self.code(code)
         if code not in self.disclosure_cache:
-            catalog = self.material.extra["catalog"]
-            self.disclosure_cache[code] = {key: catalog[key] for key in map(self._register, sources.reports(code))}
+            self.disclosure_cache[code] = self._register_documents(sources.reports(code))
         return self.disclosure_cache[code]
 
     def announcements(self, code: str, query: str = "", days: int = 180):
         code = self.code(code)
         docs, coverage = sources.announcements(code, query, days)
-        catalog = self.material.extra["catalog"]
-        found = {key: catalog[key] for key in map(self._register, docs)}
+        found = self._register_documents(docs)
         self.material.extra.setdefault("announcement_searches", []).append({"code": code, **coverage})
         if coverage["truncated"]:
             self.material.extra["gaps"].append(f"{code} 公告检索超过{sources.ANNOUNCEMENT_PAGE_SIZE * sources.ANNOUNCEMENT_MAX_PAGES}条，仅返回部分目录；请缩小关键词或时间范围。")
@@ -582,23 +597,16 @@ def record_stop(material, reason, stage="explore"):
         stops.append(entry)
 
 
-class Acquisition:
-    """One tool session; exploration cannot consume the shared repair-call reserve.
+class EvidenceSession:
+    """Execute research tools and persist their evidence and trace against a single run."""
 
-    This is not a retry scheduler: identical failures are returned from the session cache,
-    and two turns without new evidence end acquisition. The writer then gets one tool-free
-    response within the SAME model-call limit; all unresolved issues still need review.
-    """
-
-    def __init__(self, runner, material, *, budget_seconds=ACQUISITION_SECONDS):
-        self.runner, self.material = runner, material
+    def __init__(self, conn, run_id: int, material):
+        self.conn, self.run_id, self.material = conn, run_id, material
         material.extra.setdefault("catalog", {"D0": material.doc.info()})
         material.extra.setdefault("sources", {})
         material.extra.setdefault("gaps", [])
         self.traces = material.extra.setdefault("tools", [])
-        self.toolkit = ResearchTools(material, runner.conn)
-        self.deadline = time.monotonic() + budget_seconds
-        self.rounds = self.stale = 0
+        self.toolkit = ResearchTools(material, conn)
         self.failures = {}
 
     def evidence_key(self):
@@ -612,6 +620,56 @@ class Acquisition:
             table.add(digest(row))
         return digest({"sources": self.material.source_registry(), "table": sorted(table),
                        "methods": self.material.extra.get("methods_used", [])})
+
+    def _record(self, name, args, stage, result, failed, started):
+        self.traces.append({"tool": name, "arguments": args, "result": result, "error": failed,
+                            "stage": stage, "seconds": round(time.monotonic() - started, 3)})
+        db.save_material(self.conn, self.run_id, self.material.snapshot())
+
+    def _execute(self, name, args, rejection):
+        if rejection:
+            return {"error": rejection}, True
+        try:
+            return self.toolkit.run(name, args), False
+        except evidence.EvidenceError:
+            raise
+        except Exception as exc:
+            message = market.redact_error(exc)
+            log.warning("run %s tool %s: %s", self.run_id, name, message)
+            return {"error": message}, True
+
+    def call(self, name: str, args: dict, stage: str, *, rejection=None) -> tuple[dict, bool]:
+        started = time.monotonic()
+        try:
+            before = self.evidence_key()
+            # A same-value C.n is not progress, but its new ID may unlock a failed reference.
+            key = (json.dumps([name, args], sort_keys=True, ensure_ascii=False), before,
+                   tuple(row["id"] for row in self.material.table))
+            if not rejection and key in self.failures:
+                return {"result": self.failures[key], "evidence_delta": 0, "charged": False}, True
+            result, failed = self._execute(name, args, rejection)
+            delta = int(self.evidence_key() != before)
+        except evidence.EvidenceError as exc:
+            self._record(name, args, stage, {"error": str(exc)}, True, started)
+            raise
+        if failed:
+            self.failures[key] = result
+            if name not in COMPUTE_TOOLS:
+                gap = f"{name}：{result['error']}"
+                if gap not in self.material.extra["gaps"]:
+                    self.material.extra["gaps"].append(gap)
+        self._record(name, args, stage, result, failed, started)
+        return {"result": result, "evidence_delta": delta, "charged": True}, failed
+
+
+class Acquisition(EvidenceSession):
+    """The writer's shared tool session and exploration/repair budgets."""
+
+    def __init__(self, runner, material, *, budget_seconds=ACQUISITION_SECONDS):
+        super().__init__(runner.conn, runner.run_id, material)
+        self.runner = runner
+        self.deadline = time.monotonic() + budget_seconds
+        self.rounds = self.stale = 0
 
     def stopped(self, stage="explore"):
         if time.monotonic() >= self.deadline:
@@ -632,40 +690,11 @@ class Acquisition:
         if reason:
             record_stop(self.material, reason, stage)
             return {"error": "本次共享取证额度已用尽；按已有证据修正并明确缺口，不能宣称已解决。"}, True
-        started = time.monotonic()
-        sig = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
-        # A failure is valid only for the evidence it saw. A newly read page can make an
-        # identical calculation valid; trace/gap changes alone must not enable retries.
-        # A same-value new C.n is not progress, but can satisfy a previously missing reference.
-        failure_key = (sig, self.evidence_key(), tuple(row["id"] for row in self.material.table))
-        failed = False
-        conflict = None
-        try:
-            if stage == "repair" and name not in REPAIR_TOOLS:
-                raise ValueError("修正可发现/读取披露、查询外部条件与核验计算，不刷新整套公司财务数据")
-            if call.get("argumentsError"):
-                raise ValueError(call["argumentsError"])
-            if failure_key in self.failures:
-                return self.failures[failure_key], True
-            result = self.toolkit.run(name, args)
-        except evidence.EvidenceError as exc:
-            # Charge and persist the failed attempt, then fail closed without merging any source.
-            failed, result, conflict = True, {"error": str(exc)}, exc
-        except Exception as exc:
-            failed, result = True, {"error": str(exc)}
-            self.failures[failure_key] = result
-            log.warning("run %s tool %s: %s", self.runner.run_id, name, exc, exc_info=True)
-            # A rejected calculation is the model's own correctable input, already returned to it
-            # as an actionable error; it is not missing evidence, so it never becomes a report gap.
-            gap = None if name in COMPUTE_TOOLS else f"{name}：{exc}"
-            if gap and gap not in self.material.extra["gaps"]:
-                self.material.extra["gaps"].append(gap)
-        self.traces.append({"tool": name, "arguments": args, "result": result, "error": failed,
-                            "stage": stage, "seconds": round(time.monotonic() - started, 3)})
-        db.save_material(self.runner.conn, self.runner.run_id, self.material.snapshot())
-        if conflict is not None:
-            raise conflict
-        return result, failed
+        rejection = call.get("argumentsError")
+        if stage == "repair" and name not in REPAIR_TOOLS:
+            rejection = "修正可发现/读取披露、查询外部条件与核验计算，不刷新整套公司财务数据"
+        receipt, failed = self.call(name, args, stage, rejection=rejection)
+        return receipt["result"], failed
 
     def write(self, prompt, stage):
         prompt += ("\n\n使用工具时可同轮提交互不依赖的调用，例如同时检索公告和计算已有表值。"

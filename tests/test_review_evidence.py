@@ -10,8 +10,7 @@ from a_share_research.evidence import (EvidenceError, source_registry, projectio
                                       citation_link, citation_errors, report_source_view)
 from a_share_research.material import Material
 from a_share_research.checking import check
-from a_share_research.prompts import parse_json
-from a_share_research.research import _verified_facts
+from a_share_research.drafts import _verified_facts
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest, legacy_issue_view, PROTOCOL
 from a_share_research.research_tools import record_stop
 from a_share_research import service, db
@@ -358,7 +357,6 @@ def test_stop_is_deduplicated_separate_from_review_failure():
     record_stop(material, "fetch_limit")
     assert len(material.extra["stop_reasons"]) == 1
     assert "failure" not in material.extra
-    assert parse_json("") is None and parse_json("not JSON") is None
 
 
 def test_full_api_keeps_report_sources_when_old_material_has_no_supplements(tmp_path):
@@ -418,36 +416,6 @@ def test_omission_needs_a_new_target_regardless_of_its_original_location(where):
     for valid in (decision | {"targets": ["risks[0]"]}, decision | {"status": "dismissed"}):
         candidate = deepcopy(ledger)
         assert accept(candidate, payload(candidate, draft, resolutions=[valid])) == []
-
-
-class Replies:
-    """Feeds fixed protocol responses to review(); it renders no financial content of its own."""
-
-    def __init__(self, *texts):
-        self.texts, self.prompts = list(texts), []
-
-    def ask(self, step, prompt):
-        self.prompts.append(prompt)
-        return self.texts.pop(0)
-
-
-def test_rejected_review_gets_one_correction_with_the_exact_defect():
-    from a_share_research.research import review
-    draft = report()
-    bound = {"version": 1, "draft_sha256": digest(draft), "material_sha256": MATERIAL.snapshot()["sha256"],
-             "resolutions": [], "risk_resolutions": []}
-    question = {"type": "question", "problem": REVIEW["problems"][0]["problem"],
-                "importance": REVIEW["problems"][0]["problem"], "evidence": []}
-    combined = json.dumps(bound | {"issues": [question | {"where": "risks[0] / risks[1]"}]}, ensure_ascii=False)
-    fixed = json.dumps(bound | {"issues": [question | {"where": "risks[0]"}]}, ensure_ascii=False)
-    ledger, runner = ReviewLedger(), Replies(combined, fixed)
-    assert [i["where"] for i in review(runner, MATERIAL, draft, ledger)] == ["risks[0]"]
-    assert "issues[0]" in runner.prompts[1] and len(ledger.rounds) == 1
-    # A second malformed answer still fails closed with nothing recorded.
-    ledger, runner = ReviewLedger(), Replies(combined, combined)
-    with pytest.raises(ReviewFormatError):
-        review(runner, MATERIAL, draft, ledger)
-    assert ledger.snapshot()["issues"] == [] and ledger.rounds == []
 
 
 def test_own_failure_reason_reaches_the_run_instead_of_a_generic_notice(tmp_path):

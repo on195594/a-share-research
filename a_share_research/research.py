@@ -17,6 +17,9 @@ from a_share_research.model_profile import CALL_TIMEOUT_SECONDS, DRAFT_CALLS, MA
 from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
+from a_share_research.drafts import (
+    RepairFormatError, indexed_draft, merge_repair_patch, open_questions, program_valuation, published, _verified_facts,
+)
 from a_share_research.checking import SECTIONS, check
 from a_share_research.prompts import RULES, output_schema, parse_json
 from a_share_research.research_tools import Acquisition, active_methods_digest, explore, run_method_catalog
@@ -79,17 +82,6 @@ def compose(runner: Runner, material: Material) -> dict | None:
     return parse_json(runner.ask("compose", prompt))
 
 
-def program_valuation(report: dict | None, material: Material) -> str:
-    """The valuation the report page shows for this draft, so judgments about price use the program's numbers."""
-    summary = valuation.program_summary((report or {}).get("valuation"), material.table, material.market_date)
-    if summary is None:
-        return ""
-    return ("\n# 程序估值测算（按本稿 valuation 计算，通过复核后随结论在报告页展示）\n"
-            + json.dumps(summary, ensure_ascii=False)
-            + "\nhurdle_price 是期望回报门槛价（等价格所等的价格）。这是程序输出，不是报告论断：报告以它作为参考价格时，"
-              "text 不重复数字也已给出价格；text 写出的价格与回报数字仍须引用 valuation 工具生成的 C.n。\n")
-
-
 def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedger) -> list[dict]:
     prompt = f"""你是独立复核员。检查下面这份研究报告是否忠实于资料。
 
@@ -124,13 +116,6 @@ def review(runner: Runner, material: Material, report: dict, ledger: ReviewLedge
         return ledger.accept(parse_json(runner.ask("review", prompt)), report, registry, material.table, material_sha256)
 
 
-REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods", "prior_status")
-
-
-def published(report: dict) -> dict:
-    """Fields of a passed report that are saved; optional judgment fields only when the contract produced them."""
-    return {k: report[k] for k in report_body.PUBLISHED_REQUIRED_FIELDS} | {
-        k: report[k] for k in report_body.PUBLISHED_FIELDS if k not in report_body.PUBLISHED_REQUIRED_FIELDS and k in report}
 PATCH_SCHEMA = """本轮只输出补丁 JSON，不输出完整报告。格式示例（所有内容及数字均为占位，须换成实际证据）：
 {"ops": [{"op": "replace", "where": "risks[2]", "value": {"text": "修正后的论断", "cites": [{"ref": "实际行标识", "period": "实际期间键"}]}}, {"op": "delete", "where": "business[0]"}, {"op": "add", "where": "risks", "value": {"text": "遗漏的风险", "cites": [{"ref": "实际行标识"}]}}], "verdict": "需要谨慎", "summary": "需要谨慎：营业收入下降10%（数字占位）"}
 ops 为数组，无需修改条目时可省略或用 []。replace/delete 的 where 必须是原报告的章节[序号]，序号从 0 开始；所有操作都按本轮原报告定位，删除不会改变其他操作的序号，同一原条目只能操作一次。
@@ -140,87 +125,6 @@ verdict、summary、gaps、valuation、stance 可在补丁顶层选择性替换�
 可选 rebuttals 数组，每项仅 {"id": "下方未解决问题的实际 ID", "reason": "据证反驳的理由", "evidence": [报告 cites 格式的实际出处]}；无 ID 的机械问题应修正对应条目。
 程序将 rebuttals 放入合并稿的 repair_rebuttals，供独立复核员作为待核查数据阅读；它不是解决声明，不接受 status/resolutions/risk_resolutions，也不能关闭问题或豁免旧风险去向复核。
 """
-
-
-class RepairFormatError(ValueError):
-    pass
-
-
-def merge_repair_patch(report: dict, patch: dict, problems: list[dict], material: Material) -> dict:
-    """Apply an atomic patch against original positions without mutating either input."""
-    if not isinstance(patch, dict) or set(patch) - {"ops", "verdict", "summary", "gaps", "valuation", "stance", "rebuttals"}:
-        raise RepairFormatError("补丁须为对象，只允许 ops、verdict、summary、gaps、valuation、stance、rebuttals；不要输出完整报告")
-    if not isinstance(patch.get("ops", []), list):
-        raise RepairFormatError("补丁 ops 必须是数组；无需改动条目时可省略或用 []")
-    replacements, additions = {}, {}
-    for i, op in enumerate(patch.get("ops", [])):
-        label = f"ops[{i}]："
-        if not isinstance(op, dict) or op.get("op") not in ("replace", "delete", "add"):
-            raise RepairFormatError(label + "op 必须是 replace/delete/add")
-        kind, where = op["op"], op.get("where")
-        keys = {"op", "where"} if kind == "delete" else {"op", "where", "value"}
-        if not keys <= op.keys():
-            raise RepairFormatError(label + f"{kind} 必须包含字段 {sorted(keys)}")
-        match = re.fullmatch(r"([a-z_]+)\[(0|[1-9]\d*)\]", where) if isinstance(where, str) else None
-        section = where if kind == "add" else match[1] if match else None
-        if not isinstance(section, str) or section not in REPAIR_SECTIONS:
-            raise RepairFormatError(label + f"章节或位置不存在：{where}；replace/delete 用章节[序号]，add 用章节名；章节仅 {', '.join(REPAIR_SECTIONS)}")
-        items = report.get(section, [])
-        if kind == "add" and items is None:
-            items = []
-        if not isinstance(items, list):
-            raise RepairFormatError(label + f"原报告 {section} 不是条目数组，不能按序号操作")
-        if kind != "delete":
-            item = op["value"]
-            if not isinstance(item, dict):
-                raise RepairFormatError(label + "value 必须是条目对象")
-        if kind == "add":
-            additions.setdefault(section, []).append(op["value"])
-            continue
-        index = int(match[2])
-        if index >= len(items):
-            raise RepairFormatError(label + f"{where} 越界；原报告 {section} 共 {len(items)} 条，序号从 0 开始；新增用 add")
-        target = (section, index)
-        if target in replacements:
-            raise RepairFormatError(label + f"{where} 重复操作（包括既删又改）；同一原条目只允许一次 replace 或 delete")
-        replacements[target] = None if kind == "delete" else op["value"]
-    if "rebuttals" in patch:
-        pending_ids = {p["id"] for p in problems if p.get("id")}
-        seen = set()
-        if not isinstance(patch["rebuttals"], list):
-            raise RepairFormatError("rebuttals 必须是数组")
-        for i, note in enumerate(patch["rebuttals"]):
-            if (not isinstance(note, dict) or set(note) != {"id", "reason", "evidence"}
-                    or not isinstance(note["id"], str) or note["id"] not in pending_ids or note["id"] in seen
-                    or not isinstance(note["reason"], str) or not note["reason"].strip()
-                    or not isinstance(note["evidence"], list) or not note["evidence"]
-                    or not all(isinstance(cite, dict) for cite in note["evidence"])):
-                raise RepairFormatError(f"rebuttals[{i}] 须含唯一的未解决问题 id、非空 reason、非空出处对象数组 evidence；不能自行指定解决状态")
-            seen.add(note["id"])
-    merged = deepcopy(report)
-    merged.pop("repair_rebuttals", None)
-    required = {*SECTIONS}
-    if material.extra.get("question"):
-        required.add("answer")
-    if material.extra.get("feedback"):
-        required.add("methods")
-        if merged.get("methods") is None:
-            merged["methods"] = []
-    else:
-        required.add("checkpoints")
-    if material.extra.get("prior"):
-        required.add("prior_status")
-    for section in {s for s, _ in replacements} | additions.keys():
-        merged[section] = [deepcopy(replacements.get((section, i), item))
-                           for i, item in enumerate(report.get(section) or [])
-                           if (section, i) not in replacements or replacements[section, i] is not None]
-        merged[section].extend(deepcopy(additions.get(section, [])))
-        if not merged[section] and section not in required:
-            merged.pop(section)
-    merged.update({k: deepcopy(patch[k]) for k in ("verdict", "summary", "gaps", "valuation", "stance") if k in patch})
-    if patch.get("rebuttals"):
-        merged["repair_rebuttals"] = deepcopy(patch["rebuttals"])
-    return merged
 
 
 def repair_result(report: dict | None, response: str, problems: list[dict], material: Material) -> dict | None:
@@ -239,10 +143,7 @@ def repair_prompt(material: Material, report: dict | None, problems: list[dict])
         original = "（上一次输出不是合法 JSON）"
     else:
         output = PATCH_SCHEMA
-        indexed = {key: {f"{key}[{i}]": item for i, item in enumerate(value)}
-                   if key in REPAIR_SECTIONS and isinstance(value, list) else value
-                   for key, value in report.items() if key != "repair_rebuttals"}
-        original = json.dumps(indexed, ensure_ascii=False, indent=1)
+        original = json.dumps(indexed_draft(report), ensure_ascii=False, indent=1)
     return f"""你是 A 股财报研究员。下面的研究报告被检查出问题，请按本轮输出格式修正。
 可以改写、替换或删除有问题的条目；没有问题的条目保持原样。
 补充遗漏风险时，保留原报告中已有依据的重大风险；可合并相关条目，不得用新风险替换另一项重大风险。
@@ -284,41 +185,6 @@ def repair(runner: Runner, material: Material, report: dict | None, problems: li
 
 
 # ---------- run ----------
-
-def _verified_facts(report: dict | None, problems: list[dict], *, reviewed: bool = False) -> dict:
-    """Retain unflagged claims only after semantic review of this exact report completed."""
-    if not report or not reviewed or any(p["where"] == "review" for p in problems):
-        return {}
-    # A carried issue retains its original target. Reordering/replacing a draft can move that
-    # disputed claim; without a new position mapping no subset is safe to endorse.
-    if any(p.get("id") and p.get("draft_sha256") != digest(report) for p in problems):
-        return {}
-    flagged = set()
-    for problem in problems:
-        targets = set()
-        for location in problem["where"].split("/"):
-            location = location.strip()
-            if location == "missing":
-                continue
-            match = re.fullmatch(r"(risks|business|financial|answer|checkpoints|prior_status)(?:\[(\d+)\])?", location)
-            if not match:
-                return {}
-            section, index = match.groups()
-            items = report.get(section)
-            if not isinstance(items, list) or not items or (index is not None and int(index) >= len(items)):
-                return {}
-            targets.add(section if index is None else f"{section}[{int(index)}]")
-        # A global or unlocatable finding cannot establish which claims were unaffected.
-        if not targets:
-            return {}
-        flagged.update(targets)
-    facts = {
-        section: [item for i, item in enumerate(report.get(section) or [])
-                  if isinstance(item, dict) and section not in flagged and f"{section}[{i}]" not in flagged]
-        for section in (*SECTIONS, "answer")
-    }
-    return facts if any(facts.values()) else {}
-
 
 def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
     code = stock_codes.normalize_key(code)
@@ -453,25 +319,6 @@ def publish(conn, run_id: int, material: Material, period: str, passed: bool,
         else:
             db.update_run(conn, run_id, status="failed", step=None, finished_at=db.now(),
                           error="研究核查未通过，不展示结论")
-
-
-# Where an unanswered part of the user's question can stay open without withholding the verified rest.
-OPEN_QUESTION_WHERE = re.compile(r"answer\[\d+\]|prior_status\[\d+\]|valuation|missing|gaps\[\d+\]")
-
-
-def open_questions(problems: list[dict], reviewed: bool) -> list[dict] | None:
-    """Unresolved review issues that may ship as named gaps, or None when any of them must block.
-
-    Only a completed review of the final draft qualifies, and only `question` issues about the answer,
-    a prior item's status, the scenario valuation, or evidence still missing: the reviewer found the work
-    incomplete, not wrong.
-    A disputed claim, an omitted material risk, or doubt about a fact, verdict or stance still blocks."""
-    if not problems or not reviewed:
-        return None
-    if all(p.get("id") and p.get("type") == "question" and OPEN_QUESTION_WHERE.fullmatch(str(p.get("where")))
-           for p in problems):
-        return problems
-    return None
 
 
 def revise(runner, material, report, ledger, *, acquisition=None):
