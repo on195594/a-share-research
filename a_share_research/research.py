@@ -13,7 +13,7 @@ from a_share_research import eval_report
 from a_share_research import report as report_body
 from a_share_research import db, market, model, sources, evidence, stance as stances, valuation, stock_codes
 from a_share_research.core.providers.tushare_common import TushareHTTPError
-from a_share_research.limits import CALL_TIMEOUT_SECONDS, DRAFT_CALLS, MAX_CALLS, RUN_SECONDS
+from a_share_research.model_profile import CALL_TIMEOUT_SECONDS, DRAFT_CALLS, MAX_CALLS, RUN_SECONDS
 from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, PROTOCOL, digest
 from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material

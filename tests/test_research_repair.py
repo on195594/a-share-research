@@ -13,7 +13,7 @@ import pytest
 
 from a_share_research import db, evidence, research, sources
 from a_share_research.material import mdna_pages
-from a_share_research.limits import CALL_LIMIT, FETCH_LIMIT, MAX_CALLS, REPAIR_CALL_RESERVE, ROUND_LIMIT
+from a_share_research.model_profile import CALL_LIMIT, FETCH_LIMIT, MAX_CALLS, REPAIR_CALL_RESERVE, ROUND_LIMIT
 from a_share_research.research_tools import Acquisition, REPAIR_TOOLS, _fetches
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest
 from support.reports import MATERIAL, SALES_ROW, report

@@ -4,7 +4,7 @@ Legacy snapshots and captured excerpts may omit identity fields. Version 2 write
 require their identity and judgment binding; loading never validates or rewrites them.
 """
 import json
-from typing import Literal, Required, TypedDict
+from typing import Literal, NotRequired, Required, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter
 
@@ -49,10 +49,12 @@ class Model(TypedDict):
     provider: str | None
     model: str | None
     reasoning: str
+    max_tokens: NotRequired[int]
 
 
 class Judgment(TypedDict):
     contract: int
+    profile_sha256: NotRequired[str]
     author: Model
     reviewer: Model
 

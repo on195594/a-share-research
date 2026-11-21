@@ -30,8 +30,19 @@ SESSION_OPEN = time(9, 30)
 # ---------- pure functions ----------
 
 
-def judgment_contract(body: dict) -> int | None:
-    return (body.get("judgment") or {}).get("contract")
+def scoring_identity(body: dict) -> dict:
+    judgment = body.get("judgment") or {}
+    return {"contract": judgment.get("contract"), "profile_sha256": judgment.get("profile_sha256") or "未记录"}
+
+
+def profile_groups(rows: list[dict]):
+    """Partition already selected samples, preserving all first-report and maturity rules."""
+    groups = {}
+    for row in rows:
+        key = (row.get("contract"), row.get("profile_sha256") or "未记录")
+        groups.setdefault(key, []).append(row)
+    for (contract, profile), group in groups.items():
+        yield {"contract": contract, "profile_sha256": profile}, group
 
 
 def filter_contract(rows: list[dict], contract: int | None) -> list[dict]:
@@ -111,10 +122,10 @@ def summarize(rows: list[dict], key: str) -> list[dict]:
     groups: dict[tuple, list[float]] = {}
     for row in rows:
         for horizon, result in row["returns"].items():
-            groups.setdefault((row["source"], row[key], horizon), []).append(result["excess"])
+            groups.setdefault((row.get("contract"), row.get("profile_sha256") or "未记录", row["source"], row[key], horizon), []).append(result["excess"])
     out = []
-    for (src, group, horizon), values in sorted(groups.items(), key=lambda kv: (kv[0][0], str(kv[0][1]), kv[0][2])):
-        out.append({"source": src, key: group, "horizon": horizon, "n": len(values),
+    for (contract, profile, src, group, horizon), values in sorted(groups.items(), key=lambda kv: str(kv[0])):
+        out.append({"contract": contract, "profile_sha256": profile, "source": src, key: group, "horizon": horizon, "n": len(values),
                     "mean": statistics.fmean(values), "median": statistics.median(values),
                     "beat": sum(v > 0 for v in values) / len(values),
                     "left_tail": sum(v <= LEFT_TAIL for v in values) / len(values)})
@@ -211,9 +222,10 @@ def forecast_diagnostics(item: dict) -> dict:
     return out
 
 
-def _group_identity(item: dict) -> tuple[int | None, str, str]:
-    roles = item.get("models") or model_roles({})
-    return (item.get("contract"), model_label(roles["author"]), model_label(roles["reviewer"]))
+def _role_labels(rows: list[dict]) -> dict:
+    # Historical reports without a profile may list more than one model in the same cohort.
+    models = [row.get("models") or model_roles({}) for row in rows]
+    return {role: "、".join(sorted({model_label(model[role]) for model in models})) for role in ("author", "reviewer")}
 
 
 def forecast_review(scored: list[dict]) -> dict:
@@ -222,11 +234,11 @@ def forecast_review(scored: list[dict]) -> dict:
     groups = {}
     shadowed = {}
     for item in items:
-        key = _group_identity(item)
+        key = (item.get("contract"), item.get("profile_sha256") or "未记录")
         (groups if item["first"] else shadowed).setdefault(key, []).append(item)
     cohorts = []
     # Stable identity order, not a model performance ranking.
-    for (contract, author, reviewer), group in sorted(groups.items(), key=lambda pair: str(pair[0])):
+    for (contract, profile), group in sorted(groups.items(), key=lambda pair: str(pair[0])):
         strata = {}
         for item in group:
             key = (item["forecast"]["confidence"], item["forecast"]["metric"], item["diagnostics"]["unit"])
@@ -246,14 +258,14 @@ def forecast_review(scored: list[dict]) -> dict:
                                  "clean_width_compared": len(clean_widths),
                                  "clean_median_width_to_baseline": statistics.median(clean_widths) if clean_widths else None})
         summary = summarize_forecasts(group)
-        cohorts.append({"contract": contract, "author": author, "reviewer": reviewer,
+        cohorts.append({"contract": contract, "profile_sha256": profile, **_role_labels(group),
                         "reports": len({i["report"] for i in group}), **summary,
                         "width_groups": width_groups})
     shadowed_cohorts = []
-    for (contract, author, reviewer), rows in sorted(shadowed.items(), key=lambda pair: str(pair[0])):
-        if (contract, author, reviewer) in groups:
+    for (contract, profile), rows in sorted(shadowed.items(), key=lambda pair: str(pair[0])):
+        if (contract, profile) in groups:
             continue
-        shadowed_cohorts.append({"contract": contract, "author": author, "reviewer": reviewer,
+        shadowed_cohorts.append({"contract": contract, "profile_sha256": profile, **_role_labels(rows),
                                  "reports": len({i["report"] for i in rows}),
                                  "companies": len({i["code"] for i in rows}),
                                  "updates": len(rows)})
@@ -389,7 +401,7 @@ def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
             forecast = item.get("forecast") if isinstance(item, dict) else None
             if base and forecast and not forecasts.problems(forecast, table):
                 out.append({"report": report_id, "code": code, "name": name, "created": created, "index": i,
-                            "contract": judgment_contract(body), "models": model_roles(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
+                            **scoring_identity(body), "models": model_roles(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
     return mark_first(filter_contract(out, contract))
 
 
@@ -419,7 +431,7 @@ def _load_eligible_reports(database: str, contract: int | None = None) -> list[d
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
         rows = conn.execute(
             "SELECT r.id, r.code, r.name, r.verdict, r.created_at, u.request, "
-            "json_extract(r.body, '$.judgment.contract', '$.stance_calc', '$.stance.trigger', '$.valuation_calc') "
+            "json_extract(r.body, '$.judgment', '$.stance_calc', '$.stance.trigger', '$.valuation_calc') "
             "FROM reports r "
             "JOIN runs u ON u.id = r.run_id WHERE r.passed = 1 AND u.kind = 'research' AND u.replay_of IS NULL"
         )
@@ -427,9 +439,9 @@ def _load_eligible_reports(database: str, contract: int | None = None) -> list[d
             src = source(json.loads(request) if request else {})
             if src is None:
                 continue
-            contract_id, calc, trigger, valuation_calc = json.loads(fields)
+            judgment, calc, trigger, valuation_calc = json.loads(fields)
             reports.append({"id": report_id, "code": code, "name": name, "verdict": verdict, "source": src,
-                            "completed": datetime.fromisoformat(created), "contract": contract_id,
+                            "completed": datetime.fromisoformat(created), **scoring_identity({"judgment": judgment}),
                             "stance": calc["action"] if calc else "未记录", "stance_calc": calc,
                             "trigger": calc.get("trigger", trigger) if calc else None,
                             "add_trigger": calc.get("add_trigger") if calc else None,
@@ -466,7 +478,7 @@ def load_agenda(database: str, contract: int | None = None) -> list[dict]:
         if src := source(json.loads(request or "{}") or {}):
             reports.append({"id": report_id, "code": code, "name": name, "source": src, "period": coverage,
                             "completed": datetime.fromisoformat(created), "prior_period": body["prior"].get("period"),
-                            "contract": judgment_contract(body), "prior_status": body.get("prior_status")})
+                            **scoring_identity(body), "prior_status": body.get("prior_status")})
     return filter_contract(reports, contract)
 
 
@@ -483,7 +495,8 @@ def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> di
         key = "scored" if row["returns"] else "no_market_data" if row["entry"] else "pending_entry"
         group[key] += 1
     return {"rows": rows, "contracts": contract_counts(rows), "unrecorded": len(split["unrecorded"]), "reruns": len(split["reruns"]),
-            "tally": agenda.tally(rows), "groups": counts, "returns": summarize(rows, "group")}
+            "tally": agenda.tally(rows), "profile_groups": [identity | {"tally": agenda.tally(group)}
+                      for identity, group in profile_groups(rows)], "groups": counts, "returns": summarize(rows, "group")}
 
 
 def agenda_lines(result: dict) -> list[str]:
@@ -492,6 +505,9 @@ def agenda_lines(result: dict) -> list[str]:
     lines = [f"V5 议程状态：入样 {len(result['rows'])} 份，历史未记录 {result['unrecorded']} 份，"
              f"同期重跑 {result['reruns']} 份（不入比率）"]
     lines.append(contract_line(result["rows"]))
+    for group in result["profile_groups"]:
+        lines.append(f"配置档 {group['profile_sha256']} 契约 {group['contract']}：旧风险已发生 {share(group['tally']['occurred'])}，"
+                     f"检查点已触发 {share(group['tally']['triggered'])}")
     for section, label in (("risks", "旧风险"), ("checkpoints", "旧检查点")):
         lines.append(f"{label}：" + "，".join(f"{status} {n}" for status, n in tally["counts"][section].items()))
     lines.append(f"可判定条目中的已发生占比 {share(tally['occurred'])}；检查点已触发占比 {share(tally['triggered'])}")
@@ -500,7 +516,7 @@ def agenda_lines(result: dict) -> list[str]:
         lines.append(f"{name}：{group['reports']} 份，可记分 {group['scored']}，待入场 {group['pending_entry']}，"
                      f"缺行情 {group['no_market_data']}")
     for s in result["returns"]:
-        lines.append(f"{s['source']}·{s['group']} {s['horizon']}：n={s['n']} 平均超额 {_pct(s['mean'])} "
+        lines.append(f"配置档 {s['profile_sha256']} {s['source']}·{s['group']} {s['horizon']}：n={s['n']} 平均超额 {_pct(s['mean'])} "
                      f"中位 {_pct(s['median'])} 跑赢 {s['beat']:.0%} 左尾 {s['left_tail']:.0%}")
     return lines
 
@@ -636,7 +652,7 @@ def main() -> None:
                 lines.append(f"  剔除 {summary['distorted_compared']} 条外推失真基线后胜过朴素预测："
                              f"{_pct(summary['clean_beat_baseline'])}（n={summary['clean_compared']}）")
         for group in review["model_groups"]:
-            lines.append(f"契约 {group['contract']} 作者 {group['author']} × 复核 {group['reviewer']}："
+            lines.append(f"契约 {group['contract']} 配置档 {group['profile_sha256']} 作者 {group['author']} × 复核 {group['reviewer']}："
                          f"{group['reports']} 份报告，{group['companies']} 家公司，{group['periods']} 个目标期，"
                          f"首份 {group['total']} 条，已兑现 {group['scored']}，朴素可比 {group['compared']}（仅描述，不作排名）")
             for width in group["width_groups"]:
@@ -651,7 +667,7 @@ def main() -> None:
             lines.append("以下契约/模型配置因早期报告已占首份名额，在当前未筛选口径下仅作更新、未计入上方首份分组：")
             for sg in review["shadowed_model_groups"]:
                 hint = f"（单独观测请加 --contract {sg['contract']}）" if sg["contract"] is not None else ""
-                lines.append(f"  契约 {sg['contract']} 作者 {sg['author']} × 复核 {sg['reviewer']}："
+                lines.append(f"  契约 {sg['contract']} 配置档 {sg['profile_sha256']} 作者 {sg['author']} × 复核 {sg['reviewer']}："
                              f"{sg['reports']} 份报告，{sg['companies']} 家公司，更新 {sg['updates']} 条{hint}")
         if review["contract_independent_first"]:
             lines.append("按契约独立去重（不受早期契约占槽影响）：")
@@ -683,6 +699,7 @@ def main() -> None:
     if args.stances:
         rows = score_stances(pro, score(pro, stance_reports, today), today)
         summary = summarize_stances(rows)
+        profiles = [identity | {"summary": summarize_stances(group)} for identity, group in profile_groups(rows)]
         lines = [f"V4 研究立场记分（{len(rows)} 份带立场报告；超额为入场至今相对 {BENCHMARK}）"]
         lines.append(contract_line(rows))
         for row in rows:
@@ -697,12 +714,13 @@ def main() -> None:
             status = {"met": "达成", "not_met": "未达成", "pending": "待披露"}.get(outcome.get("status"), outcome.get("status", "—")) if row["stance"] != "等价格" else outcome.get("status", "—")
             lines.append(f"#{row['id']} {row['code']} {row['name']} {row['stance']}{'（边界）' if row.get('boundary') else ''}{target} → {status}"
                          f"{' ' + outcome['date'] if outcome.get('date') else ''} 至今超额 {_pct(latest['excess']) if latest else '—'}")
-        for key, g in summary.items():
-            lines.append(f"{key} n={g['n']} 已入场 {g['scored']} 平均超额 {_pct(g['mean_excess']) if g['mean_excess'] is not None else '—'}")
+        for profile in profiles:
+            for key, g in profile["summary"].items():
+                lines.append(f"配置档 {profile['profile_sha256']} 契约 {profile['contract']} {key} n={g['n']} 已入场 {g['scored']} 平均超额 {_pct(g['mean_excess']) if g['mean_excess'] is not None else '—'}")
         log.info("\n%s", "\n".join(lines))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump({"rows": rows, "summary": summary, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
+                json.dump({"rows": rows, "summary": summary, "profile_groups": profiles, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
         return
     rows = score(pro, first_per_month(eligible), today)
     by_id = {row["id"]: row for row in rows}
@@ -721,7 +739,7 @@ def main() -> None:
                    if key == "stance" else f"按{ {'verdict': '结论', 'size': '市值三分位'}[key] }汇总")
         lines += ["", heading]
         for g in groups:
-            lines.append(f"{g['source']} {g[key]} {g['horizon']} n={g['n']} 均值 {_pct(g['mean'])} 中位 {_pct(g['median'])} "
+            lines.append(f"配置档 {g['profile_sha256']} {g['source']} {g[key]} {g['horizon']} n={g['n']} 均值 {_pct(g['mean'])} 中位 {_pct(g['median'])} "
                          f"跑赢 {g['beat']:.0%} 左尾≤{LEFT_TAIL:.0%} {g['left_tail']:.0%}")
     log.info("\n%s", "\n".join(lines))
     if args.json:

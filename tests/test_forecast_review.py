@@ -56,10 +56,13 @@ def test_model_metadata_does_not_create_new_sample_slots(tmp_path):
     # Metadata-only variants of the captured forecasts exercise changed model routes.
     roles = validation.model_roles({'judgment': {'author': {'provider': 'openai-codex', 'model': 'gpt-6.1-sol', 'reasoning': 'high'},
                                                 'reviewer': {'provider': 'google', 'model': 'gemini-3.8-flash'}}})
-    changed = [dict(i, report=104, created='2026-11-06T09:13:05+08:00', models=roles) for i in items]
+    changed = [dict(i, report=104, created='2026-11-06T09:13:05+08:00', models=roles, profile_sha256="b" * 64) for i in items]
     review = validation.forecast_review(validation.mark_first(items + changed))
     assert len(review['model_groups']) == 1  # A rerun under another model does not earn a new score.
     assert review['summary']['total'] == 2 and review['summary']['updates'] == 2
+    assert review['model_groups'][0]['profile_sha256'] == '未记录'
+    assert review['shadowed_model_groups'][0]['profile_sha256'] == 'b' * 64
+    assert review['shadowed_model_groups'][0]['author'] == 'openai-codex / gpt-6.1-sol / high'
     assert len(review['items']) == 4
     assert items == original  # No diagnostics or altered score written back to frozen source records.
     # A later contract selection still precedes first-sample marking, preserving the existing contract semantics.

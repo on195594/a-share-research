@@ -162,7 +162,7 @@ def test_experiment_counts_only_listed_runs_with_every_outcome(tmp_path):
     assert 'material.document' in summary['uncontrolled']['300750']
     assert cable['controls']['prior.report']['values'] == ['prior 37']
     assert summary['configs'] == [{'application_sha256': 'a' * 64, 'author': None, 'contract': None,
-                                   'explore_model': None, 'reviewer': None}] and not summary['mixed_config']
+                                   'explore_model': None, 'reviewer': None, 'code_commit': None, 'profile_sha256': '未记录'}] and not summary['mixed_config']
     assert (summary['compared'], summary['median_agreement']) == (1, 0.167)
 
 
@@ -212,3 +212,26 @@ def test_cli_keeps_modes_apart(tmp_path, capsys):
                  ['--runs', str(tmp_path / 'absent.db') + ':1']):
         with pytest.raises(SystemExit):
             stability.main(['--db', str(database), *argv])
+
+def test_profiles_separate_same_company_trials_including_failed_runs(tmp_path):
+    from a_share_research.model_profile import PROFILE_SHA256, run_identity
+
+    database = tmp_path / 'profiles.db'
+    conn = db.connect(database)
+    for run in (116, 125, 132):
+        _trial(conn, run, SAMPLES[run])
+    _trial(conn, 9001, SAMPLES[116], status='failed')
+    # Only the profile metadata changes on these captured same-day trials.
+    conn.execute("UPDATE runs SET identity=json_patch(identity, ?) WHERE id IN (125, 132, 9001)",
+                 (json.dumps(run_identity(21)),))
+    conn.commit()
+    natural = _load().observed(conn, '2026-11-01', None)
+    conn.close()
+    group, = natural['groups']
+    assert group['profile_sha256'] == PROFILE_SHA256 and [r['report'] for r in group['reports']] == [125, 132]
+    result = _load().experiment([(database, r) for r in (116, 125, 132, 9001)])
+    older, newer = result['profiles']
+    assert result['summary']['companies'] == 1 and result['summary']['mixed_config']
+    assert older['profile_sha256'] == '未记录' and older['median_agreement'] is None
+    assert newer['profile_sha256'] == PROFILE_SHA256 and newer['outcomes'] == {'priced': 2, 'failed': 1}
+    assert newer['median_agreement'] == 1

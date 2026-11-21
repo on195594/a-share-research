@@ -27,11 +27,11 @@ summary {cursor:pointer;color:#2b48b0} dt {color:#5a616b} dd {margin:0 0 8px} .n
 {% for level,g in s.by_confidence.items() %}<p>主观把握 {{ level }}%：兑现 {{ g.n }} 条，命中 {{ g.hit|review_pct }}。</p>{% endfor %}
 {% if not s.scored %}<p class="notice">尚无已记分结果，不能把未查询或未到期当成命中、失败或零收益。</p>{% endif %}
 </section>
-<section><h2>按冻结模型组合观察</h2>
-<p class="muted">模型身份来自报告保存的配置，不代表逐次调用已审计。先沿原规则选首份，再按契约、作者及复核者分组；不让重复研究增加样本。身份缺失单列，不用当前配置回填。组间公司、日期、任务可能不同，不是随机对照；按身份排序，不提供优劣排名。</p>
+<section><h2>按冻结配置档观察</h2>
+<p class="muted">模型身份来自报告保存的配置，不代表逐次调用已审计。先沿原规则选首份，再按契约和配置档分组；不让重复研究增加样本。身份缺失单列，不用当前配置回填。组间公司、日期、任务可能不同，不是随机对照；按身份排序，不提供优劣排名。</p>
 {% for g in review.model_groups %}<article>
 <h3>契约 {{ g.contract if g.contract is not none else '未记录' }}</h3>
-<p>作者：{{ g.author }}<br>复核：{{ g.reviewer }}</p>
+<p>配置档 {{ g.profile_sha256 }}<br>作者：{{ g.author }}<br>复核：{{ g.reviewer }}</p>
 <p>{{ g.reports }} 份报告 / {{ g.companies }} 家公司 / {{ g.periods }} 个目标期 / {{ g.total }} 条首份预测</p>
 <p>已兑现 {{ g.scored }}，待披露 {{ g.pending }}，缺失/不可比 {{ g.unavailable }}，未查询 {{ g.unchecked }}；胜朴素 {{ g.beat_baseline|review_pct }}（{{ g.compared }} 条可比）。</p>
 <p class="muted">区间宽度按把握度、指标及单位分层，不混合汇总；宽度含未兑现样本，不代表准确性。</p>
@@ -39,7 +39,7 @@ summary {cursor:pointer;color:#2b48b0} dt {color:#5a616b} dd {margin:0 0 8px} .n
 </article>{% else %}<p>没有入样的首份预测。</p>{% endfor %}
 {% if review.shadowed_model_groups or review.contract_independent_first %}<div class="notice">
 {% if review.shadowed_model_groups %}<p>以下契约/模型配置因早期报告已占首份名额，当前未筛选口径下仅作更新、未计入上方首份分组：</p>
-{% for sg in review.shadowed_model_groups %}<p>契约 {{ sg.contract if sg.contract is not none else '未记录' }}（作者 {{ sg.author }} × 复核 {{ sg.reviewer }}）：{{ sg.reports }} 份报告 / {{ sg.companies }} 家公司 / {{ sg.updates }} 条更新{% if sg.contract is not none %}；独立观测请运行 <code>--contract {{ sg.contract }}</code>{% endif %}。</p>{% endfor %}{% endif %}
+{% for sg in review.shadowed_model_groups %}<p>契约 {{ sg.contract if sg.contract is not none else '未记录' }} · 配置档 {{ sg.profile_sha256 }}（作者 {{ sg.author }} × 复核 {{ sg.reviewer }}）：{{ sg.reports }} 份报告 / {{ sg.companies }} 家公司 / {{ sg.updates }} 条更新{% if sg.contract is not none %}；独立观测请运行 <code>--contract {{ sg.contract }}</code>{% endif %}。</p>{% endfor %}{% endif %}
 {% if review.contract_independent_first %}<p>按契约独立去重（不受早期契约占槽影响）：{% for cs in review.contract_independent_first %}契约 {{ cs.contract }} 首份 {{ cs.total }} 条（{{ cs.companies }} 家公司、已兑现 {{ cs.scored }}）{% if not loop.last %}；{% endif %}{% endfor %}。</p>{% endif %}
 </div>{% endif %}
 </section>

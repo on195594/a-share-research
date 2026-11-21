@@ -14,7 +14,7 @@ from requests import RequestException
 from a_share_research import report as report_body
 from a_share_research import api_keys, batches, companies, db, stance as stances
 from a_share_research import stock_codes
-from a_share_research.limits import MAX_CALLS, MONTHLY_MAX_CALLS
+from a_share_research.model_profile import PROFILE, PROFILE_SHA256
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
@@ -296,8 +296,10 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
                                                    zip(report_body.FAILED_FIELDS, ({}, None, []))} |
                                                    ({'producer': body['producer']} if 'producer' in body else {}),
             "purpose": row["purpose"], "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
-            "model_calls": [{key: identity.get(key) for key in
-                             ("requested", "actual", "pi_version", "node_version", "parameters", "prompt_sha256", "pi_infer_sha256")}
+            "model_calls": [{key: identity[key] for key in
+                             ("requested", "actual", "pi_version", "node_version", "model_source", "extension",
+                              "request_parameters", "parameters", "stop_reason", "prompt_sha256", "pi_infer_sha256",
+                              "profile_sha256", "code_commit") if key in identity}
                             if (identity := json.loads(value or "null")) else None
                             for value in json.loads(row["call_identities"])],
             "coverage": {"periods": _table_periods(body),
@@ -445,13 +447,21 @@ def is_monthly_research(conn, run_id: int | None) -> bool:
         "WHERE r.id = ? AND b.request_id LIKE 'monthly:%'", (run_id,)).fetchone() is not None
 
 
-def research_call_limit(conn, run_id: int | None = None) -> int:
-    return MONTHLY_MAX_CALLS if is_monthly_research(conn, run_id) else MAX_CALLS
+def research_call_limit(conn, run_id: int | None = None, *, max_calls: int | None = None) -> int:
+    limit = PROFILE.limits.monthly_model_calls if is_monthly_research(conn, run_id) else PROFILE.limits.model_calls
+    return min(max_calls, limit) if max_calls is not None else limit
 
 
 def run_budget(conn, run_id: int | None = None) -> dict:
-    count = conn.execute("SELECT COUNT(*) FROM calls WHERE run_id = ?", (run_id,)).fetchone()[0] if run_id is not None else None
-    return {"model_call_limit": research_call_limit(conn, run_id), "model_calls_recorded": count, "run_id": run_id,
+    limit, count, profile = None, None, PROFILE_SHA256
+    if run_id is not None:
+        limit, profile, count = conn.execute(
+            "SELECT json_extract(r.identity, '$.effective_model_call_limit'), "
+            "json_extract(r.identity, '$.profile_sha256'), count(c.id) "
+            "FROM runs r LEFT JOIN calls c ON c.run_id = r.id WHERE r.id = ?", (run_id,),
+        ).fetchone()
+    return {"model_call_limit": limit if limit is not None else research_call_limit(conn, run_id),
+            "profile_sha256": profile or "未记录", "model_calls_recorded": count, "run_id": run_id,
             "scope": "run" if run_id is not None else "configuration",
             "limit_kind": "loop_guard_not_money_cap", "cost": None, "cost_status": "unavailable",
             "automatic_paid_restart": False,

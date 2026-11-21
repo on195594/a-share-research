@@ -103,6 +103,7 @@ def observations(reports: list[dict], trade_days: list[str], closes: dict[str, f
             report = by_day[day]
             row = {"report": report["id"], "code": report["code"], "name": report["name"],
                    "source": report["source"], "period": report.get("period"), "contract": report.get("contract"),
+                   "profile_sha256": report.get("profile_sha256") or "未记录",
                    "rule": {"pe": PE_RULE, "v2": valuation.RULE_V2}.get(kind, report["valuation_calc"]["rule"]),
                    "zone": labels[day], "observation": day, "entry": next_day.get(day),
                    "valuation_zone": valuations[day], "pe_zone": percentiles[day]}
@@ -131,13 +132,13 @@ def summarize(rows: list[dict]) -> list[dict]:
     """Per rule/zone/horizon, show empty/pending groups rather than implying zero returns."""
     groups = {}
     for row in rows:
-        groups.setdefault((row["rule"], row["zone"]), []).append(row)
+        groups.setdefault((row.get("profile_sha256") or "未记录", row["rule"], row["zone"]), []).append(row)
     out = []
-    for (rule, zone), group in sorted(groups.items()):
+    for (profile, rule, zone), group in sorted(groups.items()):
         for horizon in HORIZONS:
             done = [r for r in group if horizon in r["returns"]]
             values = [r["returns"][horizon]["excess"] for r in done]
-            out.append({"rule": rule, "zone": zone, "horizon": horizon, "n": len(done),
+            out.append({"profile_sha256": profile, "rule": rule, "zone": zone, "horizon": horizon, "n": len(done),
                         "companies": len({r["code"] for r in done}), "observations": len(group),
                         "pending": len(group) - len(done),
                         "periods": sorted({r["period"] for r in done if r.get("period")}),
@@ -220,7 +221,7 @@ def load_reports(database: str, contract: int | None = None) -> list[dict]:
             raise ValueError(f"报告 #{report_id} valuation_calc 的规则或区间阈值无效")
         reports.append({"id": report_id, "code": code, "name": name, "source": src,
                         "completed": datetime.fromisoformat(created), "valuation_calc": calc,
-                        "contract": validation.judgment_contract(body),
+                        **validation.scoring_identity(body),
                         "period": validation.forecasts.base_period(body.get("table") or [])})
     return sorted(validation.filter_contract(reports, contract), key=lambda r: (r["completed"], r["id"]))
 
