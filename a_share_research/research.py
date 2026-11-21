@@ -9,6 +9,7 @@ import time
 from copy import deepcopy
 from datetime import date
 
+from a_share_research import eval_report
 from a_share_research import report as report_body
 from a_share_research import db, market, model, sources, evidence, stance as stances, valuation, stock_codes
 from a_share_research.core.providers.tushare_common import TushareHTTPError
@@ -708,9 +709,11 @@ def main() -> None:
             parser.error(str(exc))
     else:
         targets = [(code, None) for code in args.codes or EVAL_SET]
+    run_ids = []
     for code, replay_of in targets:
         started = time.monotonic()
         run_id = db.create_run(conn, code, status="running")  # never 'queued', so a worker cannot also pick it up
+        run_ids.append(run_id)
         if args.question:
             db.update_run(conn, run_id, request=json.dumps({"question": args.question}, ensure_ascii=False))
         execute(conn, run_id, replay_of=replay_of)
@@ -720,6 +723,7 @@ def main() -> None:
         print(f"{code} run={run_id} {run['status']} {time.monotonic() - started:.0f}s "
               f"calls={body.get('calls')} {report['verdict'] if report else ''} "
               f"{run['error'] or body.get('summary', '')}", flush=True)
+    eval_report.report_runs(run_ids)
 
 
 if __name__ == "__main__":

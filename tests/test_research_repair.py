@@ -625,6 +625,7 @@ def test_execute_freezes_schema_and_judgment_at_publish(tmp_path, monkeypatch, r
     assert bool(row['passed']) is passed
     assert body['schema_version'] == 2
     assert body['judgment'] == model.judgment_identity()
+    assert set(body['judgment']) == {'contract', 'author', 'reviewer'}
     assert set(body['judgment']['author']) == set(body['judgment']['reviewer']) == {'provider', 'model', 'reasoning'}
     assert body['replay_of'] == (source if replay else None)
     report_body.validate(body)

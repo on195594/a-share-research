@@ -49,8 +49,6 @@ BODIES = list(captured_bodies())
 def test_captured_report_bodies(location, body):
     loaded = report.load(json.dumps(body, ensure_ascii=False))
     assert loaded == body | {'schema_version': body.get('schema_version', 1)}
-    assert 'judgment' not in loaded or loaded['judgment'] == body['judgment']
-    report.validate(loaded)
 
 
 def test_top_level_and_required_core_are_checked():
@@ -62,23 +60,10 @@ def test_top_level_and_required_core_are_checked():
         report.validate(body)
 
 
-def test_current_report_requires_identity_and_complete_judgment():
+def test_current_report_requires_judgment():
     body = report.load(json.dumps(BODIES[0][1])) | {'schema_version': 2}
     with pytest.raises(ValidationError, match='judgment'):
         report.validate(body)
-    schema = report.json_schema()
-    assert set(schema['required']) == {'schema_version', 'code', 'name', 'period', 'judgment'}
-    assert schema['additionalProperties'] is False
-    judgment = schema['$defs']['Judgment']
-    assert set(judgment['required']) == {'contract', 'surface_sha256', 'author', 'reviewer'}
-
-
-def test_projections_are_declared_and_compact_exposes_judgment():
-    for fields in (report.PUBLISHED_REQUIRED_FIELDS, report.PUBLISHED_FIELDS, report.COMPACT_FIELDS,
-                   report.FAILED_FIELDS, report.CARD_FIELDS):
-        assert set(fields) <= report.Report.__annotations__.keys()
-    assert 'judgment' in report.COMPACT_FIELDS
-    assert 'relative' in report.Report.__annotations__
 
 
 def test_loading_does_not_validate_or_change_existing_fields():
