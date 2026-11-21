@@ -1,6 +1,6 @@
 # a-share-research：面向模型演进的架构重构方案
 
-2026-11-21 · v6。v5 经 Codex 四轮审查后，又交 agy（Gemini 4 Argon High）做过度工程审查，所有者按审查结论改定（Telegram msg 4565）。审查记录与 v1–v5 存放在证据目录 `~/.local/share/a-share-research-evaluations/architecture-plan-20261121/`。
+2026-11-21 · v6。v5 经 Codex 四轮审查后，又交 agy（Gemini 4 Argon High）做过度工程审查，所有者按审查结论改定（Telegram msg 4565）。审查记录与 v1–v5 存放在证据目录 `~/.local/share/a-share-research-evaluations/architecture-plan-20261121/`。两步均已实施，上线状态与回退约束见[实施计划](implementation-plan.md#当前部署)，下文的删除项和实施要点保留为设计记录。
 
 ## 所有者决定（2026-11-21）
 

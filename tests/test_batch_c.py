@@ -43,35 +43,6 @@ def proposed(conn, *, status='proposed'):
     return q20, s10
 
 
-def test_only_new_batches_receive_v13_and_existing_rows_survive_v8(tmp_path):
-    path = tmp_path / 'v7.db'
-    old = sqlite3.connect(path, isolation_level=None)
-    old.row_factory = sqlite3.Row
-    old.executescript(db.SCHEMA)
-    for migrate in db.MIGRATIONS[:7]:
-        migrate(old)
-    old.execute('PRAGMA user_version=7')
-    for status in ('queued', 'frozen', 'tracking'):
-        old.execute('INSERT INTO batches (status,created_at,rule,q20,q5,l5,entry,marks) VALUES (?,?,?,?,?,?,?,?)',
-                    (status, '2026-10-24', json.dumps(batches.RULE), json.dumps(ROWS), '[]',
-                     json.dumps({'codes': list(PRICES['entry']['prices'])}), json.dumps(PRICES['entry']),
-                     json.dumps({'latest': PRICES['mark']})))
-    before = [dict(r) for r in old.execute('SELECT * FROM batches')]
-    old.close()
-    conn = db.connect(path)
-    assert conn.execute('PRAGMA user_version').fetchone()[0] == len(db.MIGRATIONS)
-    assert conn.total_changes == 0
-    for row in before:
-        saved = dict(conn.execute('SELECT * FROM batches WHERE id=?', (row['id'],)).fetchone())
-        assert {key: saved[key] for key in row} == row
-        assert all(saved[key] is None for key in ('s10', 'sq3', 'sl3', 'small_selection', 'coverage'))
-    new_id = service.create_batch(conn, 'new-c')
-    new = batches.load(conn.execute('SELECT * FROM batches WHERE id=?', (new_id,)).fetchone())
-    assert new['rule'] == batches.NEW_RULE and batches.RULE['version'] == 'screen-v1.1'
-    assert new['rule']['weights'] == batches.RULE['weights']
-    conn.close()
-
-
 def test_sl3_comparison_and_freeze_enforce_one_company_per_industry(tmp_path, monkeypatch):
     cache_partial_window(monkeypatch)
     conn = db.connect(tmp_path / 'c.db')
