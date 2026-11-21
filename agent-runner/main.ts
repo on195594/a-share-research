@@ -8,8 +8,10 @@ import { readProfile, RunnerError } from "./profile.ts";
 import { runResearch } from "./research.ts";
 import { runSingle } from "./single.ts";
 
-export async function withWorker(pi: Pi, input: Readable, output: Writable, work: (client: McpClient) => Promise<void>) {
-  const client = new pi.mcp.McpClient({ name: "a-share-agent-runner", version: "1", requestTimeoutMs: 300_000 });
+export async function withWorker(pi: Pi, input: Readable, output: Writable, work: (client: McpClient) => Promise<void>,
+                                 requestTimeoutMs: number) {
+  // Worker tools run synchronously and are bounded by the run deadline, not by a per-request timer.
+  const client = new pi.mcp.McpClient({ name: "a-share-agent-runner", version: "1", requestTimeoutMs });
   const transport = new pi.mcp.PipeTransport({
     closeTimeoutMs: 0,
     async open({ onStdout }) {
@@ -64,7 +66,9 @@ async function main() {
         try {
           await runResearch(client, pi, models, profile, stream, Number(values["run-id"]));
         } catch (error) {
-          throw error instanceof RunnerError ? error : new RunnerError(1, "Research MCP protocol failed");
+          if (error instanceof RunnerError) throw error;
+          console.error(error);
+          throw new RunnerError(1, "Research MCP protocol failed");
         }
       } else if (check) {
         readiness = { ready: true, pi_version: pi.version, node_version: process.version,
@@ -77,7 +81,7 @@ async function main() {
     }
     if (readiness) process.stdout.write(JSON.stringify(readiness) + "\n");
   }
-  if (mode === "run") await withWorker(pi, process.stdin, process.stdout, work);
+  if (mode === "run") await withWorker(pi, process.stdin, process.stdout, work, profile.limits.run_seconds * 1000);
   else await work();
 }
 

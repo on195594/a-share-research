@@ -278,6 +278,9 @@ async def serve_stdio(session: ResearchSession, child_stdout: BinaryIO, child_st
             async with stdio_server(stdin=anyio.wrap_file(rd), stdout=anyio.wrap_file(wr)) as streams:
                 try:
                     await session.serve(*streams)
+                except anyio.get_cancelled_exc_class():
+                    # A failed pipe task cancels the session; its group carries the actual error.
+                    raise
                 except BaseException as exc:
                     failure = exc
                     # Release the SDK's blocking pipe reader on failure or worker deadline.

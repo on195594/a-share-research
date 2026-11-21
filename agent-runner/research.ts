@@ -64,6 +64,7 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
     let nextMessage: string | undefined;
 
     function fail(error: unknown) {
+      if (!(error instanceof RunnerError)) console.error(error);
       fatal = error instanceof RunnerError ? error : new RunnerError(1, "Research MCP or agent failed");
       sealed = true;
       agent.abort();

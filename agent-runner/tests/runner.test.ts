@@ -121,7 +121,7 @@ function worker(turns: Turn[], reply: (name: string) => object, options: { repla
   })();
   async function run() {
     try {
-      await withWorker(pi, input, output, client => runResearch(client, pi, models, profile, fakeStream(turns, requests), 1));
+      await withWorker(pi, input, output, client => runResearch(client, pi, models, profile, fakeStream(turns, requests), 1), 60_000);
     } finally {
       await server;
     }

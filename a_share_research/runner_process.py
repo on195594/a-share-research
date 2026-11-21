@@ -87,7 +87,16 @@ def run_research(session: ResearchSession, *, replay_of: int | None = None) -> N
 
         try:
             with time_left(session.deadline, terminate=proc.kill):
-                anyio.run(serve)
+                try:
+                    anyio.run(serve)
+                except Exception:
+                    if session.failure:
+                        raise
+                    # The runner left first, e.g. broken pipe; its exit code names the failure.
+                    if proc.poll() is None:
+                        proc.kill()
+                    _check_exit(proc.wait(), session.last_error_kind)
+                    raise
                 _check_exit(proc.wait(), session.last_error_kind)
         finally:
             # Popen.__exit__ closes both pipes and waits, including after protocol failure.
