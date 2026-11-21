@@ -232,7 +232,7 @@ def test_fixed_child_transport_drops_inherited_credentials_and_config(tmp_path,m
     monkeypatch.setattr(monitor.subprocess,'Popen',popen)
     assert monitor.capture(database,parameters,source=source)=={'transport_fixture':True}
     assert seen['argv']==[sys.executable,'-m','a_share_research.policy.capture']
-    assert seen['payload']==(parameters if source is None else dict(parameters=parameters,source=source))
+    assert seen['payload']==dict(parameters=parameters,source=source)
     assert seen['timeout']==25
     env=seen['kwargs']['env']
     assert set(env)<= {'PATH','HOME','LANG','LC_ALL','POLICY_V0_DB','A_STOCK_CONFIG_FILE','TUSHARE_TOKEN'}

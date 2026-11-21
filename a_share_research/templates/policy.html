@@ -69,7 +69,6 @@
     <div><dt>确认时间</dt><dd>{{ (parameters.get('confirmed_at') or '未记录')|replace('T', ' ') }}</dd></div>
     <div><dt>确认依据</dt><dd>{{ parameters.get('confirmation_ref') or '未记录' }}</dd></div>
     <div><dt>完整政策身份</dt><dd>{{ policy.manifest.identity }}</dd></div>
-    <div><dt>代码版本</dt><dd>{{ policy.manifest.code_hash }}</dd></div>
     <div><dt>规则版本摘要</dt><dd>{{ policy.manifest.rules_hash }}</dd></div>
     <div><dt>指南版本摘要</dt><dd>{{ policy.manifest.guide_version }}</dd></div>
   </dl>

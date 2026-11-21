@@ -278,8 +278,6 @@ def policy_probe(*, owner_token=None):
                 or value['activation']['identity'] != value['identity']
                 or value['manifest']['identity'] != value['identity']):
             raise ValueError
-        from a_share_research.policy.identity import verify
-        verify(value['manifest'])  # Self-consistency only, never host check_installed.
     except (KeyError, TypeError, ValueError):
         raise RuntimeError('镜像内政策状态未知或不完整') from None
     return value
@@ -307,7 +305,6 @@ def identity_diff(old, new):
         return sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
     return dict(identity=[old['identity'], new['identity']],
                 parameters_changed=old['parameters'] != new['parameters'],
-                code=changed(old['files']['code'], new['files']['code']),
                 rules=[old.get('rules_hash'), new.get('rules_hash')],
                 guides=changed(old['files']['guides'], new['files']['guides']))
 

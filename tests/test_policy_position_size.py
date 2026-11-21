@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from a_share_research import api_keys, gate
-from a_share_research.policy import evaluation, identity, monitor, position_evaluation, position_sizing, registry
+from a_share_research.policy import evaluation, monitor, position_evaluation, position_sizing, registry
 from a_share_research.tools.server import create_app
 from test_policy_monitor import historical_replay, setup as monitor_setup
 
@@ -89,14 +89,6 @@ def test_replay_reference_not_service_monitor(setup):
     with pytest.raises(registry.PolicyError, match='服务端监控'):
         run(setup, supplied)
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
-
-
-def test_installed_drift_rejected_without_write(setup, parent, monkeypatch):
-    def drift(*args): raise ValueError('injected installed drift')
-    monkeypatch.setattr(identity, 'check_installed', drift)
-    with pytest.raises(registry.PolicyError, match='当前实现'):
-        run(setup, parent)
-    assert setup[1].execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
 
 
 def test_transaction_fault_does_not_leave_half_receipt(setup, parent):

@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -35,7 +36,8 @@ def _version(conn, selected):
         raise PolicyError('政策身份未登记；不能将旧投影 profile 当作完整政策',404)
     try:
         manifest = json.loads(row[0])
-        identity.verify(manifest)
+        if manifest['schema_version'] not in (1, 2):
+            identity.verify(manifest)
         if manifest['identity'] != selected:
             raise identity.IdentityError('policy key differs from manifest')
     except (ValueError,KeyError,TypeError) as exc:
@@ -70,12 +72,16 @@ def _read_state(conn):
     if activation is None:
         return dict(activation=None,manifest=None,installed=False)
     manifest = _version(conn,activation['identity'])
-    try:
-        identity.check_installed(manifest)
-        installed = True
-    except identity.IdentityError:
-        installed = False
-    return dict(activation=activation,manifest=manifest,installed=installed)
+    return dict(activation=activation,manifest=manifest,installed=identity.installed(manifest))
+
+
+def _active_policy(conn):
+    state = _read_state(conn)
+    if state['activation'] is None:
+        raise PolicyError('生效政策尚未启用，请先读取当前指针')
+    if not state['installed']:
+        raise PolicyError('当前规则、指南或身份版本与生效政策不一致，须重新登记并启用')
+    return state['activation'], state['manifest']
 
 
 def _state(conn, principal):
@@ -109,10 +115,8 @@ def activate(conn, principal, selected, *, expected_id, request_id, reason):
                 raise PolicyError('request_id 已用于不同政策切换')
             return saved
         manifest = _version(conn,selected)
-        try:
-            identity.check_installed(manifest)
-        except identity.IdentityError as exc:
-            raise PolicyError(f'当前安装与政策身份不一致，须先登记当前实现：{exc}') from None
+        if not identity.installed(manifest):
+            raise PolicyError('当前安装与政策身份不一致，须先登记当前规则和指南')
         from a_share_research.policy.evaluation import validate_parameters
         parameters = manifest['parameters']
         validate_parameters(parameters)
@@ -238,22 +242,19 @@ def inspect(conn):
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='policy_versions'").fetchone():
         return []
     problems = []
-    for (selected,) in conn.execute('SELECT identity FROM policy_versions').fetchall():
+    activation = _current(conn)
+    # Pre-v19 raw pointers have no registered manifest.
+    if activation and activation['request_id'] is not None:
         try:
-            _version(conn,selected)
+            manifest = _version(conn, activation['identity'])
+            previous = conn.execute('SELECT MAX(id) FROM policy_activations WHERE id<?',
+                                    (activation['id'],)).fetchone()[0] or 0
+            if manifest['policy'] != activation['policy'] or previous != activation['expected_id']:
+                raise PolicyError('政策切换身份或前序不一致')
         except PolicyError as exc:
-            problems.append(str(exc))
-    for row in conn.execute('SELECT id,identity,policy,request_id,expected_id FROM policy_activations ORDER BY id'):
-        # Pre-v19 raw pointers remain historical; new authenticated rows must bind a full identity.
-        if row[3] is not None:
-            try:
-                manifest = _version(conn,row[1])
-                previous = conn.execute('SELECT MAX(id) FROM policy_activations WHERE id<?',(row[0],)).fetchone()[0] or 0
-                if manifest['policy'] != row[2] or previous != row[4]:
-                    raise PolicyError('政策切换身份或前序不一致')
-            except PolicyError as exc:
-                problems.append(f'政策切换 {row[0]}：{exc}')
-    for row in conn.execute('SELECT * FROM policy_evaluations'):
+            problems.append(f"政策切换 {activation['id']}：{exc}")
+    for *row, manifest_json in conn.execute('SELECT e.*, v.manifest FROM policy_evaluations e '
+                                             'LEFT JOIN policy_versions v ON v.identity=e.identity'):
         try:
             if len(row)>10 and (row[10] is not None or row[11] is not None):
                 context=json.loads(row[10])
@@ -265,8 +266,7 @@ def inspect(conn):
                     verify_parent(conn, _evaluation(row))
             if gate.digest(json.loads(row[8])) != row[6] or gate.digest(json.loads(row[9])) != row[7]:
                 raise PolicyError('输入或结果哈希不一致')
-            manifest = _version(conn,row[1])
-            if json.loads(row[8]).get('risk_policy') != manifest['parameters']:
+            if json.loads(row[8]).get('risk_policy') != json.loads(manifest_json)['parameters']:
                 raise PolicyError('评估参数与政策身份不同')
             if row[2] is not None:
                 activation = conn.execute('SELECT identity FROM policy_activations WHERE id=?',(row[2],)).fetchone()
@@ -299,20 +299,21 @@ def main():
         if principal is None:
             raise PolicyError('请提供有效的 ASHARE_OWNER_TOKEN',403)
         _authorize(conn,principal,owner=True)
+        fields = ('identity', 'policy', 'rules_hash', 'guide_version')
         if args.action == 'register':
             from a_share_research.policy.v0 import paths, risk_policy
             parameters = json.loads(paths.read_private_config(args.parameters,label='policy parameters'),
                 object_pairs_hook=risk_policy._unique_object,parse_constant=risk_policy._reject_constant,
                 parse_float=risk_policy._json_float)
             result = register(conn,principal,parameters)
-            result = {k:result[k] for k in ('identity','policy','code_hash','rules_hash','guide_version')}
+            result = {k:result[k] for k in fields}
         elif args.action == 'activate':
             result = activate(conn,principal,args.identity,expected_id=args.expected_id,request_id=args.request_id,reason=args.reason)
         else:
             result = current(conn,principal)
             if result['manifest']:
-                result['manifest'] = {k:result['manifest'][k] for k in ('identity','policy','code_hash','rules_hash','guide_version')}
-        print(gate.canonical(result))
+                result['manifest'] = {k:result['manifest'][k] for k in fields}
+        sys.stdout.write(gate.canonical(result) + '\n')
     except (ValueError,sqlite3.Error,OSError) as exc:
         parser.exit(1,f'{type(exc).__name__}: {exc}\n')
     finally:

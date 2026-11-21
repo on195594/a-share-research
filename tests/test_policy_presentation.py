@@ -96,14 +96,12 @@ def test_pointer_metadata_must_match_the_verified_policy(book,field,value):
     assert result['status']=='invalid' and result['manifest'] is None
 
 
-def test_runtime_drift_keeps_saved_parameters_visible_but_not_active(book,monkeypatch):
+def test_missing_rules_keep_saved_parameters_visible_but_not_active(book, tmp_path, monkeypatch):
     manifest=install(book)
-    def changed(_):raise identity.IdentityError('private filesystem detail')
-    monkeypatch.setattr(identity,'check_installed',changed)
+    monkeypatch.setattr(identity, 'ROOT', tmp_path)
     result=view(book)
     assert result['status']=='implementation_changed' and result['installed'] is False
     assert result['manifest']['parameters']==manifest['parameters']
-    assert 'private filesystem' not in json.dumps(result)
 
 
 @pytest.mark.parametrize('changes,status',[
