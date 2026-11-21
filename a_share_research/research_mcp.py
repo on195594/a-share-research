@@ -63,6 +63,10 @@ def _receipt(value, *, error=False):
         structured_content=value, is_error=error)
 
 
+TOOL_HINT = ("\n\n使用工具时可同轮提交互不依赖的调用，例如同时检索公告和计算已有表值。"
+             "同一 PDF 的连续页可用 read_disclosure 的 page、count 一次读至多 5 页；需要前一项返回的出处或数值时再分轮。")
+
+
 # Prompt text is carried over verbatim from the in-process orchestration (contract 7); only the
 # final line names the submission tool. The runner forwards these and owns no prompt wording.
 def explore_prompt(material: Material) -> str:
@@ -86,7 +90,7 @@ def explore_prompt(material: Material) -> str:
 取证足够后调用 submit_draft，以上述格式的报告作为 draft 提交。
 # 起始材料
 {material.prompt_block()}
-"""
+""" + TOOL_HINT
 
 
 def compose_prompt(material: Material) -> str:
@@ -147,7 +151,7 @@ def repair_prompt(material: Material, report: dict, problems: list[dict], *, acq
 先区分已有原文未引用、需要补读、仍无法取得的证据。已有页直接给支持主张的 cites；
 缺页或跨期/同业口径不全时可用只读披露工具补证及 calculate，不凭表值伪造原文。
 补证、补丁及格式失败后的完整改写共用剩余额度；工具失败或无新证据时明确缺口。
-重要遗漏与用户要求不能靠一句“未知”自动关闭，仍须独立复核。按本轮输出格式作答。"""
+重要遗漏与用户要求不能靠一句“未知”自动关闭，仍须独立复核。按本轮输出格式作答。""" + TOOL_HINT
     return prompt
 
 
