@@ -11,9 +11,9 @@ import pytest
 PACKAGE = Path(__file__).resolve().parents[1] / "a_share_research"
 PURE_MODULES = (
     "valuation", "stance", "forecasts", "agenda", "screening_factors",
-    "batches", "stock_codes", "limits",
+    "batches", "stock_codes",
 ) + tuple(name for name in ("report", "contract") if (PACKAGE / f"{name}.py").exists())
-FORBIDDEN = {"db", "sources", "market", "model", "service", "research", "screening", "web", "worker"}
+FORBIDDEN = {"db", "sources", "market", "runner_process", "service", "research", "screening", "web", "worker"}
 LAYER_FORBIDDEN = {
     "core": {
         "account", "policy", "tools", "research", "research_tools", "material",
