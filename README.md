@@ -101,6 +101,9 @@ DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.re
 DATA_DIR=/tmp/research-eval uv run --env-file .env python -m a_share_research.research --replay 1
 ```
 
+单股研究 CLI（默认评估集或指定代码）结束时输出调用报表。JSON 默认写入 `~/.local/share/a-share-research-evaluations/eval-reports/`，可用 `EVAL_REPORT_DIR` 覆盖。
+已有任务用 `DATA_DIR=/path/to/data uv run python -m a_share_research.eval_report RUN_ID ...` 出报表，括号内显示相对上一份报表中同一公司的差值。
+
 完整性巡检只读，可在线运行，有问题时以 1 退出。正式备份包含 SQLite 一致快照、PDF 与已引用的账户证据。
 
 ```bash

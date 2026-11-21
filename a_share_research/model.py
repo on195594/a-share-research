@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from a_share_research import core
-from a_share_research.contract import JUDGMENT_CONTRACT, SURFACE_SHA256
+from a_share_research.contract import JUDGMENT_CONTRACT
 
 SCRIPT = Path(__file__).with_name("pi_infer.mjs")
 
@@ -110,7 +110,7 @@ def configured_model(role: str | None = None) -> tuple[str | None, str | None, s
 def judgment_identity() -> dict:
     """Record the current frozen judgment contract and configured model roles."""
     keys = ("provider", "model", "reasoning")
-    return {"contract": JUDGMENT_CONTRACT, "surface_sha256": SURFACE_SHA256,
+    return {"contract": JUDGMENT_CONTRACT,
             "author": dict(zip(keys, configured_model())),
             "reviewer": dict(zip(keys, configured_model("review")))}
 

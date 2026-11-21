@@ -53,7 +53,6 @@ class Model(TypedDict):
 
 class Judgment(TypedDict):
     contract: int
-    surface_sha256: str
     author: Model
     reviewer: Model
 
