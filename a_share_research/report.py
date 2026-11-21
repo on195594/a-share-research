@@ -54,7 +54,7 @@ class Model(TypedDict):
 
 class Judgment(TypedDict):
     contract: int
-    profile_sha256: NotRequired[str]
+    profile_sha256: str
     author: Model
     reviewer: Model
 

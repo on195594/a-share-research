@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from a_share_research import report
+from a_share_research import model_profile, report
 from tests.support.reports import report as source_report
 
 DATA = Path(__file__).parent / 'data'
@@ -64,6 +64,10 @@ def test_current_report_requires_judgment():
     body = report.load(json.dumps(BODIES[0][1])) | {'schema_version': 2}
     with pytest.raises(ValidationError, match='judgment'):
         report.validate(body)
+    current = model_profile.judgment_identity()
+    del current['profile_sha256']
+    with pytest.raises(ValidationError, match='profile_sha256'):
+        report.validate(body | {'judgment': current})
 
 
 def test_loading_does_not_validate_or_change_existing_fields():

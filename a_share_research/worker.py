@@ -1,9 +1,9 @@
-"""Run queued research one at a time, then batch steps; the only process holding model and market credentials."""
+"""Run queued research and batch steps, one at a time."""
 
 import logging
 import time
 
-from a_share_research import consensus_backfill, db, model, price, research, screening, scans, service
+from a_share_research import consensus_backfill, db, price, research, runner_process, screening, scans, service
 
 log = logging.getLogger(__name__)
 
@@ -42,15 +42,16 @@ def execute_run(conn, row):
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
-        runtime = model.preflight()
+        runtime = runner_process.preflight()
     except RuntimeError:
         log.exception("worker 启动已阻断；修复 Pi 运行时后重启，队列保持原状")
         raise SystemExit(1)
     log.info("pi ready: version=%s node=%s provider=%s model=%s reasoning=%s source=%s",
              runtime["pi_version"], runtime["node_version"], runtime["provider"],
-             runtime["model"], runtime.get("reasoning", "high"), runtime["model_source"])
-    if runtime.get("review"):
-        log.info("review model: provider=%s model=%s reasoning=%s", *runtime["review"].values())
+             runtime["model"], runtime["reasoning"], runtime["model_source"])
+    reviewer = runtime["review"]
+    log.info("review model: provider=%s model=%s reasoning=%s",
+             reviewer["provider"], reviewer["model"], reviewer["reasoning"])
     conn = db.connect()
     recover(conn)
     screening.recover(conn)

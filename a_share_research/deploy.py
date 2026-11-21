@@ -503,7 +503,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, approval_path:
         if (head != run('git', 'rev-parse', 'origin/main') or not revision.startswith(code)
                 or run('git', 'merge-base', revision, head) != revision):
             raise RuntimeError('须在 origin/main 的 HEAD 上按已推送的提交号发布预构建镜像')
-        if run('git', 'status', '--porcelain', '--', 'a_share_research', 'Dockerfile', 'compose.yaml',
+        if run('git', 'status', '--porcelain', '--', 'a_share_research', 'agent-runner', 'Dockerfile', 'compose.yaml',
                'pyproject.toml', 'uv.lock'):
             raise RuntimeError('应用或部署文件有未提交修改')
         has_tools = bool(run('docker', 'ps', '-a', '--filter', 'name=^/a-share-research-tools$', '--format', '{{.ID}}'))
@@ -555,14 +555,20 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, approval_path:
             save('policy-plan.json', state | dict(status='planned'))
             return
 
-        def check_ready(paused):
+        def check_ready(paused, *, candidate=False):
             wait_ready()
             if has_tools:
                 save('tools-ready-paused.json' if paused else 'tools-ready.json', wait_tools_ready(paused=paused))
+            # A rollback can target a commit from before the runner was introduced.
+            if candidate and run('git', 'ls-tree', '--name-only', revision, 'a_share_research/runner_process.py'):
+                result = run('docker', 'exec', 'a-share-research-worker', 'python', '-c',
+                             'import json, sys; from a_share_research.runner_process import preflight; '
+                             'json.dump(preflight(), sys.stdout)')
+                save('worker-preflight.json', json.loads(result))
 
         same_images = all(before[s]['image'] == images[s] for s in services)
         if not offline and same_images and not config_changed and not frozen.get('intent'):
-            check_ready(already_paused)
+            check_ready(already_paused, candidate=True)
             current = policy_gate(images, frozen, approval=approval, save=save)
             save('release-state.json', state | dict(status='succeeded', tools_paused=already_paused, actual_policy=policy_summary(current)))
             return
@@ -604,7 +610,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, approval_path:
             state['policy'] = frozen
             save('release-state.json', state | dict(status='switching'))
         compose('up', '-d', '--no-build', '--no-deps', *services)
-        check_ready(has_tools)
+        check_ready(has_tools, candidate=True)
         current = policy_gate(images, frozen, approval=approval, save=save)
         resume = has_tools and not already_paused
         try:

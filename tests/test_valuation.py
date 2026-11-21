@@ -8,7 +8,7 @@ import pytest
 
 from a_share_research import checking, drafts, prompts, research, reviewing, stance, valuation
 from a_share_research.material import Material
-from a_share_research.research_tools import ResearchTools, _fetches
+from a_share_research.research_tools import ResearchTools
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
 from support.valuation import BODY, ROWS, STORED, assumptions, with_probabilities
@@ -393,7 +393,7 @@ def test_stale_price_through_a_derived_calculation_is_caught():
     assert any(hurdle['id'] in p['problem'] for p in _answer_problems(rep, mat))
 
 
-def test_tool_errors_are_actionable_and_not_fetches():
+def test_tool_errors_are_actionable():
     mat = _tool_material()
     with pytest.raises(ValueError, match='not_priced'):
         ResearchTools(mat, None).run('valuation', {'valuation': {'not_priced': {'text': 'x', 'cites': []}}})
@@ -401,7 +401,6 @@ def test_tool_errors_are_actionable_and_not_fetches():
     broken['scenarios']['保守']['probability'] = 80
     with pytest.raises(ValueError, match='probability'):
         ResearchTools(mat, None).run('valuation', {'valuation': broken})
-    assert _fetches([{'tool': 'valuation'}, {'tool': 'calculate'}, {'tool': 'read_disclosure'}]) == 1
 
 
 def test_program_summary_matches_the_page_price():

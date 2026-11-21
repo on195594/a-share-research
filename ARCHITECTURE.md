@@ -1,6 +1,6 @@
 # 系统架构
 
-Web、MCP 与 worker 共用一个 SQLite 账本。产品目标见 [PRODUCT.md](PRODUCT.md)，授权与研究边界见 [AGENTS.md](AGENTS.md)。
+Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布，按任务启动 agent-runner 执行模型调用。产品目标见 [PRODUCT.md](PRODUCT.md)，授权与研究边界见 [AGENTS.md](AGENTS.md)。
 
 ## 能力与状态归属
 
@@ -9,7 +9,9 @@ Web、MCP 与 worker 共用一个 SQLite 账本。产品目标见 [PRODUCT.md](P
 | 模块 | 职责与状态 |
 |---|---|
 | `core/`、`market.py` | 数据提供方、来源与时点、行情接入和确定性计算。 |
-| 研究模块 | 受理任务、取证、核验、发布报告与论点卡，保存研究材料、复核记录与冻结判断并记分。 |
+| `research.py`、`research_mcp.py`、`research_tools.py` | 冻结研究身份及材料，执行取证和计算，持久化工具轨迹与模型调用，判定终稿能否发布。 |
+| `drafts.py`、`checking.py`、`reviewing.py` | 按原稿索引原子合并补丁，核对事实与计算，绑定材料、稿件、历次问题及决议。 |
+| `agent-runner/` | 按角色和阶段调度模型、切换工具、判定停止和执行调用上限。对话只在子进程内存中保存。 |
 | `account/` | 保存凭证、账户事件、资产观察与对账回执，从有效事件重建持仓和现金。分析历史按账户和持仓周期追加，涵盖论点版本、L3、预警和 Tier。 |
 | `policy/` | 管理版本、激活记录与评估回执。`policy/v0/` 提供 v0 规则与监控指南。政策身份绑定规则、指南、参数，每次评估记录所用身份。 |
 | `gate.py` | 提供账户、政策与证据记录共用的规范 JSON 编码与哈希。 |
@@ -20,8 +22,17 @@ Web、MCP 与 worker 共用一个 SQLite 账本。产品目标见 [PRODUCT.md](P
 
 - **web** 提供 HTML 页面、GitHub 所有者会话、OAuth 发现与授权服务，以及授权管理页 `/connections`。账户表单校验会话、同源与 CSRF 后，以专属 `web-owner-proxy` grant 经内网调用 tools 的 `/mcp`，提交凭证、记账或评估 NAV。写入与回执归 tools。
 - **tools** 接收 nginx `location = /mcp` 转发的 Streamable HTTP MCP 请求。服务按公网地址校验 Host 和 Origin，接受有效的非 owner PAT 或绑定本资源的 OAuth access token。五个本机宿主使用原生 HTTP MCP，Hermes 业务脚本经 `ashare` 调用。政策激活仅走本机 owner 入口。接入方法见 [README](README.md#web-与-mcp-接入)。
-- **worker** 执行研究、核验、扫描与记分，经 pi 调用模型。模型凭据只注入 worker，tools 从独立环境文件读取行情凭据。研究模型只使用受控研究工具。
+- **worker** 在领取任务前调用 runner 的 `--check`，离线解析作者与复核员的模型和凭据。它一次执行一个单股任务，单股队列和扫描队列空闲时推进批次。worker 可访问研究行情凭据与宿主 pi 目录。tools 的行情凭据来自独立环境文件。
 - MCP 与 tools 业务 REST 热备共用注册表与 Gate。写入与采集共享两个并发名额。工具发现与读取只登记在途。发布暂停时拒收新请求，等待在途请求结束，暂停标记跨重启保留。旧入口的退役条件见[实施计划](docs/implementation-plan.md#web-与-mcp-双入口实施)。
+
+## 研究与模型调用
+
+1. **采集与启动。** `research.execute` 在采集前保存本次运行的判断契约、模型配置档哈希和生效上限。采集完成后，worker 保存材料快照，通过 `runner_process.py` 启动一个 `node agent-runner/main.ts run` 子进程。总时限从采集前起算，到期由 worker 结束并回收子进程。
+2. **运行时与工具。** Node 24 直接运行 TypeScript。runner 从宿主 pi 安装加载 pi-agent-core、pi-ai、pi-mcp 和 pi-coding-agent 的 ModelRuntime，通过模型配置档为各阶段选取模型。worker 在子进程的标准输入输出上提供本次研究专用的 MCP 服务，runner 是客户端，从 `research://run/context` 读取材料和预算，再从工具目录选择当前角色可用的工具。模型只能调用授予该角色的研究工具。
+3. **取证与复核。** 研究员按需取证，worker 在每次执行后记录可复用的结果、证据增量和材料快照。提交稿件后先做机械检查，通过后由独立复核员提交绑定稿件与材料的整轮决议。有待解决的问题时，runner 用索引化原稿、问题和材料开一段新的修补对话。每次模型调用都由 runner 通过内部 `record_call` 将实际请求、模型身份、耗时、用量和完成原因交给 worker 记账。
+4. **交付与重放。** worker 用最终稿、问题和复核绑定判定能否交付，在同一事务内保存报告、估值、冻结立场、事件证据及任务终态。历史 `--replay` 使用来源任务的冻结材料，只注册试稿、复核、修补与调用审计工具，交付前核对材料哈希。普通带请求编号的研究中断后最多重跑一次，自动月批研究中断后记为失败。
+
+每批比较使用一个 `single` 子进程。Q20 选股、强制排序与 S10 独立比较按需逐项发送 JSON 行，每次请求使用独立上下文。Python 核验结果、决定格式纠正、将实际调用明细存入批次，并冻结名单。各角色、阶段映射、上限和取值依据见[模型配置档](a_share_research/model_profile.json)。
 
 ## 数据与兼容
 

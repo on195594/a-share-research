@@ -298,7 +298,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "purpose": row["purpose"], "evidence": evidence, "identity": json.loads(row["identity"] or "null"),
             "model_calls": [{key: identity[key] for key in
                              ("requested", "actual", "pi_version", "node_version", "model_source", "extension",
-                              "request_parameters", "parameters", "stop_reason", "prompt_sha256", "pi_infer_sha256",
+                              "request_parameters", "parameters", "stop_reason", "prompt_sha256",
                               "profile_sha256", "code_commit") if key in identity}
                             if (identity := json.loads(value or "null")) else None
                             for value in json.loads(row["call_identities"])],

@@ -8,6 +8,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY a_share_research ./a_share_research
 COPY skill ./skill
 RUN chmod -R a+rX a_share_research && chmod -R a=rX skill
+ARG GIT_COMMIT
+ENV GIT_COMMIT=$GIT_COMMIT
 
 # Frontend Web service: serves HTML & handles OAuth, holds no model/market credentials
 FROM base AS web
@@ -20,5 +22,6 @@ CMD ["uvicorn", "a_share_research.web:app", "--host", "0.0.0.0", "--port", "8620
 FROM base AS worker
 COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils poppler-data && rm -rf /var/lib/apt/lists/*
+COPY agent-runner ./agent-runner
 USER 1000:1000
 CMD ["python", "-m", "a_share_research.worker"]

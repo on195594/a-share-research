@@ -81,6 +81,7 @@ class ResearchSession:
         self.problems: list[dict] = []
         self.reviewed_binding: tuple[str, str] | None = None
         self.failure: dict | None = None
+        self.last_error_kind: str | None = None
         self._chains: dict[str, tuple[int, str]] = {}
         self._server = self._build_server()
 
@@ -143,6 +144,7 @@ class ResearchSession:
                                   error=f"模型阶段未完成（{kind}）" if kind else None, identity=identity,
                                   base=self._chains.get(step), block=self.material.prompt_block())
         self._chains[step] = (call_id, prompt)
+        self.last_error_kind = kind
         return {"call_id": call_id}
 
     def _verify_replay(self):

@@ -107,15 +107,3 @@ def application_identity() -> dict:
 
 def run_identity(effective_model_call_limit: int) -> dict:
     return application_identity() | {"effective_model_call_limit": effective_model_call_limit}
-
-
-# Names imported by the Python loops until the runner cutover.
-MAX_CALLS = PROFILE.limits.model_calls
-CALL_TIMEOUT_SECONDS = PROFILE.limits.model_call_seconds
-DRAFT_CALLS = PROFILE.limits.draft_call_reserve
-RUN_SECONDS = PROFILE.limits.run_seconds
-ACQUISITION_SECONDS = PROFILE.limits.acquisition_seconds
-CALL_LIMIT = PROFILE.limits.explore_tool_calls
-FETCH_LIMIT = PROFILE.limits.fetch_calls
-REPAIR_CALL_RESERVE = PROFILE.limits.repair_extra_tool_calls
-ROUND_LIMIT = PROFILE.limits.acquisition_rounds

@@ -45,6 +45,10 @@ def operations(monkeypatch, tmp_path):
                 return args[2]
             if args[:2] == ('git', 'status'):
                 return ''
+            if args[:2] == ('git', 'ls-tree'):
+                return args[-1] if args[-2] == 'revision' else ''
+            if args[:3] == ('docker', 'exec', 'a-share-research-worker'):
+                return json.dumps({'ready': True})
             if args[:2] == ('docker', 'ps'):
                 return 'tools' if existing else ''
             if args[:2] == ('docker', 'inspect'):
@@ -142,6 +146,7 @@ def test_existing_tools_is_automatically_included_and_not_resumed_before_verific
     assert index(state,('backup',))<index(state,('run','docker','tag','new-web'))
     assert any(event[-3:]==('web','worker','tools') for event in commands(state,'up'))
     assert index(state,('tools_ready',True))<index(state,('control','resume'))
+    assert json.loads((state.evidence / 'worker-preflight.json').read_text())['ready']
     tags=[event for event in state.events if event[:3]==('run','docker','tag')]
     assert not any('a-share-research-tools:' in event[-1] for event in tags)
 
