@@ -13,6 +13,8 @@
     <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，非公告日期）</p>
     {% if newer_report %}<p class="notice caution" role="status">正在阅读历史报告，以下判断与价格属于本报告时点。<a href="/reports/{{ newer_report.id }}">查看 {{ newer_report.created_at[:10] }} 的最新正式研究（{{ '复核通过' if newer_report.passed else '复核未通过' }}）</a>。</p>{% endif %}
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
+    {# The stance price grid already shows the report close; the market grid then skips it. #}
+    {% set stance_close_shown = namespace(value=false) %}
     {% if report.passed %}
       {{ verdict_scale(body.verdict) }}
       <p class="conclusion" id="claim-summary-0" tabindex="-1">{% if body.verdict not in ["暂不值得", "需要谨慎", "值得继续研究"] %}研究判断：{% endif %}{{ body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
@@ -20,8 +22,8 @@
       {% if body.stance is mapping and body.stance.action %}{% set sc = body.stance_calc or {} %}{% set vc = body.valuation_calc or {} %}
       {% set sd = stance_decision(body.stance, sc, vc) if stance_decision is defined else None %}
       <div class="stance" id="stance">
-        <p class="relative-call">研究立场：<strong>{{ body.stance.action }}</strong>{% if body.stance.action == '等价格' and sc.price is number %}（期望回报门槛价 <span class="num">{{ '%.2f' | format(sc.price) }}</span> 元，有效至 {{ sc.valid_until }}）{% elif body.stance.action == '等证据' and body.stance.trigger %}{% set t = body.stance.trigger %}（{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}）{% endif %}</p>
-        {% if sd and sd.has_prices %}
+        <p class="relative-call">研究立场：<strong>{{ body.stance.action }}</strong>{% if body.stance.action == '等价格' and sc.price is number %}（{% if not (sd and sd.has_prices) %}期望回报门槛价 <span class="num">{{ '%.2f' | format(sc.price) }}</span> 元，{% endif %}有效至 {{ sc.valid_until }}）{% elif body.stance.action == '等证据' and body.stance.trigger %}{% set t = body.stance.trigger %}（{{ t.period }} {{ rows[t.metric].label if t.metric in rows else t.metric }} {{ '≥' if t.op == '>=' else '≤' }} <span class="num">{{ t.value }}</span>{{ rows[t.metric].unit if t.metric in rows else '' }}）{% endif %}</p>
+        {% if sd and sd.has_prices %}{% set stance_close_shown.value = true %}
         <dl class="snapshot stance-snapshot" aria-label="立场价格与门槛对照">
           <div><dt>报告收盘价</dt><dd class="num">{{ '%.2f' | format(sd.close) }}<small>元</small></dd></div>
           <div><dt>期望回报门槛价</dt><dd class="num">{{ '%.2f' | format(sd.hurdle) }}<small>元</small></dd></div>
@@ -55,7 +57,11 @@
     {% endif %}
     {% if market %}
     <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
-      {% for r in market %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}
+      {% set grid = namespace(pe_bands=[]) %}
+      {% for r in market if r.id.startswith('M.pe_ttm_5y_p') %}{% set grid.pe_bands = grid.pe_bands + [r] %}{% endfor %}
+      {% set pe_bands = grid.pe_bands %}
+      {% for r in market if r not in pe_bands and not (stance_close_shown.value and r.id == 'M.close') %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}
+      {% if pe_bands %}<div class="pe-bands"><dt>近 5 年 PE TTM {{ pe_bands | map(attribute='id') | map('replace', 'M.pe_ttm_5y_p', '') | join('/') }} 分位</dt><dd class="num">{% for r in pe_bands %}{{ r["values"].values() | first }}{{ ' / ' if not loop.last }}{% endfor %}<small>{{ pe_bands[0].unit }}</small></dd></div>{% endif %}
     </dl>
     <p class="muted small">行情为 {{ body.market_date }} 收盘。</p>
     {% if report.passed %}{{ snapshot_date_notice(body.market_date, price) }}{% endif %}
