@@ -1,0 +1,14 @@
+{% include "schema.j2" -%}
+{% if not feedback -%}
+    {% set next_period = next_period or "下一期" -%}
+    {% include "valuation.j2" -%}
+    {% include "checkpoints.j2" -%}
+    {% include "stance.j2" -%}
+{% endif -%}
+{% if question %}
+另加 "answer": [{"text": "直接回答本次问题", "cites": [出处]}]，不得省略。{% endif -%}
+{% if feedback %}
+本次是用户对关联原报告的纠错：在 answer 中核查是否成立，说明证据、根因与最小修正。
+另加 "methods": [{"text": "由本次核查支持的可复用取证方法，说明适用条件、步骤及不适用边界", "cites": [出处]}]。只保留有依据的通用做法，不把公司事实泛化成规律；没有可复用方法就返回 []。若核查位置是 methods[i]，本次 methods 将替代该条历史方法：反馈不成立则重述仍成立的方法，失效且无适用替代时返回 []。这不改变投资政策、代码或原报告。{% endif -%}
+{% if prior %}{% include "prior.j2" %}{% endif -%}
+{% if events %}{% include "events.j2" %}{% endif %}

@@ -190,7 +190,8 @@ def test_continuation_lists_events_in_catalog_with_financial_checks(conn):  # no
     assert all(m['periods']['2026-09-30'].startswith('财务表无该期数值') for m in q3)
     assert 'financial_checks' not in listed[2]
     material.extra['events'] = listed
-    assert prompts.EVENTS in prompts.output_schema(material) and '相减' in prompts.EVENTS
+    events = prompts.render_prompt('events.j2')
+    assert events in prompts.output_schema(material) and '相减' in events
 
 
 def test_unrelated_newer_report_leaves_event_open_and_cited_one_settles(conn):  # noqa: F811

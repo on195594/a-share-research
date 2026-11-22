@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from a_share_research import db, integrity
-from a_share_research.prompts import RULES, SCHEMA
+from a_share_research.prompts import render_prompt
 
 CHAIN = json.loads(gzip.decompress((Path(__file__).parent / "data" / "explore-call-chain.json.gz").read_bytes()))
 PROMPTS = [call["prompt"] for call in CHAIN["calls"]]
@@ -83,7 +83,7 @@ def test_integrity_reports_a_broken_chain(tmp_path):
 
 BLOCK = json.loads(PROMPTS[0])["messages"][0]["content"].split("\n# 起始材料\n", 1)[1].split("\n# 补证与引用", 1)[0].rstrip("\n")
 # What compose sends for the same material: the plain-text stage shares the block with exploration.
-COMPOSE = f"你是 A 股财报研究员，为普通投资者写一份研究报告。\n\n{RULES}\n\n{SCHEMA}\n\n# 资料\n{BLOCK}"
+COMPOSE = f"你是 A 股财报研究员，为普通投资者写一份研究报告。\n\n{render_prompt('rules.j2')}\n\n{render_prompt('schema.j2')}\n\n# 资料\n{BLOCK}"
 
 
 def test_material_block_is_cut_once_from_plain_and_tool_loop_prompts(tmp_path):

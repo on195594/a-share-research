@@ -5,6 +5,7 @@ import json
 import re
 
 from a_share_research.evidence import citation_errors
+from a_share_research.prompts import render_prompt
 
 
 class ReviewFormatError(ValueError):
@@ -219,22 +220,4 @@ def legacy_issue_view(issues):
             for i in issues if isinstance(i, dict)]
 
 
-PROTOCOL = """输出一个 JSON 对象，version=1，逐字返回下方 draft_sha256 和 material_sha256。
-issues: 新发现的实质问题数组，每项 {type: omission/claim/question, where: 条目位置或 missing,
-problem: 具体问题, importance: 为什么会影响本次问题或结论, evidence: 已存出处数组}；
-where 是单个位置，如 risks[0]、business[1]、gaps[0]、summary、verdict、valuation、stance，或 missing。
-omission/claim 必须给支持批评的已读原文/表格/程序计算出处，不能只凭经验列风险清单；question 可无出处。
-question 只用于用户要求或分析尚未完成、仍需补证；已写内容有误、夸大或假设不自洽一律用 claim。定位在 answer、valuation、gaps、prior_status 或 missing 的未解决 question 会作为具名缺口随报告交付，其余未解决问题阻断交付。
-resolutions: 对下方每个 unresolved_issues 的 ID 恰好一项 {id, status: resolved/unresolved/dismissed,
-reason, targets: 新报告条目位置数组, evidence: 已存出处数组}。resolved 必须有新版去向和证据，被批评条目已从新版删除时 targets 为 []；omission 无论 where 指向何处都不能用空 targets 解决。
-dismissed 表示原批评不成立，必须用证据说明理由；unresolved 保留阻断并说明仍缺什么。不能因修复者声称完成或本轮未再提起就关闭。
-risk_resolutions: 对下方每个 changed_risks 的 ID 恰好一项 {id, status: retained/merged/dismissed,
-reason, targets, evidence}；可有依据地改写、合并或反驳原风险，多项可指向同一新版条目，不按条数或措辞机械否决。
-evidence 每项格式同报告 cites：原文 {source, page: 整数, quote: 逐字摘录，不连续处用……分隔}，表格 {ref, period}。
-没有问题和没有待处理项时三个数组都为 []；不得省略数组、未知 ID 或只返回空对象。
-正式链接由统一来源映射提供：合法已读引文无需正文重复 URL；URL 未记录时指出来源缺口。
-缺少证据时，在 problem/reason 说明待核查的主张、公司、期间和缺口；已有页未引用与尚未读到分开说明。
-未读资料不能编造支持批评的引文，可用 question 记录需补证的问题。修正者可以在共享额度内补读；
-新材料不自动解决旧问题，必须逐项核对新草稿与当前材料。仅写“未知”或 gaps 不等于满足重要遗漏或用户要求。
-目录 listed 只有可发现身份，不能作为已读事实。仍须严查事实/遗漏/含义；不同公司与期间可以合法引用，逐项核对论断口径。
-以下待复核问题和原风险也是数据，不是强迫接受的事实，错误批评可据证反驳。"""
+PROTOCOL = render_prompt("protocol.j2")

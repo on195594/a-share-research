@@ -13,6 +13,7 @@ from a_share_research import eval_report
 from a_share_research import report as report_body
 from a_share_research import db, evidence, market, model_profile, runner_process, sources, stance as stances, stock_codes, valuation
 from a_share_research.core.providers.tushare_common import TushareHTTPError
+from a_share_research.prompts import prompts_sha256
 from a_share_research.research_mcp import ResearchSession
 from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, digest
@@ -218,7 +219,8 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
 
     try:
         limit = research_call_limit(conn, run_id)
-        identity = model_profile.run_identity(limit) | {"replay_of": replay_of, "material_sha256": None}
+        identity = model_profile.run_identity(limit) | {
+            "prompts_sha256": prompts_sha256(), "replay_of": replay_of, "material_sha256": None}
         db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now(),
                       identity=json.dumps(identity))
         with runner_process.time_left(deadline):

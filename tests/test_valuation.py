@@ -212,7 +212,7 @@ def test_missing_contract_and_feedback_exemption():
     schema = prompts.output_schema(material())
     assert '"years": [2026, 2027, 2028]' in schema
     assert 'report_rc' not in schema
-    assert prompts.VALUATION not in prompts.output_schema(mat)
+    assert '"valuation"' not in prompts.output_schema(mat)
 
 
 def test_patch_publish_and_review_target():
