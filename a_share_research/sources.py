@@ -245,7 +245,7 @@ def _write_atomic(path: Path, payload: bytes) -> None:
 
 def _frame(result) -> pd.DataFrame:
     if result.value is None:
-        raise SourceError(f"{result.source}: {result.error_code} {result.error_message}")
+        raise SourceError(f"{result.source}: {result.error_code} {result.error_message}") from result.cause
     return result.value
 
 

@@ -260,7 +260,7 @@ class TushareProviderBase:
             value = call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
         except Exception as exc:
             code, message = classify_tushare_exception(exc, self.token)
-            return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
+            return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint, cause=exc)
         return self._validate_frame(value, source, fingerprint, required_columns, allow_empty)
 
     def _client_or_failure(
@@ -283,7 +283,7 @@ class TushareProviderBase:
                 self._client = self._build_client()
             except Exception as exc:
                 code, message = classify_tushare_exception(exc, self.token)
-                return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
+                return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint, cause=exc)
         return self._client
 
     def _build_client(self) -> Any:
