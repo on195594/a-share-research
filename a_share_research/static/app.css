@@ -192,13 +192,11 @@ form.inline { display: inline; margin: 0; }
 .relative-call { font-size: 15px; margin: -8px 0 12px; }
 .snapshot { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 100px), 1fr)); margin: 16px 0 4px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-/* Hairlines between cells, drawn outward so the clipped outer edge stays the border; the last
-   cell runs to the row end so a short last row leaves no empty box. */
+/* Hairlines between cells, drawn outward so the clipped outer edge stays the border. A short
+   last row keeps cells in reading order; an auto-start cell cannot stretch to the row end. */
 .snapshot div { margin: 0; padding: 8px 12px; box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line); }
-.snapshot div:last-child { grid-column: auto / -1; }
-.snapshot div.pe-bands { grid-column: span 2 / -1; }
+.snapshot div.pe-bands { grid-column: span 2; }
 .valuation-snapshot { grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
-.valuation-snapshot div:last-child { grid-column: auto; }
 .snapshot dt { color: var(--muted); font-size: 13px; }
 .snapshot dd { margin: 0; font-size: 17px; font-weight: 650; white-space: nowrap; letter-spacing: -0.01em; }
 .snapshot small, th small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 2px; }
@@ -655,7 +653,6 @@ a.plain:hover { text-decoration-color: var(--accent); }
 /* ---------- Decision, Steps and Navigation Polish ---------- */
 .stance { margin: 12px 0 16px; }
 .stance-snapshot { margin: 8px 0 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
-.stance-snapshot div:last-child { grid-column: auto; }
 .stance-snapshot dd { white-space: normal; overflow-wrap: anywhere; }
 .stance-snapshot dd:not(.num) small { display: block; margin-left: 0; }
 .stance-trigger { margin: 6px 0; color: var(--ink); }
