@@ -129,11 +129,10 @@
     <div class="figures">{% for f in figures[:shown] %}{{ figure(f) }}{% endfor %}</div>
     {% if figures | length > shown %}
     <details class="block more-figures">
-      <summary>更多走势 · {{ figures[shown:] | map(attribute='title') | join('、') }}</summary>
+      <summary>更多走势 · {{ figures[shown:] | length }} 张图</summary>
       <div class="figures">{% for f in figures[shown:] %}{{ figure(f) }}{% endfor %}</div>
     </details>
     {% endif %}
-    <p class="hint">图中数值均来自本报告保存的财务数据；桌面悬停、手机点按可读出每一期，每张图下的“本图数值”列出全部数值。</p>
     {% endif %}
     <h3>财务要点</h3>
     {{ items(content.financial or [], rows, "可列出的财务事实", documents, "financial", focus, limit=4) }}
@@ -175,7 +174,7 @@
   {% if content.checkpoints %}
   <section id="checkpoints" tabindex="-1">
     <h2>下期检查点</h2>
-    <p class="muted">下一期披露时应观察的事项；出处只证明基期事实。标“预测”的是对下一期财务表数值的区间判断，披露后由程序记分。</p>
+    <p class="muted">标“预测”的条目在下一期披露后由程序记分。</p>
     {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus, followup=purpose != 'diagnostic' and not replay_of) }}
   </section>
   {% endif %}
