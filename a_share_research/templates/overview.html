@@ -14,7 +14,7 @@
   <a class="link" href="/account/ledger/new">记一笔成交</a></div>
 {% if view.policy %}
 <p><strong>{{ monitor_status(view.policy) }}</strong></p>
-{{ policy_link(view.policy) }}
+{{ policy_link(view.policy, view.account) }}
 {{ monitor_items(view.policy) }}
 {% endif %}
 {% if view.gaps %}<ul class="facts">{% for gap in view.gaps %}<li>{{ account_gap(gap) }}</li>{% endfor %}</ul>{% endif %}

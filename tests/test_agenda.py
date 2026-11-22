@@ -138,12 +138,6 @@ def test_a_flagged_status_does_not_erase_verified_facts():
     assert facts["risks"] == draft["risks"] and "prior_status" not in facts
 
 
-def test_status_citations_count_on_the_report_page():
-    rows = {"T.op_cash": {"calculation": None}}
-    content = {"prior_status": [{"ref": "risks[0]", "status": "已发生", "text": "x", "cites": [CASH]}]}
-    assert reading.evidence_ledger(content, rows, {})["quotes"] == 1
-
-
 # ---------- real reports ----------
 
 def continuation_body(entries):

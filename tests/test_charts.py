@@ -348,23 +348,6 @@ def test_verdict_track_uses_reviewed_original_reports_with_their_questions():
         assert ("问题：" + row["question"][:40]) in point["tip"] if row["question"] else "未记录具体问题" in point["tip"]
 
 
-def test_ledger_counts_distinct_quotes_and_calculations_actually_cited():
-    body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
-    rows = {r["id"]: r for r in body["table"]}
-    ledger = reading.evidence_ledger(body, rows, reading.evidence_context(body, None))
-    quotes = {(c.get("source") or "D0", c.get("page"), c["quote"]) for key in ("answer", "risks", "business", "financial", "checkpoints", "methods")
-              for item in body.get(key) or [] for c in item.get("cites") or [] if not c.get("ref") and c.get("quote")}
-    assert ledger["quotes"] == len(quotes) > 0
-    cited = {c["ref"] for key in ("answer", "risks", "business", "financial", "checkpoints", "methods")
-             for item in body.get(key) or [] for c in item.get("cites") or [] if c.get("ref")}
-    assert ledger["calculations"] == len({ref for ref in cited if rows[ref].get("calculation")}) == 3
-    assert len(cited) > 3  # plain table rows are cited too and are not counted as calculations
-    assert ledger["risks"] == len(body["risks"]) and ledger["gaps"] == len(dict.fromkeys(body.get("gaps") or []))
-    doubled = copy.deepcopy(body)
-    doubled["risks"].append(copy.deepcopy(doubled["risks"][0]))
-    assert reading.evidence_ledger(doubled, rows, {})["quotes"] == ledger["quotes"]
-
-
 def test_folded_items_keep_claim_ids_and_open_for_a_focused_claim():
     body = next(r["report"]["body"] for r in RECORDS if r["report"]["id"] == 37)
     answers = [item for key in ("risks", "business", "financial", "checkpoints") for item in body.get(key) or []][:7]

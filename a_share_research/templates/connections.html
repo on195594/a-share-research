@@ -2,6 +2,11 @@
 {% block title %}授权管理 · 个股研究{% endblock %}
 {% block main %}
 <h1>授权管理</h1>
+<section class="device-preferences" aria-labelledby="device-heading">
+  <h2 id="device-heading">此设备</h2>
+  {% if device_until %}<span>已记住此设备，至 {{ device_until }}（北京时间）；退出即取消。</span>
+  {% else %}<form method="post" action="/auth/remember-device"><input type="hidden" name="return_path" value="{{ request.url.path }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">记住此设备 30 天</button><span>仅在自己的设备启用</span></form>{% endif %}
+</section>
 <section aria-labelledby="mcp-address-label">
   <h2 id="mcp-address-label"><label for="mcp-address">MCP 地址</label></h2>
   <div class="search">

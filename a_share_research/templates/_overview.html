@@ -18,10 +18,13 @@
 {{ gap }}{% if 'NAV' in gap %} · <a href="/account/nav/new">评估 NAV 区间</a>{% endif %}
 {%- endmacro %}
 
+{# The review status repeats the action when a review is already pending. #}
 {% macro monitor_status(policy) -%}
 {{ {'no_action':'暂无动作', 'review_candidate':'待复核', 'trade_candidate':'有待确认的交易候选'}.get(policy.action_status, policy.action_status) }}
  · {{ {'complete':'资料完整', 'partial':'资料不完整', 'stale':'资料过期', 'unavailable':'资料不可用', 'conflicted':'资料有冲突'}.get(policy.data_status, policy.data_status) }}
+{%- if not (policy.review_status == 'review_required' and policy.action_status == 'review_candidate') %}
  · {{ {'cleared':'复核已通过', 'review_required':'需要复核', 'blocked':'复核受阻'}.get(policy.review_status, policy.review_status) }}
+{%- endif %}
 {%- endmacro %}
 
 {% macro monitor_items(policy) %}
@@ -34,7 +37,6 @@
 {% set account = view.account %}
 {% if account %}
 <p><a href="{{ account.path }}">{{ '绑定账本' if account.mode == 'ledger' else '已核实镜像' }}</a>
-  {% if account.mode == 'ledger' %}{{ account.account_id }} · 账户版本 {{ account.version }}{% endif %}
   <span class="small muted">来源登记于 {{ account.source_updated_at|shanghai_minute }}</span></p>
 {% if account.latest_receipt %}
 <p>最近对账 · <a href="{{ account.latest_receipt.path }}">{{ receipt_status(account.latest_receipt.status) }}回执 #{{ account.latest_receipt.id }}</a>
@@ -50,17 +52,17 @@
 {% endif %}
 {% endmacro %}
 
-{% macro policy_link(policy) %}
-<p><a href="{{ policy.path }}">监控评估 #{{ policy.id }}</a> · 评估于 {{ policy.as_of|shanghai_minute }}
-  <span class="small muted">账户版本 {{ policy.account_version }}</span></p>
-<p class="small muted">评估采用的政策 <span title="{{ policy.identity }}">{{ policy.identity[:15] }}…</span> · 启用编号 {{ policy.activation_id }}</p>
+{# Version and policy identity live on the evaluation page; here only a stale evaluation is worth a line. #}
+{% macro policy_link(policy, account=none) %}
+<p><a href="{{ policy.path }}">监控评估</a> · 评估于 {{ policy.as_of|shanghai_minute }}
+  {% if account and account.mode == 'ledger' and account.version != policy.account_version %}<strong class="flag">评估基于账户版本 {{ policy.account_version }}，账本已更新到版本 {{ account.version }}</strong>{% endif %}</p>
 {% endmacro %}
 
 {% macro company_body(company, portfolio=false) %}
 {% set r = company.research %}
 {% if r %}
-<p>{% if r.verdict %}{{ badge(r.verdict) }}{% endif %} {{ r.summary or '' }}</p>
-<p class="small"><a href="{{ r.path }}">研究报告 #{{ r.report_id }}</a> · {{ r.status }} · 研究于 {{ r.completed_at|shanghai_minute }} · 资料至 {{ r.period }}</p>
+<p>{% if r.verdict %}{{ badge(r.verdict) }}{% endif %} {{ (r.summary or '') | without_verdict(r.verdict) }}</p>
+<p class="small"><a href="{{ r.path }}">研究报告</a>{% if r.status != '有效' %} · <strong class="flag">{{ r.status }}</strong>{% endif %} · 研究于 {{ r.completed_at|shanghai_minute }} · 资料至 {{ r.period }}</p>
 <p>报告立场 · {% if r.stance %}<strong>{{ r.stance.action }}</strong> {{ r.stance.text }}
   {% if r.stance.hurdle is not none %} · 门槛价 {{ r.stance.hurdle }} 元{% endif %}
   {% if r.stance.valid_until %} · 有效至 {{ r.stance.valid_until }}{% endif %}
@@ -83,7 +85,7 @@
   <p>{{ thesis.l1 }}</p><p>{{ thesis.l2 }}</p>{% endfor %}</details>
 {% endif %}
 {% if company.policy %}
-{% if not portfolio %}{{ policy_link(company.policy) }}{% endif %}
+{% if not portfolio %}{{ policy_link(company.policy, company.account) }}{% endif %}
 {% if company.policy.stop_risk_pct is not none %}<p>止损参考风险占组合 {{ company.policy.stop_risk_pct|decimal_format('.2f') }}%</p>{% endif %}
 {% endif %}
 {% set has_evidence = company.gaps or (company.policy and (company.policy.data_gaps or company.policy.escalations)) or company.announcements %}

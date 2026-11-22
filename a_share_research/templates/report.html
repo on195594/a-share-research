@@ -53,16 +53,6 @@
       {% if body.failure %}<p class="small">停止阶段：{{ {'check': '原文与计算检查', 'review': '独立复核'}.get(body.failure.stage, '研究处理') }}；{{ {'review_format': '复核响应无效，未接受解决声明', 'substantive_review': '实质问题仍未解决', 'citation_calculation': '引用、数字或报告结构检查未通过', 'source_input': '来源身份存在冲突', 'generation_format': '成文响应格式无效'}.get(body.failure.category, '流程未能完成') }}。<a href="?scope=1#research-scope">查看具体问题与已存原文</a>；不会自动重跑。</p>{% endif %}
       {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
     {% endif %}
-    {# A failed review with nothing retained has no evidence to count; the notice above says so. #}
-    {% if ledger and (report.passed or ledger.risks or ledger.quotes or ledger.calculations) %}
-    <ul class="ledger" aria-label="正文条目引用的证据计数">
-      <li><a href="#risks"><b>{{ ledger.risks }}</b> 条风险与反证</a></li>
-      {% if ledger.checkpoints %}<li><a href="#checkpoints"><b>{{ ledger.checkpoints }}</b> 个检查点</a></li>{% endif %}
-      <li><b>{{ ledger.quotes }}</b> 段引用原文</li>
-      <li><b>{{ ledger.calculations }}</b> 项引用的程序计算</li>
-      <li><a href="?evidence=1#evidence"><b>{{ ledger.gaps }}</b> 项记录的缺口</a></li>
-    </ul>
-    {% endif %}
     {% if market %}
     <dl class="snapshot" aria-label="估值快照，{{ body.market_date }} 收盘">
       {% for r in market %}<div><dt>{{ r.label }}</dt><dd class="num">{{ r["values"].values() | first }}<small>{{ r.unit }}</small></dd></div>{% endfor %}

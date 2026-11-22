@@ -211,7 +211,7 @@ def test_invalid_variants_return_none(variant):
             scenario['dividends'] = calc['market_cap'] * 10
     assert stance.flip_distance(calc) is None
 
-def test_report_and_both_card_shapes():
+def test_sensitivity_sits_with_the_stance():
     sample = FLIP_SAMPLES[0]
     calc = sample['valuation_calc']
     body = {'stance': {'action': sample['action']}, 'valuation_calc': calc, 'market_date': calc['as_of']}
@@ -220,9 +220,10 @@ def test_report_and_both_card_shapes():
     card = reading.card(rep, body)
     cards = ENV.get_template('_card.html').module
     distance = stance.flip_distance(calc)
-    for html in (render('report.html', report=rep, body=body, rows={}, comparison=None),
-                 cards.summary_card(card), cards.full_card(card)):
+    for html in (render('report.html', report=rep, body=body, rows={}, comparison=None), cards.full_card(card)):
         assert '假设敏感度' in html and f'{abs(distance) * 100:.1f}%' in html
+    # The home card shows no stance, so a stance-flip distance there has nothing to refer to.
+    assert '假设敏感度' not in cards.summary_card(card)
 
 
 def test_exact_hurdle_has_zero_distance_and_no_direction_claim():

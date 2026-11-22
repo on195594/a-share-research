@@ -317,12 +317,6 @@ nav[aria-label="报告章节"], #batch-sections, #company-sections {
 .pips i { width: 10px; height: 6px; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--control); }
 .pips i.on { background: var(--accent); box-shadow: none; }
 
-.ledger { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 10px 0; margin: 12px 0 0;
-  border-block: 1px solid var(--line); font-size: 14px; color: var(--muted); }
-.ledger li { display: inline-flex; align-items: center; min-height: 40px; }
-.ledger b { color: var(--ink); font-size: 16px; font-weight: 700; margin-right: 3px; }
-.ledger a { color: var(--muted); text-decoration: none; min-height: 40px; display: inline-flex; align-items: center; }
-.ledger a:hover { color: var(--accent-strong); text-decoration: underline; }
 
 .question { font-weight: 600; }
 h3 { font-size: 16px; line-height: 1.4; margin: 24px 0 8px; }
@@ -663,9 +657,12 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .compare-shortcut:hover { color: var(--accent-strong); }
 .step-desc { font-size: 13px; font-weight: 400; color: var(--muted); margin: 4px 0 2px; line-height: 1.5; }
 
-.device-preferences { max-width: var(--column); margin: 0 auto; padding: 0 20px; font-size: 13px; color: var(--muted); }
+.device-preferences span { font-size: 14px; color: var(--muted); }
 .device-preferences form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .device-preferences button { min-height: 44px; }
+.item-actions { display: flex; align-items: flex-start; gap: 16px; }
+.item-actions > details { flex: 1; min-width: 0; }
+.item-actions > a { min-height: 44px; display: inline-flex; align-items: center; flex: none; }
 
 .account-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .account-form input[type="file"] { width: 100%; }

@@ -858,7 +858,6 @@ def report_page(request: Request, report_id: int):
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"], newer_report=newer_report,
                   source_view=report_source_view(body, (json.loads(run["material"] or "{}") or {}).get("data")),
-                  ledger=reading.evidence_ledger(body if row['passed'] else body.get('facts') or {}, rows, evidence),
                   figures=charts.financial_charts(body, fin), vitals=charts.vitals(body, fin),
                   peer_snapshots=reading.peer_snapshots(body) if row['passed'] else [],
                   feedback_retry=service.feedback_retry_payload(run) is not None,

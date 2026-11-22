@@ -287,21 +287,6 @@ def evidence_context(body: dict, coverage: str | None) -> dict:
             'gaps': list(dict.fromkeys(body.get('gaps') or []))}
 
 
-def evidence_ledger(content: dict, rows: dict, evidence: dict) -> dict:
-    """Counts of what a report shows: its items, distinct quoted passages and program calculations."""
-    quotes, calculations = set(), set()
-    for key in ('answer', 'prior_status', 'risks', 'business', 'financial', 'checkpoints', 'methods'):
-        for item in content.get(key) or []:
-            for cite in item.get('cites') or [] if isinstance(item, dict) else []:
-                if cite.get('ref'):
-                    if (rows.get(cite['ref']) or {}).get('calculation'):
-                        calculations.add(cite['ref'])
-                elif cite.get('quote'):
-                    quotes.add((cite.get('source') or 'D0', cite.get('page'), cite['quote']))
-    return {'risks': len(content.get('risks') or []), 'checkpoints': len(content.get('checkpoints') or []),
-            'quotes': len(quotes), 'calculations': len(calculations), 'gaps': len(evidence.get('gaps') or [])}
-
-
 def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
                    passed: bool = False, since: str | None = None, code_prefix: str | None = None,
                    limit: int = -1, offset: int = 0, include_checkpoint: bool = True) -> list:
@@ -616,6 +601,14 @@ CARD_KEYS = ('T.revenue_yoy', 'T.core_profit_yoy', 'M.pe_ttm', 'M.dv_ttm')
 CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
 
 
+def without_verdict(summary: str, verdict: str | None) -> str:
+    """Summaries often open with the verdict that the page already shows on its scale or badge."""
+    summary = summary.strip()
+    if verdict and summary[len(verdict):len(verdict) + 1] in ('：', ':', '，') and summary.startswith(verdict):
+        return summary[len(verdict) + 1:].lstrip()
+    return summary
+
+
 def card(report, body: dict, last_passed=None, *, checks: list[dict] | None = None) -> dict:
     """One company's investment card from saved data; no market fetch or valuation recomputation.
 
@@ -625,10 +618,7 @@ def card(report, body: dict, last_passed=None, *, checks: list[dict] | None = No
     report = dict(report)  # sqlite3.Row has no .get
     passed = bool(report['passed'])
     verdict = report['verdict'] if passed and report['verdict'] in charts.VERDICTS else None
-    summary = (body.get('summary') or '').strip() if passed else ''
-    # Summaries often open with the verdict the card already shows on its scale.
-    if verdict and summary[len(verdict):len(verdict) + 1] in ('：', ':', '，') and summary.startswith(verdict):
-        summary = summary[len(verdict) + 1:].lstrip()
+    summary = without_verdict(body.get('summary') or '', verdict) if passed else ''
 
     def texts(key):
         return [i['text'] for i in body.get(key) or []

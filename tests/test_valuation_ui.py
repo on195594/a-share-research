@@ -84,6 +84,8 @@ def test_unavailable_and_partial_without_samples_show_coverage():
     comparison.update(status='partial', coverage={'trading_days': 2, 'covered_days': 1, 'truncated_days': []})
     html = page(body)
     assert '部分覆盖' in html and '覆盖 1/2 个交易日' in html and '未采集到符合日期' in html
+    comparison.update(status='ok', coverage={'trading_days': 2, 'covered_days': 2, 'truncated_days': []})
+    assert '覆盖 2/2 个交易日' not in page(body)  # full coverage is the normal case and says nothing
 
 
 def test_v2_shadow_and_research_stance_render_with_program_price():

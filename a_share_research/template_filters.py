@@ -2,6 +2,7 @@
 import re
 from decimal import Decimal
 
+from a_share_research import reading
 from a_share_research.scans import instant
 
 
@@ -126,4 +127,4 @@ def monitor_lines(policy: dict) -> list[tuple[str, str]]:
 
 
 FILTERS = dict(shanghai_minute=shanghai_minute, decimal_format=decimal_format, monitor_gap=monitor_gap,
-               monitor_lines=monitor_lines)
+               monitor_lines=monitor_lines, without_verdict=reading.without_verdict)

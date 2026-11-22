@@ -5,7 +5,7 @@ from html import unescape
 
 import pytest
 
-from a_share_research import overview, scans, service, template_filters
+from a_share_research import overview, reading, scans, service, template_filters
 from a_share_research.account import cycle_analysis
 from a_share_research.tools.registry import Context, invoke
 from support.account_analysis import request, rewrite
@@ -176,7 +176,7 @@ def test_public_research_and_open_disclosures_survive_an_unavailable_account(web
     page = html(web.company_overview(owner_request(path), code))
     research = company['research']
     announcement = company['announcements'][0]
-    for value in (research['verdict'], research['summary'], research['current']['current_zone'],
+    for value in (research['verdict'], reading.without_verdict(research['summary'], research['verdict']), research['current']['current_zone'],
                   research['current']['last_close_date'], research['zone_note'], research['period'], research['path'],
                   announcement['title'], announcement['source_url'], *company['account_gaps']):
         assert value in page
@@ -242,7 +242,7 @@ def test_held_company_without_research_links_to_saved_records_and_evidence(ledge
     for page in (portfolio, company):
         for value in (code, evaluation_path, receipt_path, latest['path'], *holding['gaps']):
             assert value in page
-    assert evaluation['identity'] in portfolio and evaluation['result']['as_of'][:10] in portfolio
+    assert evaluation['result']['as_of'][:10] in portfolio and evaluation['identity'] not in portfolio  # identity lives on the evaluation page
     assert '前收盘价 · 补充有效的前收盘价' in company
     stock = html(web.stock_page(owner_request(f'/stock/{code}'), code), 404)
     assert f'href="{company_path}"' in stock
