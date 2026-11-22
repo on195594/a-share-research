@@ -243,9 +243,11 @@ def _write_atomic(path: Path, payload: bytes) -> None:
     os.replace(tmp, path)
 
 
-def _frame(result) -> pd.DataFrame:
+def _frame(provider, fetch, *args, **kwargs) -> pd.DataFrame:
+    result = fetch(*args, **kwargs)
     if result.value is None:
-        raise SourceError(f"{result.source}: {result.error_code} {result.error_message}") from result.cause
+        # Chained so research can name a typed upstream failure such as TuShare's HTTP 502.
+        raise SourceError(f"{result.source}: {result.error_code} {result.error_message}") from provider.last_error
     return result.value
 
 
@@ -253,13 +255,13 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
     provider = TushareFinancialProvider()
-    indicator = _frame(provider.fetch_indicator_history(code, start_date=start))
+    indicator = _frame(provider, provider.fetch_indicator_history, code, start_date=start)
     if "profit_dedt" not in indicator.columns:
         raise SourceError("TuShare fina_indicator: 返回数据缺少必要列 profit_dedt")
     return {
-        "income": _frame(provider.fetch_income_history(code, start_date=start)),
-        "cashflow": _frame(provider.fetch_cashflow_history(code, start_date=start)),
-        "balance": _frame(provider.fetch_balance_history(code, start_date=start)),
+        "income": _frame(provider, provider.fetch_income_history, code, start_date=start),
+        "cashflow": _frame(provider, provider.fetch_cashflow_history, code, start_date=start),
+        "balance": _frame(provider, provider.fetch_balance_history, code, start_date=start),
         # The same indicator rows, projected to the columns the deducted-profit series has always stored.
         "deducted": indicator[["ts_code", "ann_date", "end_date", "update_flag", "profit_dedt"]].copy(),
         "indicator": indicator,
@@ -269,9 +271,9 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
 def valuation(code: str) -> dict:
     """Latest daily_basic row: close, PE(TTM), PB, dividend yield, market cap."""
     end = datetime.now(SHANGHAI).date()
-    frame = _frame(TushareValuationProvider().fetch_valuation_history(
-        code, start_date=(end - timedelta(days=14)).isoformat(), end_date=end.isoformat()
-    ))
+    provider = TushareValuationProvider()
+    frame = _frame(provider, provider.fetch_valuation_history,
+                   code, start_date=(end - timedelta(days=14)).isoformat(), end_date=end.isoformat())
     if frame.empty:
         raise SourceError(f"no valuation rows for {code}")
     return frame.sort_values("trade_date").iloc[-1].to_dict()
@@ -304,8 +306,8 @@ def pe_reference(code: str, market_date: str) -> dict:
     try:
         end = date.fromisoformat(market_date)
         start = end.replace(year=end.year - 5, day=28) if end.month == 2 and end.day == 29 else end.replace(year=end.year - 5)
-        frame = _frame(TushareValuationProvider().fetch_valuation_history(
-            code, start_date=str(start), end_date=market_date))
+        provider = TushareValuationProvider()
+        frame = _frame(provider, provider.fetch_valuation_history, code, start_date=str(start), end_date=market_date)
         return pe_quantiles(frame, code, market_date)
     except SourceError:
         raise

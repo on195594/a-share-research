@@ -242,6 +242,8 @@ class TushareProviderBase:
         self._client = client
         self._client_factory = client_factory
         self._rate_limiter = rate_limiter or (_GLOBAL_RATE_LIMITER if client is None else TushareRateLimiter(10**9))
+        # Exception behind the latest failed request; MarketDataResult is a serialized contract and stays exception-free.
+        self.last_error: Exception | None = None
 
     def _request_frame(
         self,
@@ -251,6 +253,7 @@ class TushareProviderBase:
         required_columns: set[str],
         allow_empty: bool = False,
     ) -> MarketDataResult[pd.DataFrame]:
+        self.last_error = None
         fingerprint = request_fingerprint(endpoint, params)
         client_result = self._client_or_failure(source, fingerprint)
         if isinstance(client_result, MarketDataResult):
@@ -259,8 +262,9 @@ class TushareProviderBase:
             method = getattr(client_result, endpoint)
             value = call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
         except Exception as exc:
+            self.last_error = exc
             code, message = classify_tushare_exception(exc, self.token)
-            return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint, cause=exc)
+            return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
         return self._validate_frame(value, source, fingerprint, required_columns, allow_empty)
 
     def _client_or_failure(
@@ -282,8 +286,9 @@ class TushareProviderBase:
             try:
                 self._client = self._build_client()
             except Exception as exc:
+                self.last_error = exc
                 code, message = classify_tushare_exception(exc, self.token)
-                return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint, cause=exc)
+                return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
         return self._client
 
     def _build_client(self) -> Any:

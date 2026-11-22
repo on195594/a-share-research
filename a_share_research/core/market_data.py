@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Generic, Literal, TypeVar
 
@@ -93,8 +93,6 @@ class MarketDataResult(Generic[T]):
     source_as_of: str | None = None
     request_fingerprint: str | None = None
     row_count: int | None = None
-    # The provider exception behind a failed result, so callers can chain it when they raise.
-    cause: BaseException | None = field(default=None, repr=False, compare=False)
 
 
 def now() -> str:
