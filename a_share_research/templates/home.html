@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
-{% from "_card.html" import summary_card %}
+{% from "_card.html" import summary_card, compact_card %}
 {% macro review_items(rows) %}
 <ul class="list">
 {% for r in rows %}
@@ -113,7 +113,9 @@
   {% if group %}
   <section class="card-group" data-verdict="{{ label }}" aria-labelledby="group-{{ label }}">
     <h3 class="group-title" id="group-{{ label }}" tabindex="-1">{{ label }} <span class="num">{{ group | length }}</span></h3>
-    <div class="cards">{% for c in group %}{{ summary_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>
+    {# Full cards only where the next step is more research; the rest index into company pages. #}
+    {% if label == "值得继续研究" %}<div class="cards">{% for c in group %}{{ summary_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>
+    {% else %}<div class="cards rows">{% for c in group %}{{ compact_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>{% endif %}
   </section>
   {% endif %}
   {% endfor %}

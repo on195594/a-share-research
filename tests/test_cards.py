@@ -129,7 +129,7 @@ def test_both_web_cards_preserve_boundary_and_full_open_questions_before_the_fol
     assert report['body'] == original  # Neither projection nor render changes the saved report.
 
 
-@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card', 'compact_card'])
 @pytest.mark.parametrize('priced', [True, False])
 def test_ordinary_and_legacy_web_cards_do_not_invent_cautions(macro, priced):
     record = deepcopy(json.loads((ROOT / 'tests/data/valuation-warning-reports-20261105.json').read_text())['reports'][5])
@@ -142,7 +142,7 @@ def test_ordinary_and_legacy_web_cards_do_not_invent_cautions(macro, priced):
     assert '边界立场' not in html and '复核认为尚未答完' not in html
 
 
-@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card', 'compact_card'])
 def test_failed_web_card_does_not_present_cautions_as_a_passed_judgment(macro):
     report = warning_report() | {'passed': 0}
     card = reading.card(report, report['body'])

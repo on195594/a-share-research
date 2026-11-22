@@ -544,6 +544,11 @@ details.block[open] { padding-bottom: 12px; }
   margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .group-title .num { font-size: 13px; font-weight: 400; }
 .cards { display: grid; gap: 12px; }
+.cards.rows { gap: 0 24px; }
+.card-row { padding: 12px 0 10px; border-bottom: 1px solid var(--line); }
+.card-row .card-name { font-size: 16px; }
+.card-row-thesis { font-size: 15px; line-height: 1.6; margin: 6px 0 0; }
+.card-row .card-meta { margin-top: 4px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 0; }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
 .card-name { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 700; }

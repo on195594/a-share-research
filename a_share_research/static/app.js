@@ -109,7 +109,7 @@ document.addEventListener("click", (event) => {
   document.querySelectorAll(".companies > [data-verdict]").forEach((group) => {
     const match = target === "all" || group.dataset.verdict === target;
     group.hidden = !match;
-    if (match) shown += group.querySelectorAll(".card").length;
+    if (match) shown += group.querySelectorAll(".card, .card-row").length;
   });
   const status = document.querySelector("[data-filter-status]");
   if (status) status.textContent = `当前显示 ${shown} 家公司`;
