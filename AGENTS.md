@@ -71,7 +71,7 @@
 ## 工程约束
 
 - 凭据保存在私有环境文件或宿主 pi 的凭据存储中，权限 0600，不进 Git 和镜像。worker 从 `.env` 读取行情凭据及 pi 配置，tools 从独立的 `.env.tools` 接收所需行情凭据。web 进程不持模型与行情凭据。
-- Python 源码在 `a_share_research/`，使用包绝对导入。模型调用统一经 TypeScript 的 `agent-runner/`，从宿主 pi 安装加载 pi-agent-core、pi-ai、pi-mcp 及 pi-coding-agent 的 ModelRuntime，随宿主升级。研究工具由 worker 经 MCP 提供，角色、模型与运行上限由版本化的模型配置档定义。
+- Python 源码在 `a_share_research/`，使用包绝对导入。模型调用统一经 TypeScript 的 `agent-runner/`，从宿主 pi 安装加载 pi-agent-core、pi-ai、pi-mcp 及 pi-coding-agent 的 ModelRuntime，随宿主升级。研究工具由 worker 经 MCP 提供，角色、模型与运行上限由版本化的模型配置档定义。模型可见的提示词措辞只放在 `a_share_research/prompts/` 模板里，Python 只提供事实变量与开关。
 - 生产/后台代码用 `logging`，不裸 `print`；不吞异常。修 Bug 必须定位真实数据源、工具或解析根因，严禁只在外层加防御性判空掩盖数据异常。
 - **边界解析与纯函数**：外部金融行情、公告与研报数据在接入边界完成清洗校验与类型收敛；内部核心业务逻辑、指标派生与引文核对保持为可直接验证的纯函数。
 - **数据层治理**：带公司代码的新表须有 `company_key`，跨表比较只用它；大字段放表尾，后加高频列须配索引或重建；表间关系用列，记分样本复用常量且不改冻结口径；迁移须可重入并验证旧镜像兼容，否则单独设计回退（见[数据层方案第 7 节](docs/data-foundation.md#7-验收与治理规则)）。

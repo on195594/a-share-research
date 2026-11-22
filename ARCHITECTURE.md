@@ -9,7 +9,7 @@ Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布
 | 模块 | 职责与状态 |
 |---|---|
 | `core/`、`market.py` | 数据提供方、来源与时点、行情接入和确定性计算。 |
-| `research.py`、`research_mcp.py`、`research_tools.py`、`prompts.py` | 冻结研究身份及材料，执行取证和计算，生成全部提示词并决定复核、修补或结束，持久化工具轨迹与模型调用，判定终稿能否发布。 |
+| `research.py`、`research_mcp.py`、`research_tools.py`、`prompts.py` | 冻结研究身份及材料，执行取证和计算，用 `prompts/` 模板渲染全部提示词并决定复核、修补或结束，持久化工具轨迹与模型调用，判定终稿能否发布。 |
 | `drafts.py`、`checking.py`、`reviewing.py` | 按原稿索引原子合并补丁，核对事实与计算，绑定材料、稿件、历次问题及决议。 |
 | `agent-runner/` | 按角色和阶段调度模型、切换工具、判定停止和执行调用上限，不持有提示词措辞。对话只在子进程内存中保存。 |
 | `account/` | 保存凭证、账户事件、资产观察与对账回执，从有效事件重建持仓和现金。分析历史按账户和持仓周期追加，涵盖论点版本、L3、预警和 Tier。 |
