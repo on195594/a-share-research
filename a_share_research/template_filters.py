@@ -66,4 +66,64 @@ def monitor_gap(gap: dict) -> str:
     return f'{label} · {hint}'
 
 
-FILTERS = dict(shanghai_minute=shanghai_minute, decimal_format=decimal_format, monitor_gap=monitor_gap)
+_ESCALATIONS = {
+    'quote sources conflict': '行情来源之间有冲突',
+    'multiple active holding rows for one code': '同一代码有多条在仓记录',
+    'quote is stale': '行情已过期',
+    'quote or timestamp unavailable': '缺少行情或时间戳',
+    'current price reached the stored second stop line': '现价已触及第二档止损参考价',
+    'current price reached the stored first stop line': '现价已触及第一档止损参考价',
+    'explicit portfolio value is required for weights and risk budgets': '缺少组合总资产，无法计算仓位占比和风险预算',
+    'account scope is unconfirmed; policy not applied; weights and risk budgets unavailable':
+        '账户范围未确认，未执行政策，仓位占比和风险预算不可用',
+}
+
+_L3_CONTRACTS = {'versioned': '有条件尚待核实', 'legacy': '缺少当前生效的论点版本',
+                 'invalid': '论点条件不完整', 'none': '没有持仓论点'}
+
+_ESCALATION_PATTERNS = (
+    (r'daily change (\S+)% is at or below -3%', lambda m: f'当日涨跌 {m[1]}%，已到 -3% 提醒线'),
+    (r'relative change (\S+)pts is at or below -2pts', lambda m: f'相对行业 {m[1]} 个百分点，已到 -2 个百分点提醒线'),
+    (r'(?:path (\S+)|Tier1) price target reached; review Step 4',
+     lambda m: f'{"路径 " + m[1] if m[1] else "第一档"}目标价已到，复核第 4 步'),
+    (r'alert (\S+) is due', lambda m: f'预警 {m[1]} 已到复核日'),
+    (r'L3 state requires verification \((.*)\)', lambda m: 'L3 持仓论点待核实：' + _L3_CONTRACTS.get(m[1], m[1])),
+    (r'L3 condition (\d+) is due', lambda m: f'L3 条件 #{m[1]} 已到复核日'),
+    (r'L3 condition (\d+) is triggered', lambda m: f'L3 条件 #{m[1]} 已触发'),
+    (r'L3 condition (\d+) is watch \(as_of (\S+), next_review (\S+)\); no new risk',
+     lambda m: f'L3 条件 #{m[1]} 观察中（资料截至 {m[2]}，下次复核 {m[3]}），无新增风险'),
+)
+
+
+def monitor_escalation(item: dict) -> str:
+    # Saved evaluations keep the policy's English detail; the owner reads the Chinese rendering.
+    detail = item['detail']
+    if item['reason_code'] == 'risk_budget_exceeded':
+        fields = dict(part.split('=', 1) for part in detail.split('; ') if '=' in part)
+        scope = '单只' if fields.get('scope') == 'position' else '组合'
+        return (f'{scope}止损参考风险 {fields.get("amount", "?").removesuffix(" CNY")} 元，占 {fields.get("ratio", "?")}，'
+                f'超过上限 {fields.get("limit", "?")}')
+    if item['reason_code'] == 'denominator_missing':
+        for english, chinese in _ESCALATIONS.items():
+            detail = detail.replace(english, chinese)
+        return detail.replace('; ', '；')
+    for pattern, render in _ESCALATION_PATTERNS:
+        if match := re.fullmatch(pattern, detail):
+            return render(match)
+    return _ESCALATIONS.get(detail) or _GAP_ACTIONS.get(detail, detail)
+
+
+def monitor_lines(policy: dict) -> list[tuple[str, str]]:
+    """Escalations, then data gaps; the same line for several holdings collapses into one."""
+    names = {h['code']: h.get('name') or h['code'] for h in policy.get('holdings') or []}
+    lines: dict[str, list[str]] = {}
+    for text, code in ([(monitor_escalation(e), e['code']) for e in policy.get('escalations') or []]
+                       + [(monitor_gap(g), g['code']) for g in policy.get('data_gaps') or []]):
+        codes = lines.setdefault(text, [])
+        if code and code not in codes:
+            codes.append(code)
+    return [('、'.join(names.get(code, code) for code in codes), text) for text, codes in lines.items()]
+
+
+FILTERS = dict(shanghai_minute=shanghai_minute, decimal_format=decimal_format, monitor_gap=monitor_gap,
+               monitor_lines=monitor_lines)

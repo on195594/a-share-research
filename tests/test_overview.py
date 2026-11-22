@@ -47,6 +47,37 @@ def test_overview_display_formats():
     assert template_filters.monitor_gap(dict(field='new_field', minimum_action='new hint')) == 'new_field · new hint'
 
 
+def test_monitor_lines_render_saved_english_details_and_collapse_repeated_gaps():
+    # Escalation details and gaps as saved by production monitor evaluation 519 (2026-11-20).
+    gap = {'field': 'industry_change_pct', 'minimum_action': 'supply a same-day industry comparison'}
+    policy = {
+        'holdings': [{'code': '002050', 'name': '三花智控'}, {'code': '601899', 'name': '紫金矿业'},
+                     {'code': '603606', 'name': '东方电缆'}],
+        'escalations': [
+            {'code': '002050', 'reason_code': 'daily_drop', 'detail': 'daily change -3.50% is at or below -3%'},
+            {'code': '601899', 'reason_code': 'l3_candidate', 'detail': 'L3 state requires verification (versioned)'},
+            {'code': '603606', 'reason_code': 'l3_watch', 'detail':
+             'L3 condition 35 is watch (as_of 2026-10-30, next_review 2027-04-30); no new risk'},
+            {'code': None, 'reason_code': 'risk_budget_exceeded', 'detail':
+             'scope=portfolio; amount=81234.5 CNY; principal=unknown; unrealized_gain=unknown; ratio=8.4%; '
+             'limit=8%; denominator=967078 CNY; denominator_source=explicit; account_scope=all'},
+            {'code': '601899', 'reason_code': 'new_reason', 'detail': 'unmapped detail'},
+        ],
+        'data_gaps': [dict(gap, code=code) for code in ('002050', '601899', '603606')],
+    }
+    assert template_filters.monitor_lines(policy) == [
+        ('三花智控', '当日涨跌 -3.50%，已到 -3% 提醒线'),
+        ('紫金矿业', 'L3 持仓论点待核实：有条件尚待核实'),
+        ('东方电缆', 'L3 条件 #35 观察中（资料截至 2026-10-30，下次复核 2027-04-30），无新增风险'),
+        ('', '组合止损参考风险 81234.5 元，占 8.4%，超过上限 8%'),
+        ('紫金矿业', 'unmapped detail'),
+        ('三花智控、紫金矿业、东方电缆', '行业涨跌幅 · 补充同一交易日的行业涨跌幅'),
+    ]
+    # Overview read models carry no holdings list; lines fall back to codes.
+    assert template_filters.monitor_lines({'escalations': [], 'data_gaps': [dict(gap, code='002050')]}) == [
+        ('002050', '行业涨跌幅 · 补充同一交易日的行业涨跌幅')]
+
+
 def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_monitor):
     configured = ledger_monitor
     (path, conn, principal, directory, sha), _, active, _ = configured

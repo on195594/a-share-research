@@ -1189,6 +1189,12 @@ def batch_page(request: Request, batch_id: int):
         batch["q20"] = reading.research_state(conn, batch["q20"])[1]
         if dual:
             batch["s10"] = reading.research_state(conn, batch.get("s10") or [])[1]
+    # Frozen rows keep the ids of failed runs that were later deleted; show their error without a dead link.
+    linked = [r for r in (batch["q20"] or []) + (batch.get("s10") or []) if r.get("run_id")]
+    existing = reading.existing_run_ids(conn, [r["run_id"] for r in linked])
+    for r in linked:
+        if r["run_id"] not in existing:
+            r["run_id"] = None
     draft = ((batch["selection"] or {}).get("draft") or {})
     results = batches.returns(batch)
     names = {r["code"]: r["name"] for r in (batch["q20"] or []) + (batch.get("s10") or [])}

@@ -741,6 +741,11 @@ def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
     return done, q20
 
 
+def existing_run_ids(conn, run_ids: list[int]) -> set[int]:
+    marks = ",".join("?" * len(run_ids))
+    return {r[0] for r in conn.execute(f"SELECT id FROM runs WHERE id IN ({marks})", run_ids)} if run_ids else set()
+
+
 def active_runs(conn) -> list:
     """Queued and running tasks, plus recent failures nobody has retried or asked again."""
     since = (datetime.now(db.SHANGHAI) - timedelta(days=RECENT_FAILURE_DAYS)).isoformat(timespec="seconds")

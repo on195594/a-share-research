@@ -26,10 +26,7 @@
 
 {% macro monitor_items(policy) %}
 {% if policy and (policy.escalations or policy.data_gaps) %}
-<ul class="facts">
-  {% for item in policy.escalations %}<li>{% if item.code %}{{ item.code }} · {% endif %}{{ item.detail }}</li>{% endfor %}
-  {% for gap in policy.data_gaps %}<li>{% if gap.code %}{{ gap.code }} · {% endif %}{{ gap|monitor_gap }}</li>{% endfor %}
-</ul>
+<ul class="facts">{% for who, text in policy|monitor_lines %}<li>{% if who %}{{ who }} · {% endif %}{{ text }}</li>{% endfor %}</ul>
 {% endif %}
 {% endmacro %}
 
@@ -56,10 +53,10 @@
 {% macro policy_link(policy) %}
 <p><a href="{{ policy.path }}">监控评估 #{{ policy.id }}</a> · 评估于 {{ policy.as_of|shanghai_minute }}
   <span class="small muted">账户版本 {{ policy.account_version }}</span></p>
-<p class="small muted">评估采用的政策身份 {{ policy.identity }} · 启用编号 {{ policy.activation_id }}</p>
+<p class="small muted">评估采用的政策 <span title="{{ policy.identity }}">{{ policy.identity[:15] }}…</span> · 启用编号 {{ policy.activation_id }}</p>
 {% endmacro %}
 
-{% macro company_body(company, account, nav, portfolio=false) %}
+{% macro company_body(company, portfolio=false) %}
 {% set r = company.research %}
 {% if r %}
 <p>{% if r.verdict %}{{ badge(r.verdict) }}{% endif %} {{ r.summary or '' }}</p>
@@ -86,8 +83,7 @@
   <p>{{ thesis.l1 }}</p><p>{{ thesis.l2 }}</p>{% endfor %}</details>
 {% endif %}
 {% if company.policy %}
-{% if portfolio %}<p><a href="{{ company.policy.path }}">持仓监控 #{{ company.policy.id }}</a> · {{ company.policy.as_of|shanghai_minute }}</p>
-{% else %}{{ policy_link(company.policy) }}{% endif %}
+{% if not portfolio %}{{ policy_link(company.policy) }}{% endif %}
 {% if company.policy.stop_risk_pct is not none %}<p>止损参考风险占组合 {{ company.policy.stop_risk_pct|decimal_format('.2f') }}%</p>{% endif %}
 {% endif %}
 {% set has_evidence = company.gaps or (company.policy and (company.policy.data_gaps or company.policy.escalations)) or company.announcements %}
@@ -108,8 +104,6 @@
 {% if portfolio %}
 <div class="actions">
   {% if has_evidence %}<a class="link" href="{{ company.evidence_path }}">核对待补证据与公告</a>{% endif %}
-  {% if account.latest_receipt %}<a class="link" href="{{ account.latest_receipt.path }}">账户对账回执</a>{% endif %}
-  {% if nav %}<a class="link" href="{{ nav.path }}">账户 NAV 区间</a>{% endif %}
 </div>
 {% endif %}
 {% endmacro %}

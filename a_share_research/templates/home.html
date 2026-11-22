@@ -24,7 +24,7 @@
     <input type="hidden" name="request_id" value="{{ request_id }}">
     <label for="q">研究一家公司</label>
     <div class="row">
-      <input id="q" name="q" value="{{ q or '' }}" placeholder="代码或简称，如 600519 或 茅台" autocomplete="off" enterkeyhint="go" required>
+      <input id="q" name="q" value="{{ q or '' }}" placeholder="代码或简称，如 600519" autocomplete="off" enterkeyhint="go" required>
       <button class="btn" type="submit">开始研究</button>
     </div>
     <details class="question"{% if question %} open{% endif %}>

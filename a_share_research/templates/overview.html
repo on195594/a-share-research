@@ -23,7 +23,7 @@
   <h2><a href="/stock/{{ company.code }}/overview">{{ company.name or company.code }}</a>
     {% if company.name %}<span class="code">{{ company.code }}</span>{% endif %}</h2>
   {% if company.position %}<p>{{ company.position.shares }} 股 · 本周期买入日 {{ company.position.buy_date }}</p>{% endif %}
-  {{ company_body(company, view.account, view.nav_interval, portfolio=true) }}
+  {{ company_body(company, portfolio=true) }}
 </section>
 {% endfor %}
 {% else %}
@@ -31,7 +31,7 @@
 <p>{% if view.name %}<span class="code">{{ view.code }}</span> · {% endif %}
   {% if view.held is none %}持仓状态尚未核实{% elif view.held %}当前持仓{% if view.position %} {{ view.position.shares }} 股 · 本周期买入日 {{ view.position.buy_date }}{% endif %}
   {% else %}已核实未持有{% endif %}</p>
-{{ company_body(view, view.account, view.nav_interval) }}
+{{ company_body(view) }}
 <div class="actions"><a class="link" href="/portfolio/overview">返回组合总览</a>
   {% if view.research %}<a class="link" href="{{ view.path }}">查看公司档案</a>{% endif %}</div>
 {% endif %}
