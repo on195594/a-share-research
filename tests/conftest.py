@@ -151,7 +151,7 @@ def echo_inputs(value):
         return {k: echo_inputs(v) for k, v in value.items()}
     if isinstance(value, list):
         return [echo_inputs(v) for v in value]
-    if isinstance(value, str) and value in ('$request_id', '$expected_activation_id'):
+    if isinstance(value, str) and value in ('$request_id', '$expected_activation_id', '$slot', '$job', '$run_id'):
         return args[value[1:]]
     return value
 

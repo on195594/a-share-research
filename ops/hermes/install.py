@@ -3,15 +3,15 @@
 
 import argparse
 from contextlib import ExitStack
-import fcntl
-from functools import partial
 import hashlib
-from importlib.util import module_from_spec, spec_from_file_location
+import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
+import sys
 
 SOURCE = Path(__file__).resolve().parent
 OBSOLETE = (
@@ -55,11 +55,30 @@ def check(target: Path) -> int:
     return int(different)
 
 
-def script_module(name: str):
-    spec = spec_from_file_location(name, SOURCE / f"{name}.py")
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def check_legacy_pending(path: Path):
+    """Cutover must not strand a request submitted by the previously installed client."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return
+    with os.fdopen(fd) as stream:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f'{path} 旧状态须为常规文件。')
+        if path.name == 'scan.json' and (info.st_mode & 0o077 or info.st_uid != os.getuid()
+                                         or info.st_nlink != 1 or info.st_size > 32768):
+            raise ValueError(f'{path} 旧扫描状态权限或大小无效。')
+        state = json.load(stream)
+    if isinstance(state, list) and path.name in ('opportunities.json', 'weekly-opportunities.json'):
+        return  # Old list of delivered keys.
+    if not isinstance(state, dict):
+        raise ValueError(f'{path} 旧状态格式无效，请核对后再安装。')
+    if state.get('pending') is not None:
+        if path.name == 'scan.json':
+            if state.get('schema_version') == 1:
+                raise ValueError('须用旧 research key 与旧脚本查回扫描后再安装。')
+            raise ValueError('扫描仍有待查请求，请用原身份查回后再安装。')
+        raise ValueError(f'{path} 仍有待查政策请求，请用原 assistant 身份与旧脚本查回后再安装。')
 
 
 def apply(target: Path) -> None:
@@ -76,27 +95,17 @@ def apply(target: Path) -> None:
     )
     if any(Path(line).suffix in {".py", ".sh"} for line in ignored.stdout.splitlines() if line.strip()):
         raise ValueError("拒绝安装：ops/hermes/ 存在被忽略的脚本文件，请清理后再 --apply。")
-    advisor = script_module("a-share-advisor")
+    sys.path.insert(0, str(SOURCE))
+    from ashare_schedule import advisor_directory, policy_state_path, task_lock
+    advisor = advisor_directory()
+    legacy = [policy_state_path(job) for job in ('stop_alert', 'daily_brief', 'benchmark')]
+    legacy.extend(advisor / filename for filename in ('scan.json', 'opportunities.json', 'weekly-opportunities.json'))
     with ExitStack() as locks:
-        if not locks.enter_context(advisor.task_lock()):
-            raise ValueError("扫描正在运行，请等原扫描完成后再安装。")
-        if advisor.read_scan_state()["pending"] is not None:
-            raise ValueError("扫描仍有待查请求，请用原身份查回后再安装。")
-        policy_states = []
-        for name in ("a-share-stop-alert", "a-share-daily-brief", "a-share-benchmark"):
-            script = script_module(name)
-            policy_states.append((script.STATE, script.load_state))
-        for path in (advisor.OPPORTUNITY_STATE, advisor.WEEKLY_OPPORTUNITY_STATE):
-            policy_states.append((path, partial(advisor.read_opportunity_state, path)))
-        for path, load in policy_states:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            lock = locks.enter_context(path.with_suffix(".lock").open("a"))
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise ValueError(f"{path} 的政策任务正在运行，请等任务完成后再安装。") from None
-            if load()["pending"] is not None:
-                raise ValueError(f"{path} 仍有待查政策请求，请用原 assistant 身份与旧脚本查回后再安装。")
+        for path in [advisor / 'weekly.lock', *(state.with_suffix('.lock') for state in legacy)]:
+            if not locks.enter_context(task_lock(path)):
+                raise ValueError(f'{path} 的任务正在运行，请等任务完成后再安装。')
+        for state in legacy:
+            check_legacy_pending(state)
         copy_scripts(target)
 
 

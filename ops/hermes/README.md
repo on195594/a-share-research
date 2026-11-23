@@ -21,7 +21,7 @@ Hermes 以 `no_agent` 模式运行下列脚本，时间均为上海时间。入�
 
 账户、顾问和月批脚本通过 `ashare_tools.py` 调用 `~/.local/bin/ashare`，使用 `~/.config/ashare/hermes-assistant.json`（0600）。`ASHARE_HERMES_CONFIG` 可指定另一绝对路径。配置使用公网 MCP 地址，本机 cron 通过 `connect` 直连 tools 回环端口。记分任务直接运行 worker 容器内的命令。[CLI 配置与退出码](../clients/README.md#cli-与本机-cron)
 
-先部署服务，再同步同版本 CLI。更换配置前用原身份查回扫描与政策待查请求。提交本目录的脚本改动后，从仓库根目录安装：
+先部署服务，再同步同版本 CLI。首次切换前用原凭据和旧脚本查完历史待查请求。提交本目录的脚本改动后，从仓库根目录安装。
 
 ```sh
 python3 ops/hermes/install.py --apply
@@ -30,27 +30,27 @@ python3 ops/hermes/install.py --check
 
 `--apply` 在扫描与政策任务空闲且没有待查请求时复制脚本，`--check` 比较内容与可执行位。两者都可用 `--target <目录>` 指定安装位置。应用镜像发布与宿主脚本安装分别执行。
 
+## 止损、日报、月度对比与顾问任务
+
+脚本按上海时间确定时段，用原 assistant 凭据调用 `schedule_run(job, slot)`。服务端按凭据、任务和时段保存运行行。评估记录可按 `evaluation_id` 查询当时的政策与采集证据。重新执行同一时段时，已就绪的行返回原结果，已确认的行静默结束。
+
+| 任务 | 时段 | 查回与输出 |
+|---|---|---|
+| 止损 `stop_alert` | 当前时间向下取整至 5 分钟 | 服务从同一上海日期最近确认的档位评估。超过 15 分钟的时段静默过期。 |
+| 日报 `daily_brief` | 当天日期 | 服务生成持仓与分红核查正文，分红失败可在评估回执的 `dividends.failures` 查到。 |
+| 月度对比 `benchmark` | 当月 | 服务沿用首次受理时的上海日期作为截止日，比较两个全收益基准。 |
+| 扫描 `advisor_scan` | 当天日期 | 按服务端返回的 `scan_id` 跟踪扫描，在本次运行内轮询同一时段。终态后展示披露及新增建仓机会。 |
+| 周报 `advisor_weekly` | ISO 周 | 展示研究状态、披露缺口及换仓复核。扫描与周报各自按最近确认的机会记录去重。 |
+
+回执为 `ready` 时，脚本先将正文写入标准输出，再用 `schedule_ack(run_id)` 确认。顾问在客户端渲染回执中的结构化结果。确认失败时正文已经输出，脚本向标准错误说明原因并以 1 退出。未获确认的止损档位和机会可在后续时段再次提醒，实际投递情况查 Hermes 执行记录。
+
+退出码 21 表示服务暂不可用。脚本每 20 秒用相同时段或运行编号重试，最多 240 秒，耗尽后以 1 退出。采集或评估失败时，运行行保存 `error_code` 和脱敏的 `error`，在同一时段再次调用会重试。日报和扫描在跨日时尚未就绪，会返回 `expired` 和一行说明。
+
+扫描与周报各有任务锁。`advisor_budget.py` 为本轮请求及轮询共留 540 秒，到期终止子进程组。宿主配置 `cron.script_timeout_seconds=600`，排查提前超时时须核对 `HERMES_CRON_SCRIPT_TIMEOUT` 是否覆盖该值。
+
 ## 跨激活 pending 转接
 
-政策评估前，脚本在本地加锁并保存服务、凭据的绑定摘要、请求编号和预期激活编号。响应损坏、超时或 CLI 退出 22 时，保留待查请求，用原身份和原参数找回回执。凭据或绑定不符时，先恢复原配置并核对回执，再换发凭据。
-
-- **退出 20** 表示政策变化且原请求确定未写入。止损、日报和顾问会把原请求封存到状态文件旁的 `<文件名>.rejected-<原请求编号的 SHA256>.json`，读取新激活编号，持久化新请求后再采集。每轮最多转接一次。月度对比保留原请求，需人工核对。
-- **退出 21** 表示暂未受理，保留待查请求并在恢复后原样重试。止损脚本对连续不可用计时，满 10 分钟才提示失败。一般冲突、坏状态或坏回执须核对原身份与请求编号，不能清空状态重跑。
-- **过期回执**　超过 15 分钟的止损告警不投递、不推进档位。日报、顾问机会和月度对比查回其他日期的回执时，保留原日期，只结束这笔待查请求。本地去重记录在交付输出前落盘，核实实际送达须查看 Hermes 投递记录。
-
-| 任务 | 调用与排错 | 默认状态文件（相对 `~/.local/state/`） |
-|---|---|---|
-| 止损 | `policy_stop_alert` 读取有效时段的行情，全部无效时提示检查失败。按同日升档去重。 | `ashare-stop-alert/state.json`，可用 `ASHARE_STOP_ALERT_STATE` 指定 |
-| 日报 | `policy_daily_brief` 提供持仓与分红核对。分红失败查回执中的 `dividends.failures`；行情令牌由 tools 的 `.env.tools` 提供。 | `ashare-daily-brief/state.json`，可用 `ASHARE_DAILY_BRIEF_STATE` 指定 |
-| 月度对比 | `policy_benchmark` 按保存的截止日比较两个全收益基准。无交易、缺指数或股票报价时，查看失败回执。 | `ashare-benchmark/state.json`，可用 `ASHARE_BENCHMARK_STATE` 指定 |
-
-## 顾问请求恢复与执行预算
-
-顾问状态目录为 `~/.local/state/a-share-advisor/`，可由 `A_SHARE_ADVISOR_STATE` 指定。扫描在 `scan.json` 保存绑定和请求编号，用 `research_scan_request` 提交或找回扫描，再用 `research_scan_read` 查终态。跨日找回时显示原扫描时间。通知需要持仓信息时才读 `account_current`，读取失败则注明持仓状态未知。
-
-扫描后的机会检查通过 `policy_monitor` 取评估，`opportunities.json` 按代码、报告、立场和估值区间去重。周报读取 `research_scan_weekly`，用独立的 `weekly-opportunities.json` 保存换仓复核请求。机会检查失败时仍输出取得的扫描或周报正文。
-
-扫描与周报各有任务锁。`advisor_budget.py` 为每轮调用、轮询及机会检查共留 540 秒，到期终止子进程组。宿主配置 `cron.script_timeout_seconds=600`，排查提前超时时须核对 `HERMES_CRON_SCRIPT_TIMEOUT` 是否覆盖该值。
+回退到旧版政策脚本前，从切换时的备份恢复对应的本地状态，再用原身份、请求编号和预期激活编号查回待查评估。旧版止损、日报和顾问脚本遇到退出 20 时会封存被拒请求，并用新激活编号重新受理一次。旧版月度对比须人工核对。月批按下节的批次回执恢复。
 
 ## 月批发起与状态
 

@@ -91,7 +91,7 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
                 result['schema_version'] = conn.execute('PRAGMA user_version').fetchone()[0]
                 if result['schema_version'] != len(db.MIGRATIONS):
                     return JSONResponse(result,status_code=503)
-                expected = {'api_keys','runs','reports','prices','batches','scan_requests',*db.ACCOUNT_TABLES,
+                expected = {'api_keys','runs','reports','prices','batches','scan_requests','scheduled_runs',*db.ACCOUNT_TABLES,
                             *db.V25_TABLES}
                 if account_shadow_enabled:
                     expected.update(('account_books','account_batches','account_journal','account_voids','account_observations',

@@ -102,6 +102,15 @@ class SubscriptionCodes(Arguments):
     codes: list[str]
 
 
+class ScheduleRun(Arguments):
+    job: Literal['stop_alert', 'daily_brief', 'benchmark', 'advisor_scan', 'advisor_weekly']
+    slot: str = Field(min_length=1, max_length=16)
+
+
+class ScheduleAck(Arguments):
+    run_id: int = Field(gt=0)
+
+
 class PolicyGuide(Arguments):
     path: str | None = None
 
@@ -265,6 +274,16 @@ def _monthly_batch(ctx: Context, month: str, *, submit: bool = False, compact: b
     return Payload(data=data)
 
 
+def _schedule_run(ctx: Context, args: ScheduleRun) -> Payload:
+    from a_share_research.tools import scheduling
+    return Payload(data=scheduling.run(ctx, args.job, args.slot))
+
+
+def _schedule_ack(ctx: Context, args: ScheduleAck) -> Payload:
+    from a_share_research.tools import scheduling
+    return Payload(data=scheduling.ack(ctx, args.run_id))
+
+
 def _monitor(ctx: Context, args: PolicyMonitor) -> Payload:
     from a_share_research.policy.monitor import run
     return Payload(data=run(ctx.connection,ctx.principal,ctx.database,args.request_id,args.expected_activation_id))
@@ -374,6 +393,10 @@ def _portfolio_overview(ctx: Context, args: Arguments) -> Payload:
 
 _READERS = frozenset({'research', 'assistant'})
 _TOOLS = (
+    Tool('schedule_run', '按上海时段受理或查回定时任务；扫描运行中可按原时段轮询',
+         frozenset({'assistant'}), ScheduleRun, Payload, _schedule_run, access='write', account=True, collects=True),
+    Tool('schedule_ack', '打印正文后确认本凭据的定时运行；重复确认返回原记录',
+         frozenset({'assistant'}), ScheduleAck, Payload, _schedule_ack, access='write', account=True),
     Tool('research_company_overview', '读取公司研究、公告复核、本次持仓周期与已保存的监控判断',
          frozenset({'assistant'}), Company, Payload, _company_overview, account=True),
     Tool('account_portfolio_overview', '读取已核实持仓的研究、在仓论点、监控判断与待补资料',
@@ -511,6 +534,14 @@ def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:
     return tool
 
 
+def domain_error(exc: service.RequestError | ledger.LedgerError | policies.PolicyError) -> ToolError:
+    code = {400: 'invalid_arguments', 403: 'forbidden', 404: 'not_found', 409: 'conflict',
+            422: 'invalid_arguments', 503: 'unavailable', 504: 'timeout'}.get(exc.status, 'service_failure')
+    if isinstance(exc, policies.PolicyError) and exc.status == 409 and exc.code == 'policy_activation_changed':
+        code = exc.code
+    return ToolError(code, str(exc), exc.status)
+
+
 def invoke(ctx: Context, name: str, arguments: dict) -> dict:
     """Reject scope/shape errors before invoking a handler; never upgrades caller privileges."""
     tool = authorize_tool(ctx, TOOLS.get(name))
@@ -527,11 +558,7 @@ def invoke(ctx: Context, name: str, arguments: dict) -> dict:
             parsed.account_id = account_id
         return tool.result.model_validate(tool.handler(ctx, parsed)).model_dump(mode='json')
     except (service.RequestError, ledger.LedgerError, policies.PolicyError) as exc:
-        code = {400: 'invalid_arguments', 403: 'forbidden', 404: 'not_found', 409: 'conflict',
-                422: 'invalid_arguments', 503: 'unavailable', 504: 'timeout'}[exc.status]
-        if isinstance(exc, policies.PolicyError) and exc.status == 409 and exc.code == 'policy_activation_changed':
-            code = exc.code
-        raise ToolError(code, str(exc), exc.status) from None
+        raise domain_error(exc) from None
     except evidence.EvidenceError as exc:
         raise ToolError('invalid_arguments', str(exc), 422) from None
     except RequestException:

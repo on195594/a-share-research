@@ -74,6 +74,17 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 `register` 保存身份。`activate` 首次用 `--expected-id 0`，此后使用当前激活编号。实装版本、参数有效期和账户范围须匹配；同一请求编号与内容复用原激活记录，同号改内容或预期编号过时会被拒绝。
 
+## 定时运行与确认
+
+启用账户工具的实例向 `assistant` 开放以下两个工具。服务端按 grant 编号保存运行记录。
+
+| 工具 | 输入与回执 |
+|---|---|
+| `schedule_run` | 传 `job`、`slot` 受理或查回本时段。上海时间格式为止损 `stop_alert` 用 5 分钟整点 `YYYY-MM-DDTHH:MM`，日报 `daily_brief` 与扫描 `advisor_scan` 用日期，周报 `advisor_weekly` 用 ISO 周 `YYYY-Www`，月度对比 `benchmark` 用 `YYYY-MM`。 |
+| `schedule_ack` | 传 `run_id` 确认本 grant 已输出的 `ready` 回执。成功返回 `acked`，同一编号可重复确认。 |
+
+顾问扫描返回 `running` 与 `scan_id` 时，按原时段轮询。就绪行含 `text` 或顾问渲染所需的 `result`。采集失败返回 `failed`、`error_code` 与脱敏的 `error`，重试原时段会重新评估。服务用当时的生效激活编号保存政策评估和关联编号。过期与送达语义见 [Hermes 手册](../../ops/hermes/README.md#止损日报月度对比与顾问任务)。
+
 ## 服务端监控与测算
 
 先用 `policy_current` 取得 `expected_activation_id`，每次新观察提供新的 `request_id`。服务从核实的来源采集并保存输入，采集后重新核对凭据、政策和账户来源，再原子追加评估。生产来源为明确绑定的账本。采集子进程限时 25 秒；监控、日报和基准可使用 tools 的行情凭据。阅读评估时须同时查看实际时点和缺口。
@@ -81,7 +92,7 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 | 工具 | 输入或结果 |
 |---|---|
 | `policy_monitor` | 保存持仓、资产观察、研究卡片、行情与监控判断。 |
-| `policy_stop_alert` | 附 `previous_state`（可为空对象），返回本轮提醒和下一通知状态。通知与状态推进由宿主处理。 |
+| `policy_stop_alert` | 附 `previous_state`（可为空对象），返回本轮提醒和下一通知状态。回退脚本使用此入口自行传入通知状态。 |
 | `policy_daily_brief` | 保存持仓监控、分红检查、失败项与盘后日报。 |
 | `policy_holdings_check` | 保存逐仓检查、P3 流动性延期证据与复核期限。读取逐项缺口判断资料是否齐全。 |
 | `policy_benchmark` | 附截止日 `end`（YYYY-MM-DD），以完整持仓现金流对照 H00300.CSI、H00922.CSI 全收益指数。 |
@@ -94,4 +105,4 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 采集先按原凭据和 `request_id` 查找回执。已有相同请求返回原结果；同号不同内容为 `conflict`。只有确定原请求未写入且原生效指针确已变化时，才返回 `policy_activation_changed`。一般身份、权限与账户来源冲突须按各自错误处理。
 
-CLI 收到该确定拒绝时退出 20；暂停、繁忙或拒绝连接时退出 21；结果未知时退出 22，应先查回执再用原身份和原请求重试。宿主对旧 pending 的转接、宽限与通知见[宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。
+CLI 收到该确定拒绝时退出 20；暂停、繁忙或拒绝连接时退出 21；结果未知时退出 22，应先查回执再用原身份和原请求重试。旧政策脚本的回退处理见[宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。

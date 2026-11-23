@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import sqlite3
+from threading import Barrier
 
 import pytest
 
@@ -331,8 +332,9 @@ def v24(tmp_path, monkeypatch):
     return path, token, key_id, requester, scan_id
 
 
-def test_grant_migration_preserves_old_columns_audit_and_pending_request(v24):
+def test_grant_migration_preserves_old_columns_audit_and_pending_request(v24, monkeypatch):
     path, token, key_id, requester, scan_id = v24
+    monkeypatch.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:25])
     before = database_rows(path)
     assert before.pop('__user_version__') == 24
     keys = before.pop('api_keys')
@@ -383,3 +385,96 @@ def test_grant_copy_hash_mismatch_rolls_back_the_entire_migration(v24, monkeypat
         assert list(conn.iterdump()) == before
         with pytest.raises(sqlite3.IntegrityError, match='rotate key'):
             conn.execute("UPDATE api_keys SET role='owner'")
+
+
+def test_scheduled_runs_migration_preserves_v25_and_is_reentrant(v24, monkeypatch):
+    path, _, key_id, _, scan_id = v24
+    with monkeypatch.context() as old:
+        old.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:25])
+        with closing(db.connect(path)) as conn:
+            before = list(conn.iterdump())
+            assert conn.execute('PRAGMA user_version').fetchone()[0] == 25
+
+    with closing(db.connect(path)) as conn:
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 26
+        assert [line for line in conn.iterdump() if 'scheduled_runs' not in line] == before
+        columns = [r['name'] for r in conn.execute('PRAGMA table_xinfo(scheduled_runs)')]
+        assert set(columns[-4:]) == {'state', 'text', 'result', 'error'}
+        assert {r['from']: r['table'] for r in conn.execute('PRAGMA foreign_key_list(scheduled_runs)')} == {
+            'principal_key_id': 'api_keys', 'scan_id': 'scans',
+            'activation_id': 'policy_activations', 'evaluation_id': 'policy_evaluations'}
+        assert conn.execute("SELECT partial FROM pragma_index_list('scheduled_runs') WHERE name='scheduled_runs_acked'"
+                            ).fetchone()[0] == 1
+
+        insert = 'INSERT INTO scheduled_runs(principal_key_id,job,slot,scan_id,status,created_at) VALUES (?,?,?,?,?,?)'
+        entry = (key_id, 'advisor_scan', '2026-11-23', scan_id, 'running', db.now())
+        conn.execute(insert, entry)
+        with pytest.raises(sqlite3.IntegrityError, match='UNIQUE'):
+            conn.execute(insert, entry)
+        with pytest.raises(sqlite3.IntegrityError, match='CHECK'):
+            conn.execute("UPDATE scheduled_runs SET status='unknown'")
+        with pytest.raises(sqlite3.IntegrityError, match='FOREIGN KEY'):
+            conn.execute("UPDATE scheduled_runs SET scan_id=-1")
+        after = list(conn.iterdump())
+        with db.transaction(conn):
+            db._migrate_v26(conn)
+        assert list(conn.iterdump()) == after
+        assert not conn.execute('PRAGMA foreign_key_check').fetchall()
+        assert conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    with closing(db.connect(path)) as reopened:
+        assert list(reopened.iterdump()) == after and reopened.total_changes == 0
+
+
+def test_scheduled_runs_partial_migration_rolls_back(tmp_path, monkeypatch):
+    path = tmp_path / 'app.db'
+    with monkeypatch.context() as old:
+        old.setattr(db, 'MIGRATIONS', db.MIGRATIONS[:25])
+        with closing(db.connect(path)) as conn:
+            # Make CREATE INDEX fail after the table has been created.
+            conn.execute('CREATE TABLE scheduled_runs_acked(unused INTEGER)')
+            before = list(conn.iterdump())
+    with pytest.raises(sqlite3.OperationalError, match='already a table'):
+        db.connect(path)
+    with closing(sqlite3.connect(path)) as conn:
+        assert list(conn.iterdump()) == before
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 25
+
+
+def test_two_connections_migrate_empty_database_to_v26_once(tmp_path, monkeypatch):
+    path = tmp_path / 'app.db'
+    start = Barrier(2)
+    calls = []
+
+    def migrate(conn):
+        calls.append(conn.in_transaction)
+        db._migrate_v26(conn)
+
+    monkeypatch.setattr(db, 'MIGRATIONS', (*db.MIGRATIONS[:25], migrate))
+
+    def connect():
+        start.wait()
+        with closing(db.connect(path)) as conn:
+            assert conn.execute('PRAGMA user_version').fetchone()[0] == 26
+            assert not conn.execute('SELECT * FROM scheduled_runs').fetchall()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tasks = [pool.submit(connect) for _ in range(2)]
+        for task in tasks:
+            task.result()
+    assert calls == [True]
+
+
+def test_wal_startup_retries_a_concurrent_lock_upgrade(tmp_path, monkeypatch):
+    path = tmp_path / 'app.db'
+    with closing(sqlite3.connect(path)) as other:
+        # A rollback-journal writer stops the other opener from switching to WAL.
+        other.execute('BEGIN IMMEDIATE')
+
+        def finish_writer(seconds):
+            assert other.in_transaction
+            other.commit()
+
+        monkeypatch.setattr(db, 'sleep', finish_writer)
+        with closing(db.connect(path)) as conn:
+            assert not other.in_transaction
+            assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'

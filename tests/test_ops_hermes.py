@@ -220,3 +220,15 @@ def test_production_commit_reads_running_container(milestones, monkeypatch, insp
 
     monkeypatch.setattr(milestones.subprocess, "run", fake_run)
     assert milestones.production_commit() == expected
+
+
+def test_install_waits_for_the_weekly_delivery_lock(installer_repo, tmp_path):
+    import fcntl
+    repo, _ = installer_repo
+    path = tmp_path / 'advisor/weekly.lock'
+    path.parent.mkdir()
+    with path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        target = tmp_path / 'target'
+        result = run_install(repo, target, '--apply')
+    assert result.returncode == 1 and '任务正在运行' in result.stdout and not target.exists()

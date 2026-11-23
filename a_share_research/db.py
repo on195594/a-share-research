@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from time import monotonic, sleep
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -633,21 +634,51 @@ def _migrate_v25(conn: sqlite3.Connection) -> None:
         raise ValueError('v25 迁移后存在无效外键，迁移已停止')
 
 
+def _migrate_v26(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS scheduled_runs (
+        id INTEGER PRIMARY KEY, principal_key_id INTEGER NOT NULL REFERENCES api_keys(id),
+        job TEXT NOT NULL, slot TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('running','ready','failed','acked','expired')),
+        attempts INTEGER NOT NULL DEFAULT 1 CHECK(attempts >= 0),
+        activation_id INTEGER REFERENCES policy_activations(id),
+        evaluation_id INTEGER REFERENCES policy_evaluations(id), scan_id INTEGER REFERENCES scans(id),
+        error_code TEXT, created_at TEXT NOT NULL, finished_at TEXT, acked_at TEXT,
+        state TEXT, result TEXT, text TEXT, error TEXT,
+        UNIQUE(principal_key_id, job, slot))""")
+    conn.execute("""CREATE INDEX IF NOT EXISTS scheduled_runs_acked
+                    ON scheduled_runs(principal_key_id, job, slot) WHERE status = 'acked'""")
+
+
 MIGRATIONS = (_migrate_v1, _migrate_v2, _migrate_v3, _migrate_v4, _migrate_v5, _migrate_v6, _migrate_v7, _migrate_v8,
-              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22, _migrate_v23, _migrate_v24, _migrate_v25)
+              _migrate_v9, _migrate_v10, _migrate_v11, _migrate_v12, _migrate_v13, _migrate_v14, _migrate_v15, _migrate_v16, _migrate_v17, _migrate_v18, _migrate_v19, _migrate_v20, _migrate_v21, _migrate_v22, _migrate_v23, _migrate_v24, _migrate_v25, _migrate_v26)
 
 
 def now() -> str:
     return datetime.now(SHANGHAI).isoformat(timespec="seconds")
 
 
+def _enable_wal(conn: sqlite3.Connection, timeout: float) -> None:
+    # Two first openers can both take a read lock. SQLite returns BUSY immediately
+    # on the lock upgrade, without invoking the connection's busy timeout.
+    deadline = monotonic() + timeout
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if exc.sqlite_errorcode != sqlite3.SQLITE_BUSY or monotonic() >= deadline:
+                raise
+            sleep(0.05)
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     path = path or DATA / "app.db"
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=30, isolation_level=None, check_same_thread=False)
+    timeout = 30
+    conn = sqlite3.connect(path, timeout=timeout, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        _enable_wal(conn, timeout)
         conn.executescript(SCHEMA)
         migrated = False
         for version, migrate in enumerate(MIGRATIONS, start=1):

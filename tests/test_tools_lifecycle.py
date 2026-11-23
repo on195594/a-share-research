@@ -40,7 +40,7 @@ def test_ready_checks_schema_without_writing_or_migrating(database, options, mod
 
 
 @pytest.mark.parametrize('damage', ['missing', 'version', 'api_keys', 'account_journal', 'account_analysis_history',
-                                    'scan_requests', 'oauth_tokens', 'account_nav_refs'])
+                                    'scan_requests', 'oauth_tokens', 'account_nav_refs', 'scheduled_runs'])
 def test_not_ready_never_creates_or_repairs_database(database, damage):
     path, _ = database
     if damage == 'missing':

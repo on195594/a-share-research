@@ -116,7 +116,7 @@ def test_discovery_and_call_enforce_same_scope(setup, account_enabled):
         for name in ('account_research_coverage', 'account_portfolio_overview', 'research_company_overview'):
             assert (name in names) == (account_enabled and role == 'assistant')
         for name in ('research_scan_request', 'research_scan_read', 'research_scan_weekly',
-                     'research_subscriptions', 'research_subscriptions_replace'):
+                     'research_subscriptions', 'research_subscriptions_replace', 'schedule_run', 'schedule_ack'):
             assert (name in names) == (account_enabled and role == 'assistant')
             if name not in names:
                 denied = client.post(f'/tools/{name}', json={}, headers=header(token))

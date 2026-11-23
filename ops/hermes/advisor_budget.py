@@ -52,7 +52,7 @@ def _stop(pid: int, status: int | None) -> None:
             if reaped():
                 return
             time.sleep(.02)
-    raise BudgetError('顾问子进程清理未完成；请核对任务进程和待查记录')
+    raise BudgetError('顾问子进程清理未完成；请核对任务进程和服务端运行记录')
 
 
 def run_bounded(callback: Callable[[float], str], seconds: float = 540) -> str:
@@ -113,11 +113,11 @@ def run_bounded(callback: Callable[[float], str], seconds: float = 540) -> str:
                     if waited:
                         status = value
                     if cancelled:
-                        raise BudgetError('顾问任务已取消；下次按本地待查记录恢复')
+                        raise BudgetError('顾问任务已取消；请按原时段查回送达状态')
                     if status is not None:
                         break
                     if time.monotonic() >= deadline:
-                        raise BudgetError('顾问执行超过整轮时限；下次按本地待查记录恢复')
+                        raise BudgetError('顾问执行超过整轮时限；请按原时段查回送达状态')
                     time.sleep(min(.05, max(0, deadline - time.monotonic())))
             finally:
                 try:
@@ -127,15 +127,15 @@ def run_bounded(callback: Callable[[float], str], seconds: float = 540) -> str:
                     # A second wait can reap an already-reaped PID or hide its error.
                     pid = None
             if status != 0:
-                raise BudgetError('顾问子任务未完成；请核对服务与本地待查记录')
+                raise BudgetError('顾问子任务未完成；请核对服务与服务端运行记录')
             value = json.loads(output.read_text())
             if not isinstance(value, str):
-                raise BudgetError('顾问子任务回执无效；请核对本地待查记录')
+                raise BudgetError('顾问子任务回执无效；请核对服务端运行记录')
             return value
     except BudgetError:
         raise
     except Exception:
-        raise BudgetError('顾问执行监督失败；请核对任务进程和待查记录') from None
+        raise BudgetError('顾问执行监督失败；请核对任务进程和服务端运行记录') from None
     finally:
         try:
             if pid is not None and pid > 0:

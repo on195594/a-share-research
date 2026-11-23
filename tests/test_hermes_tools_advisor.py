@@ -1,9 +1,7 @@
 """Scheduled-client transport and retry tests; research prompts use a captured real card."""
 from copy import deepcopy
-from datetime import date, datetime, timedelta
-import fcntl
+from datetime import date
 import json
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -13,11 +11,8 @@ from support.hermes import ROOT, load
 
 
 @pytest.fixture
-def advisor(tmp_path, monkeypatch, ashare_cli):
-    module = load('a-share-advisor')
-    monkeypatch.setattr(module, 'OPPORTUNITY_STATE', tmp_path / 'opportunities.json')
-    monkeypatch.setattr(module, 'SCAN_STATE', tmp_path / 'scan.json')
-    return module
+def advisor():
+    return load('a-share-advisor')
 
 
 @pytest.fixture
@@ -27,68 +22,11 @@ def prompts():
     return [p for p in prompts if p['kind'] == 'research_opportunity']
 
 
-def monitor_receipt(prompts, **changes):
-    return dict(mode='service_monitor_capture', request_id='$request_id', activation_id='$expected_activation_id',
-                capture_context={'capture_finished_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()},
-                result={'review_prompts': prompts}) | changes
-
-
-def test_real_prompt_dedup_migrates_legacy_keys_and_allows_lapsed_return(advisor, ashare_cli, prompts):
-    assert len(prompts) == 1
-    advisor.OPPORTUNITY_STATE.write_text(json.dumps([advisor.opportunity_key(prompts[0])]))
-    ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 7}))
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts))
-    assert advisor.opportunities() == '' and advisor.read_opportunity_state()['pending'] is None
-    ashare_cli.reply('policy_monitor', monitor_receipt([]))
-    assert advisor.opportunities() == ''
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts))
-    assert '【建仓机会】' in advisor.opportunities()
-    assert advisor.opportunities() == ''
-    requests = [args['request_id'] for name, args in ashare_cli.calls if name == 'policy_monitor']
-    assert len(set(requests)) == 4
-
-
-@pytest.mark.parametrize('code', [21, 22, 23])
-def test_original_monitor_request_recovered_without_new_policy_lookup(advisor, ashare_cli, prompts, code):
-    ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 7}))
-    ashare_cli.reply('policy_monitor', code=code)
-    failure = advisor.opportunities()
-    assert '检查未完成' in failure
-    if code == 23:
-        assert '回执超限' in failure and '原请求' in failure
-    pending = advisor.read_opportunity_state()['pending']
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts))
-    assert '【建仓机会】' in advisor.opportunities()
-    assert ashare_cli.calls == [('policy_current', {}), ('policy_monitor', pending), ('policy_monitor', pending)]
-
-
-@pytest.mark.parametrize('mutation', [dict(mode='supplied_input_replay'), dict(request_id='another'),
-                                      dict(activation_id=8), dict(result={})])
-def test_incompatible_receipt_preserves_keys_and_pending(advisor, ashare_cli, prompts, mutation):
-    advisor.OPPORTUNITY_STATE.write_text('["previous-key"]')
-    ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 7}))
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts, **mutation))
-    assert '检查未完成' in advisor.opportunities()
-    assert advisor.read_opportunity_state()['seen'] == ['previous-key']
-    assert advisor.read_opportunity_state()['pending'] is not None
-
-
-def test_recovered_old_receipt_is_not_presented_as_today(advisor, ashare_cli, prompts):
-    advisor.OPPORTUNITY_STATE.write_text('["previous-key"]')
-    ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 7}))
-    old = datetime.now(ZoneInfo('Asia/Shanghai')) - timedelta(days=1)
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts, capture_context={'capture_finished_at': old.isoformat()}))
-    assert '未作为今日机会推送' in advisor.opportunities()
-    assert advisor.read_opportunity_state() == dict(schema_version=1, seen=['previous-key'], pending=None)
-
-
-def test_concurrent_and_corrupt_state_do_not_execute_tools(advisor, ashare_cli):
-    with advisor.OPPORTUNITY_STATE.with_suffix('.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert '已有检查' in advisor.opportunities()
-    advisor.OPPORTUNITY_STATE.write_text('{')
-    assert '检查未完成' in advisor.opportunities()
-    assert advisor.OPPORTUNITY_STATE.read_text() == '{' and ashare_cli.calls == []
+def test_real_filtered_opportunity_links_and_risk_note(advisor, prompts):
+    text = advisor.render_opportunities(prompts, 'https://stock.test')
+    assert prompts[0]['detail'] in text and 'https://stock.test/stock/' + prompts[0]['code'] in text
+    assert advisor.OPPORTUNITY_NOTE in text
+    assert advisor.render_opportunities([]) == ''
 
 
 @pytest.mark.parametrize(('reason', 'label'), [
@@ -112,50 +50,6 @@ def test_disclosure_notice_shows_detail_and_review_action(advisor, reason, label
         assert '当前未持仓：无需处理持仓' in text
         assert '复核是否减仓' not in text
     assert '%' not in text and '卖出比例' not in text
-
-
-def test_opportunity_rebind_only_after_certain_policy_change(advisor, ashare_cli, prompts):
-    original = dict(request_id='advisor-before-release', expected_activation_id=3)
-    advisor.OPPORTUNITY_STATE.write_text(json.dumps(dict(schema_version=1, seen=['old-key'], pending=original,
-        binding=advisor.client_identity()[0])))
-    ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 4}))
-    ashare_cli.reply('policy_monitor', code=20)
-    assert '政策异常' in advisor.opportunities()
-    saved = advisor.read_opportunity_state()
-    replacement = saved['pending']
-    assert saved['seen'] == ['old-key'] and replacement['request_id'] != original['request_id']
-    assert replacement['expected_activation_id'] == 4
-    assert ashare_cli.calls == [('policy_monitor', original), ('policy_current', {}), ('policy_monitor', replacement)]
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts))
-    assert '【建仓机会】' in advisor.opportunities()
-    assert ashare_cli.calls[-1] == ('policy_monitor', replacement)
-    assert advisor.read_opportunity_state()['pending'] is None
-
-
-@pytest.mark.parametrize('account', [None, {'codes': [], 'source': {}}, {'codes': [], 'source': {'mode': 'ledger'}}])
-def test_holdings_read_only_at_delivery_and_opportunity_failure_keeps_scan(advisor, ashare_cli, account):
-    from support.hermes import RECEIPT, response
-
-    original = dict(request_id='opportunity-pending', expected_activation_id=7)
-    advisor.OPPORTUNITY_STATE.write_text(json.dumps(dict(schema_version=1, seen=['keep-seen'], pending=original,
-        binding=advisor.client_identity()[0])))
-    ashare_cli.reply('research_scan_request', RECEIPT)
-    ashare_cli.reply('research_scan_read', response(notify=[dict(
-        code='600519', reason='pending_review', path='/stock/600519')]))
-    ashare_cli.reply('account_current', account, code=21 if account is None else 0)
-    ashare_cli.reply('policy_monitor', code=21)
-    output = advisor.scan()
-    assert [name for name, _ in ashare_cli.calls] == [
-        'research_scan_request', 'research_scan_read', 'account_current', 'policy_monitor']
-    assert 'https://stock.test/stock/600519' in output and '检查未完成' in output and '发布暂停' in output
-    assert '订阅' not in output
-    if account and account['source'].get('mode') == 'ledger':
-        assert '当前未持仓' in output
-    else:
-        assert '持仓状态未知' in output and '当前未持仓' not in output
-    assert advisor.read_scan_state()['pending'] is None
-    state = advisor.read_opportunity_state()
-    assert state['pending'] == original and state['seen'] == ['keep-seen']
 
 
 def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn, disclosure_replay):  # noqa: F811
@@ -197,7 +91,7 @@ def test_scan_and_weekly_show_check_failures_gaps_and_open_events(advisor, conn,
     assert '报告 #pending' in advisor.render_weekly(unlinked_week)
 
 
-def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, conn, ashare_cli):  # noqa: F811
+def test_weekly_includes_opportunity_cost(advisor, conn):  # noqa: F811
     from support.scans import AT
 
     from a_share_research import scans
@@ -212,22 +106,10 @@ def test_weekly_includes_opportunity_cost_and_survives_tool_failure(advisor, con
     assert len(opportunity_prompts) == 1
 
     weekly_payload = json.loads(json.dumps(scans.weekly(conn, at=AT), default=str))
-    ashare_cli.reply('research_scan_weekly', weekly_payload)
-    ashare_cli.reply('policy_current', dict(installed=True, activation={'id': 7}))
-    ashare_cli.reply('policy_monitor', monitor_receipt(prompts))
-    output = advisor.weekly()
+    output = advisor.render_weekly(weekly_payload, opportunity_prompts)
     assert '换仓机会成本复核 1 项：' in output
     assert opportunity_prompts[0]['detail'] in output
     assert '测算透支区' not in output.split('换仓机会成本复核')[1]
-    assert not advisor.OPPORTUNITY_STATE.exists()
-    weekly_state = advisor.OPPORTUNITY_STATE.with_name(advisor.WEEKLY_OPPORTUNITY_STATE.name)
-    assert json.loads(weekly_state.read_text())['pending'] is None
-
-    assert ashare_cli.calls[0] == ('research_scan_weekly', {'compact': False})
-    ashare_cli.reply('policy_monitor', code=21)
-    degraded = advisor.weekly()
-    assert '【研究周报】' in degraded and '【换仓复核】检查未完成' in degraded and '发布暂停' in degraded
-    assert json.loads(weekly_state.read_text())['pending'] is not None
 
 
 @pytest.mark.wide_scan_scope

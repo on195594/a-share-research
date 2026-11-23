@@ -7,23 +7,17 @@ weekly: render the weekly digest and portfolio review prompts.
 
 The ashare CLI uses the private Hermes assistant configuration. Hermes delivers stdout.
 """
-import json
-import fcntl
 import os
-import re
-import stat
 import sys
-import time
-import uuid
 from collections import Counter
 from datetime import datetime
-from contextlib import contextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ashare_tools import ToolsError as AdvisorError, client_identity, policy_receipt, save_json, tool
 from advisor_budget import BudgetError, run_bounded
+from ashare_schedule import current_slot, deliver, lock_path, task_lock
+from ashare_tools import ToolsError, client_identity
 
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
            "judgment_changed": "研究更新", "current_zone_changed": "估值位置变化",
@@ -33,21 +27,9 @@ ZONES = {"测算支持区": "模型认为估值较有吸引力", "中性区": "�
 VALUATION_NOTE = "注：估值参考不是技术支撑位或买卖指令，也不预测股价一定涨跌。"
 ACTIONS = {"covered": "已有报告", "queued_review": "已安排研究复核", "deferred": "等待研究复核",
            "no_card": "暂无研究记录", "skipped": "跳过"}
-OPPORTUNITY_STATE = Path(os.environ.get("A_SHARE_ADVISOR_STATE", Path.home() / ".local/state/a-share-advisor")) / "opportunities.json"
-WEEKLY_OPPORTUNITY_STATE = OPPORTUNITY_STATE.with_name('weekly-opportunities.json')
-SCAN_STATE = OPPORTUNITY_STATE.with_name('scan.json')
 OPPORTUNITY_NOTE = ("注：机会来自研究立场与按情景概率加权的期望回报，情景尚未记分；"
                     "建仓前通过 a-share 读取生效政策，按风险预算核对仓位，再由所有者决定是否下单。")
-POLL_SECONDS, RUN_SECONDS = 20, 540  # Leave cleanup time below Hermes' 600-second limit.
-
-
-def holdings() -> list[str]:
-    data = tool('account_current', {})
-    codes = data.get('codes')
-    if (not isinstance(codes, list) or any(not isinstance(c, str) or re.fullmatch('[0-9]{6}', c) is None for c in codes)
-            or not isinstance(data.get('source'), dict) or data['source'].get('mode') not in ('mirror', 'ledger')):
-        raise AdvisorError('账户代码或来源格式不兼容，无法核实当前持仓')
-    return sorted(set(codes))
+RUN_SECONDS = 540  # Leave cleanup time below Hermes' 600-second limit.
 
 
 def pct(value) -> str:
@@ -181,148 +163,11 @@ def render_scan(result: dict, held_codes: set[str] | None, public_base: str = ""
     return "\n\n".join(lines)
 
 
-def aware_time(value):
-    if not isinstance(value, str):
-        raise ValueError('timestamp must be a string')
-    at = datetime.fromisoformat(value)
-    if at.tzinfo is None:
-        raise ValueError('timestamp must have a timezone')
-    return at
-
-
-def read_scan_state() -> dict:
-    def unique(pairs):
-        out = {}
-        for key, value in pairs:
-            if key in out:
-                raise ValueError('duplicate state key')
-            out[key] = value
-        return out
-    try:
-        descriptor = os.open(SCAN_STATE, os.O_RDONLY | os.O_NOFOLLOW)
-    except FileNotFoundError:
-        return dict(schema_version=1, pending=None)
-    try:
-        with os.fdopen(descriptor) as stream:
-            info = os.fstat(stream.fileno())
-            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
-                    or stat.S_IMODE(info.st_mode) & 0o077 or info.st_size > 32768):
-                raise ValueError('unsafe state file')
-            saved = json.load(stream, object_pairs_hook=unique)
-        if (not isinstance(saved, dict) or set(saved) != {'schema_version', 'pending'}
-                or type(saved['schema_version']) is not int or saved['schema_version'] not in (1, 2)):
-            raise ValueError('state shape')
-        pending = saved['pending']
-        if pending is not None:
-            if (not isinstance(pending, dict) or set(pending) != {'request_id', 'binding', 'created_at', 'scan_id'}
-                    or not isinstance(pending['request_id'], str)
-                    or re.fullmatch(r'hermes-scan-[0-9a-f]{32}', pending['request_id']) is None
-                    or not isinstance(pending['binding'], str) or re.fullmatch('[0-9a-f]{64}', pending['binding']) is None
-                    or (pending['scan_id'] is not None and (type(pending['scan_id']) is not int or pending['scan_id'] < 1))
-                    or aware_time(pending['created_at']) > datetime.now(ZoneInfo('Asia/Shanghai'))):
-                raise ValueError('pending shape')
-    except (ValueError, TypeError, KeyError):
-        raise AdvisorError('扫描待查记录不兼容；保留原文件，请核对后重试') from None
-    if pending is not None and saved['schema_version'] == 1:
-        raise AdvisorError('发现旧 research key 的未完成扫描，请用旧脚本和原凭据完成原请求，确认 pending 为空后再换发')
-    return saved
-
-
-@contextmanager
-def task_lock(mode='scan'):
-    SCAN_STATE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = SCAN_STATE.with_suffix('.lock') if mode == 'scan' else SCAN_STATE.with_name('weekly.lock')
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, 'a') as lock:
-        info = os.fstat(lock.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid():
-            raise AdvisorError('扫描任务锁不兼容；未执行')
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-        else:
-            yield True
-
-
-def scan(deadline=None) -> str:
-    with task_lock() as acquired:
-        return _scan(deadline if deadline is not None else time.monotonic() + RUN_SECONDS) if acquired else ''
-
-
-def _scan(deadline: float) -> str:
-    if deadline <= time.monotonic():
-        raise AdvisorError('本轮等待时限已到；待查请求保留，下次继续查询')
-    saved = read_scan_state()
-    binding, public_base = client_identity()
-    if saved['pending'] is None:
-        saved['schema_version'] = 2
-        saved['pending'] = dict(request_id='hermes-scan-' + uuid.uuid4().hex, binding=binding,
-                                created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(), scan_id=None)
-        save_json(SCAN_STATE, saved)
-    pending = saved['pending']
-    if pending['binding'] != binding:
-        raise AdvisorError('研究服务或凭据已变化；保留原扫描请求，请核对后恢复')
-    receipt = tool('research_scan_request', {'request_id': pending['request_id']})
-    if (receipt.get('version') != 'research-v1' or receipt.get('id') != receipt.get('scan_id')
-            or type(receipt.get('id')) is not int or receipt.get('request_id') != pending['request_id']
-            or type(receipt.get('scan_id')) is not int or receipt['scan_id'] < 1
-            or (pending['scan_id'] is not None and receipt['scan_id'] != pending['scan_id'])):
-        raise AdvisorError('扫描提交回执不兼容；保留原请求供核对')
-    scan_id = receipt['scan_id']
-    if pending['scan_id'] is None:
-        pending['scan_id'] = scan_id
-        save_json(SCAN_STATE, saved)
-    while True:
-        if deadline - time.monotonic() <= 1:
-            return f'【研究扫描】扫描 #{scan_id} 本轮等待已结束，已保留请求，下次继续查询。'
-        result = tool('research_scan_read', {'scan_id': scan_id, 'compact': False})
-        try:
-            if (not isinstance(result, dict) or result.get('version') != 'research-v1'
-                    or type(result.get('id')) is not int or result['id'] != scan_id
-                    or result.get('status') not in ('queued', 'running', 'done', 'failed')
-                    or not isinstance(result.get('summary'), dict) or not isinstance(result.get('notify'), list)
-                    or any(not isinstance(item, dict) for item in result['notify'])):
-                raise ValueError
-            requested = aware_time(result['requested_at'])
-            if requested > datetime.now(ZoneInfo('Asia/Shanghai')):
-                raise ValueError
-        except (ValueError, KeyError, TypeError):
-            raise AdvisorError('扫描查询回执不兼容；保留原请求供核对') from None
-        if result['status'] in ('done', 'failed'):
-            break
-        time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic() - 1)))
-    # Refresh at delivery time: a position may have been closed while the scan ran.
-    held_codes: set[str] | None = set()
-    holding_note = ''
-    if result.get('notify'):
-        try:
-            held_codes = set(holdings())
-        except AdvisorError as exc:
-            held_codes = None
-            holding_note = f'【持仓核对】{exc}'
-    text = render_scan(result | {"scan_id": scan_id}, held_codes, public_base)
-    if text and requested.astimezone(ZoneInfo('Asia/Shanghai')).date() != datetime.now(ZoneInfo('Asia/Shanghai')).date():
-        text = f'【研究扫描补回】原扫描时间 {requested.isoformat()}；以下为历史回执，不代表今日观察。\n\n' + text
-    extra = opportunities(public_base)
-    output = "\n\n".join(part for part in (text, holding_note, extra) if part)
-    # A completed scan leaves the empty state readable by the previous client.
-    save_json(SCAN_STATE, dict(schema_version=1, pending=None))
-    return output
-
-
-def opportunity_key(prompt: dict) -> str:
-    e = prompt["evidence"]
-    # A new report, stance or zone makes it a new opportunity; a price wiggle inside one does not.
-    return f"{prompt['code']}|{e.get('report_id')}|{e.get('stance_action')}|{e.get('v2_zone')}"
-
-
-def render_opportunities(prompts: list[dict], seen: set[str], public_base: str = "") -> str:
-    fresh = [p for p in prompts if opportunity_key(p) not in seen]
-    if not fresh:
+def render_opportunities(prompts: list[dict], public_base: str = "") -> str:
+    if not prompts:
         return ""
     lines = []
-    for prompt in fresh:
+    for prompt in prompts:
         e = prompt["evidence"]
         line = f"【建仓机会】{prompt['detail']}"
         if e.get("report_id") is not None:
@@ -333,112 +178,7 @@ def render_opportunities(prompts: list[dict], seen: set[str], public_base: str =
     return "\n\n".join([*lines, OPPORTUNITY_NOTE])
 
 
-def save_opportunity_state(state: dict, path: Path | None = None) -> None:
-    """Atomically retain the original request before a potentially ambiguous tool call."""
-    save_json(path or OPPORTUNITY_STATE, state)
-
-
-def read_opportunity_state(path: Path | None = None) -> dict:
-    target = path or OPPORTUNITY_STATE
-    value = json.loads(target.read_text()) if target.exists() else []
-    # Preserve the existing notification keys when installing the replacement.
-    if isinstance(value, list):
-        value = dict(schema_version=1, seen=value, pending=None)
-    if (not isinstance(value, dict) or set(value) - {'binding'} != {'schema_version', 'seen', 'pending'}
-            or type(value['schema_version']) is not int or value['schema_version'] != 1
-            or not isinstance(value['seen'], list) or any(not isinstance(k, str) for k in value['seen'])):
-        raise AdvisorError('机会去重记录不兼容；未覆盖原记录')
-    pending = value['pending']
-    if pending is not None and (not isinstance(pending, dict)
-            or set(pending) != {'request_id', 'expected_activation_id'}
-            or not isinstance(pending['request_id'], str) or not pending['request_id']
-            or type(pending['expected_activation_id']) is not int or pending['expected_activation_id'] < 1):
-        raise AdvisorError('待查政策请求记录不兼容；未覆盖原记录')
-    return value
-
-
-def _collect_monitor_prompts(state_path: Path, stale_message: str) -> tuple[dict | None, list[dict] | None, str]:
-    state = read_opportunity_state(state_path)
-    if state['pending'] is None:
-        current = tool('policy_current', {})
-        activation = current.get('activation') or {}
-        if current.get('installed') is not True or type(activation.get('id')) is not int or activation['id'] < 1:
-            raise AdvisorError('政策异常：尚无与实装一致的生效政策，请核对后再采集建仓机会')
-        state['binding'] = client_identity()[0]
-        state['pending'] = dict(request_id='hermes-advisor-' + uuid.uuid4().hex,
-                                expected_activation_id=activation['id'])
-        save_opportunity_state(state, state_path)
-    saved = policy_receipt('policy_monitor', state, state_path, call=tool)
-    try:
-        if (saved['mode'] != 'service_monitor_capture' or saved['request_id'] != state['pending']['request_id']
-                or saved['activation_id'] != state['pending']['expected_activation_id']):
-            raise ValueError
-        captured = datetime.fromisoformat(saved['capture_context']['capture_finished_at'])
-        now = datetime.now(ZoneInfo('Asia/Shanghai'))
-        if captured.tzinfo is None or captured > now:
-            raise ValueError
-        if captured.astimezone(now.tzinfo).date() != now.date():
-            save_opportunity_state(dict(schema_version=1, seen=state['seen'], pending=None), state_path)
-            return None, None, stale_message
-        prompts = saved['result']['review_prompts']
-        if not isinstance(prompts, list):
-            raise ValueError
-    except (ValueError, KeyError, TypeError, AttributeError):
-        raise AdvisorError('政策回执不兼容；保留原请求供核对，不清空去重记录') from None
-    return state, prompts, ''
-
-
-def _opportunities(public_base: str) -> str:
-    state, prompts, stale = _collect_monitor_prompts(
-        OPPORTUNITY_STATE, '【建仓机会】已查回前日评估回执，未作为今日机会推送；下次检查重新采集。')
-    if prompts is None:
-        return stale
-    prompts = [p for p in prompts if p['kind'] == 'research_opportunity']
-    text = render_opportunities(prompts, set(state['seen']), public_base)
-    keys = sorted(opportunity_key(p) for p in prompts)
-    # Keep only current keys so a lapsed opportunity can be notified again.
-    save_opportunity_state(dict(schema_version=1, seen=keys, pending=None), OPPORTUNITY_STATE)
-    return text
-
-
-def opportunities(public_base: str = "") -> str:
-    OPPORTUNITY_STATE.parent.mkdir(parents=True, exist_ok=True)
-    with OPPORTUNITY_STATE.with_suffix('.lock').open('a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return '【建仓机会】已有检查在运行，本次未重复采集。'
-        try:
-            return _opportunities(public_base)
-        except (AdvisorError, OSError, ValueError) as exc:
-            message = str(exc) if isinstance(exc, AdvisorError) else '去重状态读写失败；保留原记录，请核对后重试'
-            return f'【建仓机会】检查未完成：{message}'
-
-
-def weekly_opportunity_costs(deadline=None) -> tuple[list[dict], str]:
-    if deadline is not None and deadline - time.monotonic() <= 1:
-        return [], '【换仓复核】本轮等待时限已到；未采集换仓复核。'
-    state_path = OPPORTUNITY_STATE.with_name(WEEKLY_OPPORTUNITY_STATE.name)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    with state_path.with_suffix('.lock').open('a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return [], '【换仓复核】已有检查在运行，本次未重复采集。'
-        try:
-            _, prompts, stale = _collect_monitor_prompts(
-                state_path, '【换仓复核】已查回前日评估回执，未作为本周结果展示；下次检查重新采集。')
-            if prompts is None:
-                return [], stale
-            costs = [p for p in prompts if p.get('kind') == 'opportunity_cost' and isinstance(p.get('detail'), str)]
-            save_opportunity_state(dict(schema_version=1, seen=[], pending=None), state_path)
-            return costs, ''
-        except (AdvisorError, OSError, ValueError) as exc:
-            message = str(exc) if isinstance(exc, AdvisorError) else '状态读写失败；保留原记录，请核对后重试'
-            return [], f'【换仓复核】检查未完成：{message}'
-
-
-def render_weekly(data: dict, opportunity_costs: list[dict] | None = None, opportunity_note: str = "") -> str:
+def render_weekly(data: dict, opportunity_costs: list[dict] | None = None) -> str:
     states = {"有效": "可参考", "待复核": "有新信息待核实"}
     lines = [f"【研究周报】截至 {data['as_of'][:16]}",
              "研究状态：" + "、".join(f"{states.get(k, k)} {v}家" for k, v in data["status_distribution"].items()),
@@ -481,38 +221,61 @@ def render_weekly(data: dict, opportunity_costs: list[dict] | None = None, oppor
         lines.append(f"换仓机会成本复核 {len(opportunity_costs)} 项：")
         for prompt in opportunity_costs:
             lines.append(f"- {prompt['detail']}")
-    if opportunity_note:
-        lines.append(opportunity_note)
     lines.append(VALUATION_NOTE)
     return "\n".join(lines)
 
 
-def weekly(deadline=None) -> str:
-    data = tool('research_scan_weekly', {'compact': False})
-    costs, note = weekly_opportunity_costs(deadline=deadline)
-    return render_weekly(data, costs, note)
-
-
-def main() -> None:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "scan"
-    if len(sys.argv) > 2 or mode not in ("scan", "weekly"):
-        # Any other argument (e.g. --help) must not trigger a real scan.
-        sys.exit("usage: a-share-advisor.py [scan|weekly]")
-    def task(deadline):
-        try:
-            return weekly(deadline) if mode == 'weekly' else _scan(deadline)
-        except AdvisorError as exc:
-            return f'【研究扫描】任务未能完成：{exc}'
-        except (KeyError, OSError, ValueError, TypeError, AttributeError):
-            return '【研究扫描】服务或回执不可用；请核对配置与待查记录，未自动清空或重建请求。'
-    try:
-        with task_lock(mode) as acquired:
-            text = run_bounded(task, seconds=RUN_SECONDS) if acquired else ''
-    except (BudgetError, AdvisorError, OSError):
-        text = '【研究扫描】本轮执行中断或超过时限；请核对待查记录，下次继续恢复，不代表扫描无事件。'
+def scan_text(result):
+    _, public_base = client_identity()
+    codes = result['held_codes']
+    scan = result['scan']
+    text = render_scan(scan, set(codes) if codes is not None else None, public_base)
     if text:
-        sys.stdout.write(text + '\n')
+        requested = datetime.fromisoformat(scan['requested_at']).astimezone(ZoneInfo('Asia/Shanghai'))
+        if requested.date() != datetime.now(requested.tzinfo).date():
+            text = f'【研究扫描补回】原扫描时间 {requested.isoformat()}；以下为历史回执，不代表今日观察。\n\n' + text
+    opportunities = render_opportunities(result['opportunities'], public_base)
+    holding_note = f"【持仓核对】{result['holding_note']}" if result['holding_note'] else ''
+    return '\n\n'.join(part for part in (text, holding_note, opportunities) if part)
 
 
-if __name__ == "__main__":
-    main()
+def main() -> int:
+    mode = sys.argv[1] if len(sys.argv) > 1 else 'scan'
+    if len(sys.argv) > 2 or mode not in ('scan', 'weekly'):
+        sys.stderr.write('usage: a-share-advisor.py [scan|weekly]\n')
+        return 2
+    job = 'advisor_' + mode
+    slot = current_slot(job)
+
+    def render(result):
+        text = render_weekly(result['weekly'], result['opportunity_costs']) if mode == 'weekly' else scan_text(result)
+        return text + '\n' if text else ''
+
+    try:
+        with task_lock(lock_path(job)) as acquired:
+            if not acquired:
+                return 0
+            # The supervisor silences diagnostic streams in its child. Give delivery a
+            # dedicated stdout descriptor so it can flush the report before acknowledgement.
+            with os.fdopen(os.dup(sys.stdout.fileno()), 'w', encoding=sys.stdout.encoding) as delivery_stream:
+                def task(deadline):
+                    try:
+                        deliver(job, slot, render=render, stdout=delivery_stream, deadline=deadline)
+                    except ToolsError as exc:
+                        return str(exc)
+                    except (KeyError, TypeError, ValueError, AttributeError):
+                        return '顾问运行回执无效，请按原时段查回。'
+                    return ''
+                error = run_bounded(task, seconds=RUN_SECONDS)
+    except (BudgetError, ToolsError) as exc:
+        error = str(exc)
+    except OSError:
+        error = '顾问任务的锁或输出流不可用，请核对执行记录。'
+    if error:
+        sys.stderr.write(error + '\n')
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
