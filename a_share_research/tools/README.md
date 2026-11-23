@@ -80,10 +80,10 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 | 工具 | 输入与回执 |
 |---|---|
-| `schedule_run` | 传 `job`、`slot` 受理或查回本时段。上海时间格式为止损 `stop_alert` 用 5 分钟整点 `YYYY-MM-DDTHH:MM`，日报 `daily_brief` 与扫描 `advisor_scan` 用日期，周报 `advisor_weekly` 用 ISO 周 `YYYY-Www`，月度对比 `benchmark` 用 `YYYY-MM`。 |
+| `schedule_run` | 传 `job`、`slot` 受理或查回本时段。上海时间格式为止损 `stop_alert` 用 5 分钟整点 `YYYY-MM-DDTHH:MM`，日报 `daily_brief` 与扫描 `advisor_scan` 用日期，周报 `advisor_weekly` 用 ISO 周 `YYYY-Www`，月度对比 `benchmark` 与月批发起 `monthly_submit` 用月份 `YYYY-MM`，月批状态 `monthly_status` 用整点 `YYYY-MM-DDTHH`。 |
 | `schedule_ack` | 传 `run_id` 确认本 grant 已输出的 `ready` 回执。成功返回 `acked`，同一编号可重复确认。 |
 
-顾问扫描返回 `running` 与 `scan_id` 时，按原时段轮询。就绪行含 `text` 或顾问渲染所需的 `result`。采集失败返回 `failed`、`error_code` 与脱敏的 `error`，重试原时段会重新评估。服务用当时的生效激活编号保存政策评估和关联编号。过期与送达语义见 [Hermes 手册](../../ops/hermes/README.md#止损日报月度对比与顾问任务)。
+顾问扫描返回 `running` 与 `scan_id` 时，按原时段轮询。就绪行的 `text` 是最终推送正文，空串表示本时段静默。扫描或周报的政策评估失败时，`text` 保留已取得的披露或周报内容。采集失败返回 `failed`、`error_code` 与脱敏的 `error`，重试原时段会重新评估。服务用当时的生效激活编号保存政策评估和关联编号。过期与送达语义见 [Hermes 手册](../../ops/hermes/README.md)。
 
 ## 服务端监控与测算
 
@@ -92,17 +92,14 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 | 工具 | 输入或结果 |
 |---|---|
 | `policy_monitor` | 保存持仓、资产观察、研究卡片、行情与监控判断。 |
-| `policy_stop_alert` | 附 `previous_state`（可为空对象），返回本轮提醒和下一通知状态。回退脚本使用此入口自行传入通知状态。 |
-| `policy_daily_brief` | 保存持仓监控、分红检查、失败项与盘后日报。 |
 | `policy_holdings_check` | 保存逐仓检查、P3 流动性延期证据与复核期限。读取逐项缺口判断资料是否齐全。 |
-| `policy_benchmark` | 附截止日 `end`（YYYY-MM-DD），以完整持仓现金流对照 H00300.CSI、H00922.CSI 全收益指数。 |
 | `policy_position_size` | 附 `monitor_evaluation_id` 与 `proposal`（代码、价格、框架、可选现金），基于既有监控快照试算仓位。 |
 | `policy_portfolio_scenario` | 附 `monitor_evaluation_id` 与 `proposal`，明确 `sales` 股数、`fees` 和可选现金，返回静态卖出情景。 |
 
 仓位和情景工具核对父监控回执与当前来源，使用快照中的价格与分母。账户或政策变化后，应重新采集监控再测算。调用者提供的价格、股数及费用是测算条件。
 
-### 跨激活 pending 的确定拒绝协议
+### 交互式评估的政策切换与重试
 
 采集先按原凭据和 `request_id` 查找回执。已有相同请求返回原结果；同号不同内容为 `conflict`。只有确定原请求未写入且原生效指针确已变化时，才返回 `policy_activation_changed`。一般身份、权限与账户来源冲突须按各自错误处理。
 
-CLI 收到该确定拒绝时退出 20；暂停、繁忙或拒绝连接时退出 21；结果未知时退出 22，应先查回执再用原身份和原请求重试。旧政策脚本的回退处理见[宿主恢复协议](../../ops/hermes/README.md#跨激活-pending-转接)。
+CLI 收到该确定拒绝时退出 20；暂停、繁忙或拒绝连接时退出 21；结果未知时退出 22，应先查回执再用原身份和原请求重试。定时任务由服务端处理政策切换后的重新受理。

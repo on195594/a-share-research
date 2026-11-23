@@ -73,7 +73,7 @@ def test_existing_scripts_import(name, monkeypatch):
 @pytest.fixture
 def installer_repo(tmp_path, monkeypatch):
     monkeypatch.setenv("A_SHARE_ADVISOR_STATE", str(tmp_path / "advisor"))
-    for job in ("stop-alert", "daily-brief", "benchmark"):
+    for job in ("stop-alert", "daily-brief", "benchmark", "monthly-submit", "monthly-status"):
         monkeypatch.setenv("ASHARE_" + job.upper().replace("-", "_") + "_STATE", str(tmp_path / job / "state.json"))
     repo = tmp_path / "repo"
     shutil.copytree(SOURCE, repo / "ops/hermes", ignore=shutil.ignore_patterns("__pycache__"))
@@ -99,7 +99,7 @@ def run_install(repo, target, *args):
 def test_install_copies_dependencies_before_entries(tmp_path, monkeypatch):
     installer = load("install")
     replace = installer.os.replace
-    modules = {"advisor_budget.py", "ashare_tools.py", "ashare_schedule.py"}
+    modules = {"ashare_tools.py", "ashare_schedule.py"}
 
     def install_file(temporary, dest):
         if dest.name == "ashare_schedule.py":
@@ -119,13 +119,12 @@ def test_rollback_runbook_lists_all_unconfirmed_runs(policy_setup):
         conn.execute("INSERT INTO scheduled_runs(principal_key_id,job,slot,status,created_at) "
                      "VALUES (?, 'advisor_scan', ?, ?, ?)", (principals["assistant"].key_id, slot, status, slot))
 
-    runbook = (SOURCE / "README.md").read_text().split("## 跨激活 pending 转接", 1)[1]
+    runbook = (SOURCE / "README.md").read_text().split("## 段 3 回退", 1)[1]
     sql = runbook.split("```sql\n", 1)[1].split("```", 1)[0]
-    rows = conn.execute(sql).fetchall()
+    rows = conn.execute(sql, {'grant_id': principals['assistant'].key_id}).fetchall()
     assert rows[0].keys() == ["id", "job", "slot", "status", "scan_id"]
     assert {row["status"] for row in rows} == {"running", "ready", "failed"}
-    design = (ROOT / "docs/scheduling-state.md").read_text().split("段 2 必须", 1)[1].split("## 6", 1)[0]
-    assert "695a36f" in design
+    assert '9e77a07' in runbook and 'install.py --apply' in runbook
 
 
 def test_install_lifecycle(installer_repo, tmp_path):

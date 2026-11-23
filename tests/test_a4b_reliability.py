@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from a_share_research import disclosure_checks, material, scans, service
 from support.financials import CAPTURES, frames
-from support.hermes import load
+from a_share_research.tools import advisor_text
 from support.scans import CapturedSources, run_scan
 
 
@@ -125,11 +125,10 @@ def test_mechanical_failure_visible_separate_from_directory_and_cleared(disclosu
     assert failure and failure['report_id'] == card['report_id'] and failure['scan_id'] == second['id']
     assert scans.mechanical_failure(conn, code + '.SH', card['report_id']) == failure
     assert not any(e.get('kind') == 'scan_failure' for e in card['pending_events'])
-    advisor = load('a-share-advisor')
-    daily = advisor.render_scan(second, set())
+    daily = advisor_text.render_scan(second, set())
     assert code in daily and 'financial fetch failed' in daily and '机械' in daily
     assert str(card['report_id']) in daily and str(second['id']) in daily
-    weekly = advisor.render_weekly(scans.weekly(conn, at='2026-11-02T18:00:00+08:00'))
+    weekly = advisor_text.render_weekly(scans.weekly(conn, at='2026-11-02T18:00:00+08:00'))
     assert code in weekly and 'financial fetch failed' in weekly and '机械' in weekly
     # Skipping the check is not recovery, even if the rest of a scan succeeds.
     check = scans._check_disclosures

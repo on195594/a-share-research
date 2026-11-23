@@ -4,37 +4,42 @@ from datetime import date, datetime, timedelta
 import fcntl
 import json
 import logging
+import os
 import re
+from urllib.parse import urlsplit
 
 from requests import RequestException
 
 from a_share_research import db, gate, scans, service
 from a_share_research.market import redact_error
 from a_share_research.policy import account_view, benchmark, daily_brief, monitor, registry, stop_alert
+from a_share_research.tools import advisor_text, scheduled_monthly
 from a_share_research.tools.registry import Context, ToolError, domain_error
 
 log = logging.getLogger(__name__)
 _SLOT_FORMAT = {
     'stop_alert': 'YYYY-MM-DDTHH:MM（5 分钟整点）', 'daily_brief': 'YYYY-MM-DD',
     'advisor_scan': 'YYYY-MM-DD', 'benchmark': 'YYYY-MM', 'advisor_weekly': 'YYYY-Www',
+    'monthly_submit': 'YYYY-MM', 'monthly_status': 'YYYY-MM-DDTHH',
 }
 
 
 def _slot_start(job, slot, now):
     try:
-        if job == 'stop_alert':
+        if job in ('stop_alert', 'monthly_status'):
             start = datetime.fromisoformat(slot)
-            canonical = start.isoformat(timespec='minutes')
+            canonical = start.isoformat(timespec='hours' if job == 'monthly_status' else 'minutes')
             if start.tzinfo is not None or start.minute % 5:
                 raise ValueError
         else:
-            day = date.fromisoformat(slot + '-01' if job == 'benchmark' else slot)
+            monthly = job in ('benchmark', 'monthly_submit')
+            day = date.fromisoformat(slot + '-01' if monthly else slot)
             start = datetime.combine(day, datetime.min.time())
             if job == 'advisor_weekly':
                 year, week, _ = day.isocalendar()
                 canonical = f'{year:04d}-W{week:02d}'
             else:
-                canonical = day.isoformat()[:7] if job == 'benchmark' else day.isoformat()
+                canonical = day.isoformat()[:7] if monthly else day.isoformat()
         if canonical != slot:
             raise ValueError
     except ValueError:
@@ -103,6 +108,12 @@ def _accept(ctx, job, slot, now):
 def _previous(conn, row):
     query = "SELECT state FROM scheduled_runs WHERE principal_key_id=? AND job=? AND status='acked'"
     args = [row['principal_key_id'], row['job']]
+    if row['job'] == 'monthly_status':
+        # Acks share second-resolution timestamps. The merged set orders ties.
+        found = conn.execute(query + """ AND slot GLOB ? ORDER BY acked_at DESC,
+                             json_array_length(state,'$.seen') DESC LIMIT 1""",
+                             (*args, row['slot'][:7] + '-*')).fetchone()
+        return json.loads(found[0]) if found else {}
     if row['job'] == 'stop_alert':
         from a_share_research.policy.v0.commands_holdings import new_stop_alerts
         day = row['slot'][:10]
@@ -233,6 +244,16 @@ def _advisor_opportunities(ctx, row, result):
     return receipt['id'], {'seen': sorted(key for key, _ in current)}
 
 
+def _advisor_body(job, result):
+    if job == 'advisor_scan':
+        url = urlsplit(os.environ.get('ASHARE_PUBLIC_MCP_URL', ''))
+        origin = f'https://{url.netloc}' if url.scheme == 'https' and url.hostname and url.username is None else ''
+        body = advisor_text.scan_text(result, origin, date.fromisoformat(db.now()[:10]))
+    else:
+        body = advisor_text.render_weekly(result['weekly'], result['opportunity_costs'])
+    return body + '\n' if body else ''
+
+
 def _complete(ctx, row, start):
     conn = ctx.connection
     job = row['job']
@@ -240,9 +261,17 @@ def _complete(ctx, row, start):
     error_code = error = evaluation_id = None
     try:
         if job in ('advisor_scan', 'advisor_weekly'):
-            if not _advisor_inputs(ctx, row, result):
-                return
-            evaluation_id, state = _advisor_opportunities(ctx, row, result)
+            try:
+                if not _advisor_inputs(ctx, row, result):
+                    return
+                evaluation_id, state = _advisor_opportunities(ctx, row, result)
+            finally:
+                # Even a failed account lookup or monitor can leave disclosures or a weekly digest.
+                if result:
+                    text = _advisor_body(job, result)
+        elif job in ('monthly_submit', 'monthly_status'):
+            previous = _previous(conn, row) if job == 'monthly_status' else {}
+            text, state = scheduled_monthly.run(conn, job, row['slot'], previous)
         else:
             receipt = _evaluate(ctx, row)
             evaluation_id = receipt['id']
@@ -269,8 +298,9 @@ def _complete(ctx, row, start):
         if error_code and job == 'advisor_scan' and row['slot'] < finished[:10]:
             # A failed catch-up is terminal so future scans can proceed. Keep its partial disclosures and error.
             status = 'expired'
-            reason = ' '.join(error.split())[:160]
-            text = f"{row['slot']} 的扫描补回失败：{error_code}，{reason}\n"
+            if result:
+                result['has_body'] = bool(text)
+            text += _scan_failure_text(row['slot'], error_code, error)
         conn.execute("""UPDATE scheduled_runs SET status=?,evaluation_id=?,finished_at=?,error_code=?,error=?,
                         state=?,result=?,text=? WHERE id=?""",
                      (status, evaluation_id, finished, error_code, error,
@@ -296,6 +326,32 @@ def _backlog(ctx, job, slot):
     return found[0] if found else slot
 
 
+def _replay(conn, row):
+    data = _view(row)
+    result = data['result']
+    if data['job'] not in ('advisor_scan', 'advisor_weekly') or not result:
+        return data
+    if data['status'] == 'ready':
+        # v26 rows may predate server rendering. A scan can also cross midnight before delivery.
+        text = _advisor_body(data['job'], result)
+    elif data['status'] == 'expired' and data['error_code'] and 'has_body' not in result:
+        body = _advisor_body(data['job'], result)
+        result['has_body'] = bool(body)
+        text = body + _scan_failure_text(data['slot'], data['error_code'], data['error'])
+    else:
+        return data
+    if text != data['text'] or data['status'] == 'expired':
+        conn.execute('UPDATE scheduled_runs SET text=?,result=? WHERE id=?',
+                     (text, gate.canonical(result), data['run_id']))
+        data['text'] = text
+    return data
+
+
+def _scan_failure_text(slot, code, error):
+    reason = ' '.join(error.split())[:160]
+    return f"{slot} 的扫描补回失败：{code}，{reason}\n"
+
+
 def run(ctx: Context, job: str, slot: str) -> dict:
     _slot_start(job, slot, datetime.fromisoformat(db.now()))
     # No SQLite write lock across collection. flock also releases on process death.
@@ -303,10 +359,14 @@ def run(ctx: Context, job: str, slot: str) -> dict:
     with lock.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
         row, start = _accept(ctx, job, slot, datetime.fromisoformat(db.now()))
-        if row['status'] == 'running':
+        replay = row['status'] != 'running'
+        if not replay:
             _complete(ctx, row, start)
-        registry._authorize(ctx.connection, ctx.principal)
-        return _view(_row(ctx.connection, row['id']))
+        conn = ctx.connection
+        with db.transaction(conn):
+            registry._authorize(conn, ctx.principal)
+            row = _row(conn, row['id'])
+            return _replay(conn, row) if replay else _view(row)
 
 
 def ack(ctx: Context, run_id: int) -> dict:
@@ -321,5 +381,10 @@ def ack(ctx: Context, run_id: int) -> dict:
             return _view(row)
         if row['status'] != 'ready':
             raise ToolError('conflict', '仅可确认 ready 状态的定时运行', 409)
-        conn.execute("UPDATE scheduled_runs SET status='acked',acked_at=? WHERE id=?", (db.now(), run_id))
+        state = row['state']
+        if row['job'] == 'monthly_status':
+            # Two different events can be ready before either delivery is acknowledged.
+            seen = set(_previous(conn, row).get('seen', [])) | set(json.loads(state).get('seen', []))
+            state = gate.canonical({'seen': sorted(seen)})
+        conn.execute("UPDATE scheduled_runs SET status='acked',acked_at=?,state=? WHERE id=?", (db.now(), state, run_id))
         return _view(_row(conn, run_id))

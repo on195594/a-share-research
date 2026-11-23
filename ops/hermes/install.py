@@ -15,6 +15,7 @@ import sys
 
 SOURCE = Path(__file__).resolve().parent
 OBSOLETE = (
+    "advisor_budget.py",
     "a-share-k7-progress.py",
     "a-share-k7-progress.sh",
     "a-share-shadow-diff.sh",
@@ -96,12 +97,13 @@ def apply(target: Path) -> None:
     if any(Path(line).suffix in {".py", ".sh"} for line in ignored.stdout.splitlines() if line.strip()):
         raise ValueError("拒绝安装：ops/hermes/ 存在被忽略的脚本文件，请清理后再 --apply。")
     sys.path.insert(0, str(SOURCE))
-    from ashare_schedule import advisor_directory, policy_state_path, task_lock
+    from ashare_schedule import advisor_directory, lock_path, policy_state_path, task_lock
     advisor = advisor_directory()
     legacy = [policy_state_path(job) for job in ('stop_alert', 'daily_brief', 'benchmark')]
     legacy.extend(advisor / filename for filename in ('scan.json', 'opportunities.json', 'weekly-opportunities.json'))
     with ExitStack() as locks:
-        for path in [advisor / 'weekly.lock', *(state.with_suffix('.lock') for state in legacy)]:
+        for path in [advisor / 'weekly.lock', lock_path('monthly_submit'), lock_path('monthly_status'),
+                     *(state.with_suffix('.lock') for state in legacy)]:
             if not locks.enter_context(task_lock(path)):
                 raise ValueError(f'{path} 的任务正在运行，请等任务完成后再安装。')
         for state in legacy:
@@ -111,7 +113,7 @@ def apply(target: Path) -> None:
 
 def copy_scripts(target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
-    modules = [SOURCE / name for name in ("ashare_tools.py", "ashare_schedule.py", "advisor_budget.py")]
+    modules = [SOURCE / name for name in ("ashare_tools.py", "ashare_schedule.py")]
     for source in modules + [path for path in scripts() if path not in modules]:
         temporary = None
         try:

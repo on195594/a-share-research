@@ -8,16 +8,20 @@ import sqlite3
 from threading import Event
 
 from fastapi.testclient import TestClient
+import pandas as pd
 import pytest
 
-from a_share_research import api_keys, db, scans
+from a_share_research import api_keys, db, gate, scans
 from a_share_research.account import mirror
-from a_share_research.policy import benchmark, monitor, registry, stop_alert
+from a_share_research.core.market_data import MarketDataResult
+from a_share_research.policy import (benchmark, benchmark_evaluation, daily_brief, daily_evaluation, monitor, registry,
+                                     stop_alert, stop_evaluation)
 from a_share_research.policy.v0 import commands_monitor
 from a_share_research.tools.registry import Context, ToolError, invoke
 from a_share_research.tools.server import create_app
 from support.evaluations import benchmark_bundle, stop_bundle
 from support.mcp import RESOURCE, ORIGIN, rpc
+from support.policy import policy_input_book as ledger_book, scoped_parameters
 from support.scans import CapturedSources
 
 CARDS = Path(__file__).parent / 'policy_v0/fixtures/monitor'
@@ -57,6 +61,12 @@ def receipt(ctx, row):
     return registry.evaluation(ctx.connection, ctx.principal, row['evaluation_id'])
 
 
+def test_scheduled_policy_jobs_have_no_direct_tool():
+    from a_share_research.tools.registry import TOOLS
+    for job in ('stop_alert', 'daily_brief', 'benchmark'):
+        assert f'policy_{job}' not in TOOLS
+
+
 def test_stop_delivered_state_and_replay(context, stop_capture):
     ctx, clock = context
     a, b, c = [DAY + 'T' + t for t in ('10:25', '10:30', '10:35')]
@@ -65,7 +75,9 @@ def test_stop_delivered_state_and_replay(context, stop_capture):
     assert run(ctx, 'stop_alert', a) == first and len(stop_capture) == 1
     repeated = run(ctx, 'stop_alert', b)
     assert repeated['text'] == first['text'] and stop_capture == [{}, {}]
-    assert first['state'] == receipt(ctx, first)['result']['state']
+    evaluation = receipt(ctx, first)['result']
+    assert evaluation['alerts'] == [{'code': '000963', 'level': 'stop1'}]
+    assert first['state'] == evaluation['state']
     saved = ack(ctx, repeated)
     clock[0] = DAY + 'T10:40:01+08:00'
     assert ack(ctx, repeated) == saved == run(ctx, 'stop_alert', b)
@@ -124,7 +136,7 @@ def test_concurrent_duplicate_collects_once(context, stop_capture, monkeypatch):
     ('daily_brief', '2026-02-30'), ('daily_brief', '20261022'), ('daily_brief', '2026-10-23'),
     ('advisor_scan', '2026-10-23'), ('advisor_weekly', '2025-W53'), ('advisor_weekly', '2026-W44'),
     ('advisor_weekly', '2026-W1'), ('benchmark', '2026-9'), ('benchmark', '2026-11'),
-    ('monthly_submit', '2026-10'),
+    ('monthly_submit', '2026-11'),
 ])
 def test_invalid_or_future_slots_write_nothing(context, job, slot):
     ctx, _ = context
@@ -203,6 +215,7 @@ def test_failed_evaluation_retries_on_new_activation(context, policy_setup, monk
     assert saved['activation_id'] == new['id'] and saved['request_id'] != receipt(ctx, failed)['request_id']
     assert calls == [DAY, DAY] and ready['evaluation_id'] != failed['evaluation_id']
     assert ready['text'] == '📊 A股账本月度对比\n' + saved['result']['stdout']
+    assert saved['result']['metrics']['pnl'] == 2787
     assert ready['result']['stderr'] == saved['result']['stderr'] and '价格参考' in ready['result']['stderr']
 
 
@@ -361,6 +374,62 @@ def test_daily_real_capture_over_mcp_then_next_day_lookup(context, monkeypatch):
         assert call('schedule_ack', run_id=ready['run_id'])['status'] == 'acked'
 
 
+@pytest.mark.parametrize(('job', 'version', 'empty_input', 'result_status', 'tamper'), [
+    ('stop_alert', 3, dict(holdings=[], quotes={}), ('no_holdings', 'outside_session'),
+     {'previous_state': {'levels': {'000963': 'stop2'}}}),
+    ('daily_brief', 4, dict(local={'holdings': [], 'closed_count': 0}, dividends=[]), ('silent',),
+     {'action': 'policy.monitor'}),
+    ('benchmark', 5, dict(events=[], indices={}, prices={}), ('no_events',), {'end': '2000-01-01'}),
+])
+def test_empty_account_real_capture_and_immutable_receipt(
+        context, policy_setup, job, version, empty_input, result_status, tamper):
+    ctx, _ = context
+    manifest, active = policy_setup[3:5]
+    # Shipping children read the isolated empty mirror without market requests.
+    slot = {'daily_brief': DAY, 'benchmark': DAY[:7], 'stop_alert': DAY + 'T10:35'}[job]
+    row = run(ctx, job, slot)
+    saved = receipt(ctx, row)
+    assert all(saved['input'][key] == value for key, value in empty_input.items())
+    assert saved['identity'] == manifest['identity'] and saved['activation_id'] == active['id']
+    assert saved['mode'] == f'service_{job}_capture'
+    assert saved['capture_context']['schema_version'] == version
+    assert saved['capture_context']['source']['mode'] == 'mirror'
+    assert saved['input_hash'] == gate.digest(saved['input'])
+    assert saved['result_hash'] == gate.digest(saved['result'])
+    evaluator = {'daily_brief': daily_evaluation, 'stop_alert': stop_evaluation, 'benchmark': benchmark_evaluation}[job]
+    assert saved['result'] == evaluator.evaluate(saved['input'], manifest['parameters'])
+    assert saved['result']['status'] in result_status and saved['result']['stdout'] == ''
+    assert registry.inspect(ctx.connection) == []
+    if job == 'benchmark':
+        assert row['status'] == 'failed' and row['error'] == '错误：账本没有交易事件\n'
+    else:
+        assert row['status'] == 'ready'
+        assert run(ctx, job, slot) == row
+
+    ctx.connection.execute('DROP TRIGGER policy_evaluations_no_update')
+    evidence = saved['capture_context']
+    evidence['request'].update(tamper)
+    ctx.connection.execute('UPDATE policy_evaluations SET capture_context=?,capture_context_hash=? WHERE id=?',
+                           (gate.canonical(evidence), gate.digest(evidence), saved['id']))
+    with pytest.raises(registry.PolicyError, match='损坏'):
+        receipt(ctx, row)
+    assert registry.inspect(ctx.connection)
+
+
+@pytest.mark.parametrize(('job', 'slot'), [('stop_alert', DAY + 'T10:35'), ('benchmark', DAY[:7])])
+def test_policy_capture_must_echo_scheduled_input(context, monkeypatch, job, slot):
+    ctx, _ = context
+    def capture(database, module, payload, **kwargs):
+        if job == 'benchmark':
+            return benchmark_bundle() | {'end': '2026-10-23'}
+        return stop_bundle(state={'date': DAY})
+
+    monkeypatch.setattr(monitor, '_capture', capture)
+    failed = run(ctx, job, slot)
+    assert failed['status'] == 'failed' and failed['error_code'] == 'invalid_arguments'
+    assert not ctx.connection.execute('SELECT 1 FROM policy_evaluations').fetchone()
+
+
 def test_daily_text_uses_account_reconciliation_wording(context, daily_bundle, monkeypatch):
     ctx, _ = context
     # The recorded dividend fixture adds its holding after the isolated mirror was registered.
@@ -373,7 +442,6 @@ def test_daily_text_uses_account_reconciliation_wording(context, daily_bundle, m
 
 
 def test_stop_text_replaces_legacy_policy_name(context, stop_capture, monkeypatch):
-    from a_share_research.policy import stop_evaluation
     evaluate = stop_evaluation.evaluate
 
     def legacy_wording(*args):
@@ -516,9 +584,11 @@ def test_weekly_retry_reuses_digest_after_week_ends(context, monkeypatch):
         failed = run(ctx, 'advisor_weekly', '2026-W43')
     assert failed['status'] == 'failed' and failed['error_code'] == 'timeout'
     assert failed['result']['weekly']['as_of'] == clock[0] and failed['result']['opportunity_costs'] == []
+    assert failed['text'].startswith('【研究周报】截至 2026-10-25T18:07\n')
     clock[0] = '2026-10-26T09:00:00+08:00'
     ready = run(ctx, 'advisor_weekly', '2026-W43')
     assert ready['status'] == 'ready' and ready['result']['weekly'] == failed['result']['weekly']
+    assert ready['text'] == failed['text']
 
 
 def test_historical_week_without_digest_expires(context):
@@ -572,3 +642,146 @@ def test_activation_change_during_capture_rebinds_once(context, policy_setup, st
         assert row['status'] == 'ready' and row['activation_id'] == active['id']
         assert receipt(ctx, row)['request_id'] == requests[1]
         assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
+
+
+def test_actual_ledger_collector_reads_canonical_lines_without_writing_state(tmp_path, monkeypatch):
+    from a_share_research.policy.v0 import domain, market_quotes
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
+        monkeypatch.setenv('POLICY_V0_DB', str(path))
+        monkeypatch.setattr(domain, 'cst_now', lambda: datetime.fromisoformat('2026-11-02T10:31:00+08:00'))
+        calls = []
+        def quotes(codes):
+            calls.append(codes)
+            return {code: market_quotes.PriceQuote(8.4, '2026-11-02', '10:30:00', 'structural') for code in codes}
+        monkeypatch.setattr(market_quotes, 'fetch_current_price_quotes', quotes)
+        source = monitor._source(conn, path.parent)
+        before = list(conn.iterdump())
+        value = stop_alert.collect(scoped_parameters(), {}, source=source)
+        assert calls == [['600001']]
+        assert value['holdings'][0]['stop_loss_15'] == 8.5
+        assert stop_evaluation.evaluate(value, scoped_parameters())['status'] == 'alerts'
+        assert list(conn.iterdump()) == before
+        assert not (tmp_path / 'stop-alert-state.json').exists()
+        monkeypatch.setattr(domain, 'cst_now', lambda: datetime.fromisoformat('2026-11-02T12:00:00+08:00'))
+        assert stop_alert.collect(scoped_parameters(), {}, source=source)['quotes'] == {}
+        assert len(calls) == 1
+
+
+def test_provider_evidence_preserves_null_cells_without_rounding_and_sanitizes_errors(monkeypatch):
+    from a_share_research.core import providers
+    amount = 0.1234567890123456  # Explicit precision boundary variant, not a financial assertion.
+    frame = pd.DataFrame([dict(div_proc='实施', record_date='2026-09-17', ex_date=None,
+                              pay_date=None, cash_div_tax=amount, stk_div=float('nan'))])
+    response = MarketDataResult(frame, 'ok', 'tushare.dividend', '2026-11-11T15:35:00+08:00')
+    class Provider:
+        def __init__(self, **kwargs): pass
+        def fetch_dividend_history(self, code): return response
+    monkeypatch.setattr(providers, 'TushareDividendProvider', Provider)
+    captured = daily_brief._dividend_response('000963')
+    assert captured['rows'][0]['cash_div_tax'] == amount and captured['rows'][0]['stk_div'] is None
+    assert captured['fetched_at'] == response.fetched_at
+    def fail(*args): raise RuntimeError('secret-provider-response')
+    monkeypatch.setattr(Provider, 'fetch_dividend_history', fail)
+    failed = daily_brief._dividend_response('000963')
+    assert failed['rows'] is None and failed['error_type'] == 'RuntimeError'
+    assert 'secret' not in json.dumps(failed)
+
+
+def test_ledger_capture_keeps_full_event_rows_and_provider_failure(tmp_path, monkeypatch):
+    from a_share_research.policy import capture
+    from a_share_research.policy.v0 import domain, commands_holdings
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
+        monkeypatch.setenv('POLICY_V0_DB', str(path))
+        now = datetime.fromisoformat('2026-11-02T15:35:00+08:00')
+        monkeypatch.setattr(domain, 'cst_now', lambda: now)
+        monkeypatch.setattr(domain, 'cst_today', lambda: now.date().isoformat())
+        monkeypatch.setattr(commands_holdings, 'fetch_monitor_price_quotes', lambda codes: ({c: None for c in codes}, None))
+        monkeypatch.setattr(capture.monitor_research, 'fetch_cards', lambda: pytest.fail('daily must not acquire research'))
+        calls = []
+        def unavailable(code):
+            calls.append(code)
+            return dict(rows=None, source='tushare.dividend', status='failed', fetched_at=now.isoformat(),
+                        source_as_of=None, error_code='AUTH_MISSING', error_type=None)
+        monkeypatch.setattr(daily_brief, '_dividend_response', unavailable)
+        source = monitor._source(conn, tmp_path)
+        before = list(conn.iterdump())
+        value = daily_brief.collect(scoped_parameters(), source=source)
+        assert calls == ['600001']
+        assert value['dividends'][0]['events'][0][0:3] == ['buy', '2026-10-01', 100]
+        result = daily_evaluation.evaluate(value, scoped_parameters())
+        assert result['dividends']['failures'][0]['error_code'] == 'AUTH_MISSING'
+        assert result['status'] == 'silent' and result['stdout'] == ''
+        assert list(conn.iterdump()) == before
+
+
+def test_response_preserves_precision_nulls_and_sanitizes_exception():
+    amount = 0.1234567890123456  # Precision boundary only.
+    frame = pd.DataFrame([dict(date='2026-10-21', close=amount, optional=float('nan'))])
+    response = MarketDataResult(frame, 'ok', 'tushare.index_daily', '2026-11-11T15:35:00+08:00')
+    captured = benchmark._response(lambda: response, kind='index', source='tushare.index_daily')
+    assert captured['rows'] == [dict(date='2026-10-21', close=amount, optional=None)]
+    assert captured['fetched_at'] == response.fetched_at
+    price = benchmark._response(lambda: MarketDataResult(amount, 'ok', 'tushare.daily', response.fetched_at), kind='stock', source='tushare.daily')
+    assert price['value'] == amount
+    def fail(): raise RuntimeError('secret-provider-response')
+    for kind, field in [('index', 'rows'), ('stock', 'value')]:
+        failed = benchmark._response(fail, kind=kind, source='fixture')
+        assert failed[field] is None and failed['error_type'] == 'RuntimeError'
+        assert failed['status'] == 'failed' and 'secret' not in json.dumps(failed)
+
+
+def test_only_allowed_collector_receives_market_credential(tmp_path, monkeypatch):
+    monkeypatch.setenv('TUSHARE_TOKEN', 'structural-market-token')
+    monkeypatch.setenv('ASHARE_OWNER_TOKEN', 'must-not-inherit')
+    monkeypatch.setenv('MODEL_API_KEY', 'must-not-inherit')
+    envs = []
+    class Process:
+        returncode = 0
+        def communicate(self, *args, **kwargs): return b'{}', b''
+    def popen(argv, **kwargs):
+        envs.append(kwargs['env'])
+        return Process()
+    monkeypatch.setattr(monitor.subprocess, 'Popen', popen)
+    for module in ('benchmark', 'daily_brief'):
+        monitor._capture(tmp_path / 'app.db', f'a_share_research.policy.{module}', {}, market_token=True)
+        assert envs[-1]['TUSHARE_TOKEN'] == 'structural-market-token'
+    monitor.capture(tmp_path / 'app.db', {})
+    assert envs[-1]['TUSHARE_TOKEN'] == 'structural-market-token'
+    monitor._capture(tmp_path / 'app.db', 'a_share_research.policy.stop_alert', {})
+    assert 'TUSHARE_TOKEN' not in envs[-1]
+    assert all('ASHARE_OWNER_TOKEN' not in e and 'MODEL_API_KEY' not in e for e in envs)
+    with pytest.raises(ValueError):
+        monitor._capture(tmp_path / 'app.db', 'a_share_research.policy.stop_alert', {}, market_token=True)
+
+
+@pytest.mark.parametrize('index_mode', ['failed', 'before-first-event'])
+def test_collector_keeps_all_history_and_skips_stocks_without_valuation(tmp_path, monkeypatch, index_mode):
+    from a_share_research.core import providers
+    from a_share_research.policy.v0 import domain
+    for path, conn, principal, directory, sha in ledger_book(tmp_path):
+        monkeypatch.setenv('POLICY_V0_DB', str(path))
+        now = datetime.fromisoformat('2026-11-02T15:35:00+08:00')
+        monkeypatch.setattr(domain, 'cst_now', lambda: now)
+        monkeypatch.setattr(domain, 'cst_today', lambda: now.date().isoformat())
+        calls = []
+        class Provider:
+            def __init__(self, **kwargs): pass
+            def fetch_index_bars(self, code, first, end):
+                calls.append((code, first, end))
+                if index_mode == 'failed':
+                    return MarketDataResult(None, 'failed', 'fixture', now.isoformat(), error_code='AUTH_MISSING')
+                frame = pd.DataFrame([dict(date='2026-08-31', close=100.)])
+                return MarketDataResult(frame, 'ok', 'fixture', now.isoformat())
+            def fetch_close_price(self, *args): pytest.fail('cannot fetch stock without valuation')
+        monkeypatch.setattr(providers, 'TushareMarketDataProvider', Provider)
+        source = monitor._source(conn, tmp_path)
+        before = list(conn.iterdump())
+        value = benchmark.collect(scoped_parameters(), '2026-11-02', source=source)
+        assert [(r[0], r[1], r[2]) for r in value['events']] == [
+            ('600002', 'buy', '2026-09-01'), ('600002', 'sell', '2026-09-30'), ('600001', 'buy', '2026-10-01')]
+        assert len(calls) == 2 and all(c[1:] == ('2026-09-01', '2026-11-02') for c in calls)
+        assert value['prices'] == {}
+        result = benchmark_evaluation.evaluate(value, scoped_parameters())
+        assert result['status'] == 'unavailable'
+        assert result['failures'][0]['kind'] == ('index' if index_mode == 'failed' else 'calculation')
+        assert list(conn.iterdump()) == before

@@ -19,7 +19,6 @@ from a_share_research.account import trades, ledger, evidence, analysis, positio
 from a_share_research.account import nav
 from a_share_research.policy import account_view, registry as policies
 from a_share_research.policy.v0 import account_store
-from a_share_research.policy.stop_state import StopState
 from a_share_research.policy.position_request import Proposal
 from a_share_research.policy.scenario_request import Proposal as ScenarioProposal
 
@@ -103,7 +102,7 @@ class SubscriptionCodes(Arguments):
 
 
 class ScheduleRun(Arguments):
-    job: Literal['stop_alert', 'daily_brief', 'benchmark', 'advisor_scan', 'advisor_weekly']
+    job: Literal['stop_alert', 'daily_brief', 'benchmark', 'advisor_scan', 'advisor_weekly', 'monthly_submit', 'monthly_status']
     slot: str = Field(min_length=1, max_length=16)
 
 
@@ -122,14 +121,6 @@ class PolicyEvaluation(Arguments):
 class PolicyMonitor(Arguments):
     request_id: str = Field(min_length=1, max_length=128)
     expected_activation_id: int = Field(gt=0)
-
-
-class PolicyStopAlert(PolicyMonitor):
-    previous_state: StopState
-
-
-class PolicyBenchmark(PolicyMonitor):
-    end: str = Field(pattern=r'^\d{4}-\d{2}-\d{2}$')
 
 
 class PolicyPositionSize(PolicyMonitor):
@@ -293,25 +284,9 @@ def _current_account(ctx: Context, args: Arguments) -> Payload:
     return Payload(data=account_view.current(ctx.connection, ctx.principal, ctx.database))
 
 
-def _stop_alert(ctx: Context, args: PolicyStopAlert) -> Payload:
-    from a_share_research.policy.stop_alert import run
-    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id,
-                           args.expected_activation_id, args.previous_state.model_dump(mode='json', exclude_unset=True)))
-
-
-def _daily_brief(ctx: Context, args: PolicyMonitor) -> Payload:
-    from a_share_research.policy.daily_brief import run
-    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id))
-
-
 def _holdings_check(ctx: Context, args: PolicyMonitor) -> Payload:
     from a_share_research.policy.holdings_check import run
     return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id))
-
-
-def _benchmark(ctx: Context, args: PolicyBenchmark) -> Payload:
-    from a_share_research.policy.benchmark import run
-    return Payload(data=run(ctx.connection, ctx.principal, ctx.database, args.request_id, args.expected_activation_id, args.end))
 
 
 def _position_size(ctx: Context, args: PolicyPositionSize) -> Payload:
@@ -419,12 +394,6 @@ _TOOLS = (
          frozenset({'assistant'}), PolicyPortfolioScenario, Payload, _portfolio_scenario, access='write', account=True),
     Tool('policy_position_size', '基于已保存监控评估，按拟买入条件试算并保存风险预算定仓',
          frozenset({'assistant'}), PolicyPositionSize, Payload, _position_size, access='write', account=True),
-    Tool('policy_benchmark', '按指定截止日采集完整交易历史与双全收益指数，保存同现金流基准比较',
-         frozenset({'assistant'}), PolicyBenchmark, Payload, _benchmark, access='write', account=True, collects=True),
-    Tool('policy_daily_brief', '采集持仓监控与分红核查，保存原始输入、缺口与盘后日报',
-         frozenset({'assistant'}), PolicyMonitor, Payload, _daily_brief, access='write', account=True, collects=True),
-    Tool('policy_stop_alert', '采集在仓止损线和行情，按生效政策保存升档提醒与下一通知状态',
-         frozenset({'assistant'}), PolicyStopAlert, Payload, _stop_alert, access='write', account=True, collects=True),
     Tool('policy_monitor', '从已核对的账户镜像或绑定账本采集行情，按生效政策保存评估与原始输入；来源与时点随回执返回',
          frozenset({'assistant'}), PolicyMonitor, Payload, _monitor, access='write', account=True, collects=True),
     Tool('policy_current', '读取生效政策身份、参数与实装状态',
