@@ -129,6 +129,16 @@ def test_both_web_cards_preserve_boundary_and_full_open_questions_before_the_fol
     assert report['body'] == original  # Neither projection nor render changes the saved report.
 
 
+def test_compact_card_keeps_boundary_open_question_count_and_check_failure():
+    report = warning_report()
+    card = reading.card(report, report['body']) | {'check_failure': {'reason': '取数超时', 'report_id': 9, 'scan_id': 2}}
+    html = str(CARD.compact_card(card))
+    assert '披露机械核对未完成' in html and '边界立场' in html
+    assert f"复核认为尚未答完 {len(report['body']['open_questions'])} 项" in html
+    # Compact rows omit full question bodies and figures, leaving them on the company page.
+    assert 'card-keys' not in html and report['body']['open_questions'][0]['problem'] not in html
+
+
 @pytest.mark.parametrize('macro', ['summary_card', 'full_card', 'compact_card'])
 @pytest.mark.parametrize('priced', [True, False])
 def test_ordinary_and_legacy_web_cards_do_not_invent_cautions(macro, priced):

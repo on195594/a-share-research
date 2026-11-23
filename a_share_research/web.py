@@ -290,9 +290,7 @@ def start_session(request: Request | None = None, state: str = "") -> RedirectRe
 
 
 def render(request: Request, name: str, session: str | None, status: int = 200, **context) -> HTMLResponse:
-    device = active_device(request) if session else None
-    context |= {"csrf": csrf_token(session) if session else "", "steps": STEPS,
-                "device_until": datetime.fromtimestamp(device["expires_at"], db.SHANGHAI).strftime("%Y-%m-%d %H:%M") if device else ""}
+    context |= {"csrf": csrf_token(session) if session else "", "steps": STEPS}
     return templates.TemplateResponse(request, name, context, status_code=status)
 
 
@@ -537,8 +535,11 @@ async def oauth_token(request: Request):
 
 
 def connections_page(request: Request, session: str, status: int = 200, **fields):
+    device = active_device(request)
+    device_until = datetime.fromtimestamp(device["expires_at"], db.SHANGHAI).strftime("%Y-%m-%d %H:%M") if device else ""
     return render(request, "connections.html", session, status, clients=oauth_store.clients(conn),
-                  grants=oauth_store.mcp_grants(conn), resource=settings.base_url + "/mcp", **fields)
+                  grants=oauth_store.mcp_grants(conn), resource=settings.base_url + "/mcp",
+                  device_until=device_until, **fields)
 
 
 @app.get("/connections")

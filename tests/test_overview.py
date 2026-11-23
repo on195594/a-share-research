@@ -73,9 +73,45 @@ def test_monitor_lines_render_saved_english_details_and_collapse_repeated_gaps()
         ('紫金矿业', 'unmapped detail'),
         ('三花智控、紫金矿业、东方电缆', '行业涨跌幅 · 补充同一交易日的行业涨跌幅'),
     ]
-    # Overview read models carry no holdings list; lines fall back to codes.
+    # Overview read models carry no holdings list; lines fall back to codes, and own_code drops self-prefix.
     assert template_filters.monitor_lines({'escalations': [], 'data_gaps': [dict(gap, code='002050')]}) == [
         ('002050', '行业涨跌幅 · 补充同一交易日的行业涨跌幅')]
+    assert template_filters.monitor_lines({'escalations': [], 'data_gaps': [dict(gap, code='002050')]}, '002050') == [
+        ('', '行业涨跌幅 · 补充同一交易日的行业涨跌幅')]
+
+    # Tier gaps recorded as both escalation and data_gap collapse; P3, cache, alert and attribution render in Chinese.
+    rich = {
+        'holdings': [{'code': '002050', 'name': '三花智控'}],
+        'escalations': [
+            {'code': '002050', 'reason_code': 'tier_review_due',
+             'detail': 'verify quarterly/interim L3 evidence and three-star timing for path A'},
+            {'code': '002050', 'reason_code': 'alert_review_due', 'detail': 'alert price_stop2_liquidity_defer is due'},
+            {'code': '002050', 'reason_code': 'risk_budget_exceeded',
+             'detail': 'scope=position; amount=12000 CNY; principal=8000 CNY; unrealized_gain=4000 CNY; '
+                       'ratio=2.4%; limit=2%; denominator=500000 CNY'},
+        ],
+        'data_gaps': [
+            {'code': '002050', 'field': 'tier',
+             'minimum_action': 'verify quarterly/interim L3 evidence and three-star timing for path A'},
+            {'code': '002050', 'field': 'p3_liquidity_gate', 'minimum_action': 'complete P3 review: quote_untradeable'},
+            {'code': None, 'field': 'industry_context', 'minimum_action': 'restore same-industry context (CACHE_STALE)'},
+        ],
+        'review_prompts': [
+            {'code': '002050', 'detail': '002050 收盘价 25.00 处于测算透支区'},
+            {'code': None, 'detail': '论点卡状态未知'},
+        ],
+    }
+    assert template_filters.monitor_lines(rich) == [
+        ('三花智控', '分档退出条件 · 核对路径 A 的季报或中报 L3 证据及三星时点'),
+        ('三花智控', '预警「第二档止损流动性延迟复核」已到复核日'),
+        ('三花智控', '单只止损参考风险 12000 元，占 2.4%，超过上限 2%（其中本金风险 8000 元、浮盈风险 4000 元）'),
+        ('三花智控', 'P3 流动性复核 · 完成 P3 流动性复核（个股当前不可交易）'),
+        ('', '行业对照资料 · 补充同行业对照资料（缓存已过期）'),
+    ]
+    assert template_filters.monitor_prompts(rich) == [
+        ('三花智控', '收盘价 25.00 处于测算透支区'),
+        ('', '论点卡状态未知'),
+    ]
 
 
 def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_monitor):

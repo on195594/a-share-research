@@ -13,6 +13,6 @@
 <h2>监控提醒与待补证据</h2>{{ monitor_items(view.result) }}
 {% endif %}
 {% if view.result.review_prompts %}<h2>研究复核提醒</h2>
-<ul class="facts">{% for prompt in view.result.review_prompts %}<li>{% if prompt.code %}{{ prompt.code }} · {% endif %}{{ prompt.detail }}</li>{% endfor %}</ul>{% endif %}
+<ul class="facts">{% for who, text in view.result|monitor_prompts %}<li>{% if who %}{{ who }} · {% endif %}{{ text }}</li>{% endfor %}</ul>{% endif %}
 <p><a href="/account/nav/new">评估 NAV 区间</a></p>
 {% endblock %}

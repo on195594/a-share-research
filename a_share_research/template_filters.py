@@ -48,6 +48,30 @@ _GAP_ACTIONS = {
 }
 
 
+_P3_REASONS = {
+    'price_stop2_liquidity_defer': '系统性流动性休克延迟复核',
+    'quote_or_stop_line_missing': '缺少行情或第二档止损价',
+    'review_quote_tradability_missing': '缺少复核行情可交易性信息',
+    'review_quote_untradeable': '复核时不可交易',
+    'market_snapshot_incomplete': '市场流动性快照不完整',
+    'quote_tradability_missing': '缺少个股可交易性信息',
+    'quote_untradeable': '个股当前不可交易',
+}
+
+_CACHE_ERRORS = {
+    'CACHE_STALE': '缓存已过期',
+    'CACHE_CORRUPT': '缓存损坏',
+    'CACHE_MALFORMED': '缓存格式异常',
+    'CACHE_FUTURE_TIMESTAMP': '缓存时间戳异常',
+    'CACHE_MISSING': '缓存缺失',
+    'unknown': '原因未知',
+}
+
+_ALERT_REASONS = {
+    'price_stop2_liquidity_defer': '第二档止损流动性延迟复核',
+}
+
+
 def monitor_gap(gap: dict) -> str:
     field = gap['field']
     label = _GAP_FIELDS.get(field, field)
@@ -55,10 +79,11 @@ def monitor_gap(gap: dict) -> str:
     if action == f'reconcile holding {field}' and field in _GAP_FIELDS:
         hint = f'核对{label}'
     elif action.startswith('complete P3 review: '):
-        hint = '完成 P3 流动性复核，原因代码：' + action.removeprefix('complete P3 review: ')
+        reason = action.removeprefix('complete P3 review: ')
+        hint = f'完成 P3 流动性复核（{_P3_REASONS.get(reason, reason)}）'
     elif action.startswith('restore same-industry context (') and action.endswith(')'):
         reason = action[len('restore same-industry context ('):-1]
-        hint = f'补充同行业对照资料（{reason}）'
+        hint = f'补充同行业对照资料（{_CACHE_ERRORS.get(reason, reason)}）'
     elif match := re.fullmatch(r'L3 condition (\d+) (contract invalid|review date invalid)', action):
         detail = '复核日期' if match[2] == 'review date invalid' else '约定'
         hint = f'核对 L3 条件 #{match[1]} 的{detail}'
@@ -87,7 +112,7 @@ _ESCALATION_PATTERNS = (
     (r'relative change (\S+)pts is at or below -2pts', lambda m: f'相对行业 {m[1]} 个百分点，已到 -2 个百分点提醒线'),
     (r'(?:path (\S+)|Tier1) price target reached; review Step 4',
      lambda m: f'{"路径 " + m[1] if m[1] else "第一档"}目标价已到，复核第 4 步'),
-    (r'alert (\S+) is due', lambda m: f'预警 {m[1]} 已到复核日'),
+    (r'alert (\S+) is due', lambda m: f'预警「{_ALERT_REASONS.get(m[1], m[1])}」已到复核日'),
     (r'L3 state requires verification \((.*)\)', lambda m: 'L3 持仓论点待核实：' + _L3_CONTRACTS.get(m[1], m[1])),
     (r'L3 condition (\d+) is due', lambda m: f'L3 条件 #{m[1]} 已到复核日'),
     (r'L3 condition (\d+) is triggered', lambda m: f'L3 条件 #{m[1]} 已触发'),
@@ -102,8 +127,12 @@ def monitor_escalation(item: dict) -> str:
     if item['reason_code'] == 'risk_budget_exceeded':
         fields = dict(part.split('=', 1) for part in detail.split('; ') if '=' in part)
         scope = '单只' if fields.get('scope') == 'position' else '组合'
-        return (f'{scope}止损参考风险 {fields.get("amount", "?").removesuffix(" CNY")} 元，占 {fields.get("ratio", "?")}，'
+        text = (f'{scope}止损参考风险 {fields.get("amount", "?").removesuffix(" CNY")} 元，占 {fields.get("ratio", "?")}，'
                 f'超过上限 {fields.get("limit", "?")}')
+        principal, gain = fields.get('principal'), fields.get('unrealized_gain')
+        if principal and gain and principal != 'unknown' and gain != 'unknown':
+            text += f'（其中本金风险 {principal.removesuffix(" CNY")} 元、浮盈风险 {gain.removesuffix(" CNY")} 元）'
+        return text
     if item['reason_code'] == 'denominator_missing':
         for english, chinese in _ESCALATIONS.items():
             detail = detail.replace(english, chinese)
@@ -111,10 +140,13 @@ def monitor_escalation(item: dict) -> str:
     for pattern, render in _ESCALATION_PATTERNS:
         if match := re.fullmatch(pattern, detail):
             return render(match)
+    if item['reason_code'] == 'tier_review_due' and detail in _GAP_ACTIONS:
+        # Match monitor_gap's rendering so a tier gap also recorded as an escalation collapses into one line.
+        return f'分档退出条件 · {_GAP_ACTIONS[detail]}'
     return _ESCALATIONS.get(detail) or _GAP_ACTIONS.get(detail, detail)
 
 
-def monitor_lines(policy: dict) -> list[tuple[str, str]]:
+def monitor_lines(policy: dict, own_code: str | None = None) -> list[tuple[str, str]]:
     """Escalations, then data gaps; the same line for several holdings collapses into one."""
     names = {h['code']: h.get('name') or h['code'] for h in policy.get('holdings') or []}
     lines: dict[str, list[str]] = {}
@@ -123,8 +155,28 @@ def monitor_lines(policy: dict) -> list[tuple[str, str]]:
         codes = lines.setdefault(text, [])
         if code and code not in codes:
             codes.append(code)
-    return [('、'.join(names.get(code, code) for code in codes), text) for text, codes in lines.items()]
+    result = []
+    for text, codes in lines.items():
+        who = '' if own_code and codes == [own_code] else '、'.join(names.get(code, code) for code in codes)
+        result.append((who, text))
+    return result
+
+
+def monitor_prompts(policy: dict) -> list[tuple[str, str]]:
+    """Render research review prompts with Chinese holding names and without repeating a leading code."""
+    names = {h['code']: h.get('name') or h['code'] for h in policy.get('holdings') or []}
+    out = []
+    for prompt in policy.get('review_prompts') or []:
+        code = prompt.get('code')
+        detail = prompt['detail']
+        who = names.get(code, code) if code else ''
+        if code and detail.startswith(code):
+            rest = detail[len(code):]
+            if not rest or rest[0] in (' ', '：', ':', '·'):
+                detail = rest.lstrip(' ：:·')
+        out.append((who, detail))
+    return out
 
 
 FILTERS = dict(shanghai_minute=shanghai_minute, decimal_format=decimal_format, monitor_gap=monitor_gap,
-               monitor_lines=monitor_lines, without_verdict=reading.without_verdict)
+               monitor_lines=monitor_lines, monitor_prompts=monitor_prompts, without_verdict=reading.without_verdict)

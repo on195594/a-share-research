@@ -164,6 +164,10 @@ form.inline { display: inline; margin: 0; }
 .list p { margin: 2px 0 0; }
 .company { text-decoration: none; }
 .company strong { color: var(--ink); font-size: 18px; }
+/* list items in research library: comfortable vertical tap separation */
+.list.companies .company { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 0; }
+.list.companies > li > p { margin: 4px 0 0; }
+.list.companies > li > p a { display: inline-block; padding: 6px 0; }
 
 /* progress */
 .steps { list-style: none; padding: 0; margin: 20px 0; counter-reset: step; }
@@ -195,7 +199,8 @@ form.inline { display: inline; margin: 0; }
 /* Hairlines between cells, drawn outward so the clipped outer edge stays the border. A short
    last row keeps cells in reading order; an auto-start cell cannot stretch to the row end. */
 .snapshot div { margin: 0; padding: 8px 12px; box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line); }
-.snapshot div.pe-bands { grid-column: span 2; }
+@media (min-width: 260px) { .snapshot div.pe-bands { grid-column: span 2; } }
+.snapshot div.pe-bands dd { white-space: normal; overflow-wrap: anywhere; }
 .valuation-snapshot { grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
 .snapshot dt { color: var(--muted); font-size: 13px; }
 .snapshot dd { margin: 0; font-size: 17px; font-weight: 650; white-space: nowrap; letter-spacing: -0.01em; }
@@ -242,6 +247,7 @@ th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: lef
 td.num, th.num { text-align: right; }
 thead th { color: var(--muted); font-weight: 400; }
 tbody th { font-weight: 400; white-space: normal; min-width: 5.5em; }
+.scenario-table tbody th { min-width: auto; }
 th small { display: block; margin-left: 0; }
 @media (max-width: 480px) { th, td { padding: 8px 3px; font-size: 13px; } }
 
@@ -544,10 +550,13 @@ details.block[open] { padding-bottom: 12px; }
 .group-title .num { font-size: 13px; font-weight: 400; }
 .cards { display: grid; gap: 12px; }
 .cards.rows { gap: 0 24px; }
-.card-row { padding: 12px 0 10px; border-bottom: 1px solid var(--line); }
+.card-row { padding: 4px 0 10px; border-bottom: 1px solid var(--line); }
+.card-row .card-head { align-items: center; }
 .card-row .card-name { font-size: 16px; }
-.card-row-thesis { font-size: 15px; line-height: 1.6; margin: 6px 0 0; }
+.card-row .card-name a { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 0; }
+.card-row-thesis { font-size: 15px; line-height: 1.6; margin: 2px 0 0; }
 .card-row .card-meta { margin-top: 4px; }
+.card-row .card-note a { display: inline-block; padding: 6px 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 0; }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
 .card-name { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 700; }
@@ -660,12 +669,13 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .compare-shortcut:hover { color: var(--accent-strong); }
 .step-desc { font-size: 13px; font-weight: 400; color: var(--muted); margin: 4px 0 2px; line-height: 1.5; }
 
-.device-preferences span { font-size: 14px; color: var(--muted); }
+.device-preferences p, .device-preferences span { font-size: 14px; color: var(--muted); }
 .device-preferences form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .device-preferences button { min-height: 44px; }
-.item-actions { display: flex; align-items: flex-start; gap: 16px; }
-.item-actions > details { flex: 1; min-width: 0; }
-.item-actions > a { min-height: 44px; display: inline-flex; align-items: center; flex: none; }
+.item-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 16px; margin-top: 6px; }
+.item-actions > details { margin-top: 0; min-width: 0; }
+.item-actions > details[open] { grid-column: 1 / -1; }
+.item-actions > a { min-height: 44px; display: inline-flex; align-items: center; justify-self: start; }
 
 .account-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .account-form input[type="file"] { width: 100%; }

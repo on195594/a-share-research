@@ -4,9 +4,12 @@
 {% macro number(value, suffix='') -%}
   {{ ('%.2f' | format(value)) ~ suffix if value is number else '—' }}
 {%- endmacro %}
-{# Phone-width tables: drop trailing zeros so a six-column row fits without sideways scrolling. #}
+{# Phone-width tables: drop trailing zeros so a seven-column row fits without sideways scrolling. #}
 {% macro compact(value, suffix='') -%}
-  {{ (('%.2f' | format(value)).rstrip('0').rstrip('.')) ~ suffix if value is number else '—' }}
+  {%- if value is number -%}
+    {%- set text = ('%.2f' | format(value)).rstrip('0').rstrip('.') -%}
+    {{ ('0' if text == '-0' else text) ~ suffix }}
+  {%- else -%}—{%- endif -%}
 {%- endmacro %}
 {% macro percent(value) -%}
   {{ ('%.2f' | format(value * 100)) ~ '%' if value is number else '—' }}
@@ -41,7 +44,7 @@
     <h3>三种情景</h3>
     <p class="muted small">年份列为{{ '扣非归母净利润' if calc.basis == 'core_profit' else '归母净利润' }}，单位亿元；退出 PE 对应 {{ calc.years[-1] }} 年利润。</p>
     <div class="table-wrap" tabindex="0" role="region" aria-label="三种情景的利润、退出倍数与年化回报">
-      <table>
+      <table class="scenario-table">
         <thead><tr><th scope="col">情景</th>{% for year in calc.years %}<th scope="col" class="num">{{ year }}</th>{% endfor %}<th scope="col" class="num">退出 PE</th>{% if calc.v2 %}<th scope="col" class="num">概率</th>{% endif %}<th scope="col" class="num">年化</th></tr></thead>
         <tbody>{% for name in ['保守', '中性', '乐观'] %}{% set scenario = v.scenarios[name] %}
           <tr><th scope="row">{{ name }}</th>{% for profit in scenario.profit %}<td class="num">{{ compact(profit) }}</td>{% endfor %}<td class="num">{{ compact(scenario.exit_pe) }}</td>{% if calc.v2 %}<td class="num">{{ compact(calc.v2.probabilities[name] * 100 if calc.v2.probabilities[name] is number else None, '%') }}</td>{% endif %}<td class="num">{{ percent(calc.scenarios[name].annual_return) }}</td></tr>

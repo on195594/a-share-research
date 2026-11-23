@@ -185,3 +185,46 @@ def test_valuation_versions_and_company_stance_keep_saved_values_distinct():
     failed = reading.card(RECORD | {'passed': False}, body)
     assert failed['stance'] is None
     assert '报告时点研究立场' not in ENV.get_template('_card.html').module.full_card(failed)
+
+
+def test_report_market_snapshot_dedupes_close_merges_pe_bands_and_skips_empty_grid():
+    from a_share_research import research
+    body = calculated()
+    body['summary'] = f"{RECORD['verdict']}：利润与现金流匹配。"
+    body['stance'] = {'action': '等价格', 'text': '等估值回到门槛以下。', 'cites': []}
+    body['stance_calc'] = research.stance_calc(body['stance'], body['valuation_calc'], body['market_date'])
+    market = [r for r in body['table'] if r['id'].startswith('M.')]
+    if not any(r['id'].startswith('M.pe_ttm_5y_p') for r in market):
+        market += [
+            {'id': f'M.pe_ttm_5y_p{p}', 'label': f'近 5 年 PE TTM {p}% 分位', 'unit': '倍',
+             'values': {body['market_date']: v}}
+            for p, v in ((30, '12.50'), (50, '18.20'), (70, '24.80'))
+        ]
+    html = render('report.html', report=RECORD | {'passed': True}, body=body,
+                  rows={r['id']: r for r in body['table']}, fin=[], market=market,
+                  comparison={'old': None}, retry={'label': '重试原研究问题', 'note': ''})
+    assert '<dt>收盘价</dt>' not in html  # already shown in stance-snapshot
+    assert '近 5 年 PE TTM 30/50/70 分位' in html and 'class="pe-bands"' in html
+    assert f'>{RECORD["verdict"]}：' not in html and '利润与现金流匹配。' in html
+
+    # When only M.close is present and stance already shows it, no empty snapshot box renders.
+    only_close = [r for r in market if r['id'] == 'M.close']
+    empty_html = render('report.html', report=RECORD | {'passed': True}, body=body,
+                        rows={r['id']: r for r in body['table']}, fin=[], market=only_close,
+                        comparison={'old': None}, retry={'label': '重试原研究问题', 'note': ''})
+    assert 'aria-label="估值快照' not in empty_html
+
+    # Missing valid_until on 等价格 never leaves empty parentheses or dangling label.
+    body['stance_calc'] = {'price': body['stance_calc']['price']}
+    no_valid = page(body)
+    assert '有效至' not in no_valid and '（）' not in no_valid
+
+
+def test_scenario_table_compact_strips_trailing_zeros_and_negative_zero():
+    body = calculated()
+    body['valuation']['scenarios']['保守']['profit'] = [-0.001, 12.50, 100.00]
+    body['valuation']['scenarios']['保守']['exit_pe'] = 15.0
+    html = page(body)
+    assert 'class="scenario-table"' in html
+    assert '>-0<' not in html
+    assert '>0<' in html and '>12.5<' in html and '>100<' in html and '>15<' in html

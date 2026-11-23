@@ -27,9 +27,9 @@
 {%- endif %}
 {%- endmacro %}
 
-{% macro monitor_items(policy) %}
+{% macro monitor_items(policy, own_code=none) %}
 {% if policy and (policy.escalations or policy.data_gaps) %}
-<ul class="facts">{% for who, text in policy|monitor_lines %}<li>{% if who %}{{ who }} · {% endif %}{{ text }}</li>{% endfor %}</ul>
+<ul class="facts">{% for who, text in policy|monitor_lines(own_code) %}<li>{% if who %}{{ who }} · {% endif %}{{ text }}</li>{% endfor %}</ul>
 {% endif %}
 {% endmacro %}
 
@@ -54,8 +54,7 @@
 
 {# Version and policy identity live on the evaluation page; here only a stale evaluation is worth a line. #}
 {% macro policy_link(policy, account=none) %}
-<p><a href="{{ policy.path }}">监控评估</a> · 评估于 {{ policy.as_of|shanghai_minute }}
-  {% if account and account.mode == 'ledger' and account.version != policy.account_version %}<strong class="flag">评估基于账户版本 {{ policy.account_version }}，账本已更新到版本 {{ account.version }}</strong>{% endif %}</p>
+<p><a href="{{ policy.path }}">监控评估</a> · 评估于 {{ policy.as_of|shanghai_minute }}{% if account and account.mode == 'ledger' and account.version != policy.account_version %} · <strong class="flag">评估基于账户版本 {{ policy.account_version }}，账本已更新到版本 {{ account.version }}</strong>{% endif %}</p>
 {% endmacro %}
 
 {% macro company_body(company, portfolio=false) %}
@@ -93,7 +92,7 @@
 {% if has_evidence %}
   <h3>待补证据与公告</h3>
   {% if company.gaps %}<ul class="facts">{% for gap in company.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% endif %}
-  {{ monitor_items(company.policy) }}
+  {{ monitor_items(company.policy, company.code) }}
   {% if company.announcements %}<ul class="list">{% for event in company.announcements %}
     <li>{% if event.source_url %}<a href="{{ event.source_url }}" rel="noreferrer">{{ event.title }}</a>{% else %}{{ event.title }}{% endif %}
     <p class="small muted">{{ event.announced }} · {{ event.review.label if event.review else ('缺少研究卡' if event.action == 'no_card' else '暂无复核记录') }}

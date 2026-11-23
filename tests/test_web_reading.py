@@ -260,3 +260,49 @@ def test_stock_page_renders_disclosure_checks_and_recovers(reading_server, monke
     run_scan(conn, Conflict(source.items))
     page = client.get(url + f'/stock/{code}.SH')
     assert '同一披露版本内容冲突' in page.text and '观测值 无可判数值' in page.text
+
+
+def test_research_library_missing_verdict_keeps_clickable_report_text():
+    from support.templates import render
+    html = render('research_library.html', q='', history=False, whole_library=False, page=1,
+                  companies=[{'id': 7, 'code': '600519.SH', 'name': '贵州茅台', 'passed': 1, 'verdict': None,
+                              'created_at': '2026-11-22T10:00:00+08:00', 'coverage': '2026-09-30',
+                              'own': 1, 'from_batch': 0}],
+                  hits=[], error='', scope_company=None, more=False,
+                  history_url='/research-library', all_url='/research-library',
+                  previous_url='/research-library', next_url='/research-library')
+    assert 'href="/reports/7"' in html and '>查看报告</a>' in html
+
+
+def test_batch_page_drops_deleted_run_links_and_device_lookup_stays_on_connections(reading_server, monkeypatch):
+    from a_share_research import reading, web
+    conn, client, url, *_ = reading_server
+    monkeypatch.setattr(web, 'current_session', lambda request: 'offline-owner')
+
+    # Verify active_device is queried on /connections but skipped on ordinary pages like /.
+    device_calls = []
+    real_active_device = web.active_device
+    def spy(request):
+        device_calls.append(request.url.path)
+        return real_active_device(request)
+    monkeypatch.setattr(web, 'active_device', spy)
+    assert client.get(url + '/').status_code == 200
+    assert '/' not in device_calls
+    conn_page = client.get(url + '/connections')
+    assert conn_page.status_code == 200 and '记住此设备 30 天' in conn_page.text
+    assert '/connections' in device_calls
+
+    # Frozen batch with a deleted failed run_id shows the failure without a dead /runs/{id} link.
+    captured = json.loads((ROOT / 'tests/data/batch-candidate-matrix.json').read_text())
+    row = dict(captured['rows'][0], run_id=999999, report_id=None, verdict=None,
+               research_status='failed', research_error='模型超时')
+    rule = {'version': 'screen-v1.1', 'picks': 5, 'picks_per_industry': 2, 'cost': 0.002, 'benchmarks': {}}
+    cursor = conn.execute(
+        "INSERT INTO batches (status, as_of, rule, q20, q5, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ('frozen', '20261101', json.dumps(rule), json.dumps([row]), json.dumps([]),
+         '2026-11-01T10:00:00+08:00', '2026-11-01T10:00:00+08:00'),
+    )
+    conn.commit()
+    assert reading.existing_run_ids(conn, [999999]) == set()
+    batch_html = client.get(url + f'/batches/{cursor.lastrowid}').text
+    assert '模型超时' in batch_html and '/runs/999999' not in batch_html
