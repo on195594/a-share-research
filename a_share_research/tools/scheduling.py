@@ -58,11 +58,15 @@ def _expired(row, start, now):
         return False
     if job == 'advisor_weekly':
         return now >= start + timedelta(weeks=1) and 'weekly' not in json.loads(row['result'] or '{}')
+    if job == 'monthly_submit':
+        # Admission is only for the current Shanghai month; a past month can never be admitted.
+        return (start.year, start.month) != (now.year, now.month)
     return job in ('daily_brief', 'advisor_scan') and start.date() != now.date()
 
 
 def _expire(conn, row):
-    text = '' if row['job'] == 'stop_alert' else f"{row['slot']} 的定时任务已跨日过期，本次未推送原时段正文。\n"
+    span = '跨月' if row['job'] == 'monthly_submit' else '跨日'
+    text = '' if row['job'] == 'stop_alert' else f"{row['slot']} 的定时任务已{span}过期，本次未推送原时段正文。\n"
     conn.execute("""UPDATE scheduled_runs SET status='expired',finished_at=?,text=?,result=NULL,state=NULL,
                     error=NULL,error_code=NULL WHERE id=?""", (db.now(), text, row['id']))
 

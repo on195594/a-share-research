@@ -5,7 +5,7 @@ from a_share_research import db, service
 
 
 LABELS = {"queued": "排队中", "screening": "初筛中", "researching": "研究中", "selecting": "比较中",
-          "proposed": "待确认", "frozen": "已冻结", "tracking": "跟踪中", "failed": "失败"}
+          "proposed": "待确认", "frozen": "已冻结", "tracking": "跟踪中", "closed": "已结束", "failed": "失败"}
 
 
 def _describe(batch):
@@ -19,7 +19,7 @@ def _event_for(batch, now):
         return 'failed'
     if status == 'proposed':
         return 'needs_owner'
-    if status in ('frozen', 'tracking'):
+    if status in ('frozen', 'tracking', 'closed'):
         gaps = batch['failed_research'] or batch['ranking_error'] or batch['error']
         return 'completed_with_gaps' if gaps else 'completed'
     if now - datetime.fromisoformat(batch['created_at']) > timedelta(hours=48):

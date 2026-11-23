@@ -119,6 +119,24 @@ def test_hourly_status_stuck_boundary_and_terminal_messages(monthly):
         ack(ctx, row)
 
 
+def test_closed_batch_is_completed_not_stuck(monthly):
+    ctx, clock = monthly
+    batch_id = service.monthly_batch(ctx.connection, '2026-11', submit=True)['batch']['id']
+    clock[0] = '2026-11-03T12:00:00+08:00'
+    ctx.connection.execute("UPDATE batches SET status='closed',as_of='2026-11-02',frozen_at=? WHERE id=?",
+                           ('2026-11-02T11:30:00+08:00', batch_id))
+    assert run(ctx, 'monthly_status', '2026-11-03T12')['text'].startswith(
+        f'【月批】2026-11 批次 #{batch_id}（已结束）已完成，冻结于 2026-11-02T11:30')
+
+
+def test_unadmitted_submit_expires_after_its_month(monthly):
+    ctx, clock = monthly
+    clock[0] = '2026-12-01T10:00:00+08:00'
+    row = run(ctx, 'monthly_submit', '2026-11')
+    assert row['status'] == 'expired' and row['text'] == '2026-11 的定时任务已跨月过期，本次未推送原时段正文。\n'
+    assert not ctx.connection.execute('SELECT id FROM batches').fetchone()
+
+
 @pytest.mark.parametrize('job,slot', [('monthly_status', '2026-11-01T10:00'), ('monthly_status', '2026-11-01T11'),
                                       ('monthly_submit', '2026-11-01')])
 def test_monthly_slots_must_be_canonical_and_started(monthly, job, slot):
