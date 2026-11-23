@@ -1,104 +1,46 @@
-## 数据操作附录
+# 账户对账、入账与结构化状态操作
 
-本节用于账户差异、交易记账、状态更新和公司行动；无这些事项的日常监控不加载。
+用于账户差异对账、交易与分红入账、资产观察及周期分析状态更新。
 
-### 账户资产快照
+## 一、资产观察更新
 
-2026-11-06 用户授权：仓位与风险预算默认复用系统已存总资产，后续日常截图由系统更新，不每次索要。
+收到清晰的同账户资产截图时：
+1. 核对总资产与可见账户标识（金额模糊或账户不符时只问具体缺项）。
+2. 用 `account_evidence` 留存原图。提交当前资产观察前，先比较截图所反映的时点与账户最新资产观察；已知旧截图仅作凭证，确认时序后才用 `account_observe` 记录当前金额。
+3. 截图明确标出资产估值时点时填入 `portfolio_value_as_of`（带时区 ISO 8601）；手机状态栏时间或记录时间归入 `observed_at`，估值时点缺失则留空。
 
-- 资产观察存于 `CACHE_DB_PATH` 同目录的 `account-snapshot.json`，仓库外、user-owned、0600；不写入风险政策，也不迁移持仓数据库。
-- 收到清晰的同账户截图后，核对总资产与可见账户标识，备份原记录后更新并读回核对；这是已授权的资产观察更新，不代表成交、持仓或风险限额修改，不重复征询。账户不同、金额不可辨或互相冲突时只问具体缺项。
-- 保存 `schema_version=1`、`currency=CNY`、`account_scope`、`portfolio_value`、`portfolio_value_as_of`（无明确资产估值时点则为 null）、`recorded_at`（本次记录时间）、`source=user_screenshot`、`source_ref`（截图路径或消息出处）；可另存明确可见的 `stock_market_value`、`available_cash`，缺失不填 0。
-- 手机状态栏时间和记录时间不冒充资产估值时间；收到无时点截图仍更新已辨明金额，日常监控保留未知标记，不反复催问。已知旧截图不覆盖更新的资产观察。
-- 后续只读监控自动使用最新保存值；显式 `--portfolio-value` 仅覆盖本次，不回写、不混用旧范围/时点。资产文件不存在时才补一次初值，非法记录或账户冲突不得静默回退成已确认预算。
+## 二、对账与交易入账
 
-### 对账先闭环，不重复研究
+1. **对比差异**：结合本轮监控快照与用户截图/成交说明，经 `account_state`、`account_positions`、`account_events` 核对股数、成本、现金、费用税费与分红差异；成本口径见 [成本对账门](portfolio-risk.md#三成本对账门)。
+2. **分红核查**：查看 `policy_daily_brief` 或核查已实施分红，与用户核对到账凭证。现金分红按实收金额记 `dividend`，送转按股数变动记 `adjustment`，两类事件可同批提交。核查失败的代码标“未核对”。
+3. **补齐要素**：每笔成交及其他事件均采集完整、带时区的发生时间 `occurred_at`。一次列齐缺少的成交价、数量、费用税费（卖出印花税按成交额 × 0.5‰ 计入）及分红到账事实。如成交实际依据某份 Research 报告，附决策时阅读的 `report_id` 并核对报告时间。
+4. **确认并提交**：展示拟写入事件与期末券商快照，经 `account_events` 确认未重复且取得用户明确确认后调用 `account_submit`。更正历史记录采用作废原事件加提交替代事件。
+5. **写后复核**：检查回执（`data.status == "posted"`）与最新股数/成本，需要评估最新风险时重跑 `policy_monitor`，交付已闭合项、剩余缺口与下次复核条件。
 
-1. 用本轮快照对比用户最新截图/已成交说明，列出股数、账户范围、成交、费用税费及分红差异；先复用已提供材料，不重跑取价。成本口径与交易限制见 [对账门](portfolio-risk.md#券商成本与规则参考成本对账门)。
-2. 将“用户确认、仅供本次分析的持仓”与“尚未同步的正式账本”分开。无法恢复历史材料时只请求具体缺项；未闭合时不引用旧风险汇总为当前值，不用临时持仓手算风险或推导交易动作，不编造成交价、日期或零费用，不把卖出回款重复加到截图现金。
-3. 一次列齐最小补充项及其用途：成交日期/价格/数量/费用税费、分红实际到账；用户只说“已卖出”不是完整记账参数，也不自动授权写入。公开公告由系统核实，到账事实由用户确认。
-4. 参数齐全后展示拟记事件，取得具体写入授权再提交 `account_submit`；复用已有持仓快照，必要时只读 `holdings <代码>`，用 `position-return <代码> <快照现价>` 核对回款/分红合计（无有效快照价时不省略价格触发重新取价）。当前 CLI 没有逐笔事件列表，合计一致不能证明事件未重复；须结合既有记账回执核对，无法确认是否已记则请用户补充确认依据并暂缓该笔写入，避免重复成交或重复分红。建议、授权、申报、成交、到账事实分开。
-5. 写后复核股数、成本来源、事件与风险，交付“已闭合/仍缺什么/影响哪项判断/下次复核条件”。仅确认本次补录，不声称历史全部闭合；未写入则明确待办，不能用覆盖当前成本替代重建。
+## 三、结构化分析状态（L3 / 论点 / 预警 / Tier）
 
-账户写入只走账本工具（`a-share` skill 的账户工具，合同见 [tools/README](../../../../../tools/README.md)）；v0 CLI 的记账与状态写命令已于 2026-11-19 删除，下列 `$CACHE`（`CACHE=a-stock-cache`）命令全部只读。
+- **读取**：`account_cycle_analysis_current`、`account_cycle_analysis_history`。
+- **写入**：将 `account_cycle_analysis_current` 返回的 `data.version` 填入 `update.expected_version`，附证据哈希与变更原因。用户确认拟议变更后调用 `account_cycle_analysis_update`。
+- **论点重写（`kind=thesis`）**：须含 `l1`、`l2`、`rewrite_reason`、覆盖全部活动条件的 `retire_l3_ids` 及非空 `new_l3`。每条新 L3 含 `condition`、`scope`（`aggregate`/`core_driver`/`non_core`/`governance`）、`action`（`review`/`reduce`/`exit`，`non_core` 仅用 `review`）、`materiality_basis`、`temporary_exit_rule`。
+- **历史 `unverified/pending` 预警**：逐项复核证据后经用户确认重新分类或解除；证据不足则保持 `pending`。
+- **P3 流动性休克延迟**：固定 `reason_code=price_stop2_liquidity_defer`，`evidence` 写入含版本、`defer_started_at`、原第二档价格与原市场快照的 JSON；用户确认后开启 `red / holding_deterioration` 预警，首次 `defer_started_at` 保持不变。
+- 建仓期 Tier 路径、估值豁免声明与框架迁移目前无写入入口，需调整时向所有者说明。
 
-### 交易记账（禁止直接 SQL 改持仓）
+## 四、除权成本调整
 
-`account_submit` 接收买入、卖出、分红、公司行动等事件与完整期末快照，按业务身份去重并重建成本与周期；更正用作废加替代事件，不改原事件。交易依据了某份 Research 报告时附报告编号：用决策时实际读到的那份；没有依据报告（如止损、再平衡）就不附，不事后猜测或回填。工具会拒绝不属于该股票、未通过复核或晚于成交日的报告，但分不清同股票的多份报告，须核对回执里的报告时间。
+以事件前的参考成本为基准，`新参考成本 = (原 reference_cost - 每股现金分红) / (1 + 转增比例)`。
 
-```bash
-# 只读：按登记日账本持股找出已实施但未记账的分红
-$CACHE dividend-check [代码]
+- **仅询问计算**：补齐缺失的每股分红或转增比例后，输出新参考成本与重算后的 Tier 1/2/3 目标价。
+- **含写入意图**：在 `batch.position_distributions` 中按本批事件下标（字符串键）关联每股除权现金数；同次除权仅关联一次，含送转时关联到 `adjustment`。展示预计参考成本与 Tier 目标价，按上述对账流程确认并提交。
 
-# 用全部买卖现金流、费用税费、分红和剩余市值计算总回报及真实持有天数
-$CACHE position-return <代码> [当前价]
+## 五、持久化状态速查
 
-# 只读：关联报告的每笔买卖，从交易日收盘到期末收盘含分红送转的收益，相对沪深300全收益的差，及未关联笔数
-# 起点或期末没有当日收盘（停牌、行情未更新）时只说明原因，不作比较
-$CACHE report-trades [--end YYYY-MM-DD]
-```
-
-成本对账或用户提供账户截图时先运行 `dividend-check`：命中项向用户确认是否到账后再提交分红或公司行动事件，不让用户自己查分红；数据获取失败的代码报告“未核对”，不推定无分红。同一次分红只记一次，公司行动已含现金分红时不再单独提交分红。卖出时印花税按成交额×0.5‰计入税费，不因回单未列明而记 0。
-
-每次写入后执行 `$CACHE holdings`，确认股数、成本与 buy_date；再按 [有效政策与分母证据](portfolio-risk.md#有效政策与分母证据) 默认运行 `$CACHE portfolio-risk`，复用已存总资产、账户范围和时点，沿用本轮 `--policy-file`（如有），不重新索要截图或把旧金额当作显式覆盖传入。仅本次明确覆盖总资产时，才同传 `--portfolio-value` 与同源已确认的 `--account-scope`、可选 `--portfolio-value-as-of`；不得只给旧存值补一个新时点。政策或账户证据不齐时报告风险复核未闭合，不回退预算、不否认已成功记账；这项写后复核不属于只读监控的重复取价。
-
-### 结构化状态
-
-L3 状态与证据、论点整组重写、预警开启/pending/解除、Tier 的 pending/completed 状态经 `account_cycle_analysis_update` 写入，须引用已存证据；一次提交全成全败，版本冲突时先读当前值再提交。读取用：
-
-```bash
-$CACHE l3-list <代码> [--all]
-$CACHE alerts <代码>
-```
-
-论点重写（`kind=thesis`）须含 `l1`、`l2`、`rewrite_reason`、覆盖全部活动条件的 `retire_l3_ids`，以及非空 `new_l3`。每条新L3必须含 `condition`、`scope`、`action`、`materiality_basis` 和 `temporary_exit_rule`；scope为 `aggregate/core_driver/non_core/governance`，action为 `review/reduce/exit`，其中 `non_core` 只能使用 `review`。`core_driver/aggregate + exit` 的重要性与确认期约束、`governance + exit` 的集团级确定性证据必须写入相应文本字段。TTM现金流公式及口径写入条件/重要性/临时规则文本，运行时不负责代算财务指标。
-
-未出现活动论文版本时，`l3-list` 显示 `legacy contract` 并保留旧行为；一旦重写，只有绑定当前活动论文且未退役的合法L3可参与动作，历史记录只通过 `--all` 查看。L3、Tier、预警和主力入场日期不得再以自由文本 notes 作为唯一事实源；notes 只保留无法结构化的补充说明。
-
-建仓时的 Tier 路径与估值豁免声明、既有持仓的框架迁移不属于普通状态更新，当前没有写入入口；需要时向所有者说明，不用其他字段替代。
-
-### 历史预警查询
-
-使用 `$CACHE alerts <代码>`。首次迁移会把旧版 `analysis_results.flags` 原样转成
-`unverified + pending` 预警，保留证据但不计入恶化项门槛；复核后必须重新分类或解除，
-不再直接按历史 JSON 条数累计风险。`legacy` 或 `pending` 本身不是解除依据；不得为减少噪音批量清除。证据不足时保留待核实状态，重新分类或解除仍须用户确认具体写入动作。
-
-### 除权成本调整授权规则
-
-```
-新成本 = (建仓成本 - 每股现金分红) / (1 + 转增比例)
-触发：确认除权日或收到分红入账
-操作边界：
-  - 用户只问"怎么算"时：若 DPS 或转增比例未提供，先追问完整参数再计算；只输出新成本与
-    Tier 1/2/3 目标价，附提醒「如需更新缓存，请明确说更新」；不得写入运行时状态。
-  - 用户含写入意图时（包括：明确说「更新持仓/cache/成本」、同一句话里「算完再更新」、
-    「更新为…」等表达）：先给出拟写入的新成本与重算后的 Tier 目标价，请求用户确认。
-    有效确认词：「确认」「是，写入」「好，更新」；单纯认可计算结果（「嗯」「算对了」）
-    不视为写入授权。
-  - 用户明确确认后执行：
-    提交公司行动事件（`account_submit`）。账本把经济成本与规则参考成本分开：现金分红作为回报事件记录，不从经济投入中
-    重复扣除；Tier/止损参考成本按除息送转公式调整。不得手工 SQL 或删行重建。
-  - 除权成本调整不触发卖出记录。
-```
-
-### 结构化状态字段参考表
-
-| 字段 | 写入时点 | 适用范围 | 消费方 |
-|---|---|---|---|
-| `buy_date`（holdings 结构化列，非notes文本） | 首次建仓（INSERT） | 全部持仓 | 步骤5年度复查计时 |
-| 出场路径 / 目标 | 建仓当日配置（当前无写入入口） | A/E/F框架轻仓试探 | `holding_tier_state` |
-| Tier1估值豁免声明 | 建仓当日配置（当前无写入入口） | E/F正式仓位 | `holding_tier_state` |
-| 主力入场日期 | 账本按买入事件维护 | 全部持仓 | `holdings.main_entry_date` |
-| 压力测试后前瞻股息率数值+来源+核查日期 | 每次步骤3.5核查（无论是否加仓） | C/D框架轻仓试探持仓 | 步骤3.5「首次核查」基线比较 |
-| 格档加仓依据（证据+日期、加仓前/后累计增持量、原建仓股数基准） | 步骤3.5"格档小额试探加仓"触发时 | 同上 | 步骤3.5阶段3仓位计算的累计上限判断 |
-| Tier1/2/3状态 | `account_cycle_analysis_update` | A/E/F | `holding_tier_state` |
-| PEG计算记录（数据源、as-of日期、NP0、NP2、`G_pct`、PEG结果） | 每次涉及E框架PEG判定时（Tier1/Tier2-3/Tier1后补仓均适用） | E框架持仓 | 步骤4各处PEG判定 |
-| L3核查结论 | `account_cycle_analysis_update` | 全部持仓 | `holding_l3_conditions` |
-| L1/L2论文版本与L3替换 | `account_cycle_analysis_update`（thesis） | 新建或重写论文的持仓 | `holding_thesis_versions` + `holding_l3_conditions` |
-| 预警及消除依据 | `account_cycle_analysis_update` | 全部持仓 | `holding_alerts` |
-
-本表汇总各步骤的持久化状态。除 PEG 计算明细和格档核查证据仍可作为补充 notes 外，
-交易、L3、Tier、预警与主力入场日期均以结构化列/表为准。
-
-P3 延迟复核复用预警：固定 `reason_code=price_stop2_liquidity_defer`，`evidence` 为包含版本、`defer_started_at`、原第二档价格和原市场快照的 JSON，`review_due` 可为带时区 ISO 8601。check-holdings 只输出候选；用户确认后才经 `account_cycle_analysis_update` 开启 red / holding_deterioration 预警，原因写“系统性流动性休克观察中”。
-首次起点不得因重复运行或持续 501 家跌停而重置，停牌/封板不可解除或伪造成交。
+| 状态 | 写入方式 | 消费场景 |
+|---|---|---|
+| 持仓股数、成本、买入日与主力入场日 | `account_submit` | 监控快照、12 个月复查 |
+| 资产观察快照 | `account_observe` | 风险分母、区间净值 |
+| L3 条件与核查结论 | `account_cycle_analysis_update`（`l3`） | 论文破灭止损、步骤 2.5 |
+| L1/L2 论点版本与 L3 替换 | `account_cycle_analysis_update`（`thesis`） | 活动论文边界 |
+| 预警开启、续期与解除 | `account_cycle_analysis_update`（`alert` / `alert_open`） | 预警升级门槛、P3 延迟 |
+| Tier 1/2/3 状态 | `account_cycle_analysis_update`（`tier`） | 步骤 4 分批止盈与补仓 |
+| 格档股息率基线、PEG 计算明细 | 核查记录/备注 | 步骤 3.5 基线对比、步骤 4 PEG 复算 |

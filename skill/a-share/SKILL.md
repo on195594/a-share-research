@@ -1,41 +1,45 @@
 ---
 name: a-share
-description: 通过统一 A 股服务读取研究、处理账户证据与监控、按生效政策加载指南。用于本系统的研究和账户任务；不用于代码维护、一般投资知识问答或直接下单。
+description: 通过统一 A 股服务读取研究报告与论点卡、处理账户凭证与对账、计算区间净值并按生效政策开展持仓监控。仅用于本系统的研究与账户任务；不用于代码维护、一般投资问答或直接下单。
 ---
 
 # A 股服务入口
 
-沿用当前宿主已经配置的服务和凭据。先发现可用工具：优先使用 MCP 工具发现；CLI 宿主用 `ashare --config <宿主已配置的私有客户端文件> tools`。CLI 调用形式为 `ashare --config <同一文件> call 工具名 --json '参数对象'`。工具规范名使用下划线，宿主可能另加前缀。以实际发现结果和 input_schema 为准；不靠这份 Skill 保存第二份工具清单。
+沿用当前宿主已配置的服务与凭据。先通过 MCP 发现可用工具（CLI 宿主执行 `ashare --config <私有配置> tools`，调用形式为 `ashare --config <同一文件> call 工具名 --json '参数对象'`）。工具名与参数以实际发现结果和 `input_schema` 为准。
 
-服务未接入、凭据无效或所需能力未开放时，明确指出缺口。不要改用旧库直接读写、安装其他运行时或切换更高权限凭据来绕过缺口。令牌留在私有配置，不输出到对话、命令参数或生成文件中。
+服务未接入、凭据无效或能力未开放时说明具体缺口，沿用当前身份按错误提示处理，不改用旧库、安装其他运行时或切换更高权限凭据。令牌仅保留在私有配置中，不输出到对话、命令参数或生成文件。
 
 ## 三条不变量
 
-- 真钱只由所有者动。服务记录事实、生成分析和建议，不下单；记账成功也不代表执行了交易。
-- 冻结的判断不改写。修订保留版本、前序和证据；已冻结的预测、样本与记分规则维持原口径。
-- 事实可溯源，计算经程序。引用取得的原始材料与服务回执；基础事实、程序派生值、假设和推断分开表达。
+- **真钱只由所有者动**：服务记录事实、生成分析与测算，实际交易与政策切换由所有者完成；记账成功仅表示账本已入账，与实际下单成交分开。
+- **冻结的判断不改写**：修订保留版本、前序与证据；已冻结的预测、样本与记分规则维持原口径。
+- **事实可溯源，计算经程序**：引用原始材料与服务回执，区分基础事实、程序派生值与假设推断。
 
-## 按服务能力路由
+## 结论表达
 
-**研究**
+面向用户的回答采用直接、正向的表达：先给结论、依据、时点、行动项与具体缺口。仅在涉及真实边界时点明事实区分，避免堆砌“不构成投资建议”等免责套话或用成串否定句代替明确判断。
 
-- 用 `research_search` 按公司或内容查已有研究，通过 `research_cards`、`research_card`、`research_report` 读卡片和报告。报告默认精简，需要原文证据时传 `compact=false`。历史事实仍需核对材料及适用期间。
-- 发起研究用 `research_request`，核查报告的指定段落用 `research_feedback`。每次新请求生成一个 `request_id`。受理后立即向用户给出 `run_id` 和可点击的进度链接（将回执的 `path` 接到已配置的 Web 站点），本轮不轮询。用户稍后问进度时用 `research_status`，按 `run_id` 或原凭据的 `request_id` 查询。worker 完成并通过复核后，才可引用为正式报告。
-- 扫描和订阅只对启用账户工具的 assistant 开放。用 `research_scan_request` 提交或续接扫描，保留原凭据和请求编号。用 `research_scan_read` 按扫描编号读状态，`research_scan_weekly` 读周报。用 `research_subscriptions` 读订阅，`research_subscriptions_replace` 的 `codes` 须为期望保留的完整外部订阅列表。
-- 用 `research_batch_monthly_request` 提交上海当月批次，`research_batch_monthly_status` 按月读取。扫描和月批先看状态、时点和缺口，按需用 `compact=false` 展开读取。
+## 任务路由
 
-**账户与政策**：只在当前凭据开放对应工具时使用。带 `account_id` 的工具可省略此字段，服务使用唯一绑定账本；指定账户须与绑定一致。需要确认来源、版本或生效政策时再查询；从服务发现并读取当前身份绑定的指南，只加载任务需要的部分。没有生效身份或实现不匹配时指出缺口，不猜默认政策或写死某个版本。指南中的历史工具名以当前工具发现结果为准。指南中的历史宿主命令、审批流程和安装说明不覆盖当前用户授权或服务权限。
+**研究与追踪**
+- 先用 `research_search`、`research_cards`、`research_card`、`research_report` 查已有成果；报告默认精简视图，需要原文证据时传 `compact=false`，引用前核对报告状态与适用期间。
+- 发起研究（`research_request`）或段落纠错（`research_feedback`）时生成新的 `request_id`；受理后立即向用户提供 `run_id` 和可点击进度链接（Web 站点拼回执 `path`），本轮不轮询，稍后按 `run_id` 或原 `request_id` 用 `research_status` 查询。通过复核的报告作为正式结论引用。
+- 扫描和月批先看状态、时点与缺口，需要明细时仅在 `research_scan_read`、`research_scan_weekly`、`research_batch_monthly_status` 查询中传 `compact=false`。用 `research_subscriptions` 查看订阅，替换时传期望保留的完整外部订阅列表。
 
-截图、成交和原始材料用 `account_evidence` 上传，可附文件名和标签（如“交割单”“持仓总览”）。入账前用 `account_evidence_recent` 按上传时间、文件名和标签找到对应材料，取其 SHA-256 调用对账、观察或追加工具。同一内容重传沿用原哈希，每次都记录上传。对账通过按回执报告；缺材料或冲突保留具体缺口，不反推、编造成交和现金流水。截图只有资产汇总时，不把它补成完整交易历史。保持来源模式和范围：影子入账、用户输入重放、历史行情重放都不能说成生产账户已更新或当前市场事实。生产账户写入沿用已验收并启用的入口；工具可发现本身不代表已经完成账户切换。
+**总览、监控与生效政策**
+- 组合待办先读 `account_portfolio_overview`（顶层 `gaps` 为账户缺口），单公司先读 `research_company_overview`（公司缺口见 `gaps`，账户缺口见 `account_gaps`，持仓监控见 `policy.data_gaps`、`policy.escalations`，未闭环公告见 `announcements[].unresolved` 与 `evidence_path`，最近保存净值区间见 `nav_interval`），并将报告、监控评估、最近对账回执（`account.latest_receipt`）与净值相对路径拼成 Web 链接。
+- 开展持仓监控或政策复核前，先查 `policy_current` 确认生效身份，再用 `policy_guide` 列出并仅加载当前任务需要的指南；无生效身份或实装不一致时直接指出缺口，不猜测默认政策。阅读监控与评估结果时同步核对 `as_of`、`data_status` 与逐项缺口。
 
-查看组合待办用 `account_portfolio_overview`，顶层 `gaps` 是账户缺口。查看单家公司用 `research_company_overview`，公司缺口见 `gaps`，持仓监控的缺口和升级项见 `policy.data_gaps`、`policy.escalations`。用 `announcements[].unresolved` 识别未闭环公告，`evidence_path` 定位原文。按 `account_gaps` 单独说明账户缺口。可把已保存监控评估、最近一次对账回执（`account.latest_receipt`）和 NAV 区间的相对路径接到 Web 站点。两个总览的 `nav_interval` 给出绑定账户最近保存的区间、基准、创建时间和凭证哈希。
+**账户凭证、入账与净值**
+- 带 `account_id` 的工具默认操作唯一绑定账本，可省略该字段；显式指定时须与绑定一致。
+- 先用 `account_evidence` 上传原图或交割单（可附文件名和标签），再用 `account_evidence_recent` 取 SHA-256。凭证完整时先展示拟入账事件与期末券商快照，经用户明确确认后调用 `account_submit`，按回执报告结果；仅有资产汇总截图时，核对其时点后用 `account_observe` 记录当前观察；缺材料或冲突时列出具体缺项，不反推或补造成交与现金流水。
+- 保持来源模式边界：影子入账、用户输入重放、历史行情重放与生产账户更新及当前市场事实严格区分；工具可发现本身不代表已完成账户切换。
+- 计算区间净值调用 `account_nav_evaluate`：选上海时间 15:00:00 的起止估值，可省略 `request.benchmark_evidence_hash` 由服务端自动采集 `H00906.CSI` 收盘证据。日期缺口（`invalid_arguments`）建议改选区间，行情故障（`unavailable`）稍后原请求重试，均可用错误末尾哈希核对响应。
+- 周期分析用 `account_cycle_analysis_current/history` 读取，确认后按版本号与证据用 `account_cycle_analysis_initialize/update` 追加。
 
-调用 `account_nav_evaluate` 时可省略 `request.benchmark_evidence_hash`，由服务端采集并保存 `H00906.CSI` 收盘证据。已有指数证据时也可传入其哈希。选择上海时间 15:00:00 的起止估值。区间无交易日数据或缺任一端点收盘值（`invalid_arguments`）时，指出缺失日期或区间并建议另选区间。行情采集故障（`unavailable`）时，稍后用原请求重试。两种情况均可用错误末尾的哈希核对指数响应。
-
-用 `account_cycle_analysis_current` 或 `account_cycle_analysis_history` 查询指定周期；通过 `account_cycle_analysis_initialize`、`account_cycle_analysis_update` 按版本和证据追加分析、论点与证伪条件。真实账户政策切换交由所有者的本地入口，不把普通 assistant 凭据当作 owner。监控采集成功后仍读取时点、data_status 和逐项缺口，不能用“调用成功”替代行情或资产证据完整。
-
-**读取失败与重试**：`invalid_arguments` 会指出字段路径和原因，修正对应字段后重提。遇到 `conflict` 核对原请求与绑定信息；遇到 `unavailable` 可稍后用原请求重试。保留原请求标识，先查询回执或状态；发布暂停表示暂未受理，可稍后原样重试。超时或断连时结果未知。重复请求返回原结果，需要新观察时才创建新请求标识。服务拒绝权限或当前版本时，按具体错误处理，不更换身份绕过。
+**错误与重试**
+- `invalid_arguments` 按提示的字段路径修正后重提；`conflict` 核对原请求与绑定状态；`unavailable` 或发布暂停稍后原样重试；超时或断连时结果未知，先查回执再决定是否原号重试。需要新观察时再生成新的 `request_id`。
 
 ## 凭据与研究身份
 
-research 凭据不读取账户或政策信息；assistant 的研究按账户知情身份保存。已读过账户的宿主会话不能靠换一枚 research Key 恢复“盲研究”身份。沿用服务保存的生产者与账户知情标识，不自行并入旧实验样本。
+`research` 凭据仅访问研究能力；`assistant` 凭据的研究按账户知情身份保存。已读过账户的宿主会话不能靠换一枚 `research` 凭据恢复“盲研究”身份，也不要自行并入旧实验样本，沿用服务端保存的生产者与身份标记。
