@@ -12,9 +12,11 @@ from urllib.parse import urlsplit
 class ToolsError(ValueError):
     """Safe task failure, without server bodies or credential paths."""
 
-    def __init__(self, message, *, code='failed'):
+    def __init__(self, message, *, code='failed', transient=False):
         super().__init__(message)
         self.code = code
+        # A lost or timed-out reply, safe to repeat only for idempotent calls.
+        self.transient = transient
 
 
 def config_path() -> Path:
@@ -42,7 +44,9 @@ def tool(name: str, arguments: dict) -> dict:
     try:
         result = subprocess.run(['ashare', '--config', str(config_path()), 'call', name, '--json', json.dumps(arguments)],
                                 capture_output=True, text=True, timeout=40, stdin=subprocess.DEVNULL)
-    except (subprocess.TimeoutExpired, UnicodeError):
+    except subprocess.TimeoutExpired:
+        raise ToolsError(unknown, code='outcome_unknown', transient=True) from None
+    except UnicodeError:
         raise ToolsError(unknown, code='outcome_unknown') from None
     except OSError:
         raise ToolsError(f'{name} 客户端未启动，请检查 ashare 安装') from None
@@ -51,7 +55,7 @@ def tool(name: str, arguments: dict) -> dict:
     if result.returncode == 21:
         raise ToolsError(f'{name} 发布暂停或服务繁忙，恢复后可原样重试', code='service_unavailable')
     if result.returncode == 22 or result.returncode < 0:
-        raise ToolsError(unknown, code='outcome_unknown')
+        raise ToolsError(unknown, code='outcome_unknown', transient=True)
     if result.returncode == 23:
         raise ToolsError(f'{name} 回执超限，请用支持更大回执的 MCP 客户端，沿用原身份和原请求查回', code='outcome_unknown')
     if result.returncode:

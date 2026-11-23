@@ -55,6 +55,9 @@ def current_slot(job):
     return now.date().isoformat()
 
 
+POLICY_SECONDS = 270
+
+
 def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
     retry_until = None
 
@@ -64,9 +67,12 @@ def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
             if time.monotonic() >= deadline:
                 raise ToolsError('本轮执行时限已到，请按原时段查回')
             try:
-                return tool(name, arguments)
+                reply = tool(name, arguments)
+                retry_until = None
+                return reply
             except ToolsError as exc:
-                if exc.code != 'service_unavailable':
+                # schedule_run and schedule_ack are idempotent, so a lost reply is looked up again.
+                if exc.code != 'service_unavailable' and not exc.transient:
                     raise
                 now = time.monotonic()
                 if retry_until is None:
@@ -79,7 +85,10 @@ def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
     while True:
         row = call('schedule_run', args)
         run_id = row.get('run_id')
-        if row.get('job') != job or row.get('slot') != slot or type(run_id) is not int or run_id < 1:
+        # The service returns an earlier scan still awaiting its result before today's slot.
+        backlog = job == 'advisor_scan' and isinstance(row.get('slot'), str) and row['slot'] < slot
+        if (row.get('job') != job or (row.get('slot') != slot and not backlog)
+                or type(run_id) is not int or run_id < 1):
             raise ToolsError('定时运行回执与本次时段不符')
         status = row.get('status')
         if status != 'running':
@@ -117,6 +126,8 @@ def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
             raise ToolsError('确认回执与本次运行不符')
     except ToolsError as exc:
         raise ToolsError(f'运行 #{run_id} 的正文已输出，送达确认失败。{exc}') from None
+    if row['slot'] != slot:
+        deliver(job, slot, stdout=stdout, render=render, deadline=deadline)
 
 
 def policy_main(job):
@@ -126,7 +137,9 @@ def policy_main(job):
     try:
         with task_lock(lock_path(job)) as acquired:
             if acquired:
-                deliver(job, current_slot(job), stdout=sys.stdout)
+                # Bound the whole run inside the 5-minute stop-alert slot, so a release pause
+                # cannot hold the task lock into the next slot.
+                deliver(job, current_slot(job), stdout=sys.stdout, deadline=time.monotonic() + POLICY_SECONDS)
         return 0
     except ToolsError as exc:
         sys.stderr.write(f'{exc}\n')

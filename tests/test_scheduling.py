@@ -254,14 +254,22 @@ def test_ack_ownership_and_running_conflict(context):
     assert ack(ctx, ready)['status'] == 'acked'
 
 
-def test_running_scan_expires_across_midnight(context, policy_setup):
+def test_submitted_scan_is_delivered_late_before_the_next_slot(context, policy_setup):
     ctx, clock = context
+    bundle = policy_setup[-2]
+    bundle.update(now='2026-10-23T16:37:00+08:00', research_result=dict(status='ok', cards=[], missing=[]))
     old = run(ctx, 'advisor_scan', DAY)
-    ctx.connection.execute("UPDATE scans SET status='done' WHERE id=?", (old['scan_id'],))
-    clock[0] = '2026-10-23T00:00:00+08:00'
-    stale = run(ctx, 'advisor_scan', DAY)
-    assert stale['status'] == 'expired' and stale['scan_id'] == old['scan_id']
-    assert policy_setup[-1] == []
+    clock[0] = '2026-10-23T16:37:00+08:00'
+    waiting = run(ctx, 'advisor_scan', '2026-10-23')
+    assert (waiting['slot'], waiting['status'], waiting['scan_id']) == (DAY, 'running', old['scan_id'])
+    assert ctx.connection.execute('SELECT count(*) FROM scans').fetchone()[0] == 1
+    scans.execute(ctx.connection, old['scan_id'], source=CapturedSources(), at=clock[0])
+    late = run(ctx, 'advisor_scan', '2026-10-23')
+    assert (late['slot'], late['status'], late['result']['scan']['id']) == (DAY, 'ready', old['scan_id'])
+    assert run(ctx, 'advisor_scan', DAY) == late
+    ack(ctx, late)
+    today = run(ctx, 'advisor_scan', '2026-10-23')
+    assert today['slot'] == '2026-10-23' and today['status'] == 'running' and today['scan_id'] != old['scan_id']
 
 
 def test_scan_polls_one_request_and_only_inherits_acked_current_keys(context, policy_setup):

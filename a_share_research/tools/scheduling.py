@@ -44,9 +44,13 @@ def _slot_start(job, slot, now):
     return start
 
 
-def _expired(job, start, now, status):
+def _expired(job, start, now, status, scan_id=None):
     if job == 'stop_alert':
         return now - start > timedelta(minutes=15)
+    if job == 'advisor_scan' and scan_id is not None:
+        # A submitted scan is delivered late rather than dropped: the next scan treats its
+        # notices as already sent.
+        return False
     return job in ('daily_brief', 'advisor_scan') and status != 'ready' and start.date() != now.date()
 
 
@@ -82,7 +86,7 @@ def _accept(ctx, job, slot, start, now):
             row = _row(conn, cur.lastrowid)
         if row['status'] in ('acked', 'expired'):
             return row
-        if _expired(job, start, now, row['status']):
+        if _expired(job, start, now, row['status'], row['scan_id']):
             _expire(conn, row)
         elif row['status'] == 'failed':
             conn.execute("""UPDATE scheduled_runs SET status='running',attempts=attempts+1,
@@ -223,16 +227,28 @@ def _complete(ctx, row, start):
                         state=?,result=?,text=? WHERE id=?""",
                      ('failed' if error_code else 'ready', evaluation_id, db.now(), error_code, error,
                       gate.canonical(state), gate.canonical(result), text, row['id']))
-        if not error_code and _expired(job, start, datetime.fromisoformat(db.now()), 'running'):
+        if not error_code and _expired(job, start, datetime.fromisoformat(db.now()), 'running', row['scan_id']):
             _expire(conn, row)
 
 
+def _backlog(ctx, job, slot):
+    """An earlier scan still awaiting its result comes back before today's slot."""
+    if job != 'advisor_scan':
+        return slot
+    found = ctx.connection.execute(
+        """SELECT slot FROM scheduled_runs WHERE principal_key_id=? AND job=? AND slot<? AND status='running'
+           AND scan_id IS NOT NULL ORDER BY slot LIMIT 1""", (ctx.principal.key_id, job, slot)).fetchone()
+    return found[0] if found else slot
+
+
 def run(ctx: Context, job: str, slot: str) -> dict:
-    start = _slot_start(job, slot, datetime.fromisoformat(db.now()))
+    _slot_start(job, slot, datetime.fromisoformat(db.now()))
     # No SQLite write lock across collection. flock also releases on process death.
     lock = ctx.database.parent / f'.schedule-{ctx.principal.key_id}-{job}.lock'
     with lock.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
+        slot = _backlog(ctx, job, slot)
+        start = _slot_start(job, slot, datetime.fromisoformat(db.now()))
         row = _accept(ctx, job, slot, start, datetime.fromisoformat(db.now()))
         if row['status'] == 'running':
             _complete(ctx, row, start)

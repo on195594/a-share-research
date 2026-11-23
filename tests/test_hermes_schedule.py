@@ -55,7 +55,7 @@ def test_entry_points_print_before_ack_even_on_failure(client, tmp_path, job, ac
                                 checkpoint_count=0, forecast_count=0), opportunity_costs=[])
         expected = load('a-share-advisor').render_weekly(data['weekly']) + '\n'
     reply(client, job, 'ready', text=expected if not job.startswith('advisor') else '', result=data)
-    client.reply('schedule_ack', {'run_id': '$run_id', 'status': 'acked'}, code=22 if ack_fails else 0,
+    client.reply('schedule_ack', {'run_id': '$run_id', 'status': 'acked'}, code=1 if ack_fails else 0,
                  stderr='private diagnostic')
     run = invoke(job)
     assert run.stdout == expected
@@ -149,7 +149,7 @@ def test_held_task_lock_is_silent(client, job):
     assert (run.returncode, run.stdout, run.stderr, client.calls) == (0, '', '', [])
 
 
-def test_run_and_ack_share_the_release_retry_window(monkeypatch):
+def test_ack_retries_within_the_run_deadline(monkeypatch):
     now = 0
     attempts = []
     def sleep(seconds):
@@ -165,6 +165,64 @@ def test_run_and_ack_share_the_release_retry_window(monkeypatch):
     monkeypatch.setattr(schedule, 'time', SimpleNamespace(sleep=sleep, monotonic=lambda: now))
     stream = StringIO()
     with pytest.raises(schedule.ToolsError, match='送达确认失败'):
-        schedule.deliver('daily_brief', '2026-11-20', stdout=stream)
-    assert attempts[-2:] == [(220, 'schedule_ack'), (240, 'schedule_ack')]
+        schedule.deliver('daily_brief', '2026-11-20', stdout=stream, deadline=240)
+    assert attempts[-2:] == [(220, 'schedule_run'), (220, 'schedule_ack')]
     assert stream.getvalue() == '日报'
+
+
+@pytest.mark.parametrize('error', [dict(code='service_unavailable'), dict(code='outcome_unknown', transient=True)])
+def test_each_call_gets_its_own_retry_window(monkeypatch, error):
+    # A pause early in a long scan poll must not leave the later ack without retries.
+    now = 0
+    failures = {0, 300, 600}
+    def sleep(seconds):
+        nonlocal now
+        now += seconds
+    def call(name, args):
+        if now in failures:
+            failures.discard(now)
+            raise schedule.ToolsError('暂不可用', **error)
+        if name == 'schedule_ack':
+            return dict(run_id=41, status='acked')
+        status = 'ready' if now >= 600 else 'running'
+        return dict(run_id=41, job='advisor_scan', slot='2026-11-20', status=status, result={})
+    monkeypatch.setattr(schedule, 'tool', call)
+    monkeypatch.setattr(schedule, 'time', SimpleNamespace(sleep=sleep, monotonic=lambda: now))
+    stream = StringIO()
+    schedule.deliver('advisor_scan', '2026-11-20', stdout=stream, render=lambda result: '扫描\n', deadline=900)
+    assert stream.getvalue() == '扫描\n' and not failures
+
+
+def test_untransient_unknown_outcome_is_not_retried(monkeypatch):
+    calls = []
+    def call(name, args):
+        calls.append(name)
+        raise schedule.ToolsError('回执超限', code='outcome_unknown')
+    monkeypatch.setattr(schedule, 'tool', call)
+    with pytest.raises(schedule.ToolsError, match='回执超限'):
+        schedule.deliver('daily_brief', '2026-11-20', stdout=StringIO())
+    assert calls == ['schedule_run']
+
+
+def test_backlog_scan_is_delivered_before_today(monkeypatch):
+    calls = []
+    rows = {'2026-11-19': 'ready', '2026-11-20': 'ready'}
+    def call(name, args):
+        calls.append((name, args))
+        if name == 'schedule_ack':
+            return dict(run_id=args['run_id'], status='acked')
+        slot = '2026-11-19' if len(calls) == 1 else args['slot']
+        return dict(run_id=int(slot[-2:]), job='advisor_scan', slot=slot, status=rows[slot], result={'day': slot})
+    monkeypatch.setattr(schedule, 'tool', call)
+    stream = StringIO()
+    schedule.deliver('advisor_scan', '2026-11-20', stdout=stream, render=lambda result: result['day'] + '\n')
+    assert stream.getvalue() == '2026-11-19\n2026-11-20\n'
+    assert calls == [('schedule_run', dict(job='advisor_scan', slot='2026-11-20')), ('schedule_ack', {'run_id': 19}),
+                     ('schedule_run', dict(job='advisor_scan', slot='2026-11-20')), ('schedule_ack', {'run_id': 20})]
+
+
+def test_only_scans_accept_an_earlier_slot(monkeypatch):
+    monkeypatch.setattr(schedule, 'tool', lambda name, args: dict(
+        run_id=1, job='daily_brief', slot='2026-11-19', status='ready', text='旧'))
+    with pytest.raises(schedule.ToolsError, match='时段不符'):
+        schedule.deliver('daily_brief', '2026-11-20', stdout=StringIO())
