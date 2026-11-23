@@ -52,7 +52,7 @@ python3 ops/hermes/install.py --check
 
 ## 段 3 回退
 
-12-01 月批在冻结窗口内沿用段 3 前的脚本。12-05 切换后若需回退，先暂停受影响的 Hermes 任务，等本轮退出。在 v26 账本的只读连接上将 `:grant_id` 绑定为正在使用的 Hermes grant 编号，查回所有未确认运行，包括尚未写入 `scan_id` 的扫描。
+段 3 于 11-23 安装。若需回退，先暂停受影响的 Hermes 任务，等本轮退出。在 v26 账本的只读连接上将 `:grant_id` 绑定为正在使用的 Hermes grant 编号，查回所有未确认运行，包括尚未写入 `scan_id` 的扫描。
 
 ```sql
 SELECT id,job,slot,status,scan_id FROM scheduled_runs
