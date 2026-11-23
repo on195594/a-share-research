@@ -1,4 +1,5 @@
 """Principal-scoped scheduled captures and delivery acknowledgements."""
+from calendar import monthrange
 from datetime import date, datetime, timedelta
 import fcntl
 import json
@@ -44,14 +45,15 @@ def _slot_start(job, slot, now):
     return start
 
 
-def _expired(job, start, now, status, scan_id=None):
+def _expired(row, start, now):
+    job = row['job']
     if job == 'stop_alert':
         return now - start > timedelta(minutes=15)
-    if job == 'advisor_scan' and scan_id is not None:
-        # A submitted scan is delivered late rather than dropped: the next scan treats its
-        # notices as already sent.
+    if row['status'] == 'ready' or (job == 'advisor_scan' and row['scan_id'] is not None):
         return False
-    return job in ('daily_brief', 'advisor_scan') and status != 'ready' and start.date() != now.date()
+    if job == 'advisor_weekly':
+        return now >= start + timedelta(weeks=1) and 'weekly' not in json.loads(row['result'] or '{}')
+    return job in ('daily_brief', 'advisor_scan') and start.date() != now.date()
 
 
 def _expire(conn, row):
@@ -74,10 +76,12 @@ def _view(row):
     return data
 
 
-def _accept(ctx, job, slot, start, now):
+def _accept(ctx, job, slot, now):
     conn = ctx.connection
     with db.transaction(conn):
         registry._authorize(conn, ctx.principal)
+        slot = _backlog(ctx, job, slot)
+        start = _slot_start(job, slot, now)
         key = (ctx.principal.key_id, job, slot)
         row = conn.execute('SELECT * FROM scheduled_runs WHERE principal_key_id=? AND job=? AND slot=?', key).fetchone()
         if row is None:
@@ -85,28 +89,45 @@ def _accept(ctx, job, slot, start, now):
                                   VALUES (?,?,?,'running',?)""", (*key, now.isoformat()))
             row = _row(conn, cur.lastrowid)
         if row['status'] in ('acked', 'expired'):
-            return row
-        if _expired(job, start, now, row['status'], row['scan_id']):
+            return row, start
+        if _expired(row, start, now):
             _expire(conn, row)
         elif row['status'] == 'failed':
             conn.execute("""UPDATE scheduled_runs SET status='running',attempts=attempts+1,
                             activation_id=NULL,evaluation_id=NULL,finished_at=NULL,error_code=NULL,error=NULL,
-                            state=NULL,result=NULL,text=NULL WHERE id=?""", (row['id'],))
-        return _row(conn, row['id'])
+                            state=NULL,result=CASE WHEN job='advisor_weekly' THEN result END,text=NULL
+                            WHERE id=?""", (row['id'],))
+        return _row(conn, row['id']), start
 
 
 def _previous(conn, row):
     query = "SELECT state FROM scheduled_runs WHERE principal_key_id=? AND job=? AND status='acked'"
     args = [row['principal_key_id'], row['job']]
     if row['job'] == 'stop_alert':
+        from a_share_research.policy.v0.commands_holdings import new_stop_alerts
         day = row['slot'][:10]
         query += ' AND slot BETWEEN ? AND ?'
-        args.extend([day + 'T00:00', day + 'T23:55'])
+        delivered = {}
+        for (raw,) in conn.execute(query, (*args, day + 'T00:00', day + 'T23:55')):
+            state = json.loads(raw)
+            if state.get('date') == day:
+                _, delivered = new_stop_alerts(state['levels'], delivered, day)
+        return delivered
     found = conn.execute(query + ' ORDER BY slot DESC LIMIT 1', args).fetchone()
     return json.loads(found[0]) if found else {}
 
 
 def _evaluate(ctx, row):
+    try:
+        return _evaluate_current(ctx, row)
+    except registry.PolicyError as exc:
+        if exc.code != 'policy_activation_changed':
+            raise
+    # This rejection guarantees no receipt was written under the old activation.
+    return _evaluate_current(ctx, row)
+
+
+def _evaluate_current(ctx, row):
     conn = ctx.connection
     job = row['job']
     with db.transaction(conn):
@@ -124,13 +145,19 @@ def _evaluate(ctx, row):
             previous = json.loads(row['state']) if saved else _previous(conn, row)
         conn.execute('UPDATE scheduled_runs SET activation_id=?,state=? WHERE id=?',
                      (activation_id, gate.canonical(previous), row['id']))
+    if job == 'benchmark':
+        end = row['created_at'][:10]
+        if end[:7] > row['slot']:
+            year, month = map(int, row['slot'].split('-'))
+            end = f"{row['slot']}-{monthrange(year, month)[1]}"
+            # A pre-fix receipt under the original ID can have a different cutoff.
+            request += f':{end}'
+        return benchmark.run(conn, ctx.principal, ctx.database, request, activation_id, end)
     args = (conn, ctx.principal, ctx.database, request, activation_id)
     if job == 'stop_alert':
         return stop_alert.run(*args, previous)
     if job == 'daily_brief':
         return daily_brief.run(*args)
-    if job == 'benchmark':
-        return benchmark.run(*args, row['created_at'][:10])
     return monitor.run(*args)
 
 
@@ -167,7 +194,10 @@ def _failure(exc):
 def _advisor_inputs(ctx, row, result):
     conn = ctx.connection
     if row['job'] == 'advisor_weekly':
-        result.update(weekly=scans.weekly(conn), opportunity_costs=[])
+        result.update(json.loads(row['result'] or '{}'))
+        if 'weekly' not in result:
+            result.update(weekly=scans.weekly(conn), opportunity_costs=[])
+            conn.execute('UPDATE scheduled_runs SET result=? WHERE id=?', (gate.canonical(result), row['id']))
         return True
     scan_id = row['scan_id']
     if scan_id is None:
@@ -187,57 +217,82 @@ def _advisor_inputs(ctx, row, result):
     return True
 
 
+def _advisor_opportunities(ctx, row, result):
+    scan = row['job'] == 'advisor_scan'
+    if scan and row['slot'] < db.now()[:10]:
+        return None, _previous(ctx.connection, row)
+    receipt = _evaluate(ctx, row)
+    previous = _previous(ctx.connection, row)
+    if scan and row['slot'] < db.now()[:10]:
+        # Collection itself can cross midnight.
+        return receipt['id'], previous
+    kind, field = ('research_opportunity', 'opportunities') if scan else ('opportunity_cost', 'opportunity_costs')
+    seen = set(previous.get('seen', []))
+    current = [(_opportunity_key(p), p) for p in receipt['result']['review_prompts'] if p['kind'] == kind]
+    result[field] = [p for key, p in current if key not in seen]
+    return receipt['id'], {'seen': sorted(key for key, _ in current)}
+
+
 def _complete(ctx, row, start):
     conn = ctx.connection
     job = row['job']
     state, result, text = {}, {}, ''
     error_code = error = evaluation_id = None
     try:
-        advisor = job in ('advisor_scan', 'advisor_weekly')
-        if advisor and not _advisor_inputs(ctx, row, result):
-            return
-        receipt = _evaluate(ctx, row)
-        evaluation_id = receipt['id']
-        evaluated = receipt['result']
-        if advisor:
-            kind, field = (('research_opportunity', 'opportunities') if job == 'advisor_scan'
-                           else ('opportunity_cost', 'opportunity_costs'))
-            seen = set(_previous(conn, row).get('seen', []))
-            current = [(_opportunity_key(p), p) for p in evaluated['review_prompts'] if p['kind'] == kind]
-            result[field] = [p for key, p in current if key not in seen]
-            state = {'seen': sorted(key for key, _ in current)}
-        elif evaluated['exit_code']:
-            error_code, error = evaluated['status'], evaluated['stderr']
+        if job in ('advisor_scan', 'advisor_weekly'):
+            if not _advisor_inputs(ctx, row, result):
+                return
+            evaluation_id, state = _advisor_opportunities(ctx, row, result)
         else:
-            text = evaluated['stdout']
-            if job == 'stop_alert':
-                state = evaluated['state']
-                text = text.replace('按 a-stock-monitor 复核止损与 L3；', '按 a-share 的生效政策复核止损与 L3；')
-            elif job == 'daily_brief':
-                text = text.replace('（运行 dividend-check 核对）', '（通过 a-share 核对券商流水）')
+            receipt = _evaluate(ctx, row)
+            evaluation_id = receipt['id']
+            evaluated = receipt['result']
+            if evaluated['exit_code']:
+                error_code, error = evaluated['status'], evaluated['stderr']
             else:
-                text = '📊 A股账本月度对比\n' + text
-            if evaluated['stderr']:
-                result['stderr'] = evaluated['stderr']
+                text = evaluated['stdout']
+                if job == 'stop_alert':
+                    state = evaluated['state']
+                    text = text.replace('按 a-stock-monitor 复核止损与 L3；', '按 a-share 的生效政策复核止损与 L3；')
+                elif job == 'daily_brief':
+                    text = text.replace('（运行 dividend-check 核对）', '（通过 a-share 核对券商流水）')
+                else:
+                    text = '📊 A股账本月度对比\n' + text
+                if evaluated['stderr']:
+                    result['stderr'] = evaluated['stderr']
     except Exception as exc:
         error_code, error = _failure(exc)
         log.error('Scheduled run %s (%s) failed: %s (%s)', row['id'], job, error_code, type(exc).__name__)
     with db.transaction(conn):
+        finished = db.now()
+        status = 'failed' if error_code else 'ready'
+        if error_code and job == 'advisor_scan' and row['slot'] < finished[:10]:
+            # A failed catch-up is terminal so future scans can proceed. Keep its partial disclosures and error.
+            status = 'expired'
+            reason = ' '.join(error.split())[:160]
+            text = f"{row['slot']} 的扫描补回失败：{error_code}，{reason}\n"
         conn.execute("""UPDATE scheduled_runs SET status=?,evaluation_id=?,finished_at=?,error_code=?,error=?,
                         state=?,result=?,text=? WHERE id=?""",
-                     ('failed' if error_code else 'ready', evaluation_id, db.now(), error_code, error,
+                     (status, evaluation_id, finished, error_code, error,
                       gate.canonical(state), gate.canonical(result), text, row['id']))
-        if not error_code and _expired(job, start, datetime.fromisoformat(db.now()), 'running', row['scan_id']):
+        if not error_code and job in ('daily_brief', 'stop_alert') and _expired(row, start, datetime.fromisoformat(finished)):
             _expire(conn, row)
 
 
 def _backlog(ctx, job, slot):
-    """An earlier scan still awaiting its result comes back before today's slot."""
+    """Recover interrupted links before selecting the oldest undelivered scan."""
     if job != 'advisor_scan':
         return slot
-    found = ctx.connection.execute(
-        """SELECT slot FROM scheduled_runs WHERE principal_key_id=? AND job=? AND slot<? AND status='running'
-           AND scan_id IS NOT NULL ORDER BY slot LIMIT 1""", (ctx.principal.key_id, job, slot)).fetchone()
+    conn = ctx.connection
+    scope = (ctx.principal.key_id, job, slot)
+    conn.execute("""UPDATE scheduled_runs AS r SET scan_id=q.scan_id FROM scan_requests AS q
+                    WHERE r.principal_key_id=? AND r.job=? AND r.slot<=? AND r.scan_id IS NULL
+                    AND r.status NOT IN ('acked','expired') AND q.requester=?
+                    AND q.request_id='schedule:advisor_scan:' || r.slot""",
+                 (*scope, service.requester(conn, ctx.principal)))
+    found = conn.execute(
+        """SELECT slot FROM scheduled_runs WHERE principal_key_id=? AND job=? AND slot<?
+           AND status NOT IN ('acked','expired') AND scan_id IS NOT NULL ORDER BY slot LIMIT 1""", scope).fetchone()
     return found[0] if found else slot
 
 
@@ -247,9 +302,7 @@ def run(ctx: Context, job: str, slot: str) -> dict:
     lock = ctx.database.parent / f'.schedule-{ctx.principal.key_id}-{job}.lock'
     with lock.open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
-        slot = _backlog(ctx, job, slot)
-        start = _slot_start(job, slot, datetime.fromisoformat(db.now()))
-        row = _accept(ctx, job, slot, start, datetime.fromisoformat(db.now()))
+        row, start = _accept(ctx, job, slot, datetime.fromisoformat(db.now()))
         if row['status'] == 'running':
             _complete(ctx, row, start)
         registry._authorize(ctx.connection, ctx.principal)

@@ -14,7 +14,7 @@ def test_polls_same_request_and_renders_only_terminal_receipt(monkeypatch):
     row = dict(run_id=7, scan_id=8, **request)
     replies = iter([row | dict(status='running'), row | dict(status='ready', result={}), row | dict(status='acked')])
     calls = []
-    def call(name, args):
+    def call(name, args, *, timeout):
         calls.append((now, name, args))
         return next(replies)
     def sleep(seconds):
@@ -34,7 +34,7 @@ def test_scan_wait_ends_inside_budget_without_ack(monkeypatch, deadline, called)
     import ashare_schedule as schedule
     request = dict(job='advisor_scan', slot='2026-11-20')
     calls = []
-    def call(name, args):
+    def call(name, args, *, timeout):
         calls.append(name)
         return dict(run_id=7, status='running', scan_id=8, **request)
     monkeypatch.setattr(schedule, 'time', SimpleNamespace(monotonic=lambda: 0))

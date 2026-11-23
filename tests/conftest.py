@@ -145,6 +145,9 @@ args = json.loads(raw)
 with (root / 'calls.jsonl').open('a') as calls:
     print(json.dumps([name, args]), file=calls)
 reply = json.loads((root / (name + '.reply')).read_text())
+if reply['delay']:
+    import time
+    time.sleep(reply['delay'])
 
 def echo_inputs(value):
     if isinstance(value, dict):
@@ -162,8 +165,8 @@ sys.exit(reply['code'])
     program.chmod(0o700)
 
     class Client:
-        def reply(self, name, data=None, *, code=0, stderr=""):
-            (tmp_path / (name + ".reply")).write_text(json.dumps(dict(data=data, code=code, stderr=stderr)))
+        def reply(self, name, data=None, *, code=0, stderr="", delay=0):
+            (tmp_path / (name + ".reply")).write_text(json.dumps(dict(data=data, code=code, stderr=stderr, delay=delay)))
 
         @property
         def calls(self):

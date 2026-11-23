@@ -1,6 +1,7 @@
 """Scheduled CLI delivery, including the real advisor supervisor and ashare subprocess boundary."""
 from datetime import datetime
 from io import StringIO
+import json
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -42,7 +43,7 @@ def reply(client, job, status, *, text='', result=None, **fields):
 
 @pytest.mark.parametrize('job', SCRIPTS)
 @pytest.mark.parametrize('ack_fails', [False, True])
-def test_entry_points_print_before_ack_even_on_failure(client, tmp_path, job, ack_fails):
+def test_entry_points_preserve_body_after_failed_ack(client, tmp_path, job, ack_fails):
     expected = '时段正文\n'
     data = {'stderr': '价格参考\n'} if job == 'benchmark' else {}
     if job == 'advisor_scan':
@@ -58,9 +59,13 @@ def test_entry_points_print_before_ack_even_on_failure(client, tmp_path, job, ac
     client.reply('schedule_ack', {'run_id': '$run_id', 'status': 'acked'}, code=1 if ack_fails else 0,
                  stderr='private diagnostic')
     run = invoke(job)
-    assert run.stdout == expected
-    assert run.returncode == int(ack_fails), run.stderr
-    assert ('送达确认失败' in run.stderr) is ack_fails and 'private' not in run.stderr
+    assert run.returncode == 0, run.stderr
+    if ack_fails:
+        assert run.stdout.startswith(expected) and '送达确认失败' in run.stdout[len(expected):]
+        assert len(run.stdout[len(expected):].splitlines()) == 1
+    else:
+        assert run.stdout == expected
+    assert 'private' not in run.stdout + run.stderr
     assert ('价格参考' in run.stderr) == (job == 'benchmark')
     (tool, args), ack = client.calls
     assert tool == 'schedule_run' and args['job'] == job and set(args) == {'job', 'slot'}
@@ -97,7 +102,7 @@ def test_reject_wrong_slot_and_wrong_ack(client):
     reply(client, 'benchmark', 'ready', text='正确正文')
     client.reply('schedule_ack', dict(run_id=42, status='acked'))
     run = invoke('benchmark')
-    assert run.returncode == 1 and run.stdout == '正确正文' and '确认失败' in run.stderr
+    assert run.returncode == 0 and run.stdout.splitlines()[0] == '正确正文' and '确认失败' in run.stdout.splitlines()[1]
 
 
 def test_flush_completes_before_ack(monkeypatch):
@@ -105,7 +110,7 @@ def test_flush_completes_before_ack(monkeypatch):
     class Output(StringIO):
         def flush(self):
             events.append(('flush', self.getvalue()))
-    def call(name, args):
+    def call(name, args, *, timeout):
         events.append((name, args))
         return dict(job='daily_brief', slot='2026-11-20', run_id=41,
                     status='ready' if name == 'schedule_run' else 'acked', text='正文')
@@ -117,6 +122,11 @@ def test_flush_completes_before_ack(monkeypatch):
 
 @pytest.mark.parametrize('recover', [False, True])
 def test_exit_21_retries_same_slot_every_twenty_seconds_for_at_most_240(client, tmp_path, monkeypatch, capsys, recover):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return cls.fromisoformat('2026-11-23T10:30:00+08:00')
+    monkeypatch.setattr(schedule, 'datetime', Clock)
     job = load('a-share-stop-alert')
     monkeypatch.setattr(sys, 'argv', ['a-share-stop-alert.py'])
     now = 0
@@ -156,7 +166,7 @@ def test_ack_retries_within_the_run_deadline(monkeypatch):
         nonlocal now
         now += seconds
         assert now <= 240
-    def call(name, args):
+    def call(name, args, *, timeout):
         attempts.append((now, name))
         if name == 'schedule_run' and now == 220:
             return dict(run_id=41, job='daily_brief', slot='2026-11-20', status='ready', text='日报')
@@ -170,18 +180,17 @@ def test_ack_retries_within_the_run_deadline(monkeypatch):
     assert stream.getvalue() == '日报'
 
 
-@pytest.mark.parametrize('error', [dict(code='service_unavailable'), dict(code='outcome_unknown', transient=True)])
-def test_each_call_gets_its_own_retry_window(monkeypatch, error):
+def test_each_call_gets_its_own_retry_window(monkeypatch):
     # A pause early in a long scan poll must not leave the later ack without retries.
     now = 0
     failures = {0, 300, 600}
     def sleep(seconds):
         nonlocal now
         now += seconds
-    def call(name, args):
+    def call(name, args, *, timeout):
         if now in failures:
             failures.discard(now)
-            raise schedule.ToolsError('暂不可用', **error)
+            raise schedule.ToolsError('暂不可用', code='service_unavailable')
         if name == 'schedule_ack':
             return dict(run_id=41, status='acked')
         status = 'ready' if now >= 600 else 'running'
@@ -195,7 +204,7 @@ def test_each_call_gets_its_own_retry_window(monkeypatch, error):
 
 def test_untransient_unknown_outcome_is_not_retried(monkeypatch):
     calls = []
-    def call(name, args):
+    def call(name, args, *, timeout):
         calls.append(name)
         raise schedule.ToolsError('回执超限', code='outcome_unknown')
     monkeypatch.setattr(schedule, 'tool', call)
@@ -207,7 +216,7 @@ def test_untransient_unknown_outcome_is_not_retried(monkeypatch):
 def test_backlog_scan_is_delivered_before_today(monkeypatch):
     calls = []
     rows = {'2026-11-19': 'ready', '2026-11-20': 'ready'}
-    def call(name, args):
+    def call(name, args, *, timeout):
         calls.append((name, args))
         if name == 'schedule_ack':
             return dict(run_id=args['run_id'], status='acked')
@@ -222,7 +231,143 @@ def test_backlog_scan_is_delivered_before_today(monkeypatch):
 
 
 def test_only_scans_accept_an_earlier_slot(monkeypatch):
-    monkeypatch.setattr(schedule, 'tool', lambda name, args: dict(
+    monkeypatch.setattr(schedule, 'tool', lambda name, args, *, timeout: dict(
         run_id=1, job='daily_brief', slot='2026-11-19', status='ready', text='旧'))
     with pytest.raises(schedule.ToolsError, match='时段不符'):
         schedule.deliver('daily_brief', '2026-11-20', stdout=StringIO())
+
+
+@pytest.mark.parametrize("status", ["failed", "expired", "acked"])
+def test_terminal_backlog_delivers_disclosures_and_continues_today(monkeypatch, status):
+    args = dict(job="advisor_scan", slot="2026-11-20")
+    rows = iter([
+        dict(run_id=40, job="advisor_scan", slot="2026-11-19", status=status,
+             result={"scan": "昨日披露"}, error_code="scan_error", error="昨日部分失败", text="昨日部分失败"),
+        dict(run_id=41, **args, status="ready", result={"scan": "今日披露"}),
+        dict(run_id=41, status="acked"),
+    ])
+    calls = []
+    def call(name, arguments, **kwargs):
+        calls.append((name, arguments))
+        return next(rows)
+    monkeypatch.setattr(schedule, "tool", call)
+    stream = StringIO()
+    schedule.deliver(**args, stdout=stream, render=lambda result: result["scan"] + "\n")
+    assert calls == [("schedule_run", args), ("schedule_run", args), ("schedule_ack", {"run_id": 41})]
+    assert ("昨日披露" in stream.getvalue()) == (status != "acked")
+    assert ("昨日部分失败" in stream.getvalue()) == (status != "acked")
+    assert stream.getvalue().endswith("今日披露\n")
+
+
+@pytest.mark.parametrize("job, pause, collect, limit", [("stop_alert", 0, 20, 29), ("daily_brief", 240, 29, 270)])
+def test_policy_run_and_ack_share_remaining_subprocess_budget(monkeypatch, tmp_path, capsys, job, pause, collect, limit):
+    import ashare_tools
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return cls.fromisoformat("2026-11-23T10:34:30+08:00")
+    monkeypatch.setattr(schedule, "datetime", Clock)
+    monkeypatch.setattr(sys, "argv", ["a-share-stop-alert.py"])
+    monkeypatch.setenv(f"ASHARE_{job.upper()}_STATE", str(tmp_path / "state.json"))
+    elapsed = 0
+    calls = []
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+    monkeypatch.setattr(schedule, "time", SimpleNamespace(monotonic=lambda: elapsed, sleep=sleep))
+    def run(argv, *, timeout, **kwargs):
+        nonlocal elapsed
+        name, _, payload = argv[-3:]
+        calls.append((name, timeout))
+        if name == "schedule_run":
+            args = json.loads(payload)
+            if elapsed < pause:
+                return subprocess.CompletedProcess(argv, 21)
+            assert args["slot"] == ("2026-11-23T10:30" if job == "stop_alert" else "2026-11-23")
+            elapsed += collect
+            row = dict(**args, run_id=1, status="ready", text="止损\n")
+        else:
+            elapsed += min(39, timeout)
+            if timeout < 39:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            row = dict(run_id=1, status="acked")
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"ok": True, "result": {"data": row}}))
+    monkeypatch.setattr(ashare_tools.subprocess, "run", run)
+    assert schedule.policy_main(job) == 0
+    assert elapsed == limit, calls
+    assert calls[-2:] == [("schedule_run", limit - pause), ("schedule_ack", limit - pause - collect)]
+    assert "确认失败" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failure", ["exit22", "timeout"])
+@pytest.mark.parametrize("name", ["schedule_run", "schedule_ack"])
+def test_transient_cli_retries_identical_arguments(monkeypatch, ashare_cli, failure, name):
+    args = dict(job="daily_brief", slot="2026-11-20")
+    ready = dict(**args, run_id=41, status="ready", text="日报")
+    acked = dict(run_id=41, status="acked")
+    ashare_cli.reply("schedule_run", ready)
+    ashare_cli.reply("schedule_ack", acked)
+    ashare_cli.reply(name, code=22 if failure == "exit22" else 0, delay=5 if failure == "timeout" else 0)
+    # A short per-call budget drives a real subprocess timeout; advance replies at the retry boundary.
+    def recover(seconds):
+        assert seconds == .5
+        ashare_cli.reply(name, ready if name == "schedule_run" else acked)
+    monkeypatch.setattr(schedule, "time", SimpleNamespace(monotonic=lambda: 0, sleep=recover))
+    stream = StringIO()
+    schedule.deliver(**args, stdout=stream, deadline=.5)
+    run_call = ("schedule_run", args)
+    ack_call = ("schedule_ack", {"run_id": 41})
+    assert ashare_cli.calls == [run_call, run_call if name == "schedule_run" else ack_call, ack_call]
+    assert stream.getvalue() == "日报"
+
+
+def test_advisor_preserves_backlog_after_supervisor_deadline(monkeypatch, tmp_path, capfd):
+    advisor = load("a-share-advisor")
+    args = dict(job="advisor_scan", slot="2026-11-20")
+    body = "完整披露" * 70 + "末条风险"
+    calls = []
+    def call(name, arguments, **kwargs):
+        calls.append(name)
+        if len(calls) == 1:
+            return dict(args, slot="2026-11-19", run_id=1, status="ready", result={"text": body})
+        if name == "schedule_ack":
+            return dict(run_id=1, status="acked")
+        schedule.time.sleep(10)
+    monkeypatch.setattr(sys, "argv", ["a-share-advisor.py", "scan"])
+    monkeypatch.setenv("A_SHARE_ADVISOR_STATE", str(tmp_path / "advisor"))
+    monkeypatch.setattr(advisor, "RUN_SECONDS", .5)
+    monkeypatch.setattr(advisor, "current_slot", lambda job: args["slot"])
+    monkeypatch.setattr(advisor, "scan_text", lambda result: result["text"])
+    monkeypatch.setattr(schedule, "tool", call)
+    code = advisor.main()
+    output = capfd.readouterr()
+    assert code == 0
+    report, error = output.out.splitlines()
+    assert report == body and "时限" in error
+
+
+def test_ack_failure_with_silent_result_triggers_hermes_alarm(client):
+    reply(client, "daily_brief", "ready")
+    client.reply("schedule_ack", code=1)
+    run = invoke("daily_brief")
+    assert run.returncode == 1 and run.stdout == "" and "确认失败" in run.stderr
+
+
+@pytest.mark.parametrize("old_status", ["failed", "expired"])
+@pytest.mark.parametrize("today_status", ["failed", "acked"])
+def test_advisor_only_backlog_failure_notice_keeps_alarm(monkeypatch, tmp_path, capfd, old_status, today_status):
+    advisor = load("a-share-advisor")
+    args = dict(job="advisor_scan", slot="2026-11-20")
+    rows = iter([
+        dict(args, slot="2026-11-19", run_id=1, status=old_status, result={},
+             error_code="scan_error", error="旧扫描失败", text="旧扫描失败\n"),
+        dict(args, run_id=2, status=today_status, result={}, error_code="scan_error", error="今日采集失败"),
+    ])
+    monkeypatch.setattr(sys, "argv", ["a-share-advisor.py", "scan"])
+    monkeypatch.setenv("A_SHARE_ADVISOR_STATE", str(tmp_path / "advisor"))
+    monkeypatch.setattr(advisor, "current_slot", lambda job: args["slot"])
+    monkeypatch.setattr(schedule, "tool", lambda *args, **kwargs: next(rows))
+    code = advisor.main()
+    output = capfd.readouterr()
+    expected_error = "今日采集失败" if today_status == "failed" else "旧扫描失败"
+    assert code == 1 and expected_error in output.err

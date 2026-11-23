@@ -39,11 +39,11 @@ def client_identity() -> tuple[str, str]:
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest(), public_base
 
 
-def tool(name: str, arguments: dict) -> dict:
+def tool(name: str, arguments: dict, *, timeout: float = 40) -> dict:
     unknown = f'{name} 结果未知，请用原身份与原请求恢复'
     try:
         result = subprocess.run(['ashare', '--config', str(config_path()), 'call', name, '--json', json.dumps(arguments)],
-                                capture_output=True, text=True, timeout=40, stdin=subprocess.DEVNULL)
+                                capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         raise ToolsError(unknown, code='outcome_unknown', transient=True) from None
     except UnicodeError:

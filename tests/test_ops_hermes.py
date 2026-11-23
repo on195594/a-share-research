@@ -96,6 +96,38 @@ def run_install(repo, target, *args):
                            "--target", str(target), *args], capture_output=True, text=True)
 
 
+def test_install_copies_dependencies_before_entries(tmp_path, monkeypatch):
+    installer = load("install")
+    replace = installer.os.replace
+    modules = {"advisor_budget.py", "ashare_tools.py", "ashare_schedule.py"}
+
+    def install_file(temporary, dest):
+        if dest.name == "ashare_schedule.py":
+            assert (dest.parent / "ashare_tools.py").is_file()
+        elif dest.name not in modules:
+            assert modules <= {item.name for item in dest.parent.iterdir()}
+        replace(temporary, dest)
+
+    monkeypatch.setattr(installer.os, "replace", install_file)
+    installer.copy_scripts(tmp_path / "installed")
+
+
+def test_rollback_runbook_lists_all_unconfirmed_runs(policy_setup):
+    _, conn, principals, *_ = policy_setup
+    for day, status in enumerate(("running", "ready", "failed", "acked", "expired"), 1):
+        slot = f"2026-11-{day:02}"
+        conn.execute("INSERT INTO scheduled_runs(principal_key_id,job,slot,status,created_at) "
+                     "VALUES (?, 'advisor_scan', ?, ?, ?)", (principals["assistant"].key_id, slot, status, slot))
+
+    runbook = (SOURCE / "README.md").read_text().split("## 跨激活 pending 转接", 1)[1]
+    sql = runbook.split("```sql\n", 1)[1].split("```", 1)[0]
+    rows = conn.execute(sql).fetchall()
+    assert rows[0].keys() == ["id", "job", "slot", "status", "scan_id"]
+    assert {row["status"] for row in rows} == {"running", "ready", "failed"}
+    design = (ROOT / "docs/scheduling-state.md").read_text().split("段 2 必须", 1)[1].split("## 6", 1)[0]
+    assert "695a36f" in design
+
+
 def test_install_lifecycle(installer_repo, tmp_path):
     repo, _ = installer_repo
     target = tmp_path / "target"

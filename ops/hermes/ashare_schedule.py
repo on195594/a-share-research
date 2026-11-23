@@ -1,6 +1,6 @@
 """Hermes delivery of service-owned scheduled runs."""
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 import fcntl
 import os
 from pathlib import Path
@@ -44,8 +44,9 @@ def task_lock(path):
             yield True
 
 
-def current_slot(job):
-    now = datetime.now(ZoneInfo('Asia/Shanghai'))
+def current_slot(job, now=None):
+    if now is None:
+        now = datetime.now(ZoneInfo('Asia/Shanghai'))
     if job == 'stop_alert':
         return now.replace(minute=now.minute // 5 * 5).strftime('%Y-%m-%dT%H:%M')
     if job == 'benchmark':
@@ -58,18 +59,41 @@ def current_slot(job):
 POLICY_SECONDS = 270
 
 
-def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
-    retry_until = None
+def failure_line(error):
+    return '【定时任务失败】' + ' '.join(str(error).split())[:160] + '\n'
+
+
+def report_failure(error, written):
+    if written[0]:
+        if written[0] != ord('\n'):
+            sys.stdout.write('\n')
+        sys.stdout.write(failure_line(error))
+        return 0
+    sys.stderr.write(str(error) + '\n')
+    return 1
+
+
+def deliver(job, slot, *, stdout, render=None, deadline=float('inf'), written=None):
+    if written is None:
+        written = bytearray(1)
+
+    def write(text, *, body=True):
+        if not isinstance(text, str):
+            raise ToolsError('定时运行正文无效')
+        if text:
+            stdout.write(text)
+            stdout.flush()
+            if body or written[0]:
+                written[0] = ord('\n') if text.endswith('\n') else ord(' ')
 
     def call(name, arguments):
-        nonlocal retry_until
+        retry_until = None
         while True:
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 raise ToolsError('本轮执行时限已到，请按原时段查回')
             try:
-                reply = tool(name, arguments)
-                retry_until = None
-                return reply
+                return tool(name, arguments, timeout=min(40, remaining))
             except ToolsError as exc:
                 # schedule_run and schedule_ack are idempotent, so a lost reply is looked up again.
                 if exc.code != 'service_unavailable' and not exc.transient:
@@ -82,6 +106,7 @@ def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
                 time.sleep(min(20, retry_until - now))
 
     args = dict(job=job, slot=slot)
+    backlog_error = None
     while True:
         row = call('schedule_run', args)
         run_id = row.get('run_id')
@@ -91,58 +116,69 @@ def deliver(job, slot, *, stdout, render=None, deadline=float('inf')):
                 or type(run_id) is not int or run_id < 1):
             raise ToolsError('定时运行回执与本次时段不符')
         status = row.get('status')
-        if status != 'running':
+        if status == 'running':
+            if render is None:
+                raise ToolsError('该时段正在处理，请稍后用原时段查回')
+            if deadline - time.monotonic() <= 20:
+                raise ToolsError(f'本轮轮询时限已到，请查回运行 #{run_id}')
+            time.sleep(20)
+            continue
+        if status == 'acked':
+            if backlog:
+                continue
             break
-        if render is None:
-            raise ToolsError('该时段正在处理，请稍后用原时段查回')
-        remaining = deadline - time.monotonic()
-        if remaining <= 20:
-            raise ToolsError(f'本轮轮询时限已到，请查回运行 #{run_id}')
-        time.sleep(20)
+        if status not in ('ready', 'expired', 'failed'):
+            raise ToolsError('定时运行回执状态无效')
 
-    if status == 'acked':
-        return
-    if status not in ('ready', 'expired', 'failed'):
-        raise ToolsError('定时运行回执状态无效')
-    if status == 'failed':
-        # A completed scan/weekly digest still reaches Hermes if the subsequent monitor fails.
-        text = render(row['result']) if render and row.get('result') else ''
-    else:
-        text = render(row['result']) if render and status == 'ready' else row.get('text')
-    if not isinstance(text, str):
-        raise ToolsError('定时运行正文无效')
-    if text:
-        stdout.write(text)
-        stdout.flush()
-    if status == 'failed':
-        raise ToolsError(f"{row['error_code']}：{row['error']}")
-    if status == 'expired':
-        return
-    if render is None and (row.get('result') or {}).get('stderr'):
-        sys.stderr.write(row['result']['stderr'])
-    try:
-        ack = call('schedule_ack', {'run_id': run_id})
-        if type(ack.get('run_id')) is not int or ack['run_id'] != run_id or ack.get('status') != 'acked':
-            raise ToolsError('确认回执与本次运行不符')
-    except ToolsError as exc:
-        raise ToolsError(f'运行 #{run_id} 的正文已输出，送达确认失败。{exc}') from None
-    if row['slot'] != slot:
-        deliver(job, slot, stdout=stdout, render=render, deadline=deadline)
+        # A failed monitor can leave a completed disclosure scan or weekly digest.
+        if render and (status == 'ready' or row.get('result')):
+            write(render(row['result']))
+        if status == 'failed':
+            error = f"{row['error_code']}：{row['error']}"
+            if not backlog:
+                raise ToolsError(error)
+            backlog_error = error
+            write(failure_line(error), body=False)
+        elif status == 'expired':
+            if backlog and row.get('error_code'):
+                backlog_error = row['text']
+            write(row.get('text'), body=False)
+        else:
+            if render is None:
+                write(row.get('text'))
+                if (row.get('result') or {}).get('stderr'):
+                    sys.stderr.write(row['result']['stderr'])
+            try:
+                ack = call('schedule_ack', {'run_id': run_id})
+                if type(ack.get('run_id')) is not int or ack['run_id'] != run_id or ack.get('status') != 'acked':
+                    raise ToolsError('确认回执与本次运行不符')
+            except ToolsError as exc:
+                raise ToolsError(f'运行 #{run_id} 送达确认失败。{exc}') from None
+        if not backlog:
+            break
+    if backlog_error and not written[0]:
+        raise ToolsError(backlog_error.rstrip())
 
 
 def policy_main(job):
     if len(sys.argv) != 1:
         sys.stderr.write(f'usage: {Path(sys.argv[0]).name}\n')
         return 2
+    written = bytearray(1)
     try:
         with task_lock(lock_path(job)) as acquired:
             if acquired:
-                # Bound the whole run inside the 5-minute stop-alert slot, so a release pause
-                # cannot hold the task lock into the next slot.
-                deliver(job, current_slot(job), stdout=sys.stdout, deadline=time.monotonic() + POLICY_SECONDS)
+                started = time.monotonic()
+                budget = POLICY_SECONDS
+                now = datetime.now(ZoneInfo('Asia/Shanghai'))
+                slot = current_slot(job, now)
+                if job == 'stop_alert':
+                    end = datetime.fromisoformat(slot).replace(tzinfo=now.tzinfo) + timedelta(minutes=5)
+                    # Leave one second to release the lock before the next trigger.
+                    budget = min(budget, (end - now).total_seconds() - 1)
+                deliver(job, slot, stdout=sys.stdout, deadline=started + budget, written=written)
         return 0
     except ToolsError as exc:
-        sys.stderr.write(f'{exc}\n')
+        return report_failure(exc, written)
     except OSError:
-        sys.stderr.write('定时任务的锁或输出流不可用，请核对执行记录。\n')
-    return 1
+        return report_failure('定时任务的锁或输出流不可用，请核对执行记录。', written)

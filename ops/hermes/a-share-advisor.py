@@ -7,6 +7,7 @@ weekly: render the weekly digest and portfolio review prompts.
 
 The ashare CLI uses the private Hermes assistant configuration. Hermes delivers stdout.
 """
+import mmap
 import os
 import sys
 from collections import Counter
@@ -16,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from advisor_budget import BudgetError, run_bounded
-from ashare_schedule import current_slot, deliver, lock_path, task_lock
+from ashare_schedule import current_slot, deliver, lock_path, report_failure, task_lock
 from ashare_tools import ToolsError, client_identity
 
 REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息待核实", "review_failed": "自动复核未完成",
@@ -251,29 +252,30 @@ def main() -> int:
         text = render_weekly(result['weekly'], result['opportunity_costs']) if mode == 'weekly' else scan_text(result)
         return text + '\n' if text else ''
 
-    try:
-        with task_lock(lock_path(job)) as acquired:
-            if not acquired:
-                return 0
-            # The supervisor silences diagnostic streams in its child. Give delivery a
-            # dedicated stdout descriptor so it can flush the report before acknowledgement.
-            with os.fdopen(os.dup(sys.stdout.fileno()), 'w', encoding=sys.stdout.encoding) as delivery_stream:
-                def task(deadline):
-                    try:
-                        deliver(job, slot, render=render, stdout=delivery_stream, deadline=deadline)
-                    except ToolsError as exc:
-                        return str(exc)
-                    except (KeyError, TypeError, ValueError, AttributeError):
-                        return '顾问运行回执无效，请按原时段查回。'
-                    return ''
-                error = run_bounded(task, seconds=RUN_SECONDS)
-    except (BudgetError, ToolsError) as exc:
-        error = str(exc)
-    except OSError:
-        error = '顾问任务的锁或输出流不可用，请核对执行记录。'
-    if error:
-        sys.stderr.write(error + '\n')
-        return 1
+    # The parent must know about flushed body text even if the child is killed at the deadline.
+    with mmap.mmap(-1, 1) as written:
+        try:
+            with task_lock(lock_path(job)) as acquired:
+                if not acquired:
+                    return 0
+                # The supervisor silences diagnostic streams in its child. Give delivery a
+                # dedicated stdout descriptor so it can flush the report before acknowledgement.
+                with os.fdopen(os.dup(sys.stdout.fileno()), 'w', encoding=sys.stdout.encoding) as delivery_stream:
+                    def task(deadline):
+                        try:
+                            deliver(job, slot, render=render, stdout=delivery_stream, deadline=deadline, written=written)
+                        except ToolsError as exc:
+                            return str(exc)
+                        except (KeyError, TypeError, ValueError, AttributeError):
+                            return '顾问运行回执无效，请按原时段查回。'
+                        return ''
+                    error = run_bounded(task, seconds=RUN_SECONDS)
+        except (BudgetError, ToolsError) as exc:
+            error = str(exc)
+        except OSError:
+            error = '顾问任务的锁或输出流不可用，请核对执行记录。'
+        if error:
+            return report_failure(error, written)
     return 0
 
 

@@ -111,7 +111,8 @@ def apply(target: Path) -> None:
 
 def copy_scripts(target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
-    for source in scripts():
+    modules = [SOURCE / name for name in ("ashare_tools.py", "ashare_schedule.py", "advisor_budget.py")]
+    for source in modules + [path for path in scripts() if path not in modules]:
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(dir=target, prefix=f".{source.name}.", delete=False) as stream:

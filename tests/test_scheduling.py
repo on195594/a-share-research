@@ -12,7 +12,7 @@ import pytest
 
 from a_share_research import api_keys, db, scans
 from a_share_research.account import mirror
-from a_share_research.policy import monitor, registry, stop_alert
+from a_share_research.policy import benchmark, monitor, registry, stop_alert
 from a_share_research.policy.v0 import commands_monitor
 from a_share_research.tools.registry import Context, ToolError, invoke
 from a_share_research.tools.server import create_app
@@ -254,7 +254,7 @@ def test_ack_ownership_and_running_conflict(context):
     assert ack(ctx, ready)['status'] == 'acked'
 
 
-def test_submitted_scan_is_delivered_late_before_the_next_slot(context, policy_setup):
+def test_today_replays_ready_backlog_until_ack(context, policy_setup):
     ctx, clock = context
     bundle = policy_setup[-2]
     bundle.update(now='2026-10-23T16:37:00+08:00', research_result=dict(status='ok', cards=[], missing=[]))
@@ -266,7 +266,8 @@ def test_submitted_scan_is_delivered_late_before_the_next_slot(context, policy_s
     scans.execute(ctx.connection, old['scan_id'], source=CapturedSources(), at=clock[0])
     late = run(ctx, 'advisor_scan', '2026-10-23')
     assert (late['slot'], late['status'], late['result']['scan']['id']) == (DAY, 'ready', old['scan_id'])
-    assert run(ctx, 'advisor_scan', DAY) == late
+    assert run(ctx, 'advisor_scan', '2026-10-23') == late
+    assert ctx.connection.execute('SELECT count(*) FROM scheduled_runs').fetchone()[0] == 1
     ack(ctx, late)
     today = run(ctx, 'advisor_scan', '2026-10-23')
     assert today['slot'] == '2026-10-23' and today['status'] == 'running' and today['scan_id'] != old['scan_id']
@@ -296,10 +297,9 @@ def test_scan_polls_one_request_and_only_inherits_acked_current_keys(context, po
 
     first = scan('2026-11-04', [card])
     assert first['state'] == {'seen': [key]} and len(first['result']['opportunities']) == 1
-    repeated = scan('2026-11-05', [card])
-    assert run(ctx, 'advisor_scan', first['slot']) == first
-    assert repeated['result']['opportunities'] == first['result']['opportunities']
-    ack(ctx, repeated)
+    clock[0] = '2026-11-05T16:37:00+08:00'
+    assert run(ctx, 'advisor_scan', '2026-11-05') == first
+    ack(ctx, first)
     muted = scan('2026-11-06', [card])
     assert muted['result']['opportunities'] == [] and muted['state'] == first['state']
     ack(ctx, muted)
@@ -388,20 +388,9 @@ def test_stop_text_replaces_legacy_policy_name(context, stop_capture, monkeypatc
     assert '按 a-stock-monitor 复核止损与 L3' in receipt(ctx, ready)['result']['stdout']
 
 
-def test_failed_monitor_keeps_completed_weekly_digest(context, monkeypatch):
-    ctx, _ = context
-
-    def unavailable(*args):
-        raise registry.PolicyError('采集超时', 504)
-
-    monkeypatch.setattr(monitor, 'capture', unavailable)
-    row = run(ctx, 'advisor_weekly', '2026-W43')
-    assert row['status'] == 'failed' and row['error_code'] == 'timeout'
-    assert row['result']['weekly']['as_of'] == db.now() and row['result']['opportunity_costs'] == []
-
-
-def test_recovery_between_scan_submission_and_link(context, monkeypatch):
-    ctx, _ = context
+@pytest.mark.parametrize(('day', 'lookup'), [(DAY, DAY), ('2026-10-23', DAY), ('2026-10-23', '2026-10-23')])
+def test_recover_scan_submission_before_expiry(context, monkeypatch, day, lookup):
+    ctx, clock = context
     submit = scans.submit_request
 
     def interrupted(*args):
@@ -417,14 +406,17 @@ def test_recovery_between_scan_submission_and_link(context, monkeypatch):
     existing, request_id = ctx.connection.execute('SELECT scan_id,request_id FROM scan_requests').fetchone()
     assert DAY in request_id
     monkeypatch.setattr(scans, 'submit_request', submit)
-    ready = run(ctx, 'advisor_scan', DAY)
-    assert ready['status'] == 'ready' and ready['scan_id'] == existing
+    clock[0] = day + 'T16:37:00+08:00'
+    ready = run(ctx, 'advisor_scan', lookup)
+    assert (ready['slot'], ready['status'], ready['scan_id']) == (DAY, 'ready', existing)
     assert ctx.connection.execute('SELECT count(*) FROM scans').fetchone()[0] == 1
+    assert ctx.connection.execute('SELECT count(*) FROM scan_requests').fetchone()[0] == 1
 
 
-def test_late_ack_of_earlier_slot_cannot_rewind_stop_levels(context, monkeypatch):
+@pytest.mark.parametrize('older_higher', [True, False])
+def test_late_acks_keep_highest_stop_level(context, monkeypatch, older_higher):
     ctx, _ = context
-    prices = iter([24.0, 22.0, 22.0])
+    prices = iter([22.0, 24.0, 22.0] if older_higher else [24.0, 22.0, 22.0])
 
     def capture(database, module, payload):
         return stop_bundle(price=next(prices), state=payload['previous_state'])
@@ -432,11 +424,12 @@ def test_late_ack_of_earlier_slot_cannot_rewind_stop_levels(context, monkeypatch
     monkeypatch.setattr(monitor, '_capture', capture)
     older = run(ctx, 'stop_alert', DAY + 'T10:30')
     newer = run(ctx, 'stop_alert', DAY + 'T10:35')
-    assert older['state']['levels'] == {'000963': 'stop1'} and newer['state']['levels'] == {'000963': 'stop2'}
+    high, low = (older, newer) if older_higher else (newer, older)
+    assert high['state']['levels'] == {'000963': 'stop2'} and low['state']['levels'] == {'000963': 'stop1'}
     ack(ctx, newer)
     ack(ctx, older)
     latest = run(ctx, 'stop_alert', DAY + 'T10:40')
-    assert receipt(ctx, latest)['input']['previous_state'] == newer['state'] and latest['text'] == ''
+    assert receipt(ctx, latest)['input']['previous_state'] == high['state'] and latest['text'] == ''
 
 
 def test_stop_stales_while_capture_in_progress(context, stop_capture, monkeypatch):
@@ -467,3 +460,115 @@ def test_interrupted_before_capture_uses_latest_ack(context, stop_capture, monke
     resumed = run(ctx, 'stop_alert', DAY + 'T10:35')
     assert resumed['status'] == 'ready' and resumed['text'] == ''
     assert stop_capture == [{}, earlier['state']]
+
+
+def test_late_disclosures_keep_seen_until_todays_monitor(context, policy_setup, monkeypatch):
+    ctx, clock = context
+    card = json.loads((CARDS / 'research-card-stance.json').read_text())['card']
+    bundle, captured = policy_setup[-2:]
+    bundle.update(now='2026-11-04T16:37:00+08:00', research_result=dict(status='ok', cards=[card], missing=[]))
+    clock[0] = bundle['now']
+    first = run(ctx, 'advisor_scan', '2026-11-04')
+    scans.execute(ctx.connection, first['scan_id'], source=CapturedSources(), at=clock[0])
+    seen = ack(ctx, run(ctx, 'advisor_scan', first['slot']))['state']
+    assert seen['seen']
+    clock[0] = '2026-11-05T16:37:00+08:00'
+    old = run(ctx, 'advisor_scan', '2026-11-05')
+    clock[0] = '2026-11-06T16:37:00+08:00'
+    scans.execute(ctx.connection, old['scan_id'], source=CapturedSources(), at=clock[0])
+    with monkeypatch.context() as patch:
+        def unavailable(*args):
+            raise registry.PolicyError('采集超时', 504)
+        patch.setattr(monitor, 'capture', unavailable)
+        late = run(ctx, 'advisor_scan', '2026-11-06')
+    assert late['status'] == 'ready' and late['evaluation_id'] is None
+    assert late['result']['scan']['id'] == old['scan_id'] and late['result']['opportunities'] == []
+    assert ack(ctx, late)['state'] == seen
+    today = run(ctx, 'advisor_scan', '2026-11-06')
+    scans.execute(ctx.connection, today['scan_id'], source=CapturedSources(), at=clock[0])
+    ready = run(ctx, 'advisor_scan', today['slot'])
+    assert len(captured) == 2 and ready['state'] == seen and ready['result']['opportunities'] == []
+
+
+def test_unreadable_backlog_expires_once_and_releases_today(context, monkeypatch):
+    ctx, clock = context
+    old = run(ctx, 'advisor_scan', DAY)
+    scans.execute(ctx.connection, old['scan_id'], source=CapturedSources(), at=clock[0])
+    def unavailable(*args):
+        raise registry.PolicyError('扫描回执读取失败', 503)
+    monkeypatch.setattr(scans, 'view', unavailable)
+    assert run(ctx, 'advisor_scan', DAY)['status'] == 'failed'
+    clock[0] = '2026-10-23T16:37:00+08:00'
+    terminal = run(ctx, 'advisor_scan', '2026-10-23')
+    assert (terminal['slot'], terminal['status']) == (DAY, 'expired')
+    assert '扫描回执读取失败' in terminal['text'] and terminal['error_code'] == 'unavailable'
+    today = run(ctx, 'advisor_scan', '2026-10-23')
+    assert today['slot'] == '2026-10-23' and today['scan_id'] != old['scan_id']
+
+
+def test_weekly_retry_reuses_digest_after_week_ends(context, monkeypatch):
+    ctx, clock = context
+    clock[0] = '2026-10-25T18:07:00+08:00'
+    with monkeypatch.context() as patch:
+        def unavailable(*args):
+            raise registry.PolicyError('采集超时', 504)
+        patch.setattr(monitor, 'capture', unavailable)
+        failed = run(ctx, 'advisor_weekly', '2026-W43')
+    assert failed['status'] == 'failed' and failed['error_code'] == 'timeout'
+    assert failed['result']['weekly']['as_of'] == clock[0] and failed['result']['opportunity_costs'] == []
+    clock[0] = '2026-10-26T09:00:00+08:00'
+    ready = run(ctx, 'advisor_weekly', '2026-W43')
+    assert ready['status'] == 'ready' and ready['result']['weekly'] == failed['result']['weekly']
+
+
+def test_historical_week_without_digest_expires(context):
+    ctx, _ = context
+    row = run(ctx, 'advisor_weekly', '2026-W42')
+    assert row['status'] == 'expired' and row['result'] is None
+
+
+@pytest.mark.parametrize('interrupted_legacy_receipt', [False, True])
+def test_historical_benchmark_ends_in_requested_month(context, monkeypatch, interrupted_legacy_receipt):
+    ctx, clock = context
+    clock[0] = '2026-11-01T09:00:00+08:00'
+    def capture(database, module, payload, *, market_token):
+        return benchmark_bundle() | dict(risk_policy=payload['parameters'], now=clock[0], end=payload['end'])
+    monkeypatch.setattr(monitor, '_capture', capture)
+    if interrupted_legacy_receipt:
+        # v26 could commit a next-month evaluation before linking it to the run.
+        active = registry._current(ctx.connection)['id']
+        run_id = ctx.connection.execute("""INSERT INTO scheduled_runs
+            (principal_key_id,job,slot,status,created_at,activation_id) VALUES (?,'benchmark','2026-10','running',?,?)""",
+            (ctx.principal.key_id, clock[0], active)).lastrowid
+        benchmark.run(ctx.connection, ctx.principal, ctx.database, f'schedule:{run_id}:{active}:1', active, '2026-11-01')
+    row = run(ctx, 'benchmark', '2026-10')
+    assert row['status'] == 'ready' and receipt(ctx, row)['input']['end'] == '2026-10-31'
+
+
+@pytest.mark.parametrize('switch_again', [False, True])
+def test_activation_change_during_capture_rebinds_once(context, policy_setup, stop_capture, monkeypatch, switch_again):
+    ctx, _ = context
+    _, conn, principals, manifest, active, *_ = policy_setup
+    requests = []
+    evaluate = stop_alert.run
+    def record(conn, principal, database, request_id, *args):
+        requests.append(request_id)
+        return evaluate(conn, principal, database, request_id, *args)
+    capture = monitor._capture
+    def switch(*args):
+        nonlocal active
+        if len(requests) == 1 or switch_again:
+            active = registry.activate(conn, principals['owner'], manifest['identity'], expected_id=active['id'],
+                                       request_id=f'switch-{len(requests)}', reason='switch during capture')
+        return capture(*args)
+    monkeypatch.setattr(stop_alert, 'run', record)
+    monkeypatch.setattr(monitor, '_capture', switch)
+    row = run(ctx, 'stop_alert', DAY + 'T10:35')
+    assert len(stop_capture) == len(requests) == 2 and requests[0] != requests[1]
+    if switch_again:
+        assert row['status'] == 'failed' and row['error_code'] == 'policy_activation_changed'
+        assert not conn.execute('SELECT 1 FROM policy_evaluations').fetchone()
+    else:
+        assert row['status'] == 'ready' and row['activation_id'] == active['id']
+        assert receipt(ctx, row)['request_id'] == requests[1]
+        assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 1
