@@ -22,7 +22,7 @@ python3 ops/clients/prepare.py \
 | Codex | 将 `configs/codex.config.toml` 合入 `~/.codex/config.toml`，启用 `mcp_servers.ashare` | `ASHARE_CODEX_ASSISTANT_TOKEN` | `~/.agents/skills/a-share/` |
 | Hermes | 将 `configs/hermes.config.json` 的服务条目合入 `~/.hermes/config.yaml` 并启用 | `ASHARE_HERMES_ASSISTANT_TOKEN` | `~/.hermes/skills/a-share/` |
 | Pi | 将 `configs/pi.mcp.json` 合入 `~/.pi/agent/mcp.json` 并启用 | `ASHARE_PI_ASSISTANT_TOKEN` | `~/.agents/skills/a-share/` |
-| AGY | 将 `configs/agy/ashare/` 放在 `~/.gemini/config/plugins/ashare/`，在插件设置中填写“A 股研究 PAT”并启用，与全局同名条目择一使用 | 插件设置变量 `ASHARE_AGY_ASSISTANT_TOKEN` | `~/.gemini/config/skills/a-share/` |
+| AGY | 将 `configs/agy/ashare/` 放在 `~/.gemini/config/plugins/ashare/`，在插件设置中填写“A 股研究 PAT”并启用，与全局同名条目择一使用 | 插件设置变量 `ASHARE_AGY_ASSISTANT_TOKEN` | `~/.gemini/config/skills/a-share/`（CLI 同步 `~/.gemini/antigravity-cli/skills/a-share/`） |
 
 前四个宿主的模板从各自的进程环境取得令牌。AGY 插件从宿主设置取得变量。重载后在宿主内列举工具，再调用 `research_card` 核对权限与回执。共享的 Skill 目录只更新一次。
 
