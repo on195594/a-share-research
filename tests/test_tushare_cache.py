@@ -184,3 +184,37 @@ def test_gateway_calendar_preserves_retries_and_screen_error(pro, monkeypatch, f
             row["cal_date"] for row in MARKET["trade_cal"])
     assert replay.attempts == min(failures + 1, 3)
     assert waits == [1, 3][:failures]
+
+
+def test_cache_probe_oserror_falls_back_to_upstream(pro, monkeypatch):
+    params = {"ts_code": "000651.SZ", "end_date": FIN["as_of"]}
+    expected = screening._query(pro, "income", **params)
+    orig_exists = Path.exists
+
+    def fail_exists(self):
+        if self.name == "tushare_cache.db":
+            raise OSError("EIO")
+        return orig_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fail_exists)
+    actual = screening._query(pro, "income", **params)
+    pd.testing.assert_frame_equal(actual, expected, check_exact=True)
+    assert len(pro.calls) == 2
+
+
+def test_readonly_legacy_cache_without_budget_table_serves_hit(pro):
+    params = {"ts_code": "000651.SZ", "end_date": FIN["as_of"]}
+    expected = screening._query(pro, "income", **params)
+    cache_path = db.DATA / "tushare_cache.db"
+    with closing(sqlite3.connect(cache_path)) as conn:
+        conn.execute("PRAGMA journal_mode=DELETE")
+        conn.execute("DROP TABLE IF EXISTS report_rc_budget")
+        conn.commit()
+    cache_path.chmod(0o444)
+    try:
+        fresh = CapturedQueries()
+        cached = screening._query(fresh, "income", **params)
+        pd.testing.assert_frame_equal(cached, expected, check_exact=True)
+        assert fresh.calls == []
+    finally:
+        cache_path.chmod(0o644)

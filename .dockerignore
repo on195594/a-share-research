@@ -8,3 +8,13 @@ tests
 **/*.pyc
 .playwright-mcp
 *.log
+.ruff_cache
+.pi
+.claude
+.codex
+.agents
+.aws
+.impeccable
+docs
+ops
+scripts

@@ -135,3 +135,10 @@ def test_company_history_summaries_preserve_metadata_and_saved_series(conn):
         for key in summary.keys():
             if key != 'operating_series':
                 assert summary[key] == original[key]
+
+
+def test_research_state_accepts_string_numeric_run_id(conn):
+    report = reading.report(conn, 39)
+    done, rows = reading.research_state(conn, [{"code": report["code"], "run_id": str(report["run_id"])}])
+    assert done is True
+    assert rows[0]["report_id"] == 39 and rows[0]["research_status"] == "done"

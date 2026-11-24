@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 
 from a_share_research import api_keys, db
 from a_share_research.tools.http_json import BodyTooLarge, parse_object, read_body
-from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, check_tool_scope, discover, invoke, validation_message
+from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, check_scope, check_tool_scope, discover, invoke, validation_message
 from a_share_research.tools import control
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,10 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
     @contextmanager
     def connection(mode):
         with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=' + mode, uri=True,
-                                     timeout=5, isolation_level=None)) as conn:
+                                     timeout=15, isolation_level=None)) as conn:
+            conn.execute('PRAGMA busy_timeout=15000')
             conn.execute('PRAGMA foreign_keys=ON')
+            conn.execute('PRAGMA temp_store=MEMORY')
             conn.row_factory = sqlite3.Row
             yield conn
 
@@ -55,11 +57,19 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
                 bearer = request.headers.get('authorization', '')
                 if principal is None and not bearer.startswith('Bearer '):
                     raise ToolError('unauthorized', '需要 bearer 凭据', 401)
+                if principal is not None and tool is not None and tool.access == 'write':
+                    check_scope(principal, account_shadow_enabled, tool)
+                    with connection('rw') as conn:
+                        ctx = Context(conn, database, principal, account_shadow_enabled, nonblocking_schedule_lock=True)
+                        authorize_tool(ctx, tool)
+                        resources.enter_context(gate.slot())
+                        yield ctx
+                        return
                 with connection('ro') as conn:
                     principal = principal or api_keys.authenticate(conn, bearer[7:])
                     if principal is None:
                         raise ToolError('unauthorized', '凭据无效或已撤销', 401)
-                    ctx = Context(conn, database, principal, account_shadow_enabled)
+                    ctx = Context(conn, database, principal, account_shadow_enabled, nonblocking_schedule_lock=True)
                     if tool and (tool.access == 'write' or tool.collects):
                         if tool.access == 'write':
                             authorize_tool(ctx, tool)

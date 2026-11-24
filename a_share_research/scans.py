@@ -323,7 +323,7 @@ def scan_scope(conn, *, account_sources: bool = True) -> list[dict]:
         return _with_closes(conn, items)
 
 
-def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None) -> list[dict]:
+def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None, authorize=None) -> list[dict]:
     if not isinstance(codes, list) or any(not isinstance(c, str) or not stock_codes.KEY_RE.fullmatch(c) for c in codes):
         raise service.RequestError('订阅代码必须为六位 A 股代码')
     if catalog is None:
@@ -335,6 +335,8 @@ def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None
     if unknown:
         raise service.RequestError('未知 A 股代码：' + '、'.join(unknown))
     with db.transaction(conn):
+        if authorize is not None:
+            authorize(conn)
         for row in conn.execute("SELECT code FROM subscriptions WHERE origin='external'").fetchall():
             if row['code'] not in codes:
                 conn.execute('DELETE FROM subscriptions WHERE company_key=?', (stock_codes.normalize_key(row['code']),))
@@ -447,13 +449,19 @@ class ScanHistory:
         self.checks = {}
         closes = {}
         paths = ','.join(f"'$.{key}'" for key in fields)
+        legacy_sql = (
+            "CASE WHEN json_array_length(summary, '$.check_failures') > 0 THEN "
+            "(SELECT json_group_object(f.value ->> '$.code', coalesce("
+            "json_extract(summary, '$.before.' || (f.value ->> '$.code') || '.report_id'), "
+            "json_extract(summary, '$.cards.' || (f.value ->> '$.code') || '.report_id'))) "
+            "FROM json_each(summary,'$.check_failures') f WHERE (f.value ->> '$.report_id') IS NULL) "
+            "ELSE '{}' END"
+            if 'check_failures' in fields else "'{}'"
+        )
         # Only old check failures need the report identity in the before/cards snapshots.
         for row in conn.execute(f"""
             SELECT id,status,requested_at,started_at,finished_at,error,json_extract(summary,{paths}) AS observations,
-                   (SELECT json_group_object(f.value ->> '$.code', coalesce(
-                        json_extract(summary, '$.before.' || (f.value ->> '$.code') || '.report_id'),
-                        json_extract(summary, '$.cards.' || (f.value ->> '$.code') || '.report_id')))
-                    FROM json_each(summary,'$.check_failures') f WHERE (f.value ->> '$.report_id') IS NULL) AS legacy_ids
+                   {legacy_sql} AS legacy_ids
             FROM scans ORDER BY id
         """):
             values = json.loads(row['observations']) if row['observations'] else []
@@ -473,11 +481,12 @@ class ScanHistory:
                     self.announcements[failure['code']] = {'kind': 'scan_failure', 'scan_id': row['id'], **failure}
             for item in summary.get('checks_succeeded', []):
                 self.checks.pop((item['code'], item['report_id']), None)
-            legacy_ids = json.loads(row['legacy_ids'])
-            for failure in reversed(summary.get('check_failures', [])):
-                code = failure['code']
-                report = failure.get('report_id') or legacy_ids.get(code)
-                self.checks[code, report] = {'kind': 'check_failure', **failure, 'report_id': report, 'scan_id': row['id']}
+            if check_failures := summary.get('check_failures'):
+                legacy_ids = json.loads(row['legacy_ids'])
+                for failure in reversed(check_failures):
+                    code = failure['code']
+                    report = failure.get('report_id') or legacy_ids.get(code)
+                    self.checks[code, report] = {'kind': 'check_failure', **failure, 'report_id': report, 'scan_id': row['id']}
         self.closes = _closing_prices(conn, closes) if 'closes' in fields else {}
 
     def close(self, code):

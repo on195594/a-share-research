@@ -372,3 +372,19 @@ def test_collecting_read_requires_gate_slot(remote, monkeypatch):
         busy = call(client, tokens['research'], 'research_cards')
         assert busy['isError'] and json.loads(busy['content'][0]['text'])['error']['code'] == 'busy'
     assert not call(client, tokens['research'], 'research_cards').get('isError')
+
+
+def test_preauthenticated_mcp_read_tool_uses_physical_read_only_connection(remote, database, monkeypatch):
+    client, tokens = remote
+    path, _ = database
+    tool = TOOLS['research_cards']
+
+    def attempt_write(ctx, args):
+        ctx.connection.execute("INSERT INTO runs(code, created_at) VALUES ('600519', '2026-11-24T00:00:00+08:00')")
+        return {'data': {}}
+
+    monkeypatch.setitem(TOOLS, tool.name, replace(tool, handler=attempt_write))
+    result = call(client, tokens['research'], 'research_cards')
+    assert result['isError'] is True
+    with closing(db.connect(path)) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 0

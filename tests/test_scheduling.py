@@ -785,3 +785,43 @@ def test_collector_keeps_all_history_and_skips_stocks_without_valuation(tmp_path
         assert result['status'] == 'unavailable'
         assert result['failures'][0]['kind'] == ('index' if index_mode == 'failed' else 'calculation')
         assert list(conn.iterdump()) == before
+
+
+def test_http_concurrent_duplicate_returns_busy_without_starving_gate(policy_setup, monkeypatch):
+    path, conn, *_ = policy_setup
+    token = api_keys.create(conn, 'concurrent-http-assistant', role='assistant')
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
+    monkeypatch.setattr(db, 'now', lambda: DAY + 'T10:40:00+08:00')
+    entered, release = Event(), Event()
+
+    def slow_capture(database, module, payload):
+        entered.set()
+        assert release.wait(5)
+        return stop_bundle(state=payload['previous_state']) | {'risk_policy': payload['parameters']}
+
+    monkeypatch.setattr(monitor, '_capture', slow_capture)
+    app = create_app(path, account_shadow_enabled=True)
+    with TestClient(app, base_url=ORIGIN) as client, ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(rpc, client, token, 'tools/call',
+                            {'name': 'schedule_run', 'arguments': {'job': 'stop_alert', 'slot': DAY + 'T10:35'}})
+        assert entered.wait(5)
+        try:
+            duplicate = rpc(client, token, 'tools/call',
+                            {'name': 'schedule_run', 'arguments': {'job': 'stop_alert', 'slot': DAY + 'T10:35'}}).json()['result']
+            assert duplicate['isError'] is True
+            detail = json.loads(duplicate['content'][0]['text'])['error']
+            assert detail['code'] == 'busy'
+
+            from scripts import ashare as cli
+            cli_err = cli.tool_error(detail['code'], 'schedule_run')
+            assert cli_err.exit_code == 21 and '名额已满' not in str(cli_err)
+
+            other = rpc(client, token, 'tools/call',
+                        {'name': 'research_scan_request', 'arguments': {'request_id': 'concurrent-scan-1'}}).json()['result']
+            assert not other.get('isError')
+            assert other['structuredContent']['data']['scan_id'] > 0
+        finally:
+            release.set()
+        first_result = first.result(timeout=5).json()['result']
+        assert not first_result.get('isError')
+        assert first_result['structuredContent']['data']['status'] == 'ready'

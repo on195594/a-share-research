@@ -1,4 +1,5 @@
 """Compact read models shared by authenticated owner and assistant entry points."""
+from contextlib import nullcontext
 import json
 import sqlite3
 
@@ -172,9 +173,9 @@ def _company(conn, code, held, position, saved, history):
                 policy=policy, gaps=gaps)
 
 
-def _overview(conn, code=None):
+def _overview(conn, code=None, *, history=None):
     account_gaps = []
-    with db.transaction(conn, immediate=False):
+    with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
         # An unverified account is unknown, including when public company research exists.
         try:
             current = account_view.verified_current(conn, mirror.target_directory(conn), verify_evidence=False)
@@ -220,7 +221,8 @@ def _overview(conn, code=None):
                 nav_interval = _nav_summary(row)
         if nav_interval is None:
             account_gaps.append('暂无可查询的 NAV 区间凭证')
-        history = scans.ScanHistory(conn) if code is not None or (current and current['codes']) else None
+        if history is None and (code is not None or (current and current['codes'])):
+            history = scans.ScanHistory(conn)
         if code is not None:
             held = code in current['codes'] if current else None
             result = _company(conn, code, held, positions.get(code), saved, history)
@@ -230,12 +232,12 @@ def _overview(conn, code=None):
                               for key in current['codes']] if current else None)
 
 
-def company_overview(conn: sqlite3.Connection, code: str) -> dict:
+def company_overview(conn: sqlite3.Connection, code: str, *, history=None) -> dict:
     try:
         code = stock_codes.normalize_key(code)
     except ValueError as exc:
         raise service.RequestError(str(exc)) from exc
-    return _overview(conn, code)
+    return _overview(conn, code, history=history)
 
 
 def portfolio_overview(conn: sqlite3.Connection) -> dict:

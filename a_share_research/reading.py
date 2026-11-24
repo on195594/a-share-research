@@ -494,10 +494,33 @@ def report_bodies(conn, ids: list[int]) -> dict:
         f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
 
 
+CARD_BODY_FIELDS = (
+    'summary', 'risks', 'checkpoints', 'table', 'market_date', 'valuation_calc',
+    'open_questions', 'stance', 'stance_calc', 'prior', 'prior_status',
+)
+_CARD_BODY_PATHS = ', '.join(f"'$.{field}'" for field in CARD_BODY_FIELDS)
+
+
+def _card_bodies(conn, ids: list[int]) -> dict[int, dict]:
+    if not ids:
+        return {}
+    marks = ','.join('?' for _ in ids)
+    result = {}
+    for row in conn.execute(
+        f"SELECT id, json_extract(body, {_CARD_BODY_PATHS}) AS fields FROM reports WHERE id IN ({marks})",
+        ids,
+    ):
+        values = json.loads(row['fields']) if row['fields'] is not None else []
+        result[row['id']] = {k: v for k, v in zip(CARD_BODY_FIELDS, values) if v is not None}
+    return result
+
+
 def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
     """Compact home-page cards; a failed report also links the company's last passed one."""
+    if not reports:
+        return []
     from a_share_research import scans
-    bodies = report_bodies(conn, [report['id'] for report in reports])
+    bodies = _card_bodies(conn, [report['id'] for report in reports])
     checks = scans.ScanHistory(conn, fields=('check_failures', 'checks_succeeded')).checks
     return [card(r, bodies[r['id']], None if r['passed'] else
                  (passed_before.get(r['code']) or passed_before.get(stock_codes.normalize_key(r['code']))))
@@ -713,15 +736,32 @@ def since_prior(old: list[dict], new: list[dict]) -> dict:
 
 def research_state(conn, q20: list[dict]) -> tuple[bool, list[dict]]:
     """Current linked-run state; candidates not linked yet remain pending."""
+    def _run_id(value):
+        if type(value) is int:
+            return value
+        if isinstance(value, str) and value.isascii() and value.isdigit():
+            return int(value)
+        return value
+
+    run_ids = [_run_id(row["run_id"]) for row in q20 if row.get("run_id")]
+    runs = {}
+    if run_ids:
+        marks = ",".join("?" for _ in run_ids)
+        runs = {
+            r["id"]: r for r in conn.execute(
+                "SELECT u.id, u.status, u.error, r.id AS report_id, r.passed, r.verdict"
+                f" FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id IN ({marks})",
+                run_ids,
+            )
+        }
     done = True
     for row in q20:
-        if not row.get("run_id"):
+        run_id = _run_id(row.get("run_id"))
+        if not run_id:
             row["research_status"] = "pending"
             done = False
             continue
-        run = conn.execute("SELECT u.status, u.error, r.id AS report_id, r.passed, r.verdict, r.body"
-                           " FROM runs u LEFT JOIN reports r ON r.run_id = u.id WHERE u.id = ?",
-                           (row["run_id"],)).fetchone()
+        run = runs[run_id]
         row["research_status"] = run["status"]
         row["report_id"] = run["report_id"]
         row["verdict"] = run["verdict"] if run["passed"] else None

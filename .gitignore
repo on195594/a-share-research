@@ -6,6 +6,10 @@
 .pytest_cache/
 .ruff_cache/
 .pi/
+.claude/
+.codex/
+.agents/
+.aws/
 __pycache__/
 *.pyc
 /data/

@@ -478,3 +478,4 @@ def test_wal_startup_retries_a_concurrent_lock_upgrade(tmp_path, monkeypatch):
         with closing(db.connect(path)) as conn:
             assert not other.in_transaction
             assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+            assert conn.execute('PRAGMA synchronous').fetchone()[0] == 2

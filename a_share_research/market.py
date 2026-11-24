@@ -65,23 +65,25 @@ def cached_response(api: str, params: dict) -> pd.DataFrame | None:
         return None
     path = db.DATA / "tushare_cache.db"
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
+        if not path.exists():
+            return None
+        uri = path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=30, isolation_level=None)) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA temp_store=MEMORY")
             row = conn.execute("SELECT data,created_at FROM tushare_cache WHERE key=?", (key,)).fetchone()
-            if row:
-                saved = json.loads(row[0])
-                if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
-                    raise ValueError("TuShare cache is not a split DataFrame")
-                frame = pd.DataFrame(**saved)
-                if api == "report_rc" and frame.empty:
-                    # A recent empty response can be publication lag, not no coverage.
-                    age = datetime.now(SHANGHAI).date() - date.fromisoformat(str(params["end_date"]))
-                    ttl = timedelta(days=1 if age.days <= 7 else 7)
-                    if datetime.now(SHANGHAI) - datetime.fromisoformat(row[1]) >= ttl:
-                        return None
-                return frame
+        if row:
+            saved = json.loads(row[0])
+            if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
+                raise ValueError("TuShare cache is not a split DataFrame")
+            frame = pd.DataFrame(**saved)
+            if api == "report_rc" and frame.empty:
+                # A recent empty response can be publication lag, not no coverage.
+                age = datetime.now(SHANGHAI).date() - date.fromisoformat(str(params["end_date"]))
+                ttl = timedelta(days=1 if age.days <= 7 else 7)
+                if datetime.now(SHANGHAI) - datetime.fromisoformat(row[1]) >= ttl:
+                    return None
+            return frame
     except (OSError, sqlite3.Error, ValueError, TypeError):
         log.warning("TuShare %s cache read failed; fetching upstream", api, exc_info=True)
     return None
@@ -99,6 +101,7 @@ def report_rc_connect():
     path = db.DATA / "tushare_cache.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=30, isolation_level=None)
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
     conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
     return conn
@@ -207,7 +210,12 @@ def query(pro, api: str, **params) -> pd.DataFrame:
         try:
             # Python's JSON float encoding preserves precision and leaves date/code strings intact.
             data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
+            path.parent.mkdir(parents=True, exist_ok=True)
             with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
+                conn.execute("PRAGMA busy_timeout=30000")
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
                 conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
         except Exception:
             log.warning("TuShare %s cache write failed", api, exc_info=True)

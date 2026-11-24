@@ -22,13 +22,22 @@ def render_prompt(template: str, **facts) -> str:
     return _ENV.get_template(template).render(**facts)
 
 
+def _strip_jinja_comments(text: str, name: str) -> str:
+    return "".join(
+        value for _, token, value in _ENV.lexer.tokeniter(text, name=name)
+        if token not in ("comment_begin", "comment", "comment_end")
+    )
+
+
 def prompts_sha256() -> str:
-    """Hash the sorted relative paths and raw contents of the prompt templates."""
+    """Hash the sorted relative paths and model-visible contents (excluding Jinja comments) of the prompt templates."""
     digest = hashlib.sha256()
     for path in sorted(_PROMPTS.rglob("*")):
         if path.is_file():
-            digest.update(path.relative_to(_PROMPTS).as_posix().encode() + b"\0")
-            digest.update(path.read_bytes() + b"\0")
+            relative = path.relative_to(_PROMPTS).as_posix()
+            digest.update(relative.encode() + b"\0")
+            stripped = _strip_jinja_comments(path.read_text(encoding="utf-8"), relative)
+            digest.update(stripped.encode("utf-8") + b"\0")
     return digest.hexdigest()
 
 

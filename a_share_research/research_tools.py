@@ -596,6 +596,7 @@ class EvidenceSession:
         self.traces = material.extra.setdefault("tools", [])
         self.toolkit = ResearchTools(material, conn)
         self.failures = {}
+        self._evidence_key: str | None = None
 
     def evidence_key(self):
         # Keep calculation rows/cache untouched; ignore only purpose names and generated IDs
@@ -627,15 +628,18 @@ class EvidenceSession:
     def call(self, name: str, args: dict, stage: str) -> tuple[dict, bool]:
         started = time.monotonic()
         try:
-            before = self.evidence_key()
+            before = self._evidence_key if self._evidence_key is not None else self.evidence_key()
             # A same-value C.n is not progress, but its new ID may unlock a failed reference.
             key = (json.dumps([name, args], sort_keys=True, ensure_ascii=False), before,
                    tuple(row["id"] for row in self.material.table))
             if key in self.failures:
                 return {"result": self.failures[key], "evidence_delta": 0, "charged": False}, True
             result, failed = self._execute(name, args)
-            delta = int(self.evidence_key() != before)
+            after = self.evidence_key()
+            self._evidence_key = after
+            delta = int(after != before)
         except evidence.EvidenceError as exc:
+            self._evidence_key = None
             self._record(name, args, stage, {"error": str(exc)}, True, started)
             raise
         if failed:

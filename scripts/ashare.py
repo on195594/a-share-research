@@ -200,7 +200,7 @@ def tool_error(code, name):
     if code == 'paused':
         return ClientError('发布暂停，请稍后用原请求重试', 21)
     if code == 'busy':
-        return ClientError('发布暂停或暂未受理：名额已满，请稍后用原请求重试', 21)
+        return ClientError('发布暂停或暂未受理：服务繁忙或同类任务执行中，请稍后用原请求重试', 21)
     if code in ('unauthorized', 'forbidden'):
         return ClientError('凭据失效或权限不足，请核对授权')
     if code in ('conflict', 'not_found') and name.startswith('policy_'):

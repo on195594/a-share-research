@@ -679,6 +679,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     try:
         _enable_wal(conn, timeout)
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA temp_store=MEMORY")
         conn.executescript(SCHEMA)
         migrated = False
         for version, migrate in enumerate(MIGRATIONS, start=1):

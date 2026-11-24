@@ -221,3 +221,35 @@ def test_invoke_rechecks_grant_revoked_after_authentication(setup):
         assert error.value.status == 403
     finally:
         conn.close()
+
+
+def test_tools_write_connection_keeps_full_synchronous_and_rechecks_revoke_in_tx(tmp_path, monkeypatch):
+    from contextlib import closing
+
+    path = tmp_path / 'app.db'
+    with closing(db.connect(path)) as conn:
+        token = api_keys.create(conn, 'assistant', role='assistant')
+        principal = api_keys.authenticate(conn, token)
+        conn.execute("INSERT INTO subscriptions(code, origin, added_at) VALUES ('600519', 'external', '2026-11-24T00:00:00+08:00')")
+
+    sync_levels = []
+    tool = TOOLS['research_cards']
+    monkeypatch.setitem(TOOLS, 'test_sync', replace(
+        tool, name='test_sync', access='write',
+        handler=lambda ctx, args: sync_levels.append(ctx.connection.execute('PRAGMA synchronous').fetchone()[0]) or Payload(data={}),
+    ))
+
+    def revoke_during_catalog():
+        with closing(db.connect(path)) as other:
+            api_keys.revoke(other, principal.key_id)
+        return {'000858': {'code': '000858', 'zwjc': '五粮液'}}
+
+    monkeypatch.setattr(companies, 'stock_list', revoke_during_catalog)
+    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
+        assert client.post('/tools/test_sync', json={}, headers=header(token)).status_code == 200
+        assert sync_levels == [2]
+        # Grant is revoked while fetching stock_list; the write transaction must still reject.
+        rejected = client.post('/tools/research_subscriptions_replace', json={'codes': ['000858']}, headers=header(token))
+        assert rejected.status_code == 403
+    with closing(db.connect(path)) as check:
+        assert [r[0] for r in check.execute('SELECT code FROM subscriptions').fetchall()] == ['600519']

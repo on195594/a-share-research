@@ -7,7 +7,7 @@ import os
 import re
 import sqlite3
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Callable, Literal
 
@@ -204,6 +204,7 @@ class Context:
     database: Path
     principal: api_keys.Principal
     account_shadow_enabled: bool = False
+    nonblocking_schedule_lock: bool = False
 
 
 @dataclass(frozen=True)
@@ -462,9 +463,11 @@ _TOOLS = (
     Tool('research_subscriptions', '读取显式订阅和冻结候选及最近收盘时点', frozenset({'assistant'}), Arguments, Payload,
          lambda c, a: Payload(data=scans.subscription_view(scans.subscriptions(c.connection))), account=True),
     Tool('research_subscriptions_replace', '按公司代码完整替换外部订阅，提交空列表清空外部订阅', frozenset({'assistant'}),
-         SubscriptionCodes, Payload, lambda c,a: Payload(data=scans.subscription_view(
-             scans.replace_subscriptions(c.connection, a.codes))), access='write', collects=True, account=True,
-         destructive=True),
+         SubscriptionCodes, Payload, lambda c, a: Payload(data=scans.subscription_view(
+             scans.replace_subscriptions(c.connection, a.codes,
+                                         authorize=lambda conn: authorize_tool(replace(c, connection=conn),
+                                                                               TOOLS['research_subscriptions_replace'])))),
+         access='write', collects=True, account=True, destructive=True),
     Tool('research_batch_monthly_request', '受理上海当月的候选批次，已有批次返回原编号和状态',
          _READERS, MonthlyBatch, Payload, lambda c, a: _monthly_batch(c, a.month, submit=True), access='write'),
     Tool('research_batch_monthly_status', '按月查询候选批次状态和缺口，可展开冻结名单与失败详情',
@@ -487,12 +490,16 @@ def discover(principal: api_keys.Principal, *, account_shadow_enabled: bool = Fa
     return [tool.describe() for tool in visible_tools(principal, account_shadow_enabled=account_shadow_enabled)]
 
 
-def check_tool_scope(ctx: Context, tool: Tool | None) -> Tool:
-    if tool is None or (tool.account and not ctx.account_shadow_enabled):
+def check_scope(principal: api_keys.Principal, account_shadow_enabled: bool, tool: Tool | None) -> Tool:
+    if tool is None or (tool.account and not account_shadow_enabled):
         raise UnknownTool('not_found', '工具不存在', 404)
-    if ctx.principal.role not in tool.roles:
+    if principal.role not in tool.roles:
         raise ToolError('forbidden', '此凭据不能调用该工具', 403)
     return tool
+
+
+def check_tool_scope(ctx: Context, tool: Tool | None) -> Tool:
+    return check_scope(ctx.principal, ctx.account_shadow_enabled, tool)
 
 
 def authorize_tool(ctx: Context, tool: Tool | None) -> Tool:

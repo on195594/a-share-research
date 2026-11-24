@@ -361,7 +361,13 @@ def run(ctx: Context, job: str, slot: str) -> dict:
     # No SQLite write lock across collection. flock also releases on process death.
     lock = ctx.database.parent / f'.schedule-{ctx.principal.key_id}-{job}.lock'
     with lock.open('a') as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+        if ctx.nonblocking_schedule_lock:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ToolError('busy', '该定时任务正在执行，请稍后按原时段重试', 503) from None
+        else:
+            fcntl.flock(stream, fcntl.LOCK_EX)
         row, start = _accept(ctx, job, slot, datetime.fromisoformat(db.now()))
         replay = row['status'] != 'running'
         if not replay:

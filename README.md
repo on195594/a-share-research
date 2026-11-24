@@ -6,17 +6,18 @@
 
 | 路径 | 职责 |
 |---|---|
-| `a_share_research/` | `web.py` 处理网页鉴权、渲染与提交，`worker.py` 领取任务，`service.py` 和 `reading.py` 提供业务提交与查询。`research.py` 冻结材料并发布报告，`research_mcp.py` 提供本次研究的工具。候选与回测在 `screening.py`、`backtest.py`。 |
-| `agent-runner/` | worker 的 Node 子进程，通过宿主 pi 执行研究、复核、修补及批次比较。 |
-| `a_share_research/core/`、`account/`、`policy/`、`tools/` | 数据与确定性计算、账户账本与对账、版本化政策、受控工具。见 [Provider 手册](a_share_research/core/PROVIDERS.md)和[工具手册](a_share_research/tools/README.md)。 |
-| `tests/` | 回归用例、真实采集样本与公共支撑。见[测试说明](tests/README.md)。 |
-| `compose.yaml`、`ops/` | Web、worker、tools 部署，以及[宿主客户端](ops/clients/README.md)和 [Hermes 调度](ops/hermes/README.md)。 |
+| `a_share_research/` | 网页与鉴权（`web.py`、`web_*.py`、`oauth*.py`）、业务受理与读取（`service.py`、`reading.py`、`overview.py`）、研究与复核（`research.py`、`research_mcp.py`、`research_tools.py`、`checking.py`、`reviewing.py`、`prompts/`）、初筛与验证（`screening.py`、`backtest.py`、`validation.py`）、扫描与运维（`scans.py`、`worker.py`、`deploy.py`、`backup.py`、`integrity.py`）。 |
+| `a_share_research/core/`、`account/`、`policy/`、`tools/` | 依赖方向 `policy → account → core`：数据提供方与确定性计算、账户账本与对账、版本化政策、受控工具与远程 MCP。见 [Provider 手册](a_share_research/core/PROVIDERS.md)和[工具手册](a_share_research/tools/README.md)。 |
+| `agent-runner/` | worker 的 Node 24 TypeScript 子进程，通过宿主 pi 执行研究、复核、修补及批次比较。 |
+| `skill/`、`scripts/` | 统一外部 Agent Skill（`skill/a-share/SKILL.md`）、本机标准库 MCP 客户端（`scripts/ashare.py`）与同材料稳定性脚本（`scripts/stability.py`）。 |
+| `compose.yaml`、`ops/` | Web、worker、tools 容器部署，以及[宿主客户端](ops/clients/README.md)和 [Hermes 调度](ops/hermes/README.md)。 |
+| `docs/`、`tests/` | 产品、架构、专题方案与[实施计划](docs/implementation-plan.md)；回归用例、真实样本与公共支撑（见[测试说明](tests/README.md)）。 |
 
 ## 运行
 
 准备 Python ≥3.13、uv、Node.js 24、本机 pi、`pdftotext` 和 `poppler-data`。从仓库根目录执行 `uv sync`。按 `.env.example` 创建权限为 0600 的 `.env`，供 worker 读取行情凭据、pi 目录和可选的模型提供方扩展。数据默认写入 `./data`，也可用 `DATA_DIR` 指定目录。
 
-网页使用独立的 `.env.web`，本机开发可用 `.env.web.dev`。设置 `PUBLIC_BASE_URL`、至少 32 字符的 `SESSION_SECRET` 以及 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`。仅在本机回环地址开发时可用 `DEV_LOGIN=1` 代替 GitHub 登录。
+网页使用独立的 `.env.web`，本机开发可用 `.env.web.dev`。设置 `PUBLIC_BASE_URL`、至少 32 字符的 `SESSION_SECRET` 以及 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_USER_ID`。仅在本机回环地址开发时可用 `DEV_LOGIN=1` 代替 GitHub 登录。tools 服务使用独立的 `.env.tools`（模板见 `.env.tools.example`）。
 
 ```bash
 uv run --env-file .env.web.dev uvicorn a_share_research.web:app --port 8610
