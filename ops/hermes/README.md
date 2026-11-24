@@ -21,7 +21,7 @@ Hermes 以 `no_agent` 模式运行下列脚本，时间均为上海时间。入�
 
 账户、顾问和月批脚本通过 `ashare_tools.py` 调用 `~/.local/bin/ashare`，使用 `~/.config/ashare/hermes-assistant.json`（0600）。`ASHARE_HERMES_CONFIG` 可指定另一绝对路径。配置使用公网 MCP 地址，本机 cron 通过 `connect` 直连 tools 回环端口。记分任务直接运行 worker 容器内的命令。[CLI 配置与退出码](../clients/README.md#cli-与本机-cron)
 
-先部署服务，再同步同版本 CLI。首次切换前，用原凭据和旧脚本处理历史待查请求。提交本目录的脚本改动后，从仓库根目录安装。
+先部署服务，再同步同版本 CLI。提交本目录的脚本改动后，从仓库根目录安装。
 
 ```sh
 python3 ops/hermes/install.py --apply
@@ -32,7 +32,7 @@ python3 ops/hermes/install.py --check
 
 ## 定时运行与确认
 
-段 3 脚本按上海时间计算时段，以原 assistant 凭据调用 `schedule_run(job, slot)`。服务端按凭据、任务和时段保存运行行与最终正文。评估记录可按 `evaluation_id` 查询当时的政策与采集证据。
+定时脚本按上海时间计算时段，以原 assistant 凭据调用 `schedule_run(job, slot)`。服务端按凭据、任务和时段保存运行行与最终正文。评估记录可按 `evaluation_id` 查询当时的政策与采集证据。
 
 | 任务 | 时段 | 查回与输出 |
 |---|---|---|
@@ -50,9 +50,9 @@ python3 ops/hermes/install.py --check
 
 退出码 21 表示暂未受理，22、本地调用超时或 CLI 被信号中断表示结果未知。脚本每 20 秒按原时段或运行编号查回，每个请求的重试窗口最多 240 秒。顾问整轮限 540 秒，其他五类定时运行限 270 秒。单次 CLI 调用最多 40 秒，调用、重试和轮询共用本轮剩余时间。止损还按当前五分钟时段裁剪预算，留出释放锁的时间。宿主配置 `cron.script_timeout_seconds=600`，排查提前超时时核对 `HERMES_CRON_SCRIPT_TIMEOUT`。
 
-## 段 3 回退
+## 定时任务状态段 3 回退
 
-段 3 于 11-23 安装。若需回退，先暂停受影响的 Hermes 任务，等本轮退出。在 v26 账本的只读连接上将 `:grant_id` 绑定为正在使用的 Hermes grant 编号，查回所有未确认运行，包括尚未写入 `scan_id` 的扫描。
+若需回退，先暂停受影响的 Hermes 任务，等本轮退出。在 v26 账本的只读连接上将 `:grant_id` 绑定为正在使用的 Hermes grant 编号，查回所有未确认运行，包括尚未写入 `scan_id` 的扫描。
 
 ```sql
 SELECT id,job,slot,status,scan_id FROM scheduled_runs
