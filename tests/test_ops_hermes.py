@@ -119,7 +119,7 @@ def test_rollback_runbook_lists_all_unconfirmed_runs(policy_setup):
         conn.execute("INSERT INTO scheduled_runs(principal_key_id,job,slot,status,created_at) "
                      "VALUES (?, 'advisor_scan', ?, ?, ?)", (principals["assistant"].key_id, slot, status, slot))
 
-    runbook = (SOURCE / "README.md").read_text().split("## 段 3 回退", 1)[1]
+    runbook = (SOURCE / "README.md").read_text().split("## 定时任务状态段 3 回退", 1)[1]
     sql = runbook.split("```sql\n", 1)[1].split("```", 1)[0]
     rows = conn.execute(sql, {'grant_id': principals['assistant'].key_id}).fetchall()
     assert rows[0].keys() == ["id", "job", "slot", "status", "scan_id"]
