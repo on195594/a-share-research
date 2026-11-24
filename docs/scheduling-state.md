@@ -23,7 +23,7 @@ Hermes 负责到点触发和推送，这两件事没问题。问题在于一次�
 
 ## 3 设计决定
 
-1. **新增表 `scheduled_runs`（迁移 v26）。** 列：`id`、`principal_key_id`、`job`、`slot`、`status`（`running`/`ready`/`failed`/`acked`/`expired`）、`activation_id`、`evaluation_id`、`scan_id`、`state`（JSON，止损档位、机会与月批事件去重键）、`text`（待推送正文）、`error_code`、`error`、`attempts`（失败重试计数，进入评估请求编号）、`result`（结构化回执）、`created_at`、`finished_at`、`acked_at`，唯一键 `(principal_key_id, job, slot)`。大字段 `state`、`result`、`text`、`error` 放表尾。
+1. **新增表 `scheduled_runs`（迁移 v26）。** 唯一键 `(principal_key_id, job, slot)`；每行记录状态（`running`/`ready`/`failed`/`acked`/`expired`）、所用政策激活与评估或扫描编号、去重状态 `state`、待推送正文、结构化失败原因与重试计数（重试计数进入评估请求编号）。大字段放表尾。
 2. **两个工具取代客户端状态机。** `schedule_run(job, slot)` 按唯一键受理或查回。扫描请求先返回待补回的旧行，旧行确认或过期后再受理请求时段。脚本处理正文后调用 `schedule_ack(run_id)` 标记已确认。`job` 取 `stop_alert`、`daily_brief`、`benchmark`、`advisor_scan`、`advisor_weekly`、`monthly_submit`、`monthly_status`。
 3. **时段由客户端按任务节奏算出，确定性。** 止损取当前时刻向下取整到 5 分钟，日报与扫描取上海日期，周报取 ISO 周，月度对比和月批发起取月份，月批状态取整点（它每月 1–3 日每小时运行，同一批次同一事件只提示一次，事件去重键放在 `state` 里，按最近一次 `acked` 的运行继承）。请求编号由 `job` 与 `slot` 决定，因此“结果未知”时重跑同一时段即可查回，不需要本地记录。
 4. **定时评估使用当时的生效政策。** 服务端以当前激活编号调用 `monitor._run`，把激活编号写入运行行和评估记录。采集期间切换政策且旧评估确定未写入时，服务端重读当前激活，使用新请求编号重试一次。
@@ -42,8 +42,7 @@ Hermes 负责到点触发和推送，这两件事没问题。问题在于一次�
 
 ## 5 结论
 
-- **上线**：迁移 v26 与段 1 服务端、段 2 脚本切换于 11-23 16:39 随 `51b1c61` 发布；段 3（月批切换、顾问正文移入服务端、删除转接与 `policy_stop_alert`、`policy_daily_brief`、`policy_benchmark`）原定 12-05，应所有者要求于 11-23 晚随 `9651daf` 发布，指南引用变化产生新政策身份（激活 33）。三轮审查（agy 7 条、Codex 12 条、agy 2 条低危）的问题均已修复上线。
+- **上线**：三段均于 11-23 发布，段 3 应所有者要求从 12-05 提前；三轮审查（agy 7 条、Codex 12 条、agy 2 条低危）的问题均已修复上线。
 - **去留判据**：已达成。`ops/hermes/` 由 1901 行（`4bbba59`）降至 988 行；止损、日报、月度对比、顾问与月批脚本只用任务锁。原判据“退出码只剩 0、1、21”改为：21 与结果未知（22、超时、信号中断）都在剩余预算内按原参数查回，其他非零退出按普通失败处理——结果未知时服务可能已受理，不能当失败丢弃。
 - **非阻塞观察**：11-24 起止损盘中 `acked`、日报 15:35、扫描 16:37（首扫预期重推 002946、300750，属不迁移旧状态的预期结果）；11-29 周报、12-01 月度对比与月批（新月批脚本首次自然运行）。查 `scheduled_runs` 的 `status` 与 `error_code`。
-- **已知边界**：`acked` 只证明脚本已处理回执，早于 Hermes 实际发送；Telegram 发送失败仍可能漏报。
 - **回退**：见 [Hermes 手册](../ops/hermes/README.md#段-3-回退)与[实施计划的当前部署](implementation-plan.md#当前部署)。

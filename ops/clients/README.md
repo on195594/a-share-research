@@ -64,4 +64,4 @@ CLI 的业务数据在 stdout 的 `result.data`，失败原因写入 stderr。�
 
 ## 段 2 切换回退
 
-段 4a 前，旧业务 REST 是客户端热备。回退前先用原身份查完扫描和政策待查请求。宿主 CLI 与配置备份在 `~/.local/state/ashare-switch-backup-20261120/`。恢复备份中的 CLI、私有配置及各宿主对应条目后重载，分别列举工具，核对原身份可见的目录。本机 AGY 使用全局条目。需同时回退服务端时，按[当前部署](../../docs/implementation-plan.md#当前部署)核对镜像，恢复匹配的 Hermes 脚本和路由。nginx 配置备份在 `~/archives/nginx-backups/stock.conf.2026-11-20-pre-mcp`。
+段 4a 前，旧业务 REST 是客户端热备。回退前先用原身份查完扫描和政策待查请求。宿主 CLI 与配置备份在 `~/.local/state/ashare-switch-backup-20261120/`。恢复备份中的 CLI、私有配置及各宿主对应条目后重载，分别列举工具，核对原身份可见的目录。本机 AGY 使用全局条目。服务端回到段 2 之前须越过 v26，已不可行（见[当前部署](../../docs/implementation-plan.md#当前部署)），只回退客户端。
