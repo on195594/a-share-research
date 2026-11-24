@@ -11,7 +11,7 @@
 | `agent-runner/` | worker 的 Node 24 TypeScript 子进程，通过宿主 pi 执行研究、复核、修补及批次比较。 |
 | `skill/`、`scripts/` | 统一外部 Agent Skill（`skill/a-share/SKILL.md`）、本机标准库 MCP 客户端（`scripts/ashare.py`）与同材料稳定性脚本（`scripts/stability.py`）。 |
 | `compose.yaml`、`ops/` | Web、worker、tools 容器部署，以及[宿主客户端](ops/clients/README.md)和 [Hermes 调度](ops/hermes/README.md)。 |
-| `docs/`、`tests/` | 产品、架构、专题方案与[实施计划](docs/implementation-plan.md)；回归用例、真实样本与公共支撑（见[测试说明](tests/README.md)）。 |
+| `docs/`、`tests/` | 专题方案与[实施计划](docs/implementation-plan.md)；回归用例、真实样本与公共支撑（见[测试说明](tests/README.md)）。 |
 
 ## 运行
 
@@ -34,7 +34,7 @@ Web 的账户写入表单另需 `ASHARE_TOOLS_URL`（例如 `http://a-share-rese
 
 模型配置档随代码发布。`roles` 指定作者与复核员的提供方、模型、思考强度与输出 token 上限，`role_for` 分配研究阶段与批次比较的角色，`limits` 与 `rationale` 记录运行上限及依据。[模型配置档](a_share_research/model_profile.json)
 
-worker 在打开队列前离线预检一次，检查 Node、pi 安装、两个角色的模型和已有凭据。可在相同环境中单独执行以下命令。预检只在内存中读取模型目录与凭据。预检失败时按日志修复后重启，普通带请求编号的在途任务可恢复一次，自动月批研究中断则记为失败。
+worker 在打开队列前离线预检一次，检查 Node、pi 安装、两个角色的模型和已有凭据。可在相同环境中单独执行以下命令。预检只在内存中读取模型目录与凭据。预检失败时按日志修复后重启。
 
 ```bash
 uv run --env-file .env node agent-runner/main.ts --check --profile a_share_research/model_profile.json
@@ -42,9 +42,7 @@ uv run --env-file .env node agent-runner/main.ts --check --profile a_share_resea
 
 初筛的历史行情与财报查询可复用 `DATA_DIR/tushare_cache.db` 中的响应。需要向上游重查数据时，`TUSHARE_CACHE=0` 可旁路该库，不会刷新已有条目。
 
-### 记住当前浏览器 30 天
-
-所有者登录后，可在授权管理页点击“记住此设备 30 天”。8 小时会话到期后，打开页面可恢复登录，设备截止日期固定。过期表单须先刷新。退出登录会撤销当前设备及其派生会话。
+### 浏览器验收会话
 
 浏览器验收可在能读取实例数据目录的宿主签发短期会话，直接把生成的文件传给 Playwright 的 `storageState`。本机开发使用开发数据库与 `.env.web.dev`。
 
@@ -55,10 +53,6 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 ```
 
 `--storage-state` 独占创建 0600 文件。验收后在页面退出，再删除本次临时文件。
-
-## 报告阅读
-
-报告可展开原文页、财务表、计算依据和缺口。财务与走势页可对照已保存的同行快照。商品、宏观指标和行业趋势保留原始引用与计算引用；期货换月未复权，行业回看使用当前成分。公司卡片区分报告日冻结的估值与按最近收盘价滚动的估值，并显示检查点、边界立场和待复核事项。[研究流程](docs/proposal.md) · [判断记分口径](docs/judgment-validation.md)
 
 ## 投资政策
 
@@ -85,22 +79,9 @@ ashare tools
 ashare call research_card --json '{"code":"600519"}'
 ```
 
-### 旧 Agent 研究 API
-
-Web 的 `/api` Agent JSON、`agent:` 会话与 `/tools` 业务 REST 在段 4a 前作为 MCP 的热备，供现有客户端故障回退。段 4a 将删除这些入口并撤销对应的旧 research key。[实施计划](docs/implementation-plan.md#web-与-mcp-双入口实施)
-
-## 账户净值工具
-
-通过 MCP 或 CLI 使用绑定账本。显式传入 `account_id` 时须与绑定一致。
-
-1. `account_nav_capture` 读取账本快照并返回 `state_sha256`。从 `source` 选择起止估值和每笔外部资金流发生前的估值。估值引用包含 `kind`（`observation` 或 `batch`）、`id` 和选择理由 `reason`。
-2. 用 `account_evidence` 保存资金流水原件。`account_nav_evaluate` 的 `request` 包含 `expected_state_sha256`、`start`、`end`、`flows`（每笔带 `event_id` 和 `before`）与 `coverage`。覆盖声明给出起止时点、`currency="CNY"`、`scope="cash_equity_no_liabilities"`、凭证哈希和说明。只有原件支持时才能声明 `complete_external_flows=true`、`no_security_transfers=true`。
-3. 两端取上海时间 15:00:00，且均须有 H00906.CSI 收盘值。服务端采集并保存指数证据，也可通过 `request.benchmark_evidence_hash` 指定已有证据。计算前账本变化时，重新捕获快照。
-4. 保存 `artifact_sha256`，用 `account_nav_replay` 按哈希重放。账户与基准收益率为小数，超额为百分点。净值凭证随账户证据备份。
-
 ## 运行身份与材料重放
 
-`runs.material` 保存研究使用的表、行情时点、文档、原文页与方法目录。采集前在 `runs.identity` 冻结配置档 SHA-256、判断契约、生效模型与调用上限。发布镜像还带有构建所用的完整提交号。`calls.identity` 记录每次调用的实际模型和运行时版本。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取 Wiki 方法卡。[方法库](docs/proposal.md#研究方法库)
+运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取 Wiki 方法卡。[方法库](docs/proposal.md#研究方法库)
 
 `--replay` 按原任务编号复用已保存且哈希匹配的材料，重新成文、核验与复核，生成独立任务。以下命令分别建立评估集基线并重放指定任务。
 
@@ -127,9 +108,7 @@ uv run python -m a_share_research.backup restore /absolute/private/new-backup /a
 
 ## 候选初筛
 
-从网页“候选初筛”创建月度批次。worker 在单股研究和扫描队列空闲时推进初筛与比较，7 天内已通过的报告可复用。批次页展示候选、比较结果、冻结名单及后续模拟收益；大市值组和小市值组分别选取，按批次冻结的规则记分。[初筛实验](docs/screening-experiment.md)
-
-自动月批使用 `research_batch_monthly_request` 提交上海当月 `month`（YYYY-MM），`research_batch_monthly_status` 按月读取状态。同月存在批次即返回原批次，包括失败批次。跨月仍未开始初筛的自动批次停止，自动月批的付费研究和比较中断后不会自动重跑。只有本月批次都已失败时，网页才可手动新建本月批次。
+从网页“候选初筛”创建月度批次，自动月批经 `research_batch_monthly_request` 提交；选样、复用与月批规则见[初筛实验](docs/screening-experiment.md)。
 
 仅运行初筛或执行确定性 Q20/Q5 历史回测：
 
@@ -153,11 +132,9 @@ uv run python scripts/stability.py --db /path/to/app.db
 
 `--forecasts --frozen` 只导出冻结预测和已存信息，不联网。稳定性主动实验可用 `scripts/stability.py --label NAME --runs [PATH:]RUN_ID ...` 分别统计新旧配置的指定任务。
 
-### 顾问闭环（批次 A）
+### 卖方覆盖补取与区间诊断
 
-用 `research_card` 阅读公司的最新论点、估值与披露复核。用 `research_scan_request` 提交公告扫描，响应丢失时以原身份和原 `request_id` 找回；用 `research_scan_read`、`research_scan_weekly` 读取扫描及周报。[顾问闭环方案](docs/investment-advisor.md)
-
-worker 空闲时补取缺少的卖方覆盖数据。以下命令分别查看补取进度和计算区间条件收益诊断。
+论点卡与扫描工具见[工具手册](a_share_research/tools/README.md#研究订阅与扫描)，设计见[顾问闭环方案](docs/investment-advisor.md)。worker 空闲时补取缺少的卖方覆盖数据。以下命令分别查看补取进度和计算区间条件收益诊断。
 
 ```bash
 docker exec a-share-research-worker python -m a_share_research.consensus_backfill
