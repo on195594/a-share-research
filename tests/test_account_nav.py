@@ -175,6 +175,7 @@ def test_web_page_renders_the_tool_result_and_reports_tool_errors(web, tool, own
                                      cookies=owner_request('/account/nav').cookies) as browser:
             page = (await browser.get('/account/nav')).text
             assert '开户以来' in page and '2026-11-12 至' in page and '逐日净值' in page
+            assert '<a href="/portfolio/overview" aria-current="page">我的组合</a>' in page
             custom = (await browser.get('/account/nav', params={'start': '2026-11-17', 'end': '2026-11-20'})).text
             assert '指定区间' in custom and '2026-11-17 至 2026-11-20' in custom
             failed = (await browser.get('/account/nav', params={'end': '2026-11-01'})).text

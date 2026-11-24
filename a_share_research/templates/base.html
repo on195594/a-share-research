@@ -15,11 +15,17 @@
   <a class="brand" href="/">个股研究</a>
   {% if csrf %}
   <nav class="shell-nav" aria-label="主要页面">
-    <a href="/portfolio/overview"{% if request is defined and request.url.path == '/portfolio/overview' %} aria-current="page"{% endif %}>我的组合</a>
-    <a href="/batches">候选初筛</a>
-    <a href="/research-library">研究库</a>
-    <a href="/policy"{% if request is defined and request.url.path == '/policy' %} aria-current="page"{% endif %}>投资政策</a>
-    <a href="/connections"{% if request is defined and request.url.path == '/connections' %} aria-current="page"{% endif %}>授权管理</a>
+    {% set path = request.url.path if request is defined else '' %}
+    {# A section stays current on its sub-pages (account pages belong to the portfolio). #}
+    {% for href, label, prefixes in [
+      ('/portfolio/overview', '我的组合', ('/portfolio/', '/account/')),
+      ('/batches', '候选初筛', ('/batches',)),
+      ('/research-library', '研究库', ('/research-library',)),
+      ('/policy', '投资政策', ('/policy',)),
+      ('/connections', '授权管理', ('/connections',)),
+    ] %}
+    <a href="{{ href }}"{% if path.startswith(prefixes) %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
   </nav>
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">退出</button></form>
   {% endif %}
