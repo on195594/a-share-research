@@ -21,6 +21,14 @@ class Day(BaseModel):
     benchmark: Annotated[Decimal, Field(gt=0, allow_inf_nan=False)]
 
 
+class NonPositiveExposure(ValueError):
+    """There was P&L but no positive Modified Dietz denominator for a close."""
+
+    def __init__(self, day: date, gain: Decimal):
+        super().__init__(f'{day} 期初资金为零或加权资金基数非正，却有 {gain} 的盈亏')
+        self.day = day
+
+
 def _context():
     return localcontext(Context(prec=34, rounding=ROUND_HALF_EVEN))
 
@@ -43,7 +51,7 @@ def series(days: list[Day]) -> list[dict]:
             if base <= 0:
                 # An emptied account keeps its NAV until money comes back in.
                 if gain != 0:
-                    raise ValueError(f'{day.date} 期初资金为零却有 {gain} 的盈亏，请核对当日出入金与分红记录')
+                    raise NonPositiveExposure(day.date, gain)
             else:
                 nav *= 1 + gain / base
             if nav <= 0:

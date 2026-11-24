@@ -316,6 +316,12 @@ def _nav_closes(result, label) -> dict:
             for row in result.value.to_dict('records')}
 
 
+def _nav_trading_days(result) -> set[date]:
+    if result.status != 'ok' or result.value is None:
+        raise ToolError('unavailable', f'交易日历暂不可用（{result.error_code or result.status}），稍后重试', 503)
+    return set(result.value.loc[result.value['is_open'].eq('1'), 'cal_date'])
+
+
 def _nav_suspended(result, code) -> set[date]:
     if result.status != 'ok' or result.value is None:
         raise ToolError('unavailable', f'{code} 停牌记录暂不可用（{result.error_code or result.status}），稍后重试', 503)
@@ -328,8 +334,9 @@ def _account_nav(ctx: Context, args: AccountNav) -> Payload:
 
     provider = TushareMarketDataProvider()
     return Payload(data=nav.daily(
-        ctx.connection, ctx.principal, args.account_id, today=datetime.now(db.SHANGHAI).date(),
+        ctx.connection, ctx.principal, args.account_id, today=nav.latest_close_day(datetime.now(db.SHANGHAI)),
         start=args.start, end=args.end,
+        fetch_trading_days=lambda s, e: _nav_trading_days(provider.fetch_trading_calendar(s.isoformat(), e.isoformat())),
         fetch_index=lambda s, e: _nav_closes(provider.fetch_index_bars(nav.BENCHMARK, s.isoformat(), e.isoformat()),
                                              nav.BENCHMARK),
         fetch_closes=lambda code, s, e: _nav_closes(provider.fetch_daily_bars(code, s.isoformat(), e.isoformat()),

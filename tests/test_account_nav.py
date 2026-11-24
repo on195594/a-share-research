@@ -4,7 +4,7 @@ Closes and H00906.CSI points are captured responses; positions, cash and flows a
 structural fixtures and never establish real account performance.
 """
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -30,12 +30,13 @@ TODAY = date(2026, 11, 24)
 
 
 @pytest.fixture
-def book(tmp_path):
+def book(tmp_path, request):
     conn = db.connect(tmp_path / 'app.db')
     principal = api_keys.authenticate(conn, api_keys.create(conn, 'NAV structural', role='assistant'))
     directory = tmp_path / 'account-evidence'
     sha = evidence.store(directory, b'Structural NAV fixture, NOT broker evidence or actual performance')
-    ledger.initialize(conn, principal, 'a', Opening(positions={'601600': 1000}, cash='10000'),
+    opening = Opening(positions={}, cash=0) if getattr(request, 'param', False) else Opening(positions={'601600': 1000}, cash='10000')
+    ledger.initialize(conn, principal, 'a', opening,
                       datetime.fromisoformat('2026-11-12T15:00:00+08:00'), directory, sha, tolerance=Decimal('0'))
     yield dict(conn=conn, principal=principal, directory=directory, sha=sha, path=tmp_path / 'app.db')
     conn.close()
@@ -57,9 +58,10 @@ def post(book, events, voids=()):
     return book['conn'].execute('SELECT max(id) FROM account_journal').fetchone()[0]
 
 
-def daily(book, closes=CLOSES, suspended=None, **kwargs):
-    return nav.daily(book['conn'], book['principal'], 'a', today=TODAY,
-                     fetch_index=lambda s, e: {d: v for d, v in INDEX.items() if s <= d <= e},
+def daily(book, closes=CLOSES, suspended=None, index=INDEX, today=None, **kwargs):
+    return nav.daily(book['conn'], book['principal'], 'a', today=today or max(INDEX),
+                     fetch_index=lambda s, e: {d: v for d, v in index.items() if s <= d <= e},
+                     fetch_trading_days=lambda s, e: {d for d in INDEX if s <= d <= e},
                      fetch_closes=lambda code, s, e: {d: v for d, v in closes[code].items() if s <= d <= e},
                      fetch_suspended=lambda code, s, e: {d for d in (suspended or {}).get(code, ()) if s <= d <= e},
                      **kwargs)
@@ -100,9 +102,26 @@ def test_flows_earn_for_the_part_of_the_session_they_were_in_the_account():
 def test_session_share_counts_only_trading_minutes():
     def left(text, day=date(2026, 11, 13)):
         return nav._session_left(datetime.fromisoformat(text), day)
-    assert left('2026-11-12T16:00:00+08:00') == left('2026-11-13T09:00:00+08:00') == 1
-    assert [left(f'2026-11-13T{t}+08:00') for t in ('10:30:00', '12:00:00', '14:00:00', '15:00:00')] == [
-        Decimal('0.75'), Decimal('0.5'), Decimal('0.25'), 0]
+    values = [left(f'2026-11-13T{t}+08:00')
+              for t in ('09:00:00', '09:30:00', '10:30:00', '12:00:00', '14:00:00', '15:00:00')]
+    assert all(isinstance(value, Decimal) for value in values)
+    assert left('2026-11-12T16:00:00+08:00') == Decimal(1)
+    assert values == [Decimal(1), Decimal(1), Decimal('0.75'), Decimal('0.5'), Decimal('0.25'), Decimal(0)]
+
+
+def test_same_day_preopen_deposit_and_lunch_withdrawal_work_through_ledger(book):
+    post(book, [
+        Event(kind='deposit', cash='5000', occurred_at='2026-11-13T09:00:00+08:00', broker_id='preopen-in'),
+        Event(kind='withdrawal', cash='2000', occurred_at='2026-11-13T12:00:00+08:00', broker_id='lunch-out'),
+    ])
+    result = daily(book)
+    first, next_day = result['days'][:2]
+    first_assets, next_assets = Decimal(first['total_assets']), Decimal(next_day['total_assets'])
+    net_flow = Decimal('3000')
+    weighted_flow = Decimal('4000')  # 5000 × 1 minus 2000 × 0.5.
+    expected_nav = 1 + (next_assets - first_assets - net_flow) / (first_assets + weighted_flow)
+    assert next_day['date'] == '2026-11-13' and next_day['flow'] == '3000.00'
+    assert Decimal(next_day['nav']) == expected_nav.quantize(Decimal('0.000001'))
 
 
 def test_ledger_events_and_real_closes_drive_the_daily_series(book):
@@ -168,6 +187,51 @@ def test_series_stops_before_an_unpublished_close_and_carries_suspensions(book):
         date(2026, 11, 17)] + 300 * CLOSES['601899'][date(2026, 11, 23)]
 
 
+@pytest.mark.parametrize('missing,cutoff', [(23, '2026-11-20'), (18, '2026-11-17')])
+def test_missing_benchmark_close_is_visible_and_cuts_the_series(book, missing, cutoff):
+    # Keep the session in the calendar, but drop its H00906 value only.
+    index = {d: v for d, v in INDEX.items() if d != date(2026, 11, missing)}
+    result = daily(book, index=index)
+    assert result['as_of'] == cutoff and result['days'][-1]['date'] == cutoff
+    assert result['gaps'] == [f'H00906.CSI 的 2026-11-{missing} 收盘值缺失，净值最晚截至此前一个交易日']
+    assert result['periods'][0]['end'] == cutoff
+
+
+def test_closed_weekend_is_not_a_missing_benchmark_close(book):
+    result = daily(book, today=date(2026, 11, 22))
+    assert result['as_of'] == '2026-11-20' and result['gaps'] == []
+
+
+def test_expected_close_day_uses_shanghai_close_not_midnight():
+    assert nav.latest_close_day(datetime.fromisoformat('2026-11-24T06:59:59+00:00')) == date(2026, 11, 23)
+    assert nav.latest_close_day(datetime.fromisoformat('2026-11-24T07:00:00+00:00')) == TODAY
+
+
+@pytest.mark.parametrize('book', [True], indirect=True)
+def test_empty_opening_starts_at_first_positive_close(book):
+    with pytest.raises(ledger.LedgerError, match='尚无总资产为正的收盘估值'):
+        daily(book)
+    post(book, [Event(kind='deposit', cash='5000', occurred_at='2026-11-13T10:00:00+08:00', broker_id='open')])
+    result = daily(book)
+    assert result['opened_at'].startswith('2026-11-12')
+    assert result['days'][0]['date'] == '2026-11-13' and result['days'][0]['nav'] == '1.000000'
+    assert result['periods'][0]['label'] == '首个正资产收盘以来'
+    assert result['gaps'] == ['开户后的零资产收盘不计收益；净值从 2026-11-13 起算']
+
+
+def test_profitable_near_open_full_exit_does_not_erase_prior_rows(book):
+    price = CLOSES['601600'][min(INDEX)] + 1
+    post(book, [
+        Event(kind='sell', code='601600', shares=1000, price=price,
+              occurred_at='2026-11-13T09:30:00+08:00', broker_id='sell'),
+        Event(kind='withdrawal', cash=10000 + price * 1000,
+              occurred_at='2026-11-13T09:31:00+08:00', broker_id='out'),
+    ])
+    result = daily(book)
+    assert result['as_of'] == '2026-11-12' and [row['date'] for row in result['days']] == ['2026-11-12']
+    assert '2026-11-13' in result['gaps'][0] and '加权资金基数非正' in result['gaps'][0]
+
+
 def test_same_second_events_replay_in_journal_order(book):
     # Deposit then buy in one second; pick broker ids whose business ids sort the buy first.
     for n in range(100):
@@ -193,8 +257,9 @@ def _frame(rows):
 
 
 @pytest.fixture
-def tool(book, bind_account, monkeypatch):
-    bind_account(book['conn'], 'a')
+def nav_market(monkeypatch):
+    data = dict(index=INDEX.copy(), closes={code: rows.copy() for code, rows in CLOSES.items()},
+                open_days=set(INDEX), suspended={}, missing_calendar_day=None)
 
     def bars(rows, source):
         def fetch(provider, code, start, end):
@@ -202,13 +267,40 @@ def tool(book, bind_account, monkeypatch):
             return MarketDataResult(_frame(selected), 'ok', source, datetime.now(db.SHANGHAI).isoformat())
         return fetch
 
-    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', bars(lambda code: INDEX, 'tushare.index_daily'))
-    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_daily_bars', bars(lambda code: CLOSES[code], 'tushare.daily'))
-    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_suspended_days', lambda provider, code, start, end: MarketDataResult(
-        pd.DataFrame(columns=['trade_date']), 'ok', 'tushare.suspend_d', datetime.now(db.SHANGHAI).isoformat()))
+    def raw_frame(provider, source, endpoint, params, required_columns, allow_empty=False):
+        day = date.fromisoformat(params['start_date'])
+        end = date.fromisoformat(params['end_date'])
+        if endpoint == 'trade_cal':
+            assert params['exchange'] == 'SSE'
+            rows = []
+            while day <= end:
+                if day != data['missing_calendar_day']:
+                    rows.append(dict(cal_date=day.strftime('%Y%m%d'), is_open=int(day in data['open_days'])))
+                day += timedelta(days=1)
+            frame = pd.DataFrame(rows, columns=['cal_date', 'is_open'])
+        else:
+            assert endpoint == 'suspend_d' and params['suspend_type'] == 'S'
+            # Exercise the exact provider field selection and public tool adapter.
+            frame = pd.DataFrame(
+                [dict(trade_date=d.strftime('%Y%m%d'), suspend_type='S', suspend_timing=timing)
+                 for d, timing in data['suspended'].items() if day <= d <= end],
+                columns=params['fields'].split(','),
+            )
+        assert required_columns <= set(frame.columns)
+        return MarketDataResult(frame, 'ok', source, datetime.now(db.SHANGHAI).isoformat())
+
+    monkeypatch.setattr(nav, 'latest_close_day', lambda now: max(INDEX))
+    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', bars(lambda code: data['index'], 'tushare.index_daily'))
+    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_daily_bars', bars(lambda code: data['closes'][code], 'tushare.daily'))
+    monkeypatch.setattr(TushareMarketDataProvider, '_request_frame', raw_frame)
+    return data
+
+
+@pytest.fixture
+def tool(book, bind_account, nav_market):
+    bind_account(book['conn'], 'a')
     ctx = Context(book['conn'], book['path'], book['principal'], account_shadow_enabled=True)
     return lambda arguments: invoke(ctx, 'account_nav', arguments)['data']
-
 
 def test_tool_returns_series_and_rejects_ranges_before_the_opening(tool):
     result = tool({'start': '2026-11-13'})
@@ -216,6 +308,33 @@ def test_tool_returns_series_and_rejects_ranges_before_the_opening(tool):
     with pytest.raises(ToolError) as error:
         tool({'end': '2026-11-01'})
     assert error.value.code == 'invalid_arguments' and '可查区间' in str(error.value)
+
+
+@pytest.mark.parametrize('timing, expected', [('09:30-10:00', '2026-11-20'), (None, '2026-11-23'), ('', '2026-11-23')])
+def test_tool_only_carries_confirmed_full_day_suspensions(tool, nav_market, timing, expected):
+    last_day = max(INDEX)
+    nav_market['closes']['601600'].pop(last_day)
+    nav_market['suspended'][last_day] = timing
+    result = tool({})
+    assert result['as_of'] == expected
+    if timing:
+        assert result['gaps'] == ['601600 的 2026-11-23 收盘价尚未发布，净值截至此前一个交易日']
+    else:
+        assert result['gaps'] == []
+        assert Decimal(result['days'][-1]['total_assets']) == 10000 + 1000 * CLOSES['601600'][date(2026, 11, 20)]
+
+
+def test_tool_reports_missing_benchmark_or_a_calendar_failure(tool, nav_market):
+    last_day = max(INDEX)
+    nav_market['index'].pop(last_day)
+    result = tool({})
+    assert result['as_of'] == '2026-11-20'
+    assert result['gaps'] == ['H00906.CSI 的 2026-11-23 收盘值缺失，净值最晚截至此前一个交易日']
+
+    nav_market['missing_calendar_day'] = last_day
+    with pytest.raises(ToolError, match='交易日历暂不可用') as exc:
+        tool({})
+    assert exc.value.code == 'unavailable'
 
 
 def test_web_page_renders_the_tool_result_and_reports_tool_errors(web, tool, owner_request, monkeypatch):

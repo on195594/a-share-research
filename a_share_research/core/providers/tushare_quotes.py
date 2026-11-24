@@ -20,11 +20,13 @@ from a_share_research.core.providers.tushare_common import (
     compact_date,
     invalid_argument_result,
     parse_date,
+    schema_failure_result,
 )
 
 DAILY_SOURCE = "tushare.daily"
 INDEX_DAILY_SOURCE = "tushare.index_daily"
 SUSPEND_SOURCE = "tushare.suspend_d"
+TRADE_CAL_SOURCE = "tushare.trade_cal"
 TUSHARE_VOLUME_UNIT = "hand"
 
 
@@ -62,14 +64,54 @@ class TushareMarketDataProvider(TushareProviderBase):
                 raise ValueError("start_date must not be after end_date")
         except (ValueError, OverflowError) as exc:
             return invalid_argument_result(SUSPEND_SOURCE, exc)
-        return self._request_frame(
+        result = self._request_frame(
             SUSPEND_SOURCE,
             "suspend_d",
             {"ts_code": ts_code, "start_date": compact_date(start), "end_date": compact_date(end),
-             "suspend_type": "S", "fields": "trade_date,suspend_type"},
-            {"trade_date"},
+             "suspend_type": "S", "fields": "trade_date,suspend_type,suspend_timing"},
+            {"trade_date", "suspend_type", "suspend_timing"},
             allow_empty=True,
         )
+        if result.value is None:
+            return result
+        try:
+            frame = result.value
+            # TuShare labels both full-day and intraday halts S. Only a blank timing marks a full day.
+            full_day = frame["suspend_timing"].isna() | frame["suspend_timing"].eq("")
+            selected = frame.loc[frame["suspend_type"].eq("S") & full_day].copy()
+            selected["trade_date"] = selected["trade_date"].map(lambda value: compact_date(str(value)))
+        except (TypeError, ValueError) as exc:
+            return schema_failure_result(result, exc)
+        return replace(result, value=selected, row_count=len(selected))
+
+    def fetch_trading_calendar(self, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
+        """Shanghai Stock Exchange calendar, including closed days for coverage validation."""
+        try:
+            start, end = parse_date(start_date), parse_date(end_date)
+            if start > end:
+                raise ValueError("start_date must not be after end_date")
+        except (ValueError, OverflowError) as exc:
+            return invalid_argument_result(TRADE_CAL_SOURCE, exc)
+        result = self._request_frame(
+            TRADE_CAL_SOURCE, "trade_cal",
+            {"exchange": "SSE", "start_date": compact_date(start), "end_date": compact_date(end),
+             "fields": "cal_date,is_open"},
+            {"cal_date", "is_open"},
+        )
+        if result.value is None:
+            return result
+        try:
+            frame = result.value.copy()
+            frame["cal_date"] = frame["cal_date"].map(lambda value: parse_date(str(value)))
+            frame["is_open"] = frame["is_open"].map(str)
+            count = (end - start).days + 1
+            if (len(frame) != count or frame["cal_date"].nunique() != count
+                    or not frame["cal_date"].map(lambda day: start <= day <= end).all()
+                    or not frame["is_open"].isin({"0", "1"}).all()):
+                raise ValueError("invalid or incomplete SSE calendar range")
+        except (TypeError, ValueError) as exc:
+            return schema_failure_result(result, exc)
+        return replace(result, value=frame)
 
     def fetch_index_bars(self, symbol: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
         """Index closing points only; total-return indices need not have OHLC/volume."""

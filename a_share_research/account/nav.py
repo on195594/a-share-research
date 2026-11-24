@@ -16,8 +16,9 @@ from a_share_research.core import account_nav
 
 BENCHMARK = 'H00906.CSI'
 METHOD = 'daily_modified_dietz_v1'
-BASIS = ('账本持仓×不复权收盘价+账本现金；当日分红与送转计入当日收盘；出入金按发生时点在当日交易时段中的'
-         '剩余占比计入收益分母（修正 Dietz）；基准为中证800全收益')
+BASIS = ('账本持仓×不复权收盘价+账本现金；分红与送转按账本记账日，不推算应收，晚于除权入账可能放大期间回撤；'
+         '首个正资产收盘为净值 1，基期前费用已反映在资产中，不计入后续收益；'
+         '出入金按当日交易时段剩余占比计入收益分母（修正 Dietz）；基准为中证800全收益')
 # Look back far enough that a stock suspended on the opening day still has a prior close.
 PRICE_LOOKBACK = timedelta(days=30)
 
@@ -44,8 +45,15 @@ def _session_left(at: datetime, day: date) -> Decimal:
     if local.date() < day:
         return Decimal(1)
     minute = Decimal(local.hour * 3600 + local.minute * 60 + local.second) / 60
-    elapsed = sum(min(max(minute, start), end) - start for start, end in ((570, 690), (780, 900)))
-    return 1 - elapsed / 240
+    elapsed = sum((min(max(minute, start), end) - start for start, end in ((570, 690), (780, 900))),
+                  Decimal(0))
+    return Decimal(1) - elapsed / Decimal(240)
+
+
+def latest_close_day(now: datetime) -> date:
+    """Do not expect today's daily values until the Shanghai trading session has closed."""
+    local = now.astimezone(db.SHANGHAI)
+    return local.date() if local.time() >= time(15) else local.date() - timedelta(days=1)
 
 
 def _counts_on(event, day: date, stamp: datetime) -> bool:
@@ -84,6 +92,7 @@ def _period(rows, label, start, end):
 
 def daily(conn, principal, account_id: str, *, today: date,
           fetch_index: Callable[[date, date], Closes], fetch_closes: Callable[[str, date, date], Closes],
+          fetch_trading_days: Callable[[date, date], set[date]],
           fetch_suspended: Callable[[str, date, date], set[date]],
           start: date | None = None, end: date | None = None) -> dict:
     """Return the NAV series from the opening close and the standard comparison periods."""
@@ -91,11 +100,23 @@ def daily(conn, principal, account_id: str, *, today: date,
         ledger.authorize(conn, principal)
         opened_at, opening, events = _book(conn, account_id)
     first_day = opened_at.astimezone(db.SHANGHAI).date()
-    index = fetch_index(first_day, today)
-    stamps = [(day, datetime.combine(day, time(15), db.SHANGHAI)) for day in sorted(index)]
+    no_close = f'开户日 {first_day} 及之后尚无可用收盘估值，收盘数据发布后再查'
+    if today < first_day:
+        raise ledger.LedgerError(no_close, 422)
+    trading_days = fetch_trading_days(first_day, today)
+    stamps = [(day, datetime.combine(day, time(15), db.SHANGHAI)) for day in sorted(trading_days)]
     stamps = [(day, stamp) for day, stamp in stamps if stamp >= opened_at]
     if not stamps:
-        raise ledger.LedgerError(f'{BENCHMARK} 尚无开户日 {first_day} 及之后的收盘值，收盘数据发布后再查', 422)
+        raise ledger.LedgerError(no_close, 422)
+    index = fetch_index(stamps[0][0], today)
+    gaps = []
+    missing_index = next((day for day, _ in stamps if day not in index), None)
+    if missing_index is not None:
+        message = f'{BENCHMARK} 的 {missing_index} 收盘值缺失'
+        stamps = [(day, stamp) for day, stamp in stamps if day < missing_index]
+        if not stamps:
+            raise ledger.LedgerError(f'{message}，尚无法计算净值', 422)
+        gaps.append(f'{message}，净值最晚截至此前一个交易日')
 
     holdings, previous = [], None
     for day, stamp in stamps:
@@ -110,7 +131,7 @@ def daily(conn, principal, account_id: str, *, today: date,
 
     # A held stock without a close is either suspended (keep its last close) or not yet published;
     # the series stops before the first unpublished close instead of filling it with an older one.
-    gaps, cutoff = [], None
+    cutoff = None
     for code in codes:
         missing = [day for day, position, *_ in holdings if code in position.positions and day not in closes[code]]
         if not missing:
@@ -134,15 +155,27 @@ def daily(conn, principal, account_id: str, *, today: date,
                                     benchmark=index[day]))
     if not days:
         raise ledger.LedgerError('持仓股票尚无开户日及之后的收盘价，收盘数据发布后再查', 422)
+    first_funded = next((i for i, day in enumerate(days) if day.total_assets > 0), None)
+    if first_funded is None:
+        raise ledger.LedgerError('尚无总资产为正的收盘估值，无法建立净值基期', 422)
+    label_since_start = '开户以来'
+    if first_funded:
+        days = days[first_funded:]
+        label_since_start = '首个正资产收盘以来'
+        gaps.append(f'开户后的零资产收盘不计收益；净值从 {days[0].date} 起算')
     try:
         rows = account_nav.series(days)
+    except account_nav.NonPositiveExposure as exc:
+        # Do not fabricate return for this day or chain subsequent closes over the gap.
+        gaps.append(f'{exc}，净值截至此前一个交易日')
+        rows = account_nav.series([day for day in days if day.date < exc.day])
     except ValueError as exc:
         raise ledger.LedgerError(str(exc), 422) from None
 
     as_of = rows[-1]['date']
     periods = []
-    # A young account clips the longer windows to the opening; repeat a span only once.
-    for label, since in (('开户以来', rows[0]['date']), ('近1月', _month_ago(as_of)),
+    # A young account clips longer windows to the first comparable close; repeat a span only once.
+    for label, since in ((label_since_start, rows[0]['date']), ('近1月', _month_ago(as_of)),
                          ('今年以来', date(as_of.year - 1, 12, 31))):
         item = _period(rows, label, since, as_of)
         if all(item['start'] != p['start'] for p in periods):
