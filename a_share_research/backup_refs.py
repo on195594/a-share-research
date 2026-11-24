@@ -81,8 +81,6 @@ def required(conn: sqlite3.Connection, *, include_uploads: bool = True) -> dict[
         ('account_observations', 'evidence', False),
         ('account_position_books', 'evidence_hashes', True),
         ('account_analysis_history', 'evidence_hashes', True),
-        ('account_nav_refs', 'artifact_sha256', False),
-        ('account_nav_refs', 'evidence_hashes', True),
         ('policy_v0_account_openings', 'evidence_hashes', True),
     ):
         if table in tables:

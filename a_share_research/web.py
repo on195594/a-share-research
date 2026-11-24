@@ -34,8 +34,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from a_share_research import report as report_body
 from a_share_research import charts, db, batches, companies as company_data, service, reading
 from a_share_research import stock_codes, api_keys, oauth, oauth_store, skill_bundle, template_filters
-from a_share_research import web_evidence, web_ledger, web_nav
-from a_share_research.tools_client import ToolsClient
+from a_share_research import web_evidence, web_ledger
+from a_share_research.tools_client import ToolCallError, ToolsClient
 from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
 from a_share_research.service import FeedbackRequest, ResearchRequest
@@ -679,14 +679,21 @@ async def ledger_new(request: Request):
     return await _account_form(request, partial(web_ledger.page, connection=conn))
 
 
-@app.api_route("/account/nav/new", methods=["GET", "POST"])
-async def nav_new(request: Request):
-    return await _account_form(request, web_nav.page)
-
-
-@app.get("/account/nav/{artifact_sha256}")
-def nav_detail(request: Request, artifact_sha256: str):
-    return _owner_read(request, "nav_detail.html", _overview().nav_detail, artifact_sha256)
+@app.get("/account/nav")
+async def account_nav(request: Request, start: str = "", end: str = ""):
+    if not (session := current_session(request)):
+        return login_required()
+    client = ToolsClient.from_settings(settings)
+    context = dict(view=None, error=None, start=start, end=end)
+    if client is None:
+        context["error"] = "Web 账户读取未启用"
+    else:
+        arguments = {key: value for key, value in (("start", start), ("end", end)) if value}
+        try:
+            context["view"] = await client.call("account_nav", arguments)
+        except ToolCallError as exc:
+            context["error"] = str(exc)
+    return render(request, "nav.html", session, **context)
 
 
 @app.get("/policy")

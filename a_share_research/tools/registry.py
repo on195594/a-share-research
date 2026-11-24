@@ -7,6 +7,8 @@ import os
 import re
 import sqlite3
 from contextlib import nullcontext
+from datetime import date, datetime
+from decimal import Decimal
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Callable, Literal
@@ -156,11 +158,8 @@ class AccountObserve(Account):
 
 
 class AccountNav(Account):
-    request: nav.Request
-
-
-class AccountNavReplay(Account):
-    artifact_sha256: nav.Hash
+    start: Annotated[date, Field(strict=False)] | None = None
+    end: Annotated[date, Field(strict=False)] | None = None
 
 
 class CycleAnalysis(Account):
@@ -306,14 +305,28 @@ def _evidence_directory(ctx: Context) -> Path:
     return ctx.database.resolve().parent / 'account-evidence'
 
 
-def _collect_nav_index(start: str, end: str) -> dict:
-    from a_share_research.core.providers import TushareMarketDataProvider
-    from a_share_research.policy.benchmark import _response
+def _nav_closes(result, label) -> dict:
+    from a_share_research.core.market_data import EMPTY_RESPONSE
 
-    response = _response(lambda: TushareMarketDataProvider().fetch_index_bars('H00906.CSI', start, end),
-                         kind='index', source='tushare.index_daily')
-    return dict(schema_version=1, code='H00906.CSI', currency='CNY', return_type='total_return',
-                requested_dates=[start, end], **response)
+    if result.status == 'failed' and result.error_code == EMPTY_RESPONSE:
+        return {}
+    if result.status != 'ok' or result.value is None:
+        raise ToolError('unavailable', f'{label} 行情暂不可用（{result.error_code or result.status}），稍后重试', 503)
+    return {date.fromisoformat(str(row['date'])[:10]): Decimal(str(row['close']))
+            for row in result.value.to_dict('records')}
+
+
+def _account_nav(ctx: Context, args: AccountNav) -> Payload:
+    from a_share_research.core.providers import TushareMarketDataProvider
+
+    provider = TushareMarketDataProvider()
+    return Payload(data=nav.daily(
+        ctx.connection, ctx.principal, args.account_id, today=datetime.now(db.SHANGHAI).date(),
+        start=args.start, end=args.end,
+        fetch_index=lambda s, e: _nav_closes(provider.fetch_index_bars(nav.BENCHMARK, s.isoformat(), e.isoformat()),
+                                             nav.BENCHMARK),
+        fetch_closes=lambda code, s, e: _nav_closes(provider.fetch_daily_bars(code, s.isoformat(), e.isoformat()),
+                                                    code)))
 
 
 def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:
@@ -377,18 +390,8 @@ _TOOLS = (
          frozenset({'assistant'}), Company, Payload, _company_overview, account=True),
     Tool('account_portfolio_overview', '读取已核实持仓的研究、在仓论点、监控判断与待补资料',
          frozenset({'assistant'}), Arguments, Payload, _portfolio_overview, account=True),
-    Tool('account_nav_capture', '冻结账户账本与估值出处并返回资料哈希，供区间净值计算引用；不认定资金流水完整',
-         frozenset({'assistant'}), Account, Payload,
-         lambda c,a: Payload(data=nav.capture(c.connection,c.principal,a.account_id)), account=True),
-    Tool('account_nav_evaluate', '按完整资金声明、明确流前估值保存净值对照；省略指数证据时采集 H00906 收盘值',
-         frozenset({'assistant'}), AccountNav, Payload,
-         lambda c,a: Payload(data=nav.evaluate(c.connection,c.principal,a.account_id,a.request,
-                                               _evidence_directory(c), collect_index=_collect_nav_index)),
-         access='write', account=True, collects=True),
-    Tool('account_nav_replay', '按哈希重放已保存的净值输入与结果',
-         frozenset({'assistant'}), AccountNavReplay, Payload,
-         lambda c,a: Payload(data=nav.replay(c.connection,c.principal,a.account_id,a.artifact_sha256,_evidence_directory(c))),
-         account=True),
+    Tool('account_nav', '按绑定账本与收盘价逐日计算单位净值，对照 H00906 全收益给出开户以来、近1月、今年以来及可选区间的收益与超额',
+         frozenset({'assistant'}), AccountNav, Payload, _account_nav, account=True, collects=True),
     Tool('policy_holdings_check', '采集并保存持仓检查与流动性延迟复核证据，保留市场数据缺口',
          frozenset({'assistant'}), PolicyMonitor, Payload, _holdings_check, access='write', account=True, collects=True),
     Tool('policy_portfolio_scenario', '基于已保存监控评估，按指定卖出股数和费用试算并保存静态风险情景',

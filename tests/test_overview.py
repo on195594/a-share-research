@@ -9,7 +9,6 @@ from a_share_research import overview, reading, scans, service, template_filters
 from a_share_research.account import cycle_analysis
 from a_share_research.tools.registry import Context, invoke
 from support.account_analysis import request, rewrite
-from support.account_nav import evaluate as save_nav
 from support.policy import run_monitor as save_monitor
 from support.positions import batch, event, state, submit
 from support.scans import CATALOG, priced, run_scan
@@ -149,7 +148,7 @@ def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_moni
     assert current['held'] and current['position']['shares'] == 100
     assert portfolio['policy']['id'] == receipt['id'] and portfolio['policy']['account_version'] == 0
     assert portfolio['account']['version'] == 2
-    assert any('NAV' in gap for gap in portfolio['gaps'])
+    assert not any('NAV' in gap for gap in portfolio['gaps'])
     assert overview.monitor_detail(conn, receipt['id']) == receipt
     assert overview.receipt_detail(conn, portfolio['account']['last_receipt']['id']) == posted
     conn.execute('PRAGMA query_only=OFF')
@@ -226,7 +225,7 @@ def test_account_gaps_do_not_flag_an_unheld_company_or_its_missing_report(bound_
     for code, status in (('603606', 200), ('000963', 404)):
         data = invoke(ctx, 'research_company_overview', {'code': code})['data']
         assert data['held'] is False and data['gaps'] == []
-        assert '暂无可查询的 NAV 区间凭证' in data['account_gaps']
+        assert not any('NAV' in gap for gap in data['account_gaps'])
         page = html(web.stock_page(owner_request(f'/stock/{code}'), code), status)
         assert f'href="/stock/{code}/overview"' not in page
 
@@ -288,29 +287,6 @@ def test_held_company_without_research_links_to_saved_records_and_evidence(ledge
     assert rejected['request_hash'] in receipt and sha in receipt
     for page, original in ((monitor, evaluation), (receipt, rejected)):
         assert json.loads(re.search(r'<pre[^>]*>(.*?)</pre>', page, re.S)[1]) == original
-
-
-def test_nav_deep_link_opens_the_saved_after_cost_comparison(nav_book, bind_account, web, owner_request):
-    bind_account(nav_book['conn'], 'a')
-    portfolio_path = '/portfolio/overview'
-    missing = '暂无可查询的 NAV 区间凭证'
-    assert missing in html(web.portfolio_overview(owner_request(portfolio_path)))
-    saved = save_nav(nav_book)
-    web.conn.execute('PRAGMA query_only=ON')
-    sha = saved['artifact_sha256']
-    ctx = Context(nav_book['conn'], nav_book['path'], nav_book['principal'], account_shadow_enabled=True)
-    reference = invoke(ctx, 'account_portfolio_overview', {})['data']['nav_interval']
-    assert reference['artifact_sha256'] == sha
-    nav_path = reference['path']
-    page = html(web.portfolio_overview(owner_request(portfolio_path)))
-    assert missing not in page and f'href="{nav_path}"' in page
-    anonymous = web.nav_detail(page_request(nav_path), sha)
-    assert anonymous.status_code == 303 and anonymous.headers['location'] == '/login'
-    detail = html(web.nav_detail(owner_request(nav_path), sha))
-    for value in (sha, saved['basis']['benchmark'], saved['inputs']['start']['as_of'][:10],
-                  saved['inputs']['end']['as_of'][:10], saved['calculation']['end_nav'],
-                  saved['calculation']['benchmark_return'], saved['calculation']['excess_percentage_points']):
-        assert value in detail
 
 
 def test_overview_uses_ledger_projection_while_policy_capture_verifies_evidence(ledger_monitor):

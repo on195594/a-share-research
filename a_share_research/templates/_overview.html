@@ -14,10 +14,6 @@
 {{ {'posted': '已入账', 'conflict': '对账冲突', 'missing_material': '缺少材料', 'service_failure': '入账服务失败'}.get(status, status) }}
 {%- endmacro %}
 
-{% macro account_gap(gap) -%}
-{{ gap }}{% if 'NAV' in gap %} · <a href="/account/nav/new">评估 NAV 区间</a>{% endif %}
-{%- endmacro %}
-
 {# The review status repeats the action when a review is already pending. #}
 {% macro monitor_status(policy) -%}
 {{ {'no_action':'暂无动作', 'review_candidate':'待复核', 'trade_candidate':'有待确认的交易候选'}.get(policy.action_status, policy.action_status) }}
@@ -46,10 +42,6 @@
 {% elif account.mode == 'ledger' %}<p class="muted">暂无对账回执</p>{% endif %}
 {% else %}<p><a href="/policy#policy-source">核对账户来源</a></p>
 {% endif %}
-{% if view.nav_interval %}{% set nav = view.nav_interval %}
-<p><a href="{{ nav.path }}">NAV 区间 {{ nav.start_date }} 至 {{ nav.end_date }}</a> · {{ nav.benchmark_code }}
-  <span class="muted small">保存于 {{ nav.created_at|shanghai_minute }}</span> · <a href="/account/nav/new">评估新区间</a></p>
-{% endif %}
 {% endmacro %}
 
 {# Version and policy identity live on the evaluation page; here only a stale evaluation is worth a line. #}
@@ -75,7 +67,7 @@
 {{ account_header(company) }}
 {% if company.account_gaps %}
 <h3>账户待核对项</h3>
-<ul class="facts">{% for gap in company.account_gaps %}<li>{{ account_gap(gap) }}</li>{% endfor %}</ul>
+<ul class="facts">{% for gap in company.account_gaps %}<li>{{ gap }}</li>{% endfor %}</ul>
 {% endif %}
 {% endif %}
 {% if company.position and company.position.theses %}

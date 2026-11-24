@@ -70,7 +70,7 @@ def test_account_forms_require_owner_session_csrf_and_tools_settings(web, owner_
     async def visit():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web.app), base_url=web.settings.base_url,
                                      headers={"Origin": web.settings.base_url}) as browser:
-            for path in ("/account/evidence", "/account/ledger/new", "/account/nav/new"):
+            for path in ("/account/evidence", "/account/ledger/new"):
                 browser.cookies.clear()
                 assert (await browser.get(path)).headers["location"] == "/login"
                 browser.cookies.update(owner_request(path).cookies)

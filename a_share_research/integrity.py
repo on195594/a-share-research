@@ -12,7 +12,6 @@ import sqlite3
 from pathlib import Path
 
 from a_share_research import db
-from a_share_research.account import nav_refs
 from a_share_research.evidence import material_hash
 
 
@@ -26,7 +25,6 @@ def check(database: Path, pdf_dir: Path) -> tuple[list[str], dict]:
         # One read transaction: a report published mid-check must not be compared with an older run row.
         conn.execute("BEGIN")
         problems, counts = _check_rows(conn)
-        problems.extend(nav_refs.inspect(conn, database.resolve().parent / 'account-evidence'))
         conn.execute("COMMIT")
     finally:
         conn.close()

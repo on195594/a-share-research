@@ -507,61 +507,6 @@ def backup_source(tmp_path):
 
 
 @pytest.fixture
-def nav_book(tmp_path):
-    import json
-    from datetime import datetime
-    from decimal import Decimal
-    from pathlib import Path
-
-    from a_share_research import api_keys, db
-    from a_share_research.account import evidence, ledger
-    from a_share_research.account.reconciliation import Opening
-    from support.account_nav import observe
-
-    conn = db.connect(tmp_path / 'app.db')
-    principal = api_keys.authenticate(conn, api_keys.create(conn, 'NAV structural', role='assistant'))
-    directory = tmp_path / 'account-evidence'
-    sha = evidence.store(directory, b'Structural NAV fixture, NOT broker evidence or actual performance')
-    ledger.initialize(conn, principal, 'a', Opening(positions={}, cash='1000'),
-        datetime.fromisoformat('2026-01-01T00:00:00+08:00'), directory, sha, tolerance=Decimal('0'))
-    result = dict(conn=conn, principal=principal, directory=directory, sha=sha, path=tmp_path / 'app.db')
-    result['start'] = observe(result, '2026-01-05T15:00:00+08:00', '1000')
-    result['end'] = observe(result, '2026-01-08T15:00:00+08:00', '1100')
-    result['index'] = json.loads((Path(__file__).parent / 'data/account-nav-h00906.json').read_text())
-    yield result
-    conn.close()
-
-
-@pytest.fixture
-def collect_nav(nav_book, bind_account, monkeypatch):
-    import pandas as pd
-
-    from a_share_research.core.market_data import MarketDataResult
-    from a_share_research.core.providers import TushareMarketDataProvider
-    from a_share_research.tools.registry import Context, invoke
-    from support.account_nav import request
-
-    book = nav_book
-    bind_account(book['conn'], 'a')
-    args = request(book).model_dump(mode='json', exclude={'benchmark_evidence_hash'})
-    index = book['index']
-    calls = []
-
-    def fetch(provider, code, start, end):
-        calls.append((code, start, end))
-        rows = [row for row in index['rows'] if start <= row['date'] <= end]
-        return MarketDataResult(pd.DataFrame(rows), 'ok', index['source'], index['fetched_at'],
-                                source_as_of=max(row['date'] for row in rows), freshness_days=0)
-
-    monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', fetch)
-    def collect(connection=book['conn'], **changes):
-        ctx = Context(connection, book['path'], book['principal'], account_shadow_enabled=True)
-        return invoke(ctx, 'account_nav_evaluate', {'request': args | changes})['data']
-
-    return collect, calls
-
-
-@pytest.fixture
 def book(tmp_path):
     from datetime import datetime
     from decimal import Decimal

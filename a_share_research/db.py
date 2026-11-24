@@ -624,11 +624,23 @@ V25_TABLES = ('oauth_clients', 'oauth_codes', 'oauth_tokens', 'account_nav_refs'
 
 def _migrate_v25(conn: sqlite3.Connection) -> None:
     from a_share_research import api_keys, oauth_store
-    from a_share_research.account import evidence, nav_refs
+    from a_share_research.account import evidence
 
     oauth_store.create_tables(conn)
     api_keys.migrate_grants(conn)
-    nav_refs.create_table(conn)
+    # The interval-reference store is retired; the empty table stays for v25 and rollback images.
+    conn.execute('''CREATE TABLE IF NOT EXISTS account_nav_refs (
+        artifact_sha256 TEXT PRIMARY KEY NOT NULL,
+        account_id TEXT NOT NULL REFERENCES account_books(account_id),
+        start_date TEXT NOT NULL, end_date TEXT NOT NULL, benchmark_code TEXT NOT NULL,
+        created_at TEXT NOT NULL, key_id INTEGER NOT NULL REFERENCES api_keys(id),
+        evidence_hashes TEXT NOT NULL)''')
+    conn.execute('''CREATE INDEX IF NOT EXISTS account_nav_intervals
+        ON account_nav_refs(account_id, end_date, start_date)''')
+    for operation in ('UPDATE', 'DELETE'):
+        conn.execute(f'''CREATE TRIGGER IF NOT EXISTS account_nav_refs_no_{operation.lower()}
+            BEFORE {operation} ON account_nav_refs
+            BEGIN SELECT RAISE(ABORT,'NAV references are append-only'); END''')
     evidence.create_upload_table(conn)
     if conn.execute('PRAGMA foreign_key_check').fetchone():
         raise ValueError('v25 迁移后存在无效外键，迁移已停止')

@@ -27,14 +27,14 @@ description: 通过统一 A 股服务读取研究报告与论点卡、处理账�
 - 扫描和月批先看状态、时点与缺口，需要明细时仅在 `research_scan_read`、`research_scan_weekly`、`research_batch_monthly_status` 查询中传 `compact=false`。用 `research_subscriptions` 查看订阅，替换时传期望保留的完整外部订阅列表。
 
 **总览、监控与生效政策**
-- 组合待办先读 `account_portfolio_overview`（顶层 `gaps` 为账户缺口），单公司先读 `research_company_overview`（公司缺口见 `gaps`，账户缺口见 `account_gaps`，持仓监控见 `policy.data_gaps`、`policy.escalations`，未闭环公告见 `announcements[].unresolved` 与 `evidence_path`，最近保存净值区间见 `nav_interval`），并将报告、监控评估、最近对账回执（`account.latest_receipt`）与净值相对路径拼成 Web 链接。
+- 组合待办先读 `account_portfolio_overview`（顶层 `gaps` 为账户缺口），单公司先读 `research_company_overview`（公司缺口见 `gaps`，账户缺口见 `account_gaps`，持仓监控见 `policy.data_gaps`、`policy.escalations`，未闭环公告见 `announcements[].unresolved` 与 `evidence_path`），并将报告、监控评估与最近对账回执（`account.latest_receipt`）的相对路径拼成 Web 链接。
 - 开展持仓监控或政策复核前，先查 `policy_current` 确认生效身份，再用 `policy_guide` 列出并仅加载当前任务需要的指南；无生效身份或实装不一致时直接指出缺口，不猜测默认政策。阅读监控与评估结果时同步核对 `as_of`、`data_status` 与逐项缺口。
 
 **账户凭证、入账与净值**
 - 带 `account_id` 的工具默认操作唯一绑定账本，可省略该字段；显式指定时须与绑定一致。
 - 先用 `account_evidence` 上传原图或交割单（可附文件名和标签），再用 `account_evidence_recent` 取 SHA-256。凭证完整时先展示拟入账事件与期末券商快照，经用户明确确认后调用 `account_submit`，按回执报告结果；仅有资产汇总截图时，核对其时点后用 `account_observe` 记录当前观察；缺材料或冲突时列出具体缺项，不反推或补造成交与现金流水。
 - 保持来源模式边界：影子入账、用户输入重放、历史行情重放与生产账户更新及当前市场事实严格区分；工具可发现本身不代表已完成账户切换。
-- 计算区间净值调用 `account_nav_evaluate`：选上海时间 15:00:00 的起止估值，可省略 `request.benchmark_evidence_hash` 由服务端自动采集 `H00906.CSI` 收盘证据。日期缺口（`invalid_arguments`）建议改选区间，行情故障（`unavailable`）稍后原请求重试，均可用错误末尾哈希核对响应。
+- 账户收益与基准对比调用 `account_nav`，由账本和收盘价自动计算，开户以来、近1月、今年以来直接读 `periods`；任意区间传 `start`/`end`。有 `gaps` 时说明净值截至日。Web 页面为 `/account/nav`。
 - 周期分析用 `account_cycle_analysis_current/history` 读取，确认后按版本号与证据用 `account_cycle_analysis_initialize/update` 追加。
 
 **错误与重试**

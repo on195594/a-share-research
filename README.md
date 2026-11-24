@@ -62,7 +62,7 @@ DATA_DIR=/home/lin/a-share-research-data uv run --env-file .env.web python -m a_
 
 在 Web 的 `/connections` 复制 MCP 地址、登记客户端的 OAuth 回调地址、查看或撤销授权，并下载配套 a-share Skill。支持 OAuth 的网页客户端连接 `https://stock.keyi.win/mcp` 后，由所有者登录并授权。
 
-从 `/portfolio/overview` 进入账户操作。先在 `/account/evidence` 上传原图或交割单（每份最多 20 MiB），再到 `/account/ledger/new` 填写已发生成交，选择凭证，核对现金、持仓和市值。提交后检查业务回执；结果未知时，先查最近回执，再用原编号和原内容恢复。`/account/nav/new` 用于计算有起止估值和资金流水凭证的区间净值。
+从 `/portfolio/overview` 进入账户操作。先在 `/account/evidence` 上传原图或交割单（每份最多 20 MiB），再到 `/account/ledger/new` 填写已发生成交，选择凭证，核对现金、持仓和市值。提交后检查业务回执；结果未知时，先查最近回执，再用原编号和原内容恢复。`/account/nav` 按账本与收盘价自动显示账户逐日净值及相对中证800全收益的超额。
 
 本机宿主使用原生 HTTP MCP。为每个 CLI 或脚本签发独立的 `assistant` PAT。以下命令在持有实例数据目录的宿主运行，签发时仅显示一次明文。
 

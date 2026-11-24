@@ -42,6 +42,16 @@ class TushareMarketDataProvider(TushareProviderBase):
             return _scalar_failure(result, DAILY_SOURCE)
         return _scalar_price_result(result, target)
 
+    def fetch_daily_bars(self, code: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
+        """Unadjusted daily bars; suspended days have no row."""
+        try:
+            start, end = parse_date(start_date), parse_date(end_date)
+            if start > end:
+                raise ValueError("start_date must not be after end_date")
+        except (ValueError, OverflowError) as exc:
+            return invalid_argument_result(DAILY_SOURCE, exc)
+        return self._fetch_daily(code, compact_date(start), compact_date(end), "daily_bars")
+
     def fetch_index_bars(self, symbol: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
         """Index closing points only; total-return indices need not have OHLC/volume."""
         try:

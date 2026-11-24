@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}账户收益 · 我的组合{% endblock %}
+{% block main %}
+<div class="overview">
+<h1>账户收益</h1>
+{% if error %}<p class="notice caution" role="alert">{{ error }}</p>{% endif %}
+{% if view %}
+<p class="small muted">单位净值，截至 {{ view.as_of }} 收盘 · 对照 {{ view.benchmark }} 全收益</p>
+{% for gap in view.gaps %}<p class="notice caution">{{ gap }}</p>{% endfor %}
+<div class="table-wrap" tabindex="0" role="region" aria-label="收益对比">
+<table>
+  <thead><tr><th scope="col">区间</th><th scope="col" class="num">账户</th><th scope="col" class="num">中证800全收益</th><th scope="col" class="num">超额</th></tr></thead>
+  <tbody>
+  {% for p in view.periods %}
+    <tr><th scope="row">{{ p.label }}<br><span class="small muted">{{ p.start }} 至 {{ p.end }}</span></th>
+      <td class="num">{{ p.account_return|decimal_format('.2%') }}</td>
+      <td class="num">{{ p.benchmark_return|decimal_format('.2%') }}</td>
+      <td class="num">{{ p.excess_percentage_points|decimal_format('+.2f') }} 个百分点</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<form method="get" action="/account/nav" class="search narrow">
+  <label for="nav-start">起点</label>
+  <input id="nav-start" name="start" type="date" value="{{ start }}" min="{{ view.days[0].date }}" max="{{ view.as_of }}">
+  <label for="nav-end">终点</label>
+  <input id="nav-end" name="end" type="date" value="{{ end }}" min="{{ view.days[0].date }}" max="{{ view.as_of }}">
+  <div class="actions"><button class="btn secondary" type="submit">计算指定区间</button></div>
+</form>
+<details class="block">
+  <summary>逐日净值</summary>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="逐日净值">
+  <table>
+    <thead><tr><th scope="col">日期</th><th scope="col" class="num">总资产</th><th scope="col" class="num">出入金</th><th scope="col" class="num">单位净值</th><th scope="col" class="num">指数收盘</th></tr></thead>
+    <tbody>
+    {% for d in view.days|reverse %}
+      <tr><th scope="row">{{ d.date }}</th><td class="num">{{ d.total_assets }}</td>
+        <td class="num">{% if d.flow|float %}{{ d.flow }}{% endif %}</td>
+        <td class="num">{{ d.nav|decimal_format('.4f') }}</td><td class="num">{{ d.benchmark }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+<p class="hint">{{ view.basis }}。</p>
+{% endif %}
+<p class="actions"><a class="link" href="/portfolio/overview">返回组合总览</a></p>
+</div>
+{% endblock %}

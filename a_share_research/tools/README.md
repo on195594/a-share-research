@@ -46,14 +46,9 @@ ASHARE_PUBLIC_MCP_URL=http://127.0.0.1:8610/mcp DATA_DIR=/absolute/private/copy 
 
 观察和快照只有在原件给出估值时点时才填 `portfolio_value_as_of`（完整、带时区的时间）。观察须有总资产，`observed_at` 不早于估值时点。快照的估值时点不得早于期初或本次有效事件，不得在未来。
 
-`account_nav_capture`、`account_nav_evaluate` 和 `account_nav_replay` 用于冻结账本、计算区间净值和重放净值凭证：
+`account_nav` 按绑定账本逐日计算单位净值，无需选择估值或声明资金流水。每个交易日收盘的总资产为账本持仓乘以 TuShare 不复权收盘价再加账本现金；转入转出按所在交易日收盘计（15:00:00 及之前算当日，之后算下一交易日），只改变份额不改变净值。基准为服务端采集的 H00906.CSI 全收益。返回逐日 `days`，以及开户以来、近1月、今年以来的 `periods`（窗口早于开户时截到开户日，起点相同的只列一次）；传 `start`/`end`（`YYYY-MM-DD`）另加“指定区间”，取各自当日或之前最近的收盘。某只持仓的最新收盘未发布时，序列截至它已有的最后一日并在 `gaps` 说明；停牌日沿用前收盘。收益率为小数，超额为百分点。
 
-1. `account_nav_capture` 读取账本快照并返回 `state_sha256`。从 `source` 选择起止估值和每笔外部资金流发生前的估值。估值引用包含 `kind`（`observation` 或 `batch`）、`id` 和选择理由 `reason`。
-2. 用 `account_evidence` 保存资金流水原件。`account_nav_evaluate` 的 `request` 包含 `expected_state_sha256`、`start`、`end`、`flows`（每笔带 `event_id` 和 `before`）与 `coverage`。覆盖声明给出起止时点、`currency="CNY"`、`scope="cash_equity_no_liabilities"`、凭证哈希和说明。只有原件支持时才能声明 `complete_external_flows=true`、`no_security_transfers=true`。
-3. 两端取上海时间 15:00:00，且均须有 H00906.CSI 收盘值。服务端采集并保存指数证据，也可通过 `request.benchmark_evidence_hash` 指定已有证据。计算前账本变化时，重新捕获快照。
-4. 保存 `artifact_sha256`，用 `account_nav_replay` 按哈希重放。账户与基准收益率为小数，超额为百分点。净值凭证随账户证据备份。
-
-`research_company_overview` 与 `account_portfolio_overview` 对应 Web 的公司与组合总览，返回已有评估、当前持仓周期、研究与公告复核、净值区间和相应的缺口。通过 `account_research_coverage` 可区分成交明确采用的报告（`stated_report_id`）与成交时可查的最近正式报告（`available_report_id`）。
+`research_company_overview` 与 `account_portfolio_overview` 对应 Web 的公司与组合总览，返回已有评估、当前持仓周期、研究与公告复核和相应的缺口。通过 `account_research_coverage` 可区分成交明确采用的报告（`stated_report_id`）与成交时可查的最近正式报告（`available_report_id`）。
 
 ## 成本、周期与分析
 

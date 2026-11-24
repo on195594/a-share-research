@@ -4,7 +4,7 @@ import json
 import sqlite3
 
 from a_share_research import db, reading, scans, service, stock_codes
-from a_share_research.account import analysis, mirror, nav_refs, projection_ids
+from a_share_research.account import analysis, mirror, projection_ids
 from a_share_research.evidence import safe_url
 from a_share_research.policy import account_view, registry as policies
 
@@ -79,28 +79,6 @@ def _receipt_refs(conn, account_id):
         'last_receipt': {'id': posted['id'], 'created_at': posted['created_at'],
                          'path': f"/account/receipts/{posted['id']}"} if posted else None,
     }
-
-
-def _nav_summary(row):
-    summary = {k: row[k] for k in ('artifact_sha256', 'start_date', 'end_date', 'benchmark_code', 'created_at')}
-    return dict(summary, path=f"/account/nav/{row['artifact_sha256']}")
-
-
-def nav_detail(conn, artifact_sha256):
-    with db.transaction(conn, immediate=False):
-        try:
-            account_id = account_view.bound_account_id(conn)
-        except policies.PolicyError as exc:
-            raise service.RequestError(str(exc), 404) from exc
-        row = conn.execute('SELECT * FROM account_nav_refs WHERE account_id=? AND artifact_sha256=?',
-                           (account_id, artifact_sha256)).fetchone()
-    if row is None:
-        raise service.RequestError('绑定账户没有这份 NAV 区间凭证', 404)
-    try:
-        result = nav_refs.read_result(row, mirror.target_directory(conn) / 'account-evidence')
-    except (ValueError, TypeError, KeyError) as exc:
-        raise service.RequestError(f'NAV 区间凭证完整性核验失败：{exc}', 409) from exc
-    return _nav_summary(row) | {'result': result}
 
 
 def _policy(saved, holding=None):
@@ -186,7 +164,6 @@ def _overview(conn, code=None, *, history=None):
             account_gaps.append(str(exc))
         source = current['source'] if current else None
         account = None
-        account_id = None
         positions = {}
         saved = None
         if source:
@@ -206,28 +183,13 @@ def _overview(conn, code=None, *, history=None):
                         account_gaps.append('暂无绑定账户的已保存监控评估')
             else:
                 account_gaps.append('当前来源为已核实镜像，缺少绑定账本的持仓周期')
-        elif conn.execute("SELECT 1 FROM account_source WHERE id=1 AND mode='ledger'").fetchone():
-            # A committed interval survives gaps in the current position projection.
-            try:
-                account_id = account_view.bound_account_id(conn)
-            except policies.PolicyError as exc:
-                account_gaps.append(str(exc))
-        nav_interval = None
-        if account_id is not None:
-            row = conn.execute('SELECT artifact_sha256,start_date,end_date,benchmark_code,created_at '
-                               'FROM account_nav_refs WHERE account_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1',
-                               (account_id,)).fetchone()
-            if row:
-                nav_interval = _nav_summary(row)
-        if nav_interval is None:
-            account_gaps.append('暂无可查询的 NAV 区间凭证')
         if history is None and (code is not None or (current and current['codes'])):
             history = scans.ScanHistory(conn)
         if code is not None:
             held = code in current['codes'] if current else None
             result = _company(conn, code, held, positions.get(code), saved, history)
-            return result | {'account': account, 'nav_interval': nav_interval, 'account_gaps': account_gaps}
-        return dict(account=account, policy=_policy(saved), nav_interval=nav_interval, gaps=account_gaps,
+            return result | {'account': account, 'account_gaps': account_gaps}
+        return dict(account=account, policy=_policy(saved), gaps=account_gaps,
                     holdings=[_company(conn, key, True, positions.get(key), saved, history)
                               for key in current['codes']] if current else None)
 
