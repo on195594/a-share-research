@@ -261,7 +261,7 @@ def test_routine_l3_groups_by_date_without_hiding_due_or_unverified_items():
                 29.83,
                 l3=[
                     {"id": 6, "status": "not_triggered", "next_review": "2026-10-29"},
-                    {"id": 7, "status": "triggered", "next_review": "2026-10-30", "valid_for_action": True},
+                    {"id": 7, "status": "triggered", "action": "reduce", "next_review": "2026-10-30", "valid_for_action": True},
                     {"id": 8, "status": "not_triggered", "next_review": "2026-10-30"},
                 ],
             ),
@@ -274,13 +274,13 @@ def test_routine_l3_groups_by_date_without_hiding_due_or_unverified_items():
         "L3 2 条未触发，2026-10-29 例行复核（#1、#2）；L3 1 条待核实，未设复核日（#5）"
     ) in brief
     assert (
-        "- fixture-600900：L3 1 条已触发（#7）；L3 1 条未触发，2026-10-29 例行复核（#6）\n"
+        "- fixture-600900：L3 1 条已触发（#7 减仓）；L3 1 条未触发，2026-10-29 例行复核（#6）\n"
     ) in brief
     # Routine reviews beyond the 7-day horizon stay out of the brief.
     assert "#8" not in brief
     snapshot["holdings"][1]["l3"]["contract"] = "invalid"
     invalid = format_daily_brief(snapshot, [], "2026-10-22")
-    assert "- fixture-600900：L3 1 条已登记触发，证据或契约待核实（#7）；" in invalid
+    assert "- fixture-600900：L3 1 条已登记触发，证据或契约待核实（#7 减仓）；" in invalid
 
 
 def test_industry_trigger_and_evidence_gaps_use_snapshot_fields():

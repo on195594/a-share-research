@@ -1003,6 +1003,7 @@ _BRIEF_ACTION_LABELS = {
     "data_conflict": "数据冲突",
 }
 _BRIEF_L3_STATUS = {"pending": "待核实", "watch": "观察中", "triggered": "已触发"}
+_BRIEF_L3_ACTION = {"review": "复核", "reduce": "减仓", "exit": "清仓"}
 _BRIEF_ALERT_STATUS = {"active": "生效中", "pending": "待核实"}
 _BRIEF_P3_STATUS = {"untradeable": "P3 不可交易，暂缓"}
 _BRIEF_P3_INCOMPLETE = {
@@ -1116,6 +1117,8 @@ def _brief_signals(snapshot: dict, today: str) -> dict[str | None, dict[str, lis
             status, due = condition["status"], condition["next_review"]
             ref = f"#{condition['id']}"
             if status == "triggered":
+                # The owner decides from the phone, so a trigger names the action it calls for.
+                ref += f" {_BRIEF_L3_ACTION[condition['action']]}"
                 valid = l3["contract"] == "versioned" and condition["valid_for_action"]
                 key = ("action", "已触发" if valid else "已登记触发，证据或契约待核实")
             elif due and due <= today:
