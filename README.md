@@ -30,7 +30,7 @@ uv run --env-file .env python -m a_share_research.worker
 uv run --env-file .env python -m a_share_research.research 600519 --question '最新财报改变了什么？'
 ```
 
-Web 的账户写入表单另需 `ASHARE_TOOLS_URL`（例如 `http://a-share-research-tools:8621`）和 `ASHARE_TOOLS_TOKEN`（专属 `assistant` PAT，名为 `web-owner-proxy`），两者均放在网页环境文件中。Web 按 `PUBLIC_BASE_URL` 的 Host 请求 tools 的 `/mcp`。本地启动 tools 的命令见[工具手册](a_share_research/tools/README.md)。
+Web 的账户表单与账户收益页另需 `ASHARE_TOOLS_URL`（例如 `http://a-share-research-tools:8621`）和 `ASHARE_TOOLS_TOKEN`（专属 `assistant` PAT，名为 `web-owner-proxy`），两者均放在网页环境文件中。Web 按 `PUBLIC_BASE_URL` 的 Host 请求 tools 的 `/mcp`。本地启动 tools 的命令见[工具手册](a_share_research/tools/README.md)。
 
 模型配置档随代码发布。`roles` 指定作者与复核员的提供方、模型、思考强度与输出 token 上限，`role_for` 分配研究阶段与批次比较的角色，`limits` 与 `rationale` 记录运行上限及依据。[模型配置档](a_share_research/model_profile.json)
 

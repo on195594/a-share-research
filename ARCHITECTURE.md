@@ -20,7 +20,7 @@ Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布
 
 ## 进程与入口
 
-- **web** 提供 HTML 页面、GitHub 所有者会话、OAuth 发现与授权服务，以及授权管理页 `/connections`。账户表单校验会话、同源与 CSRF 后，以专属 `web-owner-proxy` grant 经内网调用 tools 的 `/mcp`，提交凭证、记账或评估 NAV。写入与回执归 tools。
+- **web** 提供 HTML 页面、GitHub 所有者会话、OAuth 发现与授权服务，以及授权管理页 `/connections`。账户表单校验会话、同源与 CSRF 后，以专属 `web-owner-proxy` grant 经内网调用 tools 的 `/mcp`，提交凭证、记账或读取账户净值。写入与回执归 tools。
 - **tools** 接收 nginx `location = /mcp` 转发的 Streamable HTTP MCP 请求。服务按公网地址校验 Host 和 Origin，接受有效的非 owner PAT 或绑定本资源的 OAuth access token。五个本机宿主使用原生 HTTP MCP，Hermes 业务脚本经 `ashare` 调用。政策激活仅走本机 owner 入口。接入方法见 [README](README.md#web-与-mcp-接入)。
 - **worker** 在领取任务前调用 runner 的 `--check`，离线解析作者与复核员的模型和凭据。它一次执行一个单股任务，单股队列和扫描队列空闲时推进批次。worker 可访问研究行情凭据与宿主 pi 目录。tools 的行情凭据来自独立环境文件。
 - MCP 与 tools 业务 REST 热备共用注册表与 Gate。写入与采集共享两个并发名额。工具发现与读取只登记在途。发布暂停时拒收新请求，等待在途请求结束，暂停标记跨重启保留。旧入口的退役条件见[实施计划](docs/implementation-plan.md#web-与-mcp-双入口实施)。

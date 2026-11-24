@@ -90,7 +90,6 @@
     {{ input('cash','券商现金余额（元）','number','min="0" step="any" inputmode="decimal" required') }}
     {{ input('total_assets','券商总资产（元）','number','min="0" step="any" inputmode="decimal" required') }}
     {{ input('as_of','资产估值时点（北京时间）','datetime-local','step="1"') }}
-    <p class="hint">如需用这份快照作 NAV 区间起点或终点，请提供交易日 15:00 收盘估值。</p>
     <div id="ledger-preview" class="notice" role="status" hidden><p id="cash-preview"></p><p id="market-preview"></p></div>
   </fieldset>
   <fieldset{% if not enabled or retry_only %} disabled{% endif %}>

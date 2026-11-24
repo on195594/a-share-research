@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from functools import partial
 from pathlib import Path
 from typing import Self
@@ -684,13 +684,19 @@ async def account_nav(request: Request, start: str = "", end: str = ""):
     if not (session := current_session(request)):
         return login_required()
     client = ToolsClient.from_settings(settings)
+    start, end = start.strip(), end.strip()
     context = dict(view=None, error=None, start=start, end=end)
+    arguments = {key: value for key, value in (("start", start), ("end", end)) if value}
+    try:
+        for value in arguments.values():
+            date.fromisoformat(value)
+    except ValueError:
+        context["error"] = "起点和终点须为 YYYY-MM-DD 格式的日期"
     if client is None:
         context["error"] = "Web 账户读取未启用"
-    else:
-        arguments = {key: value for key, value in (("start", start), ("end", end)) if value}
+    elif context["error"] is None:
         try:
-            context["view"] = await client.call("account_nav", arguments)
+            context["view"] = await client.call("account_nav", arguments, read_only=True)
         except ToolCallError as exc:
             context["error"] = str(exc)
     return render(request, "nav.html", session, **context)

@@ -316,6 +316,13 @@ def _nav_closes(result, label) -> dict:
             for row in result.value.to_dict('records')}
 
 
+def _nav_suspended(result, code) -> set[date]:
+    if result.status != 'ok' or result.value is None:
+        raise ToolError('unavailable', f'{code} 停牌记录暂不可用（{result.error_code or result.status}），稍后重试', 503)
+    return {date.fromisoformat(str(day)[:4] + '-' + str(day)[4:6] + '-' + str(day)[6:8])
+            for day in result.value['trade_date']}
+
+
 def _account_nav(ctx: Context, args: AccountNav) -> Payload:
     from a_share_research.core.providers import TushareMarketDataProvider
 
@@ -326,7 +333,9 @@ def _account_nav(ctx: Context, args: AccountNav) -> Payload:
         fetch_index=lambda s, e: _nav_closes(provider.fetch_index_bars(nav.BENCHMARK, s.isoformat(), e.isoformat()),
                                              nav.BENCHMARK),
         fetch_closes=lambda code, s, e: _nav_closes(provider.fetch_daily_bars(code, s.isoformat(), e.isoformat()),
-                                                    code)))
+                                                    code),
+        fetch_suspended=lambda code, s, e: _nav_suspended(
+            provider.fetch_suspended_days(code, s.isoformat(), e.isoformat()), code)))
 
 
 def _store_evidence(ctx: Context, args: EvidenceUpload) -> Payload:

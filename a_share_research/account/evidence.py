@@ -92,7 +92,7 @@ def verify(directory: Path, sha: str) -> bool:
 
 
 def create_upload_table(conn) -> None:
-    """Which grant uploaded which immutable object under what name; NAV artifacts are not uploads."""
+    """Which grant uploaded which immutable object under what name."""
     conn.execute('''CREATE TABLE IF NOT EXISTS account_evidence_uploads (
         id INTEGER PRIMARY KEY,
         sha256 TEXT NOT NULL CHECK(length(sha256)=64 AND sha256 NOT GLOB '*[^0-9a-f]*'),

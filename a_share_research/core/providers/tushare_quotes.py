@@ -24,6 +24,7 @@ from a_share_research.core.providers.tushare_common import (
 
 DAILY_SOURCE = "tushare.daily"
 INDEX_DAILY_SOURCE = "tushare.index_daily"
+SUSPEND_SOURCE = "tushare.suspend_d"
 TUSHARE_VOLUME_UNIT = "hand"
 
 
@@ -51,6 +52,24 @@ class TushareMarketDataProvider(TushareProviderBase):
         except (ValueError, OverflowError) as exc:
             return invalid_argument_result(DAILY_SOURCE, exc)
         return self._fetch_daily(code, compact_date(start), compact_date(end), "daily_bars")
+
+    def fetch_suspended_days(self, code: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
+        """Whole-day suspensions as `trade_date` rows (YYYYMMDD); an empty frame means none."""
+        try:
+            ts_code = to_tushare_stock_code(code)
+            start, end = parse_date(start_date), parse_date(end_date)
+            if start > end:
+                raise ValueError("start_date must not be after end_date")
+        except (ValueError, OverflowError) as exc:
+            return invalid_argument_result(SUSPEND_SOURCE, exc)
+        return self._request_frame(
+            SUSPEND_SOURCE,
+            "suspend_d",
+            {"ts_code": ts_code, "start_date": compact_date(start), "end_date": compact_date(end),
+             "suspend_type": "S", "fields": "trade_date,suspend_type"},
+            {"trade_date"},
+            allow_empty=True,
+        )
 
     def fetch_index_bars(self, symbol: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
         """Index closing points only; total-return indices need not have OHLC/volume."""

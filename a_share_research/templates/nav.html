@@ -20,13 +20,6 @@
   </tbody>
 </table>
 </div>
-<form method="get" action="/account/nav" class="search narrow">
-  <label for="nav-start">起点</label>
-  <input id="nav-start" name="start" type="date" value="{{ start }}" min="{{ view.days[0].date }}" max="{{ view.as_of }}">
-  <label for="nav-end">终点</label>
-  <input id="nav-end" name="end" type="date" value="{{ end }}" min="{{ view.days[0].date }}" max="{{ view.as_of }}">
-  <div class="actions"><button class="btn secondary" type="submit">计算指定区间</button></div>
-</form>
 <details class="block">
   <summary>逐日净值</summary>
   <div class="table-wrap" tabindex="0" role="region" aria-label="逐日净值">
@@ -44,6 +37,16 @@
 </details>
 <p class="hint">{{ view.basis }}。</p>
 {% endif %}
+{# Keep the date form after an error so the range can be corrected in place. #}
+{% set bounds %}{% if view %} min="{{ view.days[0].date }}" max="{{ view.as_of }}"{% endif %}{% endset %}
+<form method="get" action="/account/nav" class="search narrow">
+  <label for="nav-start">起点</label>
+  <input id="nav-start" name="start" type="date" value="{{ start }}"{{ bounds }}>
+  <label for="nav-end">终点</label>
+  <input id="nav-end" name="end" type="date" value="{{ end }}"{{ bounds }}>
+  <div class="actions"><button class="btn secondary" type="submit">计算指定区间</button>
+    {% if error %}<a class="link" href="/account/nav">查看默认区间</a>{% endif %}</div>
+</form>
 <p class="actions"><a class="link" href="/portfolio/overview">返回组合总览</a></p>
 </div>
 {% endblock %}

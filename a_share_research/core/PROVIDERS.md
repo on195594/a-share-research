@@ -14,9 +14,11 @@ TuShare 版本由 `pyproject.toml` 锁定。Token 按构造参数、`TUSHARE_TOK
 
 ## 行情价格合同
 
-`TushareMarketDataProvider` 提供两种查询。结果中的 `source_as_of` 取实际最后观察日，`freshness_days` 相对请求截止日计算。股票和指数可分别用 `to_tushare_stock_code`、`to_tushare_index_code` 规范化代码。
+`TushareMarketDataProvider` 提供以下查询。结果中的 `source_as_of` 取实际最后观察日，`freshness_days` 相对请求截止日计算。股票和指数可分别用 `to_tushare_stock_code`、`to_tushare_index_code` 规范化代码。
 
 - `fetch_index_bars(symbol, start_date, end_date)` 在闭区间内返回按日期升序排列的 `date/close` 点位，支持 SH、SZ、CSI（含 H00300.CSI 等全收益指数）。非法参数、缺列、非正或非有限点位、重复日期、区间外数据均返回失败。
+- `fetch_daily_bars(code, start_date, end_date)` 返回闭区间内的不复权日线，停牌日无行。
+- `fetch_suspended_days(code, start_date, end_date)` 返回 `suspend_d` 中全天停牌（`S`）的 `trade_date`，没有停牌时为空表。
 - `fetch_close_price(code, target_date)` 返回目标日及此前 10 个自然日内最近的有效收盘价。目标日命中为 `ok`，取较早交易日为 `degraded`，原因为 `NEAREST_AVAILABLE_PRICE`，无有效价格则失败。
 
 ## 估值

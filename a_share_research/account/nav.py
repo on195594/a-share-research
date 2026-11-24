@@ -15,8 +15,9 @@ from a_share_research.account.reconciliation import Event, Opening, project
 from a_share_research.core import account_nav
 
 BENCHMARK = 'H00906.CSI'
-METHOD = 'daily_unit_nav_v1'
-BASIS = '账本持仓×不复权收盘价+账本现金；出入金按所在交易日收盘计；基准为中证800全收益'
+METHOD = 'daily_modified_dietz_v1'
+BASIS = ('账本持仓×不复权收盘价+账本现金；当日分红与送转计入当日收盘；出入金按发生时点在当日交易时段中的'
+         '剩余占比计入收益分母（修正 Dietz）；基准为中证800全收益')
 # Look back far enough that a stock suspended on the opening day still has a prior close.
 PRICE_LOOKBACK = timedelta(days=30)
 
@@ -28,13 +29,30 @@ def _book(conn, account_id):
     if book is None:
         raise ledger.LedgerError('尚未建立影子账本期初', 404)
     rows = conn.execute('SELECT j.event FROM account_journal j LEFT JOIN account_voids v ON v.event_id=j.id '
-                        'WHERE j.account_id=? AND v.event_id IS NULL', (account_id,))
+                        'WHERE j.account_id=? AND v.event_id IS NULL ORDER BY j.id', (account_id,))
     events = sorted((Event.model_validate_json(row['event']) for row in rows), key=lambda e: e.occurred_at)
     return datetime.fromisoformat(book['opened_at']), Opening.model_validate_json(book['opening']), events
 
 
 def _flow(event):
     return {'deposit': event.cash, 'withdrawal': -event.cash}.get(event.kind, Decimal(0))
+
+
+def _session_left(at: datetime, day: date) -> Decimal:
+    """Share of the 09:30-11:30 and 13:00-15:00 session on day still ahead at the flow time."""
+    local = at.astimezone(db.SHANGHAI)
+    if local.date() < day:
+        return Decimal(1)
+    minute = Decimal(local.hour * 3600 + local.minute * 60 + local.second) / 60
+    elapsed = sum(min(max(minute, start), end) - start for start, end in ((570, 690), (780, 900)))
+    return 1 - elapsed / 240
+
+
+def _counts_on(event, day: date, stamp: datetime) -> bool:
+    # Ex-date closes already drop the payout, so a dividend or bonus booked later that day belongs
+    # to that close rather than the next one.
+    return event.occurred_at <= stamp or (event.kind in ('dividend', 'adjustment')
+                                          and event.occurred_at.astimezone(db.SHANGHAI).date() == day)
 
 
 def _close_on_or_before(closes: Closes, day: date):
@@ -66,6 +84,7 @@ def _period(rows, label, start, end):
 
 def daily(conn, principal, account_id: str, *, today: date,
           fetch_index: Callable[[date, date], Closes], fetch_closes: Callable[[str, date, date], Closes],
+          fetch_suspended: Callable[[str, date, date], set[date]],
           start: date | None = None, end: date | None = None) -> dict:
     """Return the NAV series from the opening close and the standard comparison periods."""
     with db.transaction(conn, immediate=False):
@@ -78,27 +97,32 @@ def daily(conn, principal, account_id: str, *, today: date,
     if not stamps:
         raise ledger.LedgerError(f'{BENCHMARK} 尚无开户日 {first_day} 及之后的收盘值，收盘数据发布后再查', 422)
 
-    holdings, previous = [], opened_at
+    holdings, previous = [], None
     for day, stamp in stamps:
-        position = project(opening, [e for e in events if e.occurred_at <= stamp])
-        flow = sum((_flow(e) for e in events if previous < e.occurred_at <= stamp), Decimal(0))
-        holdings.append((day, position, flow))
+        position = project(opening, [e for e in events if _counts_on(e, day, stamp)])
+        flows = [e for e in events if (previous is None or previous < e.occurred_at) and e.occurred_at <= stamp
+                 and _flow(e)]
+        holdings.append((day, position, sum((_flow(e) for e in flows), Decimal(0)),
+                         sum((_flow(e) * _session_left(e.occurred_at, day) for e in flows), Decimal(0))))
         previous = stamp
-    codes = sorted({code for _, position, _ in holdings for code in position.positions})
+    codes = sorted({code for _, position, *_ in holdings for code in position.positions})
     closes = {code: fetch_closes(code, first_day - PRICE_LOOKBACK, today) for code in codes}
 
-    # Stop at the last close every held stock has reached, so an unpublished close is never
-    # filled with the previous one; a suspension before that point keeps its last close.
-    gaps, last_day = [], stamps[-1][0]
-    for code in sorted(holdings[-1][1].positions):
-        latest = max(closes[code], default=None)
-        if latest is None or latest < last_day:
-            gaps.append(f'{code} 收盘价只到 {latest or "无"}，净值截至该日')
-            last_day = min(last_day, latest or first_day)
+    # A held stock without a close is either suspended (keep its last close) or not yet published;
+    # the series stops before the first unpublished close instead of filling it with an older one.
+    gaps, cutoff = [], None
+    for code in codes:
+        missing = [day for day, position, *_ in holdings if code in position.positions and day not in closes[code]]
+        if not missing:
+            continue
+        suspended = fetch_suspended(code, missing[0], missing[-1])
+        if unpublished := [day for day in missing if day not in suspended]:
+            gaps.append(f'{code} 的 {unpublished[0]} 收盘价尚未发布，净值截至此前一个交易日')
+            cutoff = min(cutoff or unpublished[0], unpublished[0])
 
     days = []
-    for day, position, flow in holdings:
-        if day > last_day:
+    for day, position, flow, weighted_flow in holdings:
+        if cutoff is not None and day >= cutoff:
             break
         assets = position.cash
         for code, shares in position.positions.items():
@@ -106,7 +130,8 @@ def daily(conn, principal, account_id: str, *, today: date,
             if price is None:
                 raise ledger.LedgerError(f'{code} 在 {day} 及之前 30 天没有收盘价，无法估值', 503)
             assets += price * shares
-        days.append(account_nav.Day(date=day, total_assets=assets, flow=flow, benchmark=index[day]))
+        days.append(account_nav.Day(date=day, total_assets=assets, flow=flow, weighted_flow=weighted_flow,
+                                    benchmark=index[day]))
     if not days:
         raise ledger.LedgerError('持仓股票尚无开户日及之后的收盘价，收盘数据发布后再查', 422)
     try:

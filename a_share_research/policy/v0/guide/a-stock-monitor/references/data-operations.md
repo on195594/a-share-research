@@ -38,7 +38,7 @@
 | 状态 | 写入方式 | 消费场景 |
 |---|---|---|
 | 持仓股数、成本、买入日与主力入场日 | `account_submit` | 监控快照、12 个月复查 |
-| 资产观察快照 | `account_observe` | 风险分母、区间净值 |
+| 资产观察快照 | `account_observe` | 风险分母 |
 | L3 条件与核查结论 | `account_cycle_analysis_update`（`l3`） | 论文破灭止损、步骤 2.5 |
 | L1/L2 论点版本与 L3 替换 | `account_cycle_analysis_update`（`thesis`） | 活动论文边界 |
 | 预警开启、续期与解除 | `account_cycle_analysis_update`（`alert` / `alert_open`） | 预警升级门槛、P3 延迟 |

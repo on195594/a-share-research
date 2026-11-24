@@ -74,6 +74,8 @@ def _reply(response: requests.Response, request_id: str) -> dict:
             if code in ("paused", "busy"):
                 raise ToolCallError("unavailable", message)
             if code in ("unavailable", "service_failure", "timeout"):
+                if read_only:
+                    raise ToolCallError("unavailable", message)
                 raise ToolCallError("unknown", f"{message}。{_UNKNOWN}")
             raise ToolCallError("business", message, code)
         if result.get("isError", False) is not False:
@@ -98,10 +100,11 @@ class ToolsClient:
             return None
         return cls(settings.tools_url.rstrip("/") + "/mcp", urlsplit(settings.base_url).netloc, settings.tools_token)
 
-    async def call(self, name: str, arguments: dict, *, request_id: str | None = None) -> dict:
-        return await run_in_threadpool(self._call, name, arguments, request_id or uuid4().hex)
+    async def call(self, name: str, arguments: dict, *, request_id: str | None = None, read_only: bool = False) -> dict:
+        """read_only calls have no receipt, so failures say to retry instead of checking one."""
+        return await run_in_threadpool(self._call, name, arguments, request_id or uuid4().hex, read_only)
 
-    def _call(self, name: str, arguments: dict, request_id: str) -> dict:
+    def _call(self, name: str, arguments: dict, request_id: str, read_only: bool = False) -> dict:
         params = {"name": name, "arguments": arguments, "_meta": {
             "io.modelcontextprotocol/protocolVersion": _VERSION, "io.modelcontextprotocol/clientCapabilities": {}}}
         headers = {"Authorization": "Bearer " + self.token, "Host": self.host, "Accept": "application/json",

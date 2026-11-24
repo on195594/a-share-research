@@ -16,15 +16,20 @@
   {% if csrf %}
   <nav class="shell-nav" aria-label="主要页面">
     {% set path = request.url.path if request is defined else '' %}
-    {# A section stays current on its sub-pages (account pages belong to the portfolio). #}
-    {% for href, label, prefixes in [
-      ('/portfolio/overview', '我的组合', ('/portfolio/', '/account/')),
+    {# First matching section wins; monitor evaluations are opened from the portfolio. #}
+    {% set sections = [
+      ('/portfolio/overview', '我的组合', ('/portfolio', '/account', '/policy/evaluations')),
       ('/batches', '候选初筛', ('/batches',)),
       ('/research-library', '研究库', ('/research-library',)),
       ('/policy', '投资政策', ('/policy',)),
       ('/connections', '授权管理', ('/connections',)),
     ] %}
-    <a href="{{ href }}"{% if path.startswith(prefixes) %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% set current = namespace(href=none) %}
+    {% for href, label, prefixes in sections if current.href is none %}
+      {% for prefix in prefixes if path == prefix or path.startswith(prefix ~ '/') %}{% set current.href = href %}{% endfor %}
+    {% endfor %}
+    {% for href, label, prefixes in sections %}
+    <a href="{{ href }}"{% if current.href == href %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
   <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">退出</button></form>
