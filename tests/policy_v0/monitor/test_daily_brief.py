@@ -52,19 +52,42 @@ def test_brief_lists_stop_distance_triggers_due_l3_and_extras():
         ],
     )
     brief = format_daily_brief(snapshot, ["000963 疑似漏记分红"], "2026-10-22")
-    assert "fixture-000963 000963 26.21（-1.43%） 距止损1+5.3% 距止损2+10.9%" in brief
-    assert "- 000963 日跌幅达3%：daily change -3.1%" in brief
-    assert "L3#35 观察中" in brief
-    assert "2026-10-28 有1项L3例行复核，当前均未触发（000963）" in brief
-    assert "L3#36" not in brief and "denominator" not in brief
-    assert "- 000963 疑似漏记分红" in brief
+    assert "fixture-000963 26.21 -1.43% ｜距止损 5.3%" in brief
+    # One line per holding, Chinese phrases only; the English detail stays in the snapshot.
+    assert (
+        "- fixture-000963：今日 -1.43%；L3 1 条观察中，2026-10-31 复核（#35）；"
+        "L3 1 条未触发，2026-10-28 例行复核（#34）"
+    ) in brief
+    assert "#36" not in brief and "denominator" not in brief and "daily change" not in brief
+    assert "今日需处理 1 项：\n- 000963 疑似漏记分红" in brief
+
+
+def test_stop_breach_merges_signals_into_one_action_line_and_sorts_holdings():
+    breached = _holding("000963", 24.35)
+    breached["quote"]["daily_change_pct"] = -3.41
+    snapshot = _snapshot(
+        [_holding("600900", 26.21), breached],
+        [
+            {"code": "000963", "reason_code": "price_stop_1", "detail": "current price reached"},
+            {"code": "000963", "reason_code": "daily_drop", "detail": "daily change -3.41%"},
+        ],
+    )
+    brief = format_daily_brief(snapshot, [], "2026-10-22")
+    assert (
+        "今日需处理 1 项：\n- fixture-000963：跌破第一档止损（低于止损线 1.9%），"
+        "距第二档 4.0%；今日 -3.41%"
+    ) in brief
+    assert "留意" not in brief
+    assert brief.index("fixture-000963 24.35 -3.41% ｜已破第一档") < brief.index(
+        "fixture-600900 26.21 -1.43% ｜距止损 5.3%"
+    )
 
 
 def test_calm_day_limits_no_trigger_to_program_checks():
     brief = format_daily_brief(_snapshot([_holding("000963", 26.21)]), [], "2026-10-22")
-    assert "需关注：本轮程序检查未触发" in brief
+    assert "今日无需处理：程序检查" in brief
     assert "不覆盖未自动计算的基本面条件" in brief
-    assert "无触发项" not in brief and "尚未关闭" not in brief
+    assert "留意" not in brief and "预警" not in brief.split("均未触发")[1]
 
 
 def test_unresolved_alerts_stay_listed_before_their_review_date():
@@ -102,11 +125,12 @@ def test_unresolved_alerts_stay_listed_before_their_review_date():
         },
     ]
     brief = format_daily_brief(_snapshot([holding]), [], "2026-10-22")
-    red = "000963 红色预警 fund_occupation：控股股东资金占用待核实（pending，开立 2026-10-20，复核日 2026-11-30）"
-    yellow = "000963 黄色预警 valuation_high"
-    assert brief.index("尚未关闭：") < brief.index(red) < brief.index(yellow)
-    # A condition without a review date is surfaced with its evidence date and cadence.
-    assert "L3#9 未触发（证据日期 2026-08-30，证据频率 半年），下次复核 未设" in brief
+    red = "红色预警 fixture-000963：控股股东资金占用待核实（复核日 2026-11-30）"
+    yellow = "黄色预警 1 条持续中（fixture-000963 1），今日无到期，最近复核 2026-12-31"
+    assert brief.index(red) < brief.index(yellow)
+    assert "valuation_high" not in brief and "fund_occupation" not in brief
+    # A condition without a review date stays visible.
+    assert "L3 1 条未触发，未设复核日（#9）" in brief
 
 
 def test_brief_uses_saved_denominator_without_repeated_screenshot_requests():
@@ -123,10 +147,11 @@ def test_brief_uses_saved_denominator_without_repeated_screenshot_requests():
         "portfolio_value_as_of": None,
     }
     brief = format_daily_brief(snapshot, [], "2026-10-22")
-    assert "仓位25.00%" in brief
-    assert "股票仓位 75.00%（总资产 100,000.00 元）" in brief
-    assert "组合第二档止损风险 12.50% / 预算18%；单股预算6%" in brief
-    assert "资产基线：系统保存" in brief and "资产估值时点未标注" in brief
+    assert "仓位25.0%" in brief
+    assert (
+        "组合：股票仓位 75.0%（总资产 100,000 元，10-22 记录）；"
+        "第二档止损风险 12.5% / 预算 18%（余 5.5 点）"
+    ) in brief
     assert "发资金截图" not in brief and "需当日账户总资产" not in brief
     snapshot["valuation_status"] = "priced_positions_lower_bound"
     snapshot["account"]["total_stop_risk_pct"] = None
@@ -205,10 +230,13 @@ def test_routine_l3_groups_by_date_without_hiding_due_or_unverified_items():
         ]
     )
     brief = format_daily_brief(snapshot, [], "2026-10-22")
-    assert "2026-10-29 有3项L3例行复核，当前均未触发（000963、600900）" in brief
-    for condition_id in (3, 4, 5, 7):
-        assert f"L3#{condition_id}" in brief
-    for condition_id in (1, 2, 6, 8):
-        assert f"L3#{condition_id} " not in brief
-    assert "L3#5 待核实（证据日期 未记录，证据频率 未分类，季报不能改变状态），下次复核 未设" in brief
-    assert "L3#7 已触发" in brief
+    assert "今日需处理 2 项：" in brief
+    assert (
+        "- fixture-000963：L3 2 条到期复核（#3、#4）；"
+        "L3 2 条未触发，2026-10-29 例行复核（#1、#2）；L3 1 条待核实，未设复核日（#5）"
+    ) in brief
+    assert (
+        "- fixture-600900：L3 1 条已触发（#7）；L3 1 条未触发，2026-10-29 例行复核（#6）\n"
+    ) in brief
+    # Routine reviews beyond the 7-day horizon stay out of the brief.
+    assert "#8" not in brief

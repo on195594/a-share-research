@@ -996,21 +996,89 @@ def cmd_monitor_snapshot(args: list[str]) -> None:
         raise SystemExit(1)
 
 
-_BRIEF_REASONS = {
-    "price_stop_1": "触及第一档止损",
-    "price_stop_2": "触及第二档止损",
-    "daily_drop": "日跌幅达3%",
-    "relative_underperformance": "显著跑输行业",
-    "tier_review_due": "Tier到期复核",
-    "alert_review_due": "预警到期复核",
-    "l3_review_due": "L3到期复核",
-    "l3_candidate": "L3待复核",
-    "l3_watch": "L3观察中",
-    "research_thesis_review": "研究论点待复核",
-    "risk_budget_exceeded": "风险预算超限",
-    "quote_gap": "行情缺失",
+# Action items need an owner decision today; watch items are context that changes no action.
+_BRIEF_ACTION_LABELS = {
+    "tier_review_due": "Tier 待复核",
+    "risk_budget_exceeded": "止损风险超预算",
+    "quote_gap": "行情缺失或过期",
     "data_conflict": "数据冲突",
 }
+_BRIEF_L3_STATUS = {"pending": "待核实", "watch": "观察中", "triggered": "已触发"}
+
+
+def _brief_signals(snapshot: dict, today: str) -> dict[str | None, dict[str, list[str]]]:
+    """Group every program signal by holding code into Chinese action/watch phrases."""
+    holdings = {item["code"]: item for item in snapshot["holdings"]}
+    signals: dict[str | None, dict[str, list[str]]] = {}
+
+    def add(code: str | None, kind: str, text: str) -> None:
+        bucket = signals.setdefault(code, {"action": [], "watch": []})[kind]
+        if text not in bucket:
+            bucket.append(text)
+
+    for event in snapshot["escalations"]:
+        code, reason = event["code"], event["reason_code"]
+        item = holdings.get(code) or {}
+        price = (item.get("quote") or {}).get("price")
+        stop_2 = item.get("stop_loss_20")
+        if reason == "price_stop_1":
+            below = (item["stop_loss_15"] - price) / price
+            text = f"跌破第一档止损（低于止损线 {below:.1%}）"
+            if price and stop_2 and price > stop_2:
+                text += f"，距第二档 {(price - stop_2) / price:.1%}"
+            add(code, "action", text)
+        elif reason == "price_stop_2":
+            add(code, "action", f"跌破第二档止损（低于止损线 {(stop_2 - price) / price:.1%}）")
+        elif reason == "daily_drop":
+            add(code, "watch", f"今日 {item['quote']['daily_change_pct']:+.2f}%")
+        elif reason == "relative_underperformance":
+            add(code, "watch", f"跑输行业 {-item['quote']['relative_change_pct']:.1f} 个点")
+        elif reason == "alert_review_due":
+            for alert in item.get("alerts") or []:
+                if alert.get("review_due_now"):
+                    level = "红色" if alert.get("level") == "red" else "黄色"
+                    add(code, "action", f"{level}预警到期复核：{alert.get('reason') or '无说明'}")
+        elif reason == "research_thesis_review":
+            add(code, "action", event["detail"])
+        elif reason == "risk_budget_exceeded" and code is None:
+            add(None, "action", "组合止损风险超预算")
+        elif reason in _BRIEF_ACTION_LABELS:
+            add(code, "action", _BRIEF_ACTION_LABELS[reason])
+        elif reason == "l3_candidate" and not any(
+            condition.get("status") in {"pending", "triggered"}
+            for condition in (item.get("l3") or {}).get("conditions", [])
+        ):
+            # Without a pending/triggered condition, verification means the record itself is incomplete.
+            add(code, "action", "L3 记录不完整，需补录")
+        # l3_review_due, l3_watch and per-condition l3_candidate are rendered from the conditions below.
+
+    horizon = (date.fromisoformat(today) + timedelta(days=7)).isoformat()
+    for code, item in holdings.items():
+        groups: dict[tuple[str, str], list[str]] = {}
+        for condition in (item.get("l3") or {}).get("conditions", []):
+            status, due = condition.get("status"), condition.get("next_review")
+            ref = f"#{condition['id']}"
+            if status == "triggered":
+                key = ("action", "已触发")
+            elif due and due <= today:
+                key = ("action", "到期复核")
+            elif status in _BRIEF_L3_STATUS:
+                key = ("watch", _BRIEF_L3_STATUS[status] + (f"，{due} 复核" if due else "，未设复核日"))
+            elif not due:
+                key = ("watch", "未触发，未设复核日")
+            elif due <= horizon:
+                key = ("watch", f"未触发，{due} 例行复核")
+            else:
+                continue
+            groups.setdefault(key, []).append(ref)
+        for (kind, label), refs in groups.items():
+            add(code, kind, f"L3 {len(refs)} 条{label}（{'、'.join(refs)}）")
+    return signals
+
+
+def _brief_stop_distance(item: dict) -> float | None:
+    price, stop = (item.get("quote") or {}).get("price"), item.get("stop_loss_15")
+    return (price - stop) / price if price and stop else None
 
 
 def format_daily_brief(snapshot: dict, extra: list[str], today: str) -> str:
@@ -1021,123 +1089,117 @@ def format_daily_brief(snapshot: dict, extra: list[str], today: str) -> str:
         for item in holdings
     ):
         return ""
-    lines = [f"📈 A股持仓盘后简报 {snapshot['as_of'][:16].replace('T', ' ')}"]
-    for item in holdings:
+    names = {item["code"]: item["name"] for item in holdings}
+    signals = _brief_signals(snapshot, today)
+    action_lines, watch_lines = [], []
+    for code, found in signals.items():
+        label = names.get(code) or code or "组合"
+        if found["action"]:
+            action_lines.append(f"- {label}：" + "；".join(found["action"] + found["watch"]))
+        elif found["watch"]:
+            watch_lines.append(f"- {label}：" + "；".join(found["watch"]))
+    action_lines += [f"- {text}" for text in extra]
+
+    lines = [f"📈 持仓盘后简报 {snapshot['as_of'][5:16].replace('T', ' ')}"]
+    if action_lines:
+        lines.append(f"今日需处理 {len(action_lines)} 项：")
+        lines += action_lines
+    else:
+        lines.append(
+            "今日无需处理：程序检查（止损、跌幅、行业偏离、Tier、到期预警与L3、"
+            "研究论点、风险预算）均未触发；不覆盖未自动计算的基本面条件"
+        )
+    if watch_lines:
+        lines.append("留意：")
+        lines += watch_lines
+
+    lines.append("持仓（离第一档止损由近到远）：")
+    ordered = sorted(
+        holdings,
+        key=lambda item: (_brief_stop_distance(item) is None, _brief_stop_distance(item) or 0),
+    )
+    for item in ordered:
         quote = item["quote"]
         price = quote.get("price")
         if not price:
-            lines.append(f"{item['name']} {item['code']} 行情缺失")
+            lines.append(f"{item['name']} 行情缺失")
             continue
         change = quote.get("daily_change_pct")
-        stops = " ".join(
-            f"距{label}{(price - stop) / price:+.1%}"
-            for label, stop in (
-                ("止损1", item["stop_loss_15"]),
-                ("止损2", item["stop_loss_20"]),
-            )
-            if stop
-        )
-        change_text = f"（{change:+.2f}%）" if change is not None else ""
         weight = item.get("portfolio_weight_pct")
-        weight_text = f" 仓位{weight:.2f}%" if weight is not None else ""
+        distance = _brief_stop_distance(item)
+        stop_text = (
+            "止损线未设" if distance is None
+            else "已破第一档" if distance <= 0
+            else f"距止损 {distance:.1%}"
+        )
         lines.append(
-            f"{item['name']} {item['code']} {price:.2f}{change_text} {stops}{weight_text}"
-        )
-    attention = [
-        f"{event['code'] or '组合'} {_BRIEF_REASONS.get(event['reason_code'], event['reason_code'])}："
-        f"{event['detail']}"
-        for event in snapshot["escalations"]
-        if event["reason_code"] != "denominator_missing"
-    ]
-    horizon = (date.fromisoformat(today) + timedelta(days=7)).isoformat()
-    upcoming: dict[str, list[str]] = {}
-    l3_labels = {
-        "pending": "待核实",
-        "not_triggered": "未触发",
-        "watch": "观察中",
-        "triggered": "已触发",
-    }
-    cadences = {
-        "quarterly": "季度",
-        "semiannual": "半年",
-        "annual": "年度",
-        "event": "事件",
-    }
-    for item in holdings:
-        for condition in (item.get("l3") or {}).get("conditions", []):
-            due = condition.get("next_review")
-            status = condition.get("status")
-            if status == "not_triggered" and due and today < due <= horizon:
-                upcoming.setdefault(due, []).append(item["code"])
-            elif status != "not_triggered" or not due or due <= today:
-                cadence = cadences.get(
-                    condition.get("evidence_cadence"), "未分类，季报不能改变状态"
+            " ".join(
+                part
+                for part in (
+                    item["name"],
+                    f"{price:.2f}",
+                    f"{change:+.2f}%" if change is not None else "",
+                    f"仓位{weight:.1f}%" if weight is not None else "",
+                    f"｜{stop_text}",
                 )
-                attention.append(
-                    f"{item['code']} L3#{condition['id']} {l3_labels.get(status, status)}"
-                    f"（证据日期 {condition.get('as_of') or '未记录'}，证据频率 {cadence}），"
-                    f"下次复核 {due or '未设'}"
-                )
-    for due, codes in sorted(upcoming.items()):
-        attention.append(
-            f"{due} 有{len(codes)}项L3例行复核，当前均未触发"
-            f"（{'、'.join(dict.fromkeys(codes))}）"
+                if part
+            )
         )
-    attention += extra
-    # review_due only schedules a re-check; an unresolved alert stays listed until resolved.
-    unresolved = [
-        f"{item['code']} {'红色' if alert.get('level') == 'red' else '黄色'}预警 "
-        f"{alert.get('reason_code')}：{alert.get('reason') or '无说明'}"
-        f"（{alert.get('status')}，开立 {(alert.get('opened_at') or '未记录')[:10]}，"
-        f"复核日 {alert.get('review_due') or '未设'}）"
-        for level in ("red", "yellow")
-        for item in holdings
-        for alert in item.get("alerts") or []
-        if (alert.get("level") == "red") == (level == "red")
-    ]
-    lines.append(
-        "需关注："
-        + (
-            ""
-            if attention
-            else "本轮程序检查未触发（止损、跌幅、行业偏离、Tier、到期预警与L3、"
-            "研究论点、风险预算）；不覆盖未自动计算的基本面条件"
-        )
-    )
-    lines += [f"- {text}" for text in attention]
-    if unresolved:
-        lines.append("尚未关闭：")
-        lines += [f"- {text}" for text in unresolved]
+
     account = snapshot.get("account") or {}
     value = account.get("portfolio_value")
     if value is None:
         lines.append("总资产尚无保存记录；后续随账户截图更新。")
     else:
+        parts = []
         weight = account.get("stock_weight_pct")
+        recorded = (account.get("portfolio_value_recorded_at") or "")[5:10]
+        basis = f"总资产 {value:,.0f} 元" + (f"，{recorded} 记录" if recorded else "")
         if weight is not None:
             label = (
                 "股票仓位"
                 if snapshot.get("valuation_status") == "exact"
                 else "已取价股票仓位（下限）"
             )
-            lines.append(f"{label} {weight:.2f}%（总资产 {value:,.2f} 元）")
+            parts.append(f"{label} {weight:.1f}%（{basis}）")
+        else:
+            parts.append(basis)
         policy = account.get("risk_policy") or {}
         risk = account.get("total_stop_risk_pct")
         if risk is not None:
-            lines.append(
-                f"组合第二档止损风险 {risk:.2f}% / 预算{policy['max_portfolio_risk_pct']:g}%"
-                f"；单股预算{policy['max_position_risk_pct']:g}%"
+            budget = policy["max_portfolio_risk_pct"]
+            parts.append(
+                f"第二档止损风险 {risk:.1f}% / 预算 {budget:g}%（余 {budget - risk:.1f} 点）"
             )
         else:
-            lines.append("组合止损风险不完整，已知下限不视为完整风险。")
-        if account.get("portfolio_value_source") == "account_snapshot":
+            parts.append("止损风险不完整，已知下限不视为完整风险")
+        lines.append("组合：" + "；".join(parts))
+
+    # review_due only schedules a re-check; an unresolved alert stays visible until resolved.
+    open_alerts = [
+        (item, alert)
+        for item in holdings
+        for alert in item.get("alerts") or []
+        if not alert.get("review_due_now")
+    ]
+    for item, alert in open_alerts:
+        if alert.get("level") == "red":
             lines.append(
-                f"资产基线：系统保存，记录于 {account['portfolio_value_recorded_at']}。"
+                f"红色预警 {item['name']}：{alert.get('reason') or '无说明'}"
+                f"（复核日 {alert.get('review_due') or '未设'}）"
             )
-        if account.get("portfolio_value_as_of"):
-            lines.append(f"资产估值时点：{account['portfolio_value_as_of']}。")
-        else:
-            lines.append("资产估值时点未标注；不以本次采集时间代替。")
+    yellow = [(item, alert) for item, alert in open_alerts if alert.get("level") != "red"]
+    if yellow:
+        counts: dict[str, int] = {}
+        for item, _alert in yellow:
+            counts[item["name"]] = counts.get(item["name"], 0) + 1
+        dues = sorted(alert["review_due"] for _item, alert in yellow if alert.get("review_due"))
+        lines.append(
+            f"黄色预警 {len(yellow)} 条持续中（"
+            + "、".join(f"{name} {count}" for name, count in counts.items())
+            + "），今日无到期"
+            + (f"，最近复核 {dues[0]}" if dues else "")
+        )
     return "\n".join(lines)
 
 
