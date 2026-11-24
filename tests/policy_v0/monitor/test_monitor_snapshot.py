@@ -560,7 +560,7 @@ def test_missing_stop_loss_makes_account_risk_budget_unknown(
         "invalid_time",
     ],
 )
-def test_monitor_industry_unavailable_stays_within_one_bounded_request(
+def test_monitor_industry_unavailable_stays_within_bounded_requests(
     case, monkeypatch
 ) -> None:
     failed_cache = case in {"absent", "stale", "malformed", "invalid_member", "nan_epoch"}
@@ -574,7 +574,7 @@ def test_monitor_industry_unavailable_stays_within_one_bounded_request(
 
     monkeypatch.setattr(commands_holdings, "TushareFundamentalsProvider", FakeProvider)
     if case in {"cap", "holdings_cap"}:
-        monkeypatch.setattr(commands_holdings, "_MONITOR_BATCH_LIMIT", 1)
+        monkeypatch.setattr(commands_holdings, "_MONITOR_SYMBOL_LIMIT", 1)
     calls = []
 
     def fetch(codes):

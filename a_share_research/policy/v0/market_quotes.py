@@ -87,32 +87,34 @@ def parse_sina_quote_line(
     return code, price, quote_date, quote_time, previous_close
 
 
+SINA_BATCH_SIZE = 800  # symbols per hq.sinajs.cn request
+
+
 def fetch_sina_batch_quotes(
     codes: list[str],
 ) -> dict[str, tuple[float, str | None, str | None, float | None] | None]:
-    """Fetch a batch of quotes once, returning ``None`` for failed symbols."""
-    if not codes:
-        return {}
-
-    query_list = [f"{sina_query_prefix(code)}{code}" for code in codes]
+    """Fetch quotes in requests of at most ``SINA_BATCH_SIZE`` symbols; failed symbols map to ``None``."""
     result: dict[str, tuple[float, str | None, str | None, float | None] | None] = {
         code: None for code in codes
     }
-    code_set = set(codes)
-    try:
-        response = requests.get(
-            f"https://hq.sinajs.cn/list={','.join(query_list)}",
-            headers={"Referer": "https://finance.sina.com.cn"},
-            timeout=10,
-        )
-        response.encoding = "gbk"
-        for line in response.text.split("\n"):
-            parsed = parse_sina_quote_line(line, code_set)
-            if parsed is not None:
-                code, price, quote_date, quote_time, previous_close = parsed
-                result[code] = (price, quote_date, quote_time, previous_close)
-    except requests.RequestException:
-        logger.exception("Batch fetch current prices failed")
+    for start in range(0, len(codes), SINA_BATCH_SIZE):
+        batch = codes[start : start + SINA_BATCH_SIZE]
+        query_list = [f"{sina_query_prefix(code)}{code}" for code in batch]
+        code_set = set(batch)
+        try:
+            response = requests.get(
+                f"https://hq.sinajs.cn/list={','.join(query_list)}",
+                headers={"Referer": "https://finance.sina.com.cn"},
+                timeout=10,
+            )
+            response.encoding = "gbk"
+            for line in response.text.split("\n"):
+                parsed = parse_sina_quote_line(line, code_set)
+                if parsed is not None:
+                    code, price, quote_date, quote_time, previous_close = parsed
+                    result[code] = (price, quote_date, quote_time, previous_close)
+        except requests.RequestException:
+            logger.exception("Batch fetch current prices failed for %d symbols", len(batch))
     return result
 
 

@@ -97,7 +97,8 @@ def _parse_cli_date(raw: str) -> str:
     return raw
 
 
-_MONITOR_BATCH_LIMIT = 800
+# Holdings plus same-industry members; at most three Sina requests.
+_MONITOR_SYMBOL_LIMIT = 3 * market_quotes.SINA_BATCH_SIZE
 
 
 def fetch_monitor_price_quotes(
@@ -106,11 +107,11 @@ def fetch_monitor_price_quotes(
     dict[str, PriceQuote | None],
     MarketDataResult[dict[str, str]] | None,
 ]:
-    """Fetch holdings and same-industry constituents in one bounded quote request."""
+    """Fetch holdings and same-industry constituents in a bounded number of quote requests."""
     if not codes:
         return {}, None
     codes = sorted(set(codes))
-    if len(codes) > _MONITOR_BATCH_LIMIT:
+    if len(codes) > _MONITOR_SYMBOL_LIMIT:
         return dict.fromkeys(codes), None
 
     industry_result = TushareFundamentalsProvider().read_cached_industry_map()
@@ -128,9 +129,8 @@ def fetch_monitor_price_quotes(
         if industry in requested_industries
     }
     expanded_codes = sorted(set(codes) | set(members))
-    # ponytail: one Sina request capped at 800 symbols; use provider-side sector
-    # quotes if a future portfolio spans more constituents.
-    if len(expanded_codes) > _MONITOR_BATCH_LIMIT:
+    # Beyond the cap, use provider-side sector quotes instead of more requests.
+    if len(expanded_codes) > _MONITOR_SYMBOL_LIMIT:
         members = {}
         expanded_codes = codes
     request_codes = expanded_codes

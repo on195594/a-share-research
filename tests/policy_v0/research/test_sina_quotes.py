@@ -60,6 +60,19 @@ def test_missing_symbol_and_network_failure_leave_no_quote(monkeypatch):
     assert request.call_count == 2
 
 
+def test_batches_split_at_the_size_limit_and_fail_independently(monkeypatch):
+    # The monitor's holdings plus industry members exceed one request (899 symbols on 2026-11-20).
+    monkeypatch.setattr(market_quotes, "SINA_BATCH_SIZE", 3)
+    request = _serve(monkeypatch, INTRADAY)
+    quotes = market_quotes.fetch_sina_batch_quotes(CODES)
+    assert [call.args[0].split("list=")[1] for call in request.call_args_list] == [
+        "sh600036,sz000001,bj920189", "sh600900"]
+    assert all(quotes[code] is not None for code in CODES)
+    request.side_effect = [MagicMock(text=INTRADAY), market_quotes.requests.RequestException("network down")]
+    quotes = market_quotes.fetch_sina_batch_quotes(CODES)
+    assert quotes["600036"] is not None and quotes["600900"] is None
+
+
 def test_pre_open_zero_price_is_no_quote(monkeypatch):
     # Before the first trade Sina sends 0.000 as the current price next to a real previous close.
     assert _line(PREOPEN, "600036").split(",")[2:4] == ["43.120", "0.000"]
