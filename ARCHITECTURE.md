@@ -1,6 +1,6 @@
 # 系统架构
 
-Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布，按任务启动 agent-runner 执行模型调用。产品目标见 [PRODUCT.md](PRODUCT.md)，授权与研究边界见 [AGENTS.md](AGENTS.md)。
+Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布，按任务启动 agent-runner 执行模型调用。产品目标见 [PRODUCT.md](PRODUCT.md)，研究 AI 的边界见[研究方案第 3 节](docs/proposal.md#3-研究-ai-的自主权与边界)，开发授权见 [AGENTS.md](AGENTS.md#授权)。
 
 ## 能力与状态归属
 
