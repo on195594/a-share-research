@@ -50,7 +50,10 @@ def test_tampering_and_existing_link_never_overwritten(tmp_path):
     content = b'original'
     sha = evidence.store(directory, content)
     target = directory / sha
+    assert evidence.read(directory, sha) == content
+    original = target.stat()
     target.write_bytes(b'tampered')
+    os.utime(target, ns=(original.st_atime_ns, original.st_mtime_ns))
     for operation in (lambda: evidence.read(directory, sha), lambda: evidence.store(directory, content)):
         with pytest.raises(evidence.EvidenceError):
             operation()

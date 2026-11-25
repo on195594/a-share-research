@@ -54,14 +54,14 @@ def _denominator(parameters: dict, current: datetime, *, source: dict | None = N
         portfolio_value_recorded_at=stored['recorded_at'])
 
 
-def _verify_ledger(source: dict) -> None:
+def _verify_ledger(source: dict, *, verify_evidence: bool = True) -> None:
     from a_share_research.policy import account_input
     account_input.validate_source(source)
     database=paths.cache_db_path().resolve()
     with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as connection:
         connection.execute('BEGIN')
         row=connection.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source WHERE id=1').fetchone()
-        if row is None or account_input.read(connection,database.parent,row)!=source:
+        if row is None or account_input.read(connection, database.parent, row, verify_evidence=verify_evidence) != source:
             raise CaptureError('ledger source changed during collection')
 
 
@@ -76,7 +76,7 @@ def _ledger_projection(source: dict | None):
     os.environ.update(selected)
     try:
         yield
-        _verify_ledger(source)
+        _verify_ledger(source, verify_evidence=False)
     finally:
         for key,value in previous.items():
             if value is None:os.environ.pop(key,None)

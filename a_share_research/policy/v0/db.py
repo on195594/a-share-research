@@ -13,8 +13,7 @@ from a_share_research import db as app_db
 from a_share_research.policy.v0 import paths
 
 _SCHEMA_LOCK = threading.Lock()
-_SCHEMA_INITIALIZED = False
-_SCHEMA_INITIALIZED_PATH = ""
+_SCHEMA_INITIALIZED: tuple[str, int, int] | None = None
 _READ_ONLY_REQUEST = False
 
 
@@ -58,20 +57,23 @@ def _read_only_connection(timeout: float) -> sqlite3.Connection:
 
 
 def _ensure_schema(database_path: Path) -> None:
-    """Create the database and bring it to this repository's schema, once per process and path."""
-    global _SCHEMA_INITIALIZED, _SCHEMA_INITIALIZED_PATH
-    key = str(database_path)
-    if _SCHEMA_INITIALIZED and _SCHEMA_INITIALIZED_PATH == key:
-        return
+    """Create the application database and recheck its schema when the file is replaced."""
+    global _SCHEMA_INITIALIZED
+    database_path = database_path.resolve()
     with _SCHEMA_LOCK:
-        if _SCHEMA_INITIALIZED and _SCHEMA_INITIALIZED_PATH == key:
+        try:
+            key, nonempty = app_db.database_file_state(database_path)
+        except FileNotFoundError:
+            key, nonempty = None, False
+        if nonempty and key == _SCHEMA_INITIALIZED:
             return
+        _SCHEMA_INITIALIZED = None
         try:
             paths.ensure_db_parent(database_path)
         except PermissionError as exc:
             raise sqlite3.OperationalError(str(exc)) from exc
-        if database_path.exists():
-            probe = sqlite3.connect(database_path.resolve().as_uri() + "?mode=ro", uri=True)
+        if nonempty:
+            probe = sqlite3.connect(database_path.as_uri() + "?mode=ro", uri=True)
             try:
                 legacy = probe.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
@@ -85,8 +87,9 @@ def _ensure_schema(database_path: Path) -> None:
                     "policy v0 here only opens the application database"
                 )
         app_db.connect(database_path).close()
-        _SCHEMA_INITIALIZED = True
-        _SCHEMA_INITIALIZED_PATH = key
+        current, nonempty = app_db.database_file_state(database_path)
+        if nonempty and (key is None or current == key):
+            _SCHEMA_INITIALIZED = current
 
 
 def get_db(timeout: float = 30.0) -> sqlite3.Connection:

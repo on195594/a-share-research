@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 from time import monotonic, sleep
 from zoneinfo import ZoneInfo
 
@@ -683,29 +684,61 @@ def _enable_wal(conn: sqlite3.Connection, timeout: float) -> None:
             sleep(0.05)
 
 
+_MIGRATION_LOCK = Lock()
+_MIGRATED: dict[str, tuple[int, int, int]] = {}
+
+
+def database_file_state(resolved_path: Path) -> tuple[tuple[str, int, int], bool]:
+    """Return the database file's identity and whether it can have a cached schema."""
+    info = resolved_path.stat()
+    return (str(resolved_path), info.st_dev, info.st_ino), info.st_size > 0
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Initialize the schema on an autocommit connection with foreign keys off for table rebuilds."""
+    conn.executescript(SCHEMA)
+    migrated = False
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    for target, upgrade in enumerate(MIGRATIONS, start=1):
+        if version < target:
+            # Another process may finish the migration while we wait for the write lock.
+            with transaction(conn):
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+                if version < target:
+                    upgrade(conn)
+                    conn.execute(f"PRAGMA user_version = {target}")
+                    version = target
+                    migrated = True
+    if migrated:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()  # a rebuild leaves a WAL as large as the tables
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     path = path or DATA / "app.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    in_memory = path == Path(":memory:")
+    if not in_memory:
+        path = path.resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
     timeout = 30
     conn = sqlite3.connect(path, timeout=timeout, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
-        _enable_wal(conn, timeout)
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA temp_store=MEMORY")
-        conn.executescript(SCHEMA)
-        migrated = False
-        for version, migrate in enumerate(MIGRATIONS, start=1):
-            if conn.execute("PRAGMA user_version").fetchone()[0] < version:
-                # Another process may finish the migration while we wait for the write lock.
-                with transaction(conn):
-                    if conn.execute("PRAGMA user_version").fetchone()[0] < version:
-                        migrate(conn)
-                        conn.execute(f"PRAGMA user_version = {version}")
-                        migrated = True
-        conn.execute("PRAGMA foreign_keys=ON")  # A table rebuild cannot run with enforcement on.
-        if migrated:
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()  # a rebuild leaves a WAL as large as the tables
+        if in_memory:
+            migrate(conn)
+        else:
+            with _MIGRATION_LOCK:
+                (name, device, inode), nonempty = database_file_state(path)
+                ready = (device, inode, len(MIGRATIONS))
+                # The header check catches an older schema written over the same inode.
+                if (not nonempty or _MIGRATED.get(name) != ready
+                        or conn.execute("PRAGMA user_version").fetchone()[0] < len(MIGRATIONS)):
+                    _MIGRATED.pop(name, None)  # A failed rebuild can leave a truncated file nonempty.
+                    _enable_wal(conn, timeout)
+                    migrate(conn)
+                    _MIGRATED[name] = ready
+        conn.execute("PRAGMA foreign_keys=ON")
     except BaseException:
         conn.close()
         raise

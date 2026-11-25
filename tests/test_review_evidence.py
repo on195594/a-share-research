@@ -13,7 +13,7 @@ from a_share_research.checking import check
 from a_share_research.drafts import _verified_facts
 from a_share_research.reviewing import ReviewLedger, ReviewFormatError, digest, legacy_issue_view, PROTOCOL
 from a_share_research.research_tools import record_stop
-from a_share_research import service, db
+from a_share_research import service, db, evidence
 from support.reports import MATERIAL, SALES, report
 from support.templates import ENV
 from support.continuation import load
@@ -99,6 +99,18 @@ def test_neighbor_and_cross_page_matches_link_actual_pages_not_claimed_page():
     assert quote_match(cite, registry) == [21, 22]
     registry["D0"]["pages"] = {20: text[:split], 22: text[split:]}
     assert quote_match(cite, registry) is None  # Never bridge an unread missing page.
+
+
+def test_quote_match_reuses_compact_page_text_without_mutating_sources():
+    registry = captured_registry()
+    cite = REVIEW["report"]["risks"][2]["cites"][-1]
+    original = json.dumps(registry, ensure_ascii=False)
+    assert quote_match(cite, registry) == [cite["page"]]
+    before = evidence._compact_page.cache_info()
+    assert quote_match(cite, registry) == [cite["page"]]
+    after = evidence._compact_page.cache_info()
+    assert after.hits > before.hits and after.misses == before.misses
+    assert json.dumps(registry, ensure_ascii=False) == original
 
 
 def test_legacy_manifest_links_pdf_without_fabricated_page_verification():

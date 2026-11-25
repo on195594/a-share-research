@@ -3,12 +3,14 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
+from pathlib import Path
 import sqlite3
 from threading import Barrier
 
 import pytest
 
 from a_share_research import api_keys, db, scans
+from a_share_research.policy.v0 import db as policy_db
 from support.continuation import RECORDS, load
 from support.reports import MATERIAL
 from support.account_analysis import insert as insert_analysis
@@ -120,6 +122,63 @@ def test_concurrent_connections_migrate_once(tmp_path):
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(lambda _: connect(), range(4)))
+
+
+def test_in_memory_connections_each_start_with_a_fresh_schema(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with closing(db.connect(Path(":memory:"))) as first, closing(db.connect(Path(":memory:"))) as second:
+        db.create_run(first, "603606")
+        assert second.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+    assert not (tmp_path / ":memory:").exists()
+
+
+def test_reconnect_skips_schema_and_wal_setup_but_configures_connection(tmp_path, monkeypatch):
+    path = tmp_path / "app.db"
+    db.connect(path).close()
+
+    def unexpected_setup(*args):
+        pytest.fail("A second connection repeated database initialization")
+
+    monkeypatch.setattr(db, "migrate", unexpected_setup)
+    monkeypatch.setattr(db, "_enable_wal", unexpected_setup)
+    alias = tmp_path / "alias.db"
+    alias.symlink_to(path)
+    with closing(db.connect(alias)) as conn:
+        assert conn.row_factory is sqlite3.Row
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
+        assert conn.execute("PRAGMA temp_store").fetchone()[0] == 2
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+@pytest.mark.parametrize("change", ["delete", "replace", "truncate", "reused_inode"])
+def test_policy_and_application_caches_reinitialize_changed_file(tmp_path, change):
+    path = tmp_path / "app.db"
+    policy_db._ensure_schema(path)
+    if change == "delete":
+        path.unlink()
+    elif change == "replace":
+        replacement = tmp_path / "legacy.db"
+        legacy_database(replacement)
+        assert replacement.stat().st_ino != path.stat().st_ino
+        replacement.replace(path)
+    elif change == "reused_inode":
+        previous = path.rename(tmp_path / "previous.db")
+        policy_db._ensure_schema(path)
+        # Reintroduce a v25 database with the same identity as the first generation.
+        with closing(sqlite3.connect(previous)) as conn:
+            conn.execute("DROP TABLE scheduled_runs")
+            conn.execute("PRAGMA user_version = 25")
+        previous.replace(path)
+    else:
+        path.write_bytes(b"")
+
+    policy_db._ensure_schema(path)
+    with closing(sqlite3.connect(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        assert_derived(conn)
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert conn.execute("SELECT count(*) FROM reports").fetchone()[0] == (len(RECORDS) if change == "replace" else 0)
 
 
 def test_identity_updates_and_material_writes_keep_replay_in_step(tmp_path):

@@ -9,13 +9,13 @@ from a_share_research.evidence import safe_url
 from a_share_research.policy import account_view, registry as policies
 
 
-def _positions(conn, source):
+def _positions(conn, source, code: str | None = None):
     account_id = source['watermark']['account_id']
     row = conn.execute('SELECT projection FROM account_position_books WHERE account_id=?', (account_id,)).fetchone()
     ids = projection_ids.lookup(conn, account_id, 'cycle')
     positions = {}
     for cycle in json.loads(row['projection'])['cycles']:
-        if cycle['exit_date'] is not None:
+        if cycle['exit_date'] is not None or (code is not None and cycle['code'] != code):
             continue
         hid = ids[cycle['cycle_id']]
         # verified_current already checked this exact account/cycle revision in this transaction.
@@ -32,8 +32,10 @@ def _positions(conn, source):
 
 def _saved_monitor(conn, evaluation_id=None):
     # A historical deep link keeps the same account and capture constraints as the latest summary.
-    query = """
-        SELECT e.* FROM policy_evaluations e JOIN account_source s
+    columns = ('e.id, e.identity, e.activation_id, e.created_at, e.result, e.capture_context, e.capture_context_hash'
+               if evaluation_id is None else 'e.*')
+    query = f"""
+        SELECT {columns} FROM policy_evaluations e JOIN account_source s
           ON json_extract(e.capture_context, '$.source.watermark.account_id') = json_extract(s.watermark, '$.account_id')
          AND json_extract(e.capture_context, '$.source.watermark.account_scope') = json_extract(s.watermark, '$.account_scope')
         WHERE s.id=1 AND s.mode='ledger' AND json_extract(e.capture_context, '$.source.mode')='ledger'
@@ -41,8 +43,13 @@ def _saved_monitor(conn, evaluation_id=None):
     """
     if evaluation_id is None:
         row = conn.execute(query + ' ORDER BY e.created_at DESC, e.id DESC LIMIT 1').fetchone()
-    else:
-        row = conn.execute(query + ' AND e.id=?', (evaluation_id,)).fetchone()
+        if row is None:
+            return None
+        # Monitor capture validation uses only its context and activation.
+        fields = policies._capture_fields(row['capture_context'], row['capture_context_hash'], row['activation_id'], None)
+        return {k: row[k] for k in ('id', 'identity', 'activation_id', 'created_at')} | fields | {
+            'result': json.loads(row['result'])}
+    row = conn.execute(query + ' AND e.id=?', (evaluation_id,)).fetchone()
     return policies._evaluation(row) if row else None
 
 
@@ -173,7 +180,7 @@ def _overview(conn, code=None, *, history=None):
                 opening = conn.execute('SELECT opened_at FROM account_books WHERE account_id=?', (account_id,)).fetchone()
                 account.update(account_id=account_id, version=source['account_version'], opened_at=opening['opened_at'])
                 account.update(_receipt_refs(conn, account_id))
-                positions = _positions(conn, source)
+                positions = _positions(conn, source, code)
                 try:
                     saved = _saved_monitor(conn)
                 except policies.PolicyError as exc:

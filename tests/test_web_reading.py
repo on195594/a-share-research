@@ -4,16 +4,60 @@ Condition-only cases exercise template branches, not invented research results.
 """
 import json
 import re
+from http.cookies import SimpleCookie
 from pathlib import Path
 
 import pytest
 from support.delivery import FAILURE
 from support.templates import ENV, TEMPLATES
+from support.web import page_request
 from a_share_research.evidence import report_source_view
 from markupsafe import escape
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ENV.get_template('_macros.html').module
+
+
+def test_current_session_is_cached_per_request_across_login_and_logout(web):
+    request = page_request('/', cookie='session=unknown')
+    statements = []
+    web.conn.set_trace_callback(statements.append)
+    try:
+        assert web.current_session(request) is None
+        assert web.current_session(request) is None
+        assert len(statements) == 1
+
+        logged_in = web.start_session(request)
+        token = SimpleCookie(logged_in.headers['set-cookie'])['session'].value
+        session = web.current_session(request)
+        assert session == web._hash(token)
+        assert web.current_session(page_request('/', cookie='session=unknown')) is None
+
+        next_request = page_request('/', cookie=f'session={token}')
+        statements.clear()
+        assert web.current_session(next_request) == web.current_session(next_request) == session
+        assert len(statements) == 1
+        assert web.logout(next_request, csrf=web.csrf_token(session)).status_code == 303
+        assert web.current_session(next_request) is None
+        assert web.current_session(page_request('/', cookie=f'session={token}')) is None
+    finally:
+        web.conn.set_trace_callback(None)
+
+
+def test_cached_session_expires_with_its_device(web, monkeypatch):
+    from types import SimpleNamespace
+
+    # Move the clock over the device deadline within this same request.
+    request = page_request('/')
+    web.start_session(request)
+    session = web.current_session(request)
+    monkeypatch.setattr(web, 'DEVICE_SECONDS', 1)
+    now = web.time.time()
+    monkeypatch.setattr(web, 'time', SimpleNamespace(time=lambda: now))
+    response = web.remember_device(request, csrf=web.csrf_token(session), return_path='/')
+    assert response.status_code == 303 and web.current_session(request) == session
+    now += 1
+    assert web.current_session(request) is None
 
 
 @pytest.mark.parametrize('source_kind', ['base', 'supplement'])
@@ -190,6 +234,42 @@ def test_home_verdict_filter_binds_each_card_group_bucket(tmp_path):
     assert 'role="status" aria-live="polite" data-filter-status' in html
 
 
+def test_home_batch_projection_and_last_passed_scope(web, monkeypatch):
+    from a_share_research import batches, reading
+    captured = json.loads((ROOT / 'tests/data/batch-candidate-matrix.json').read_text())
+    batch_id = web.conn.execute(
+        "INSERT INTO batches(status, created_at, rule, q20, universe) VALUES ('proposed', ?, ?, ?, ?)",
+        ('2026-10-23', json.dumps(batches.RULE), json.dumps(captured['rows']), json.dumps(captured['markets'])),
+    ).lastrowid
+    passed_queries = []
+    latest_reports = reading.latest_reports
+
+    def record_scope(conn, **kwargs):
+        if kwargs.get('passed'):
+            passed_queries.append(kwargs.get('codes'))
+        return latest_reports(conn, **kwargs)
+
+    monkeypatch.setattr(reading, 'latest_reports', record_scope)
+    response = web.home_page(page_request('/'), 'owner')
+    batch = response.context['batch']
+    assert batch['id'] == batch_id and batch['created_at'] == '2026-10-23' and batch['status'] == 'proposed'
+    assert 'universe' not in batch.keys() and batch['q20'] is None
+    assert '2026 年 10 月批次' in response.body.decode()
+    assert response.context['companies'] and not passed_queries
+
+    # Status-only variants of the captured batch and continuation expose the other home branches.
+    web.conn.execute("UPDATE batches SET status='tracking' WHERE id=?", (batch_id,))
+    web.conn.execute("UPDATE reports SET passed=0 WHERE id=39")
+    response = web.home_page(page_request('/'), 'owner')
+    assert response.context['batch']['q20'] == reading.latest_batch(web.conn)['q20']
+    failed = next(c for c in response.context['companies'] if c['id'] == 39)
+    assert failed['last_passed']['id'] == 37 and passed_queries == [[failed['code']]]
+    web.conn.execute("DELETE FROM reports")
+    passed_queries.clear()
+    assert web.home_page(page_request('/'), 'owner').context['companies'] == []
+    assert not passed_queries
+
+
 def test_contextual_followup_preserves_risk_identity_and_escapes_source():
     from support.continuation import BODY
     risk = BODY[39]['risks'][0]
@@ -203,21 +283,28 @@ def test_contextual_followup_preserves_risk_identity_and_escapes_source():
     assert '<script>' not in safe and '&lt;script&gt;' in safe
 
 
-def test_report_page_exposes_prior_status(tmp_path):
-    from contextlib import closing
-    from a_share_research import db, reading
-    from support.continuation import BODY, RECORDS, load
-    from support.templates import render
-
-    record = next(r['report'] for r in RECORDS if r['report']['id'] == 39)
+def test_report_page_exposes_prior_status(web):
+    from a_share_research import reading
+    from support.continuation import BODY
     # Exercise the prior-status field with a marked variant of the captured continuation.
     entry = {'ref': 'risks[0]', 'status': '仍存在', 'text': '风险条件仍在。', 'cites': BODY[39]['risks'][0]['cites']}
     body = BODY[39] | {'prior_status': [entry]}
-    with closing(db.connect(tmp_path / 'reading.db')) as conn:
-        load(conn)
-        prior = reading.prior_agenda(conn, body)
-    html = render('report.html', report=record, body=body, rows={r['id']: r for r in body['table']},
-                  prior_agenda=prior, comparison={'old': None})
+    web.conn.execute("UPDATE reports SET body=? WHERE id=39", (json.dumps(body),))
+    prior = reading.prior_agenda(web.conn, body)
+    expected = reading.comparison(web.conn, reading.report(web.conn, 39))
+    request = page_request('/reports/39')
+    web.start_session(request)
+    statements = []
+    web.conn.set_trace_callback(statements.append)
+    try:
+        response = web.report_page(request, 39)
+    finally:
+        web.conn.set_trace_callback(None)
+    assert response.status_code == 200
+    assert response.context['comparison'] == expected and response.context['prior_agenda'] == prior
+    assert sum('FROM runs WHERE id =' in sql for sql in statements) == 1
+    assert not any("json_extract(body, '$.risks')" in sql for sql in statements)
+    html = response.body.decode()
     assert entry['text'] in html and prior[0]['previous'] in html
 
 

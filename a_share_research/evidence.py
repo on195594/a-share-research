@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 from decimal import Decimal
+from functools import lru_cache
 from urllib.parse import urldefrag, urlparse
 
 
@@ -139,18 +140,24 @@ def projection(registry, *, catalog=False, raw=False):
 
 
 ELISION = re.compile(r"…+|\.{3,}")
+WHITESPACE = re.compile(r"\s+")
 MIN_QUOTE, MIN_SEGMENT = 8, 4
+
+
+@lru_cache(maxsize=1024)
+def _compact_page(text: str) -> str:
+    return WHITESPACE.sub("", text)
 
 
 def _find(window, quote):
     """(start, end) of the verbatim quote, else of its elided segments found in order."""
-    whole = re.sub(r"\s+", "", quote)
+    whole = WHITESPACE.sub("", quote)
     start = window.find(whole)
     if start >= 0:
         return start, start + len(whole)
     # Excerpts joined with an ellipsis are ordinary citation. Each segment must be real text, in
     # order; short segments are refused so a number or a word can't be picked from elsewhere.
-    segments = [s for s in (re.sub(r"\s+", "", part) for part in ELISION.split(quote)) if s]
+    segments = [s for s in (WHITESPACE.sub("", part) for part in ELISION.split(quote)) if s]
     if len(segments) < 2 or any(len(s) < MIN_SEGMENT for s in segments):
         return None
     first = position = window.find(segments[0])
@@ -168,12 +175,12 @@ def quote_match(cite, registry):
     page = cite.get("page")
     source_id = cite.get("source", "D0")
     source = registry.get(source_id) if isinstance(source_id, str) else None
-    if len(ELISION.sub("", re.sub(r"\s+", "", quote))) < MIN_QUOTE or type(page) is not int or page < 1 or not source:
+    if len(ELISION.sub("", WHITESPACE.sub("", quote))) < MIN_QUOTE or type(page) is not int or page < 1 or not source:
         return None
     for field in ("pages", "raw_pages"):
         parts, spans, offset = [], [], 0
         for n in (page - 1, page, page + 1):
-            text = re.sub(r"\s+", "", source[field].get(n, ""))
+            text = _compact_page(source[field].get(n, ""))
             parts.append(text)
             if text:
                 spans.append((n, offset, offset + len(text)))

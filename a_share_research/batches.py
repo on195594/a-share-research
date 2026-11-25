@@ -7,6 +7,8 @@ ENTERED = ("tracking", "closed")
 # Worker projection: retain raw JSON for CAS, omit detail-only universe and coverage.
 POLL_COLUMNS = ("id", "request_id", "status", "rule", "q20", "q5", "selection", "l5",
                 "entry", "marks", "s10", "sq3", "sl3", "small_selection", "frozen_at")
+# Saved inputs to the returns chart on the home page.
+PERFORMANCE_COLUMNS = ("rule", "q20", "q5", "selection", "l5", "entry", "marks", "s10", "sq3", "sl3")
 
 
 def horizons_complete(rule: dict, marks: dict) -> bool:

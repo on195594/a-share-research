@@ -200,6 +200,32 @@ def test_subscriptions_replace_atomic_validation_and_l5(conn):
     assert conn.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0] == 1
 
 
+def test_closing_prices_merge_last_scan_id_with_dated_subscription(conn):
+    bars = json.loads((DATA / '600900-61d.json').read_text())['stock']
+    early, middle, late = [scans.normalize_close(row, '600900', AT) for row in bars[-3:]]
+    other = scans.normalize_close(CapturedSources().valuation('603606'), '603606', AT)
+    # Replay the older quote last to distinguish scan id from trade date.
+    for closes in ({'600900': late, '603606': other}, {'600900': middle}):
+        conn.execute("INSERT INTO scans(status,requested_at,summary) VALUES ('done',?,?)",
+                     (AT, json.dumps({'closes': closes})))
+    conn.execute('INSERT INTO subscriptions(code,added_at,last_close,last_close_date) VALUES (?,?,?,?)',
+                 ('600900.SH', AT, early['last_close'], early['last_close_date']))
+    expected = {'600900': middle, '603606': other}
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        assert scans._closing_prices(conn) == expected
+    finally:
+        conn.set_trace_callback(None)
+    assert len(statements) == 1
+    assert scans.latest_close(conn, '600900.SH') == middle
+    # Same-date correction from a subscription takes precedence; supplied history skips scans.
+    conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=?', (early['last_close'], middle['last_close_date']))
+    corrected = middle | {'last_close': early['last_close']}
+    assert scans._closing_prices(conn) == (expected | {'600900': corrected})
+    assert scans._closing_prices(conn, {'600900': middle}) == {'600900': corrected}
+
+
 def test_duplicate_scan_is_idempotent_and_request_freezes_public_events(conn):
     complete_cards_at(conn)
     priced(conn)

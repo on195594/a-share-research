@@ -1,9 +1,11 @@
 """Ledger collector/persistence contracts use invented structural accounts, never broker evidence."""
 import json
+import sqlite3
 
 import pytest
 
-from a_share_research.policy import capture, monitor, registry
+from a_share_research import overview
+from a_share_research.policy import account_input, capture, monitor, registry
 from support.policy import observe, scoped_parameters
 from support.policy import run_monitor as run
 
@@ -83,6 +85,42 @@ def test_child_detects_source_change_and_restores_projection_environment(ledger_
         capture.collect(scoped_parameters(),source=source)
     assert capture.os.environ['POLICY_V0_ACCOUNT_SHADOW']=='previous-account'
     assert capture.os.environ['POLICY_V0_ANALYSIS_SHADOW']=='previous-analysis'
+
+
+def test_projection_verifies_evidence_once_and_rechecks_binding_on_exit(ledger_monitor, monkeypatch):
+    (path, conn, *_), *_ = ledger_monitor
+    source = monitor._source(conn, path.parent)
+    reads = []
+    read = account_input.read
+
+    def traced(*args, verify_evidence=True):
+        reads.append(verify_evidence)
+        return read(*args, verify_evidence=verify_evidence)
+
+    monkeypatch.setattr(account_input, 'read', traced)
+    with pytest.raises(capture.CaptureError, match='source changed'):
+        with capture._ledger_projection(source):
+            assert reads == [True]
+            conn.execute('UPDATE account_source SET source_sha256=? WHERE id=1', ('b' * 64,))
+    assert reads == [True, False]
+
+
+def test_monitor_overview_validates_capture_without_reading_input(ledger_monitor):
+    (_, conn, *_), *_ = ledger_monitor
+    receipt = run(ledger_monitor)
+
+    def deny_input(action, table, column, *args):
+        if action == sqlite3.SQLITE_READ and (table, column) == ('policy_evaluations', 'input'):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    conn.set_authorizer(deny_input)
+    try:
+        saved = overview._saved_monitor(conn)
+        assert saved['capture_context'] == receipt['capture_context'] and saved['result'] == receipt['result']
+    finally:
+        conn.set_authorizer(None)
+    assert overview.monitor_detail(conn, receipt['id']) == receipt
 
 
 def test_saved_ledger_context_remains_valid_after_later_observation(ledger_monitor):

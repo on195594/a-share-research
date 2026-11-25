@@ -205,19 +205,23 @@ def _capture_mode(context, activation_id, bundle):
     return mode
 
 
+def _capture_fields(raw, expected_hash, activation_id, bundle):
+    context = json.loads(raw)
+    if gate.digest(context) != expected_hash:
+        raise PolicyError('政策采集来源哈希不一致')
+    try:
+        mode = _capture_mode(context, activation_id, bundle)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise PolicyError('政策采集来源或请求记录损坏') from None
+    return dict(mode=mode, capture_context=context)
+
+
 def _evaluation(row):
     result = dict(id=row[0],identity=row[1],activation_id=row[2],created_at=row[3],created_by=row[4],
                 request_id=row[5],input_hash=row[6],result_hash=row[7],mode='supplied_input_replay',
                 input=json.loads(row[8]),result=json.loads(row[9]))
     if len(row)>10 and row[10] is not None:
-        context=json.loads(row[10])
-        if gate.digest(context)!=row[11]:
-            raise PolicyError('政策采集来源哈希不一致')
-        try:
-            mode = _capture_mode(context, row[2], result['input'])
-        except (ValueError, TypeError, KeyError, AttributeError):
-            raise PolicyError('政策采集来源或请求记录损坏') from None
-        result.update(mode=mode,capture_context=context)
+        result.update(_capture_fields(row[10], row[11], row[2], result['input']))
     return result
 
 

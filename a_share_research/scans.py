@@ -284,7 +284,7 @@ def subscription_scope(conn):
 def _with_closes(conn, items, history=None):
     missing = [s for s in items.values() if 'last_close' not in s]
     if missing:
-        closes = history.closes if history is not None else _closing_prices(conn)
+        closes = history.closes if history is not None else _closing_prices(conn, codes=[s['code'] for s in missing])
         for item in missing:
             item.update(closes.get(item['code'], {'last_close': None, 'last_close_date': None}))
     return list(items.values())
@@ -426,13 +426,47 @@ def card_or_none(conn, code: str, *, scan_id: int | None = None, history=None, r
         return None
 
 
-def _closing_prices(conn, closes=None):
+def _closing_prices(conn, closes=None, *, codes=None):
+    subscriptions = """
+        SELECT company_key, NULL AS scan_close, last_close, last_close_date, rowid AS subscription_id
+        FROM subscriptions WHERE last_close IS NOT NULL
+    """
+    params = {}
+    if codes is not None:
+        params['codes'] = json.dumps(codes)
+        # Look up the stored forms through the existing subscriptions.code primary key.
+        subscriptions += """
+            AND code IN (SELECT c.value || suffix.column1 FROM json_each(:codes) c
+                         CROSS JOIN (VALUES (''), ('.SH'), ('.SZ'), ('.BJ')) suffix)
+        """
+    query = subscriptions
     if closes is None:
         closes = {}
-        for row in conn.execute("SELECT json_extract(summary,'$.closes') FROM scans ORDER BY id"):
-            if row[0]:
-                closes.update(json.loads(row[0]))
-    for row in conn.execute('SELECT company_key,last_close,last_close_date FROM subscriptions WHERE last_close IS NOT NULL'):
+        if codes is None:
+            # With a single MAX, SQLite takes the price from that scan's row.
+            latest = """
+                SELECT p.key AS company_key, coalesce(p.value, 'null') AS scan_close, MAX(s.id)
+                FROM scans s, json_each(s.summary, '$.closes') p WHERE p.key IS NOT NULL GROUP BY p.key
+            """
+        else:
+            # Stop at the first matching scan for each requested code.
+            latest = """
+                SELECT c.value AS company_key, (
+                    SELECT s.summary -> ('$.closes.' || c.value) FROM scans s
+                    WHERE s.summary -> ('$.closes.' || c.value) IS NOT NULL
+                    ORDER BY s.id DESC LIMIT 1
+                ) AS scan_close FROM json_each(:codes) c
+            """
+        query = f"""
+            SELECT company_key, scan_close, NULL AS last_close, NULL AS last_close_date, NULL AS subscription_id
+            FROM ({latest})
+            UNION ALL {subscriptions}
+        """
+    for row in conn.execute(query + ' ORDER BY subscription_id', params):
+        if row['subscription_id'] is None:
+            if row['scan_close'] is not None:
+                closes[row['company_key']] = json.loads(row['scan_close'])
+            continue
         previous = closes.get(row['company_key'])
         if not previous or row['last_close_date'] >= previous['last_close_date']:
             closes[row['company_key']] = {k: row[k] for k in ('last_close', 'last_close_date')}
@@ -494,7 +528,8 @@ class ScanHistory:
 
 
 def latest_close(conn, code: str) -> dict:
-    return _closing_prices(conn).get(stock_codes.normalize_key(code), {'last_close': None, 'last_close_date': None})
+    code = stock_codes.normalize_key(code)
+    return _closing_prices(conn, codes=[code]).get(code, {'last_close': None, 'last_close_date': None})
 
 
 def announcement_failure(conn, code: str, *, scan_id: int | None = None) -> dict | None:
