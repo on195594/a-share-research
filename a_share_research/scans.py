@@ -271,8 +271,28 @@ def _add_origin(items, code, origin):
 
 
 def subscription_scope(conn):
-    items = {r['code']: dict(r, origins=[r['origin']]) for r in conn.execute(
-        'SELECT code,origin,added_at,last_close,last_close_date FROM subscriptions ORDER BY code')}
+    items = {}
+    for row in conn.execute(
+        'SELECT company_key, origin, added_at, last_close, last_close_date '
+        'FROM subscriptions ORDER BY company_key, rowid'
+    ):
+        code = row['company_key']
+        item = items.get(code)
+        if item is None:
+            items[code] = {
+                'code': code, 'origin': row['origin'], 'added_at': row['added_at'],
+                'last_close': row['last_close'], 'last_close_date': row['last_close_date'],
+                'origins': [row['origin']],
+            }
+            continue
+        if row['origin'] not in item['origins']:
+            item['origins'].append(row['origin'])
+        if row['added_at'] < item['added_at']:
+            item['added_at'] = row['added_at']
+        if row['last_close'] is not None and (
+            item['last_close'] is None or (row['last_close_date'] or '') >= (item['last_close_date'] or '')
+        ):
+            item['last_close'], item['last_close_date'] = row['last_close'], row['last_close_date']
     batch = conn.execute('SELECT l5 FROM batches WHERE frozen_at IS NOT NULL AND l5 IS NOT NULL '
                          'ORDER BY frozen_at DESC, id DESC LIMIT 1').fetchone()
     if batch:
@@ -333,15 +353,16 @@ def replace_subscriptions(conn, codes: list[str], *, catalog: dict | None = None
     unknown = sorted(set(codes) - catalog.keys())
     if unknown:
         raise service.RequestError('未知 A 股代码：' + '、'.join(unknown))
+    wanted = set(codes)
     with db.transaction(conn):
         if authorize is not None:
             authorize(conn)
-        for row in conn.execute("SELECT code FROM subscriptions WHERE origin='external'").fetchall():
-            if row['code'] not in codes:
-                conn.execute('DELETE FROM subscriptions WHERE company_key=?', (stock_codes.normalize_key(row['code']),))
-        for code in sorted(set(codes)):
-            conn.execute("INSERT INTO subscriptions(code, added_at) VALUES (?,?) ON CONFLICT(code) DO NOTHING",
-                         (code, db.now()))
+        for row in conn.execute("SELECT DISTINCT company_key FROM subscriptions WHERE origin='external'").fetchall():
+            if row['company_key'] not in wanted:
+                conn.execute('DELETE FROM subscriptions WHERE company_key=?', (row['company_key'],))
+        present = {r['company_key'] for r in conn.execute('SELECT company_key FROM subscriptions')}
+        for code in sorted(wanted - present):
+            conn.execute('INSERT INTO subscriptions(code, added_at) VALUES (?,?)', (code, db.now()))
     return subscriptions(conn)
 
 

@@ -303,11 +303,20 @@ def test_scan_events_normalize_both_code_forms(conn, scan_event):
     assert scans.events(conn, code='603606.SH') == bare
 
 
-def test_closing_prices_matches_suffixed_subscription_code(conn):
+def test_subscriptions_and_closing_prices_normalize_suffixed_code(conn):
     day, close = next(iter(next(row for row in VALUATION_BODY['table'] if row['id'] == 'M.close')['values'].items()))
     conn.execute('INSERT INTO subscriptions(code,added_at,last_close,last_close_date) VALUES (?,?,?,?)',
                  (RECORD['code'], RECORD['created_at'], close, day))
+    conn.execute("INSERT INTO batches(status,created_at,rule,l5,frozen_at) VALUES ('frozen',?,'{}',?,?)",
+                 (RECORD['created_at'], json.dumps({'codes': [RECORD['code']]}), RECORD['created_at']))
     assert scans._closing_prices(conn, codes=['603606']) == {'603606': {'last_close': float(close), 'last_close_date': day}}
+    expected = [{'code': '603606', 'origin': 'external', 'added_at': RECORD['created_at'],
+                 'last_close': float(close), 'last_close_date': day, 'origins': ['external', 'l5']}]
+    assert scans.subscriptions(conn) == expected
+    assert scans.replace_subscriptions(conn, ['603606'], catalog={'603606': RECORD['name']}) == expected
+    assert conn.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0] == 1
+    assert [s['origins'] for s in scans.replace_subscriptions(conn, [], catalog={})] == [['l5']]
+    assert conn.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0] == 0
 
 
 @pytest.fixture
