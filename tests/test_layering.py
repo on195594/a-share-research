@@ -77,8 +77,9 @@ def test_policy_page_read_loads_metadata_without_policy_runtime_or_market(tmp_pa
     result=subprocess.run([sys.executable,'-c','''
 import sys
 import a_share_research.web as web
-from a_share_research.policy.presentation import owner_view
+from a_share_research.policy.presentation import owner_view, registered_profiles
 assert owner_view(web.conn)['status']=='inactive'
+assert registered_profiles(web.conn)==[]
 for name in ('pandas','numpy','tushare','akshare','a_share_research.policy.v0',
              'a_share_research.policy.evaluation','a_share_research.policy.capture',
              'a_share_research.core.providers'):

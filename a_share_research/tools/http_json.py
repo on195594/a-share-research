@@ -1,8 +1,7 @@
 """Bounded JSON object inputs shared by the tools HTTP transports."""
-import json
-import math
-
 from starlette.requests import Request
+
+from a_share_research import gate
 
 # Space for a 20 MiB evidence object, base64 encoding and the request envelope.
 MAX_BODY_SIZE = 28 * 1024 * 1024
@@ -26,25 +25,8 @@ async def read_body(request: Request) -> bytes:
 
 
 def parse_object(body: bytes) -> dict:
-    def unique(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f'JSON 字段 {key!r} 重复')
-            result[key] = value
-        return result
-
-    def invalid_constant(value):
-        raise ValueError(f'JSON 数值 {value} 必须为有限数')
-
-    def finite_float(value):
-        number = float(value)
-        if not math.isfinite(number):
-            invalid_constant(value)
-        return number
-
     try:
-        value = json.loads(body, object_pairs_hook=unique, parse_constant=invalid_constant, parse_float=finite_float)
+        value = gate.loads_strict(body)
     except RecursionError:
         raise ValueError('JSON 嵌套过深') from None
     if not isinstance(value, dict):

@@ -9,6 +9,7 @@ from typing import Self
 import pandas as pd
 
 from a_share_research import db, sources, evidence, stock_codes
+from a_share_research.prompts import render_prompt
 from a_share_research.sources import Document
 from a_share_research.evidence import material_hash
 
@@ -91,25 +92,18 @@ class Material:
                                         self.extra.get("sources"), self.extra.get("catalog"))
 
     def prompt_block(self) -> str:
-        rows = [
-            f"[{r['id']}] {r['label']}（{r['unit']}）：" + ("；".join(f"{p} {v}" for p, v in r["values"].items()) or "缺失")
-            for r in self.table
-        ]
-        block = (
-            f"公司：{self.name}（{self.code}）\n\n"
-            f"## 财务与行情表（程序从 TuShare 生成；行情为 {self.market_date} 收盘）\n" + "\n".join(rows)
-            + "\n\n# 统一原文证据（默认 source=D0；read 为已读，listed 仅目录，不可引证；URL 由来源映射交付，无需正文手抄）\n"
-            + json.dumps(evidence.projection(self.source_registry(), catalog=True), ensure_ascii=False)
-        )
+        pending = None
         if self.extra:
             pending = {k: self.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}
             for key in ("prior", "events"):
                 if self.extra.get(key):
                     pending[key] = self.extra[key]
-            block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(pending, ensure_ascii=False)
-        block += "\n\n# 程序计算依据\n" + json.dumps(
-            [r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False)
-        return block
+        return render_prompt(
+            "material_block.j2", name=self.name, code=self.code, market_date=self.market_date, table=self.table,
+            sources=json.dumps(evidence.projection(self.source_registry(), catalog=True), ensure_ascii=False),
+            pending=json.dumps(pending, ensure_ascii=False) if pending is not None else None,
+            calculations=json.dumps([r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False),
+        )
 
 
 def replay_material(conn, source_run: int) -> Material:

@@ -1,5 +1,4 @@
 """Single-trade HTML form. The original form snapshot is sufficient to replay a submit."""
-import json
 import re
 import uuid
 from urllib.parse import urlencode
@@ -97,9 +96,9 @@ async def page(request, session, client, render, form=None, *, connection):
     holdings = {key.removeprefix('opening.'): fields[key] for key in fields if key.startswith('opening.')}
     profiles = []
     if enabled and fields.get('cost_basis') == '1':
-        rows = connection.execute('SELECT identity,created_at,parameters FROM policy_v0_profiles ORDER BY created_at DESC')
-        profiles = [{'identity': identity, 'created_at': stamp, 'frameworks': list(json.loads(parameters)['stops'])}
-                    for identity, stamp, parameters in rows]
+        from a_share_research.policy import presentation
+
+        profiles = presentation.registered_profiles(connection)
     return render(request, 'ledger_new.html', session, profiles=profiles, enabled=enabled, configured=client is not None,
                   fields=fields, holdings=holdings, selected=selected, recent=recent, errors=errors,
                   receipt=receipt, fresh_version=fresh_version, restored=restored, fresh=form is None,

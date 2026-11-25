@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen, build_opener, ProxyHandler
 
-from a_share_research import backup as recovery, db
+from a_share_research import backup as recovery, db, gate
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = ("web", "worker")
@@ -224,13 +224,7 @@ def private_json(path):
         raw = stream.read(limit + 1)
     try:
         if len(raw) > limit: raise ValueError
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result: raise ValueError
-                result[key] = value
-            return result
-        return json.loads(raw, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        return gate.loads_strict(raw)
     except (ValueError, UnicodeError, RecursionError):
         raise RuntimeError('批准输入无效') from None
 

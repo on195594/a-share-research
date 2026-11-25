@@ -141,7 +141,7 @@ def test_schedule_text_matches_captured_hermes_output(policy_setup, monkeypatch,
         scans.execute(conn, lookup(slot)['scan_id'], source=source, at=stamp)
     row = lookup(slot)
     assert row['status'] == 'ready', row['error']
-    # Golden text from the 9e77a07 Hermes renderer on these same service receipts.
+    # Golden text for these captured service receipts, including the delivery newline.
     expected = (ROOT / 'tests/data' / ('scheduled-' + job.replace('_', '-') + '.txt')).read_text()
     assert row['text'] == expected
     assert conn.execute('SELECT text FROM scheduled_runs WHERE id=?', (row['run_id'],)).fetchone()[0] == expected

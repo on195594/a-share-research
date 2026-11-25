@@ -306,9 +306,7 @@ def main():
         fields = ('identity', 'policy', 'rules_hash', 'guide_version')
         if args.action == 'register':
             from a_share_research.policy.v0 import paths, risk_policy
-            parameters = json.loads(paths.read_private_config(args.parameters,label='policy parameters'),
-                object_pairs_hook=risk_policy._unique_object,parse_constant=risk_policy._reject_constant,
-                parse_float=risk_policy._json_float)
+            parameters = risk_policy.loads_json(paths.read_private_config(args.parameters,label='policy parameters'))
             result = register(conn,principal,parameters)
             result = {k:result[k] for k in fields}
         elif args.action == 'activate':

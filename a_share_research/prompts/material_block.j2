@@ -1,0 +1,13 @@
+公司：{{ name }}（{{ code }}）
+
+## 财务与行情表（程序从 TuShare 生成；行情为 {{ market_date }} 收盘）
+{% for row in table %}[{{ row.id }}] {{ row.label }}（{{ row.unit }}）：{{ row["values"].items() | map("join", " ") | join("；") or "缺失" }}{{ "\n" if not loop.last }}{% endfor %}
+
+# 统一原文证据（默认 source=D0；read 为已读，listed 仅目录，不可引证；URL 由来源映射交付，无需正文手抄）
+{{ sources }}{% if pending %}
+
+# 本次问题与待核查上下文（不是事实来源）
+{{ pending }}{% endif %}
+
+# 程序计算依据
+{{ calculations }}

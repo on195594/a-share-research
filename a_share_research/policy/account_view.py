@@ -4,6 +4,7 @@ from pathlib import Path
 import sqlite3
 
 from a_share_research import db
+from a_share_research.account import mirror
 from a_share_research.policy import account_input, monitor, registry
 from a_share_research.stock_codes import normalize_key
 
@@ -38,6 +39,13 @@ def verified_current(conn: sqlite3.Connection, directory: Path, *, verify_eviden
     except (ValueError, TypeError):
         raise registry.PolicyError('在仓代码不能转换为研究公司代码；未返回空账户，请核对来源', 409) from None
     return dict(codes=codes, source=source)
+
+
+def current_holding_codes(conn: sqlite3.Connection, *, allow_unconfigured: bool = False) -> list[str]:
+    """Read within the caller's snapshot. Scans can start before an account source is configured."""
+    if allow_unconfigured and not conn.execute('SELECT 1 FROM account_source WHERE id=1').fetchone():
+        return []
+    return verified_current(conn, mirror.target_directory(conn))['codes']
 
 
 def current(conn: sqlite3.Connection, principal, database: Path) -> dict:

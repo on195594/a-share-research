@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import json
 from typing import Any
 
+from a_share_research import gate
 from a_share_research.policy.v0 import boards, paths, risk_budget
 
 
@@ -80,24 +80,13 @@ def _limit(value: object, field: str) -> float:
     return float(value)
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise RiskPolicyError("duplicate JSON key in risk policy")
-        result[key] = value
-    return result
-
-
-def _reject_constant(_value: str) -> None:
-    raise RiskPolicyError("risk policy JSON numbers must be finite")
-
-
-def _json_float(value: str) -> float:
-    number = float(value)
-    if not risk_budget.finite_number(number):
-        _reject_constant(value)
-    return number
+def loads_json(raw: str | bytes):
+    try:
+        return gate.loads_strict(raw)
+    except gate.DuplicateJSONKey:
+        raise RiskPolicyError("duplicate JSON key in risk policy") from None
+    except gate.NonFiniteJSONNumber:
+        raise RiskPolicyError("risk policy JSON numbers must be finite") from None
 
 
 def _load_policy(
@@ -112,12 +101,7 @@ def _load_policy(
         if not selected.exists() and not selected.is_symlink() and not configured:
             return None
         text = paths.read_private_config(selected, label="risk policy")
-        value = json.loads(
-            text,
-            object_pairs_hook=_unique_object,
-            parse_constant=_reject_constant,
-            parse_float=_json_float,
-        )
+        value = loads_json(text)
     except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
         # Do not echo policy contents, confirmation references or JSON snippets.
         raise RiskPolicyError(
@@ -187,12 +171,7 @@ def _load_account_snapshot() -> dict | None:
         selected = paths.cache_db_path().with_name("account-snapshot.json")
         if not selected.exists() and not selected.is_symlink():
             return None
-        value = json.loads(
-            paths.read_private_config(selected, label="account snapshot"),
-            object_pairs_hook=_unique_object,
-            parse_constant=_reject_constant,
-            parse_float=_json_float,
-        )
+        value = loads_json(paths.read_private_config(selected, label="account snapshot"))
     except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
         raise RiskPolicyError(
             f"cannot read stored account snapshot ({type(exc).__name__})"

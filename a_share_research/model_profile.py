@@ -91,7 +91,7 @@ def _application_sha256() -> str:
     package = PROFILE_PATH.parent
     runner = package.parent / "agent-runner"
     files = {PROFILE_PATH.name: PROFILE_SHA256}
-    for directory, extensions in ((package, {".py", ".mjs", ".html", ".css"}),
+    for directory, extensions in ((package, {".py", ".mjs", ".html", ".css", ".j2"}),
                                   (runner, {".ts", ".js", ".mjs", ".json"})):
         for path in directory.rglob("*"):
             if path.suffix in extensions and path.is_file():

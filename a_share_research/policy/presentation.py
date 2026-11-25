@@ -4,6 +4,7 @@ The route must authenticate its session first. This module neither accepts API
 credentials nor executes policy/account calculations or loads market providers.
 """
 from datetime import datetime
+import json
 
 from a_share_research import db
 from a_share_research.policy import account_input, registry
@@ -18,6 +19,12 @@ STATES = {
     'expired': ('政策参数已到期', '有效期已结束。请由所有者确认新的参数与适用期间。'),
     'active': ('政策已启用', '当前运行版本与生效登记一致。'),
 }
+
+
+def registered_profiles(conn):
+    rows = conn.execute('SELECT identity,created_at,parameters FROM policy_v0_profiles ORDER BY created_at DESC')
+    return [{'identity': identity, 'created_at': stamp, 'frameworks': list(json.loads(parameters)['stops'])}
+            for identity, stamp, parameters in rows]
 
 
 def _period(parameters, now):

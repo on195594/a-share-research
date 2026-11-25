@@ -73,8 +73,7 @@ def collector_main(label: str, collect, *fields: str) -> int:
         raw = sys.stdin.buffer.read(1024 * 1024 + 1)
         if len(raw) > 1024 * 1024:
             raise ValueError('input too large')
-        value = json.loads(raw.decode('utf-8'), object_pairs_hook=risk_policy._unique_object,
-                           parse_constant=risk_policy._reject_constant, parse_float=risk_policy._json_float)
+        value = risk_policy.loads_json(raw.decode('utf-8'))
         if not isinstance(value, dict) or set(value) != {'parameters', 'source', *fields}:
             raise ValueError('invalid capture fields')
         source = value['source']
@@ -118,13 +117,7 @@ def _capture(database: Path, module: str, payload: dict, *, market_token: bool =
         if len(output)>8*1024*1024:
             raise registry.PolicyError('政策输入包过大，未保存评估',503)
         try:
-            def unique(pairs):
-                value={}
-                for k,v in pairs:
-                    if k in value: raise ValueError('duplicate key')
-                    value[k]=v
-                return value
-            bundle=json.loads(output,object_pairs_hook=unique)
+            bundle=gate.loads_strict(output)
             from a_share_research.policy.evaluation import _json
             _json(bundle)
             if not isinstance(bundle,dict): raise ValueError('object required')

@@ -2,7 +2,6 @@
 from contextlib import nullcontext
 from datetime import datetime
 from decimal import Decimal
-import json
 import os
 from pathlib import Path
 import re
@@ -42,17 +41,15 @@ def _timestamp(value):
 
 
 def _json(value):
-    def pairs(items):
-        result={}
-        for key,item in items:
-            if key in result: raise AccountInputError('账本输入 JSON 键重复')
-            result[key]=item
-        return result
-    def constant(_):
-        raise AccountInputError('账本输入含非有限数字')
-    parsed=json.loads(value,object_pairs_hook=pairs,parse_constant=constant)
-    gate.canonical(parsed)  # Also rejects a floating-point overflow during parsing.
-    return parsed
+    try:
+        return gate.loads_strict(value)
+    except gate.DuplicateJSONKey:
+        raise AccountInputError('账本输入 JSON 键重复') from None
+    except gate.NonFiniteJSONNumber as exc:
+        if exc.token in ('NaN', 'Infinity', '-Infinity'):
+            raise AccountInputError('账本输入含非有限数字') from None
+        # An overflowing literal stays a plain ValueError, which read() reports as a corrupt ledger.
+        raise
 
 
 def _binding(value):

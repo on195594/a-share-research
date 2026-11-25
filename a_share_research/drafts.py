@@ -6,6 +6,7 @@ from copy import deepcopy
 from a_share_research import report as report_body, valuation
 from a_share_research.checking import SECTIONS
 from a_share_research.material import Material
+from a_share_research.prompts import render_prompt
 from a_share_research.reviewing import digest
 
 
@@ -14,10 +15,7 @@ def program_valuation(report: dict | None, material: Material) -> str:
     summary = valuation.program_summary((report or {}).get("valuation"), material.table, material.market_date)
     if summary is None:
         return ""
-    return ("\n# 程序估值测算（按本稿 valuation 计算，通过复核后随结论在报告页展示）\n"
-            + json.dumps(summary, ensure_ascii=False)
-            + "\nhurdle_price 是期望回报门槛价（等价格所等的价格）。这是程序输出，不是报告论断：报告以它作为参考价格时，"
-              "text 不重复数字也已给出价格；text 写出的价格与回报数字仍须引用 valuation 工具生成的 C.n。\n")
+    return render_prompt("program_valuation.j2", summary=json.dumps(summary, ensure_ascii=False))
 
 
 REPAIR_SECTIONS = (*SECTIONS, "answer", "checkpoints", "methods", "prior_status")

@@ -57,6 +57,17 @@ def test_unapproved_or_bad_owner_refuses_before_switch(local_policy, case):
     assert local.count() == 1
 
 
+@pytest.mark.parametrize('fields', [
+    '"expected_id":1,"expected_id":2', '"expected_id":1e999', '"expected_id":-Infinity',
+])
+def test_private_approval_rejects_invalid_json_fields(tmp_path, fields):
+    path = tmp_path / 'approval.json'
+    path.write_text('{' + fields + '}')
+    path.chmod(0o600)
+    with pytest.raises(RuntimeError, match='^批准输入无效$'):
+        deploy.private_json(path)
+
+
 @pytest.mark.parametrize('fault', ['cas', 'write', 'expired', 'uninstalled', 'unknown', 'historical'])
 def test_gate_failures_never_accept_unknown_or_historical_latest(local_policy, monkeypatch, fault):
     local = local_policy()

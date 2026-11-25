@@ -10,7 +10,6 @@ REASONS = {"major_risk": "发现风险公告", "pending_review": "有新信息�
            "checkpoint_deviated": "披露偏离预测区间", "add_trigger_missed": "加仓条件未达到"}
 ZONES = {"测算支持区": "模型认为估值较有吸引力", "中性区": "模型认为估值居中",
          "测算透支区": "模型认为价格偏贵"}
-VALUATION_NOTE = "注：估值参考不是技术支撑位或买卖指令，也不预测股价一定涨跌。"
 ACTIONS = {"covered": "已有报告", "queued_review": "已安排研究复核", "deferred": "等待研究复核",
            "no_card": "暂无研究记录", "skipped": "跳过"}
 OPPORTUNITY_NOTE = ("注：机会来自研究立场与按情景概率加权的期望回报，情景尚未记分；"
@@ -92,7 +91,7 @@ def notice_text(item: dict, held_codes: set[str] | None, public_base: str = "") 
     elif pending:
         conclusion = "新信息尚未核实，旧估值区间暂不能作为决策依据。"
     else:
-        conclusion = ZONES.get(zone or "", "研究已更新，当前估值位置尚不明确") + "；这不是买卖指令。"
+        conclusion = ZONES.get(zone or "", "研究已更新，当前估值位置尚不明确") + "。"
     # Subscription/L5 membership is not evidence of an account position.
     held = None if held_codes is None else item["code"] in held_codes
     if held is None:
@@ -143,8 +142,6 @@ def render_scan(result: dict, held_codes: set[str] | None, public_base: str = ""
     queued = result["summary"].get("queued_runs", [])
     if lines and queued:
         lines.append(f"已自动提交 {len(queued)} 家接续复核，完成后的变化会在下次扫描推送。")
-    if notices:
-        lines.append(VALUATION_NOTE)
     return "\n\n".join(lines)
 
 
@@ -206,7 +203,6 @@ def render_weekly(data: dict, opportunity_costs: list[dict] | None = None) -> st
         lines.append(f"换仓机会成本复核 {len(opportunity_costs)} 项：")
         for prompt in opportunity_costs:
             lines.append(f"- {prompt['detail']}")
-    lines.append(VALUATION_NOTE)
     return "\n".join(lines)
 
 

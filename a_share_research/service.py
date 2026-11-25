@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import Iterable
 from contextlib import nullcontext
 from datetime import datetime
 
@@ -404,31 +405,30 @@ def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = N
             "open_questions": body.get("open_questions", [])}
 
 
-def company_cards(conn: sqlite3.Connection, *, holdings: bool = False) -> dict:
-    """Read subscription and frozen L5 cards, optionally including verified holdings for policy monitoring."""
+def company_cards(conn: sqlite3.Connection, *, holdings: bool = False, holding_codes: Iterable[str] | None = None) -> dict:
+    """Read subscription and frozen L5 cards. Supply verified codes or request a holdings lookup."""
     with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
-        return _company_cards(conn, holdings)
+        return _company_cards(conn, holdings, holding_codes)
 
 
-def _company_cards(conn, holdings):
+def _company_cards(conn, holdings, holding_codes):
     from a_share_research import scans
 
     scope = {s['code']: s['origin'] for s in scans.subscription_scope(conn).values()}
     result = {'version': VERSION}
-    if holdings:
-        from a_share_research.account import mirror
+    if holdings and holding_codes is None:
         from a_share_research.policy import account_view, registry
 
         try:
-            current = account_view.verified_current(conn, mirror.target_directory(conn))
+            holding_codes = account_view.current_holding_codes(conn)
         except (registry.PolicyError, sqlite3.Error, OSError) as exc:
             logging.getLogger(__name__).warning('Could not verify holdings for policy research cards: %s', exc)
             result['holdings_available'] = False
-        else:
-            result['holdings_available'] = True
-            for code in current['codes']:
-                # Keep the monitor contract's external/l5 origins and preserve existing L5 candidates.
-                scope.setdefault(code, 'external')
+    if holding_codes is not None:
+        result['holdings_available'] = True
+        for code in holding_codes:
+            # Keep the monitor contract's external/l5 origins and preserve existing L5 candidates.
+            scope.setdefault(stock_codes.normalize_key(code), 'external')
     cards, missing = [], []
     history = scans.ScanHistory(conn) if scope else None
     for code, origin in scope.items():

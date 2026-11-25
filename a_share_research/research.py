@@ -13,7 +13,7 @@ from a_share_research import eval_report
 from a_share_research import report as report_body
 from a_share_research import db, evidence, market, model_profile, runner_process, sources, stance as stances, stock_codes, valuation
 from a_share_research.core.providers.tushare_common import TushareHTTPError
-from a_share_research.prompts import prompts_sha256
+from a_share_research.prompts import prompts_sha256, render_prompt
 from a_share_research.research_mcp import ResearchSession
 from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, digest
@@ -92,7 +92,7 @@ def _prior_report(conn, code: str, run_id: int) -> dict | None:
     return _agenda(row) if row else None
 
 
-EVENT_QUESTION = "公告扫描发现的 events 对研究判断、风险与检查点有什么影响？"
+EVENT_QUESTION = render_prompt("event_question.j2").rstrip("\n")
 FINANCIAL_CHECKS = ("T.roe", "T.core_profit", "T.op_cash", "T.capex", "T.fcf")
 
 

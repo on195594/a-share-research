@@ -918,6 +918,18 @@ def test_unverifiable_holding_scope_keeps_scanning_public_subscriptions(bound_bo
     assert [item['stage'] for item in weekly['failures']] == ['holding_scope']
     assert scans.weekly(conn, at=AT, compact=True)['failures'] == weekly['failures']
     assert scans.weekly(conn, at=AT, account_sources=False)['failures'] == []
+    assert service.company_cards(conn, holdings=True)['holdings_available'] is False
+
+    # Supplying a verified scope bypasses the broken ledger, including when that scope is empty.
+    code = '600001'  # From bound_book.
+    cards = service.company_cards(conn, holdings=True, holding_codes=iter([code + '.SH']))
+    assert cards['holdings_available'] is True and {'code': code, 'origin': 'external'} in cards['missing']
+    assert service.company_cards(conn, holding_codes=[])['holdings_available'] is True
+    assert {s['code'] for s in scans.scan_scope(conn, holding_codes=[code]) if 'holding' in s['origins']} == {code}
+    supplied = scans.weekly(conn, at=AT, holding_codes=iter([code]))
+    assert supplied['failures'] == [] and {'code': code, 'origin': 'holding', 'origins': ['holding']} in supplied['scan_scope']
+    empty = scans.weekly(conn, at=AT, holding_codes=[])
+    assert empty['failures'] == [] and empty['scan_scope'] == weekly['scan_scope']
     result = run_scan(conn)
     assert result['status'] == 'done'
     assert [s['code'] for s in result['summary']['scope']] == ['603606']
