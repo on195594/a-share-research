@@ -23,7 +23,7 @@ from a_share_research.drafts import RepairFormatError, indexed_draft, merge_repa
 from a_share_research.evidence import EvidenceError
 from a_share_research.material import Material, replay_material
 from a_share_research.prompts import output_schema, render_prompt, schema_facts
-from a_share_research.research_tools import TOOLS, EvidenceSession, record_stop
+from a_share_research.research_tools import TOOLS, EvidenceSession
 from a_share_research.reviewing import PROTOCOL, ReviewFormatError, ReviewLedger, digest
 
 log = logging.getLogger(__name__)
@@ -63,27 +63,33 @@ def _receipt(value, *, error=False):
         structured_content=value, is_error=error)
 
 
-def explore_prompt(material: Material) -> str:
+def explore_prompt(material: Material, *, material_block: str | None = None) -> str:
     latest = max(material.extra["catalog"].items(), key=lambda item: item[1].get("period", ""), default=None)
     cards = [m["title"] for m in material.extra.get("method_catalog", []) if "card" in m]
     return render_prompt("explore.j2", latest=latest if latest and latest[1].get("period", "") > material.doc.period else None,
-                         cards=cards, material_block=material.prompt_block(), **schema_facts(material))
+                         cards=cards, material_block=material.prompt_block() if material_block is None else material_block,
+                         **schema_facts(material))
 
 
-def compose_prompt(material: Material) -> str:
-    return render_prompt("compose.j2", material_block=material.prompt_block(), **schema_facts(material))
+def compose_prompt(material: Material, *, material_block: str | None = None) -> str:
+    return render_prompt("compose.j2", material_block=material.prompt_block() if material_block is None else material_block,
+                         **schema_facts(material))
 
 
-def review_prompt(material: Material, report: dict, binding: dict) -> str:
+def review_prompt(material: Material, report: dict, binding: dict, *,
+                  material_block: str | None = None, valuation: str | None = None) -> str:
     return render_prompt("review.j2", binding=json.dumps(binding, ensure_ascii=False),
                          report=json.dumps(report, ensure_ascii=False, indent=1),
-                         program_valuation=program_valuation(report, material), material_block=material.prompt_block())
+                         program_valuation=program_valuation(report, material) if valuation is None else valuation,
+                         material_block=material.prompt_block() if material_block is None else material_block)
 
 
-def repair_prompt(material: Material, report: dict, problems: list[dict], *, acquire: bool) -> str:
+def repair_prompt(material: Material, report: dict, problems: list[dict], *, acquire: bool,
+                  material_block: str | None = None, valuation: str | None = None) -> str:
     return render_prompt("repair.j2", acquire=acquire, problems=json.dumps(problems, ensure_ascii=False, indent=1),
                          indexed_report=json.dumps(indexed_draft(report), ensure_ascii=False, indent=1),
-                         program_valuation=program_valuation(report, material), material_block=material.prompt_block())
+                         program_valuation=program_valuation(report, material) if valuation is None else valuation,
+                         material_block=material.prompt_block() if material_block is None else material_block)
 
 
 class ResearchSession:
@@ -106,17 +112,36 @@ class ResearchSession:
         self.failure: dict | None = None
         self.last_error_kind: str | None = None
         self._chains: dict[str, tuple[int, str]] = {}
+        self._material_block: str | None = None
         self._server = self._build_server()
 
+    def flush(self):
+        if self.evidence is not None:
+            self.evidence.flush()
+
+    def material_block(self):
+        # Evidence tools can change tables, sources, methods and gaps; traces alone
+        # are not part of the prompt. Invalidate after each tool execution.
+        if self._material_block is None:
+            self._material_block = self.material.prompt_block()
+        return self._material_block
+
+    def _draft_context(self):
+        """Computed once per receipt and shared between its prompt and its fields."""
+        return {"material_block": self.material_block(),
+                "program_valuation": program_valuation(self.draft, self.material)}
+
     def _stage(self, stage):
+        self.flush()
         self.stage = stage
         if not self.standalone:
             db.update_run(self.conn, self.run_id, step=stage)
 
     def _context(self):
         return {"run_id": self.run_id, "mode": "replay" if self.evidence is None else "run",
-                "material_block": self.material.prompt_block(), "question": self.material.extra.get("question", ""),
-                "prompt": compose_prompt(self.material) if self.evidence is None else explore_prompt(self.material),
+                "material_block": self.material_block(), "question": self.material.extra.get("question", ""),
+                "prompt": compose_prompt(self.material, material_block=self.material_block()) if self.evidence is None
+                else explore_prompt(self.material, material_block=self.material_block()),
                 "output_schema": output_schema(self.material), "profile_sha256": self.profile_sha256,
                 "effective_model_call_limit": self.effective_model_call_limit,
                 "remaining_ms": max(0, int((self.deadline - time.monotonic()) * 1000)) if self.deadline is not None else None}
@@ -125,9 +150,11 @@ class ResearchSession:
         self.ledger.protect_risks(self.draft)
         self._stage("repair")
         self._chains.pop("repair", None)
+        context = self._draft_context()
         return {"status": "repair", "problems": self.problems, "indexed_draft": indexed_draft(self.draft),
-                "prompt": repair_prompt(self.material, self.draft, self.problems, acquire=self.evidence is not None),
-                "material_block": self.material.prompt_block(), "program_valuation": program_valuation(self.draft, self.material)}
+                "prompt": repair_prompt(self.material, self.draft, self.problems, acquire=self.evidence is not None,
+                                        material_block=context["material_block"], valuation=context["program_valuation"]),
+                **context}
 
     def _submit(self, draft):
         self.draft = draft
@@ -142,9 +169,11 @@ class ResearchSession:
         self._stage("review")
         self._chains.pop("review", None)
         binding = self.ledger.request(draft, self.material.snapshot()["sha256"])
-        return {"status": "review", "draft": draft, "binding": binding, "material_block": self.material.prompt_block(),
-                "prompt": review_prompt(self.material, draft, binding),
-                "program_valuation": program_valuation(draft, self.material)}
+        context = self._draft_context()
+        return {"status": "review", "draft": draft, "binding": binding, "material_block": context["material_block"],
+                "prompt": review_prompt(self.material, draft, binding,
+                                        material_block=context["material_block"], valuation=context["program_valuation"]),
+                "program_valuation": context["program_valuation"]}
 
     def _review(self, args):
         if self.stage != "review" or self.draft is None or self.reviewed_binding is not None:
@@ -168,7 +197,7 @@ class ResearchSession:
             call_id = db.log_call(self.conn, self.run_id, step, prompt,
                                   response=response, usage=args["usage"], seconds=args["seconds"],
                                   error=f"模型阶段未完成（{kind}）" if kind else None, identity=identity,
-                                  base=self._chains.get(step), block=self.material.prompt_block())
+                                  base=self._chains.get(step), block=self.material_block())
         self._chains[step] = (call_id, prompt)
         self.last_error_kind = kind
         return {"call_id": call_id}
@@ -179,6 +208,7 @@ class ResearchSession:
 
     def result(self) -> dict:
         """Return the final draft for the worker's existing delivery gate, including failed reports."""
+        self.flush()
         self._verify_replay()
         if self.failure:
             raise RuntimeError(self.failure["message"])
@@ -193,6 +223,8 @@ class ResearchSession:
         return {"draft": self.draft, "problems": problems, "reviewed": reviewed}
 
     def _call(self, name, args):
+        if name in {"submit_draft", "submit_patch", "review_decide"}:
+            self.flush()
         if name == "record_call":
             return _receipt(self._record_call(args))
         if name == "review_decide":
@@ -203,8 +235,11 @@ class ResearchSession:
             if self.draft is None or self.stage != "repair":
                 raise RepairFormatError("须先提交原稿并取得待修补问题")
             return _receipt(self._submit(merge_repair_patch(self.draft, args["patch"], self.problems, self.material)))
-        value, failed = self.evidence.call(name, args, self.stage)
-        return _receipt(value, error=failed)
+        try:
+            value, failed = self.evidence.call(name, args, self.stage)
+            return _receipt(value, error=failed)
+        finally:
+            self._material_block = None
 
     async def _abort(self, category, exc) -> NoReturn:
         self.failure = {"category": category, "stage": self.stage, "message": str(exc)}
@@ -270,8 +305,7 @@ class ResearchSession:
             async def stop(ctx, params):
                 if self.stage not in ("explore", "repair"):
                     raise MCPError(types.INVALID_PARAMS, "当前阶段未在取证")
-                record_stop(self.material, params.reason, self.stage)
-                db.save_material(self.conn, self.run_id, self.material.snapshot())
+                self.evidence.stop(params.reason, self.stage)
                 return types.EmptyResult()
 
             server.add_request_handler("research/acquisition_stop", AcquisitionStop, stop)
@@ -279,9 +313,9 @@ class ResearchSession:
 
     async def serve(self, read_stream, write_stream):
         """Serve MCP until EOF or a fatal run error; the latter also remains on failure for the worker."""
-        with anyio.CancelScope() as self._scope:
-            await self._server.run(read_stream, write_stream, self._server.create_initialization_options())
         try:
+            with anyio.CancelScope() as self._scope:
+                await self._server.run(read_stream, write_stream, self._server.create_initialization_options())
             if self.failure:
                 raise self._fatal_error
             self._verify_replay()
@@ -292,6 +326,8 @@ class ResearchSession:
                     "UPDATE runs SET identity=json_set(coalesce(identity, '{}'), '$.failure', json(?)) WHERE id=?",
                     (json.dumps(self.failure, ensure_ascii=False), self.run_id))
             raise
+        finally:
+            self.flush()
 
 
 async def serve_stdio(session: ResearchSession, child_stdout: BinaryIO, child_stdin: BinaryIO, *,

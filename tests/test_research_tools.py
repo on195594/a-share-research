@@ -1,7 +1,9 @@
 """New calculations and task boundaries using captured Moutai data and disclosed excerpts."""
 
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
@@ -9,7 +11,7 @@ import pandas as pd
 import pytest
 from jinja2 import Environment, FileSystemLoader
 
-from a_share_research import db, service
+from a_share_research import db, industry, service
 from a_share_research.material import Material, financial_table
 from a_share_research.checking import check
 from a_share_research.research import _research_context, _verified_facts
@@ -17,6 +19,54 @@ from a_share_research.research_tools import calculate
 from a_share_research.sources import Document
 from support.reports import MATERIAL, report
 from support.financials import FINANCIAL_DATA as DATA
+
+
+def test_industry_validation_cache_keeps_captured_inputs_and_mutations_separate():
+    captured = json.loads((Path(__file__).parent / "data/industry-20261104.json").read_text())
+    rows = industry.industry_rows(captured)
+    industry._expected_rows.cache_clear()
+    try:
+        industry.validate_rows(rows, rows)
+        industry.validate_rows(deepcopy(rows), deepcopy(rows))
+        assert industry._expected_rows.cache_info().misses == 1
+        assert industry._expected_rows.cache_info().hits == 1
+
+        # Mutate the caller-owned calculated value in place after the cache was filled.
+        period = next(iter(rows[0]["values"]))
+        value = rows[0]["values"][period]
+        rows[0]["values"][period] = "987654.32"
+        with pytest.raises(ValueError, match="行业数值"):
+            industry.validate_rows(rows, rows)
+        rows[0]["values"][period] = value
+        industry.validate_rows(rows, rows)
+        assert industry._expected_rows.cache_info().misses == 1
+
+        # Mutating the same raw bundle must invalidate the key and recheck identities.
+        day = next(iter(captured["daily"]))
+        original = captured["daily"][day]["params"]["trade_date"]
+        captured["daily"][day]["params"]["trade_date"] = "19000101"
+        with pytest.raises(ValueError, match="行业出处"):
+            industry.validate_rows(rows, rows)
+        assert industry._expected_rows.cache_info().misses == 2
+        captured["daily"][day]["params"]["trade_date"] = original
+        industry.validate_rows(rows, rows)
+        assert industry._expected_rows.cache_info().misses == 2
+
+        # Minimal malformed variants of the real rows stay actionable ValueErrors.
+        anchor = next(r for r in rows if "dataset" in r["source"])
+        source = anchor["source"]
+        without = lambda key: {k: v for k, v in source.items() if k != key}
+        broken = [without("dataset"), without("dataset_ref"),
+                  *(source | {"dataset": value} for value in (None, [], "x", {}, captured | {"daily": []}))]
+        for variant in broken:
+            bad = [r | {"source": variant} if r is anchor else r for r in rows]
+            with pytest.raises(ValueError, match="行业"):
+                industry.validate_rows(bad, bad)
+        for bad in ([{k: v for k, v in anchor.items() if k != "id"}], [anchor | {"source": None}]):
+            with pytest.raises(ValueError, match="行业"):
+                industry.validate_rows(bad, rows)
+    finally:
+        industry._expected_rows.cache_clear()
 
 
 def test_same_period_growth_and_calculation_inputs_are_preserved():
@@ -258,3 +308,82 @@ def test_review_targets_are_canonical_and_empty_facts_are_not_endorsed():
         report={"passed": False}, body={"facts": facts, "facts_reviewed": True})
     assert "也未保留可单独展示的事实条目" in html
     assert "仅保留本次" not in html
+
+
+def test_evidence_session_flush_batches_real_calculations_and_errors(tmp_path):
+    from contextlib import closing
+    from a_share_research.material import replay_material
+    from a_share_research.research_tools import EvidenceSession
+    from a_share_research.evidence import EvidenceError
+
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    with closing(db.connect(tmp_path / 'app.db')) as conn:
+        run_id = db.create_run(conn, material.code)
+        db.save_material(conn, run_id, material.snapshot())
+        session = EvidenceSession(conn, run_id, material)
+        statements = []
+        conn.set_trace_callback(statements.append)
+        conn.execute("CREATE TEMP TRIGGER reject_material BEFORE UPDATE OF material ON runs "
+                     "BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+        args = {'label': '经营现金流差额', 'operation': 'difference',
+                'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
+                'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}
+        session.call('calculate', args, 'explore')
+        session.call('calculate', args, 'explore')  # Toolkit cache still reuses C.1.
+        bad = args | {'left': {'ref': 'T.missing'}}
+        assert session.call('calculate', bad, 'explore')[1]
+        assert not session.call('calculate', bad, 'explore')[0]['charged']
+        assert not any(sql.startswith('UPDATE runs SET material') for sql in statements)
+        assert len(material.table) == len(MATERIAL.table) + 1
+        # A failed write keeps the evidence pending for the next boundary.
+        with pytest.raises(sqlite3.IntegrityError, match='disk full'):
+            session.flush()
+        conn.execute("DROP TRIGGER reject_material")
+        statements.clear()
+        session.flush()
+        # SQLite repeats the statement trace while executing runs triggers.
+        assert len({sql for sql in statements if sql.startswith('UPDATE runs SET material')}) == 1
+        assert replay_material(conn, run_id).extra['tools'] == session.traces
+        statements.clear()
+        session.flush()
+        assert statements == []  # Clean flush does not even serialize/query.
+
+        # A deliberately misbound real document must retain the failed trace.
+        material.extra['catalog']['D0']['period'] = '2024-12-31'
+        with pytest.raises(EvidenceError):
+            session.call('read_disclosure', {'source': 'D0', 'page': 9}, 'explore')
+        session.flush()
+        assert replay_material(conn, run_id).extra['tools'][-1]['error']
+
+
+def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_path):
+    from contextlib import closing
+    from a_share_research import research_mcp
+    from a_share_research.reviewing import ReviewLedger
+    from a_share_research.material import replay_material
+
+    material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
+    with closing(db.connect(tmp_path / 'app.db')) as conn:
+        run_id = db.create_run(conn, material.code)
+        session = research_mcp.ResearchSession(conn, run_id, material, ReviewLedger())
+        initial = session._context()
+        assert initial['prompt'] == research_mcp.explore_prompt(material)
+        session.draft = report()
+        context = session._draft_context()
+        problems = [{'where': 'verdict', 'problem': '缺失'}]
+        assert research_mcp.repair_prompt(material, session.draft, problems, acquire=True) == research_mcp.repair_prompt(
+            material, session.draft, problems, acquire=True,
+            material_block=context['material_block'], valuation=context['program_valuation'])
+        binding = session.ledger.request(session.draft, material.snapshot()['sha256'])
+        assert research_mcp.review_prompt(material, session.draft, binding) == research_mcp.review_prompt(
+            material, session.draft, binding,
+            material_block=context['material_block'], valuation=context['program_valuation'])
+        session._call('calculate', {'label': '经营现金流差额', 'operation': 'difference',
+                                   'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
+                                   'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}})
+        changed = session._draft_context()
+        assert changed['material_block'] == material.prompt_block() != initial['material_block']
+        session._stage('compose')
+        assert replay_material(conn, run_id).extra['tools'] == session.evidence.traces
+        session.evidence.stop('tool_limit', 'explore')
+        assert replay_material(conn, run_id).extra['stop_reasons'][0]['reason'] == 'tool_limit'

@@ -597,6 +597,7 @@ class EvidenceSession:
         self.toolkit = ResearchTools(material, conn)
         self.failures = {}
         self._evidence_key: str | None = None
+        self._dirty = False
 
     def evidence_key(self):
         # Keep calculation rows/cache untouched; ignore only purpose names and generated IDs
@@ -613,7 +614,18 @@ class EvidenceSession:
     def _record(self, name, args, stage, result, failed, started):
         self.traces.append({"tool": name, "arguments": args, "result": result, "error": failed,
                             "stage": stage, "seconds": round(time.monotonic() - started, 3)})
-        db.save_material(self.conn, self.run_id, self.material.snapshot())
+        self._dirty = True
+
+    def flush(self) -> None:
+        """Persist accumulated evidence at a stage or service boundary."""
+        if self._dirty:
+            db.save_material(self.conn, self.run_id, self.material.snapshot())
+            self._dirty = False
+
+    def stop(self, reason, stage):
+        record_stop(self.material, reason, stage)
+        self._dirty = True
+        self.flush()
 
     def _execute(self, name, args):
         try:

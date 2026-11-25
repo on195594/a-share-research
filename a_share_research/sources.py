@@ -316,7 +316,12 @@ def pe_quantiles(frame: pd.DataFrame, code: str, market_date: str) -> dict:
 
 
 def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None,
-                     cache_only: bool = False, max_calls: int | None = None) -> dict:
+                     cache_only: bool = False, max_calls: int | None = None, include_rows: bool = True) -> dict:
+    return _report_rc_window(as_of, days=days, code=code, cache_only=cache_only, max_calls=max_calls, include_rows=include_rows)
+
+
+def _report_rc_window(as_of: str, *, days=90, code=None, cache_only=False, max_calls=None,
+                      include_rows=True, organizations_only=False) -> dict:
     """Read daily market-wide reports; optionally backfill within the shared daily budget.
 
     Batch freeze uses cache_only: missing report days remain missing, never trigger upstream calls.
@@ -354,22 +359,30 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None,
     for day in trading_days:
         params = {"start_date": day, "end_date": day}
         try:
-            frame = market.cached_response("report_rc", params)
-            if frame is None:
-                if stopped or cache_only or (max_calls is not None and calls >= max_calls):
-                    result["missing_days"].append(day)
-                    continue
-                calls += 1
-                frame = market.query(pro, "report_rc", **params)
-            rows = market.report_rc_rows(frame, code)
-            # A daily query must never silently lend coverage to a different date.
-            if not frame.empty and not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(date.fromisoformat(day)).all():
-                raise SourceError(f"report_rc {day} 返回了其他日期的预测")
-            result["rows"].extend(rows)
+            daily = market.cached_report_rc_day(day, code=code, include_rows=include_rows,
+                                                organizations_only=organizations_only)
+            if daily is None:
+                # The index only accelerates: a raw hit it cannot serve is not an upstream call.
+                frame = market.cached_response("report_rc", params)
+                if frame is None:
+                    if stopped or cache_only or (max_calls is not None and calls >= max_calls):
+                        result["missing_days"].append(day)
+                        continue
+                    calls += 1
+                    frame = market.query(pro, "report_rc", **params)
+                    daily = market.cached_report_rc_day(day, code=code, include_rows=include_rows,
+                                                        organizations_only=organizations_only)
+                if daily is None:  # No usable index (e.g. cache disabled): same validation and metadata.
+                    selected = market._report_rc_frame(frame, code)
+                    if not frame.empty and not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(date.fromisoformat(day)).all():
+                        raise SourceError(f"report_rc {day} 返回了其他日期的预测")
+                    daily = {"rows": selected.to_dict(orient="records") if include_rows else [], "empty": frame.empty,
+                             "truncated": len(frame) >= market.REPORT_RC_ROW_CAP}
+            result["rows"].extend(daily["rows"])
             result["covered_days"] += 1
-            if frame.empty:
+            if daily["empty"]:
                 result["empty_days"].append(day)
-            if len(frame) >= market.REPORT_RC_ROW_CAP:
+            if daily["truncated"]:
                 result["truncated_days"].append(day)
         except Exception as exc:
             if isinstance(exc, (market.ReportRCBudgetExhausted, market.ReportRCCoolingDown)):
@@ -401,5 +414,5 @@ def coverage_counts(window: dict, codes: list[str], as_of: str) -> dict:
 
 def batch_coverage(batch: dict) -> dict:
     as_of = date.fromisoformat(batch["as_of"]).isoformat()
-    window = report_rc_window(as_of, days=90, cache_only=True)
+    window = _report_rc_window(as_of, days=90, cache_only=True, organizations_only=True)
     return coverage_counts(window, [r["code"] for r in batch["q20"] + (batch.get("s10") or [])], as_of)

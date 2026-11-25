@@ -588,7 +588,7 @@ class MarketSources:
 
     def report_rc_window(self, as_of):
         from a_share_research import sources
-        return sources.report_rc_window(as_of)
+        return sources.report_rc_window(as_of, include_rows=False)
 
 
 def normalize_announcements(rows: list[dict], code: str) -> list[dict]:

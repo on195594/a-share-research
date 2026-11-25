@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta
@@ -202,10 +203,13 @@ def test_cache_probe_oserror_falls_back_to_upstream(pro, monkeypatch):
     assert len(pro.calls) == 2
 
 
-def test_readonly_legacy_cache_without_budget_table_serves_hit(pro):
+def test_readonly_legacy_cache_without_budget_table_serves_hit(pro, monkeypatch):
     params = {"ts_code": "000651.SZ", "end_date": FIN["as_of"]}
     expected = screening._query(pro, "income", **params)
     cache_path = db.DATA / "tushare_cache.db"
+    # A fresh process meets the legacy file: no handle is held yet.
+    market._cache_connection().close()
+    monkeypatch.setattr(market, "_connections", threading.local())
     with closing(sqlite3.connect(cache_path)) as conn:
         conn.execute("PRAGMA journal_mode=DELETE")
         conn.execute("DROP TABLE IF EXISTS report_rc_budget")

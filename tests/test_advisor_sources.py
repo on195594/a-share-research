@@ -456,3 +456,166 @@ def test_combined_valuation_fetches_daily_basic_once(monkeypatch, age):
     # The one window still reaches five years before a close that is two weeks old.
     boundary = close_day.replace(year=close_day.year - 5)
     assert calls[0]["params"]["start_date"] <= boundary.strftime("%Y%m%d")
+
+
+def test_daily_index_matches_full_rows_and_skips_payload_for_metadata(daily_reports):
+    sources.report_rc_window("2026-09-18", days=1)
+    full = sources.report_rc_window("2026-09-18", days=1, cache_only=True)
+    statements = []
+    connection = market._cache_connection()
+    connection.set_trace_callback(statements.append)
+    try:
+        selected = sources.report_rc_window("2026-09-18", days=1, code="603606", cache_only=True)
+        assert selected == full | {"rows": [row for row in full["rows"] if row["ts_code"] == "603606.SH"]}
+        assert any("AND code='603606.SH'" in sql for sql in statements)
+        keys = [market._tushare_cache_key("report_rc", {"start_date": day, "end_date": day})
+                for day in ("20260918", "20260917")]
+        assert not any("SELECT data" in sql and any(key in sql for key in keys) for sql in statements)
+        statements.clear()
+        metadata = sources.report_rc_window("2026-09-18", days=1, cache_only=True, include_rows=False)
+        assert metadata == full | {"rows": []}
+        assert not any("row_json" in sql for sql in statements)
+    finally:
+        connection.set_trace_callback(None)
+
+
+def test_daily_index_rebuilds_legacy_timestamp_changes_and_deleted_source(daily_reports):
+    day = "20260918"
+    params = {"start_date": day, "end_date": day}
+    frame = market.query(daily_reports, "report_rc", **params)
+    key = market._tushare_cache_key("report_rc", params)
+    with closing(market.report_rc_connect()) as connection:
+        connection.execute("DELETE FROM report_rc_day_meta")
+        connection.execute("DELETE FROM report_rc_day_rows")
+        assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(frame)
+        # Real captured rows, minimally remove one to prove replacement is used.
+        replacement = frame.iloc[1:]
+        stamp = "2026-11-01T00:00:00+08:00"
+        connection.execute("UPDATE tushare_cache SET data=?,created_at=? WHERE key=?",
+                           (json.dumps(replacement.to_dict(orient="split")), stamp, key))
+        assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(replacement)
+        assert connection.execute("SELECT source_created_at FROM report_rc_day_meta WHERE day=?", (day,)).fetchone() == (stamp,)
+        connection.execute("DELETE FROM tushare_cache WHERE key=?", (key,))
+        assert market.cached_report_rc_day(day) is None
+        assert connection.execute("SELECT count(*) FROM report_rc_day_rows WHERE day=?", (day,)).fetchone()[0] == 0
+
+
+def test_daily_index_empty_ttl_uses_raw_created_at(daily_reports, monkeypatch):
+    class Clock(datetime):
+        current = datetime(2026, 9, 18, 9, tzinfo=db.SHANGHAI)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    monkeypatch.setattr(sources, "datetime", Clock)
+    monkeypatch.setattr(market, "datetime", Clock)
+    day = "20260917"
+    market.query(daily_reports, "report_rc", start_date=day, end_date=day)
+    with closing(market.report_rc_connect()) as connection:
+        key = market._tushare_cache_key("report_rc", {"start_date": day, "end_date": day})
+        connection.execute("UPDATE tushare_cache SET created_at=? WHERE key=?", (Clock.current.isoformat(), key))
+        assert market.cached_report_rc_day(day) == {"rows": [], "empty": True, "truncated": False}
+        Clock.current += timedelta(hours=25)
+        window = sources.report_rc_window("2026-09-17", days=0, cache_only=True, include_rows=False)
+        assert window["covered_days"] == 0 and window["missing_days"] == [day]
+        assert market.cached_report_rc_day(day) is None
+        assert connection.execute("SELECT count(*) FROM report_rc_day_meta WHERE day=?", (day,)).fetchone()[0] == 0
+
+
+def test_cache_connections_follow_data_path_and_external_close_is_independent(monkeypatch, tmp_path):
+    monkeypatch.setenv("TUSHARE_CACHE", "1")
+    params = {"end_date": MARKET["trade_date"]}
+    market.cached_query("daily_basic", params, lambda: pd.DataFrame([MARKET]))
+    first = market._cache_connection()
+    assert market._cache_connection() is first
+    for connector in (market.tushare_connect, market.report_rc_connect):
+        with closing(connector()) as owned:
+            assert owned is not first
+            assert owned.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+            assert owned.execute("PRAGMA synchronous").fetchone()[0] == 1
+            assert owned.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+        assert first.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 1
+    original = db.DATA
+    monkeypatch.setattr(db, "DATA", tmp_path / "other-data")
+    assert market.cached_response("daily_basic", params) is None
+    second = market._cache_connection()
+    assert second is not first
+    assert second.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 0
+    monkeypatch.setattr(db, "DATA", original)
+    pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), pd.DataFrame([MARKET]))
+
+
+def test_batch_coverage_reads_only_indexed_organizations(daily_reports):
+    sources.report_rc_window("2026-09-18")
+    window = sources.report_rc_window("2026-09-18", cache_only=True)
+    codes = ["603606.SH", "600519.SH"]
+    expected = sources.coverage_counts(window, codes, "2026-09-18")
+    statements = []
+    connection = market._cache_connection()
+    connection.set_trace_callback(statements.append)
+    try:
+        result = sources.batch_coverage({"as_of": "2026-09-18", "q20": [{"code": code} for code in codes]})
+    finally:
+        connection.set_trace_callback(None)
+    assert result == expected
+    assert not any("row_json" in sql for sql in statements)
+    assert any("SELECT code,org_name" in sql for sql in statements)
+
+
+@pytest.mark.parametrize("broken", ["{", '{"data": []}', '{"data": [[1]], "index": [], "columns": []}'])
+def test_corrupt_legacy_daily_cache_remains_a_cache_miss(daily_reports, broken):
+    day = "20260918"
+    params = {"start_date": day, "end_date": day}
+    market.query(daily_reports, "report_rc", **params)
+    with closing(market.report_rc_connect()) as connection:
+        connection.execute("UPDATE tushare_cache SET data=?,created_at=? WHERE key=?",
+                           (broken, "2026-11-01T00:00:00+08:00", market._tushare_cache_key("report_rc", params)))
+    assert market.cached_report_rc_day(day) is None
+    result = sources.report_rc_window("2026-09-18", days=0)
+    assert result["covered_days"] == 1
+    assert daily_reports.calls == [day, day]
+    assert "reason" not in result
+
+
+@pytest.mark.parametrize("table", ["report_rc_day_meta", "report_rc_day_rows"])
+def test_unwritable_index_serves_the_raw_cache_without_an_upstream_call(daily_reports, table):
+    sources.report_rc_window("2026-09-18", days=1)
+    full = sources.report_rc_window("2026-09-18", days=1, code="603606", cache_only=True)
+    used = market.report_rc_status()["used"]
+    with closing(market.report_rc_connect()) as connection:
+        connection.execute("DELETE FROM report_rc_day_meta")
+        connection.execute("DELETE FROM report_rc_day_rows")
+        connection.execute(f"CREATE TRIGGER reject_index BEFORE INSERT ON {table} "
+                           "BEGIN SELECT RAISE(ABORT, 'index unavailable'); END")
+        assert sources.report_rc_window("2026-09-18", days=1, code="603606", cache_only=True) == full
+        # max_calls counts upstream work only, so backfill is not pinned to a cached day.
+        window = sources.report_rc_window("2026-09-18", days=1, code="603606", max_calls=0)
+        assert window["rows"] == full["rows"] and window["missing_days"] == []
+        assert market.report_rc_status()["used"] == used
+        # Empty days need no row inserts; no day with forecasts is left half indexed.
+        assert connection.execute("SELECT count(*) FROM report_rc_day_meta WHERE empty=0").fetchone() == (0,)
+
+
+def test_same_second_refresh_invalidates_the_daily_index(daily_reports, monkeypatch):
+    day = "20260918"
+    params = {"start_date": day, "end_date": day}
+    monkeypatch.setattr(db, "now", lambda: "2026-11-01T00:00:00+08:00")
+    frame = market.query(daily_reports, "report_rc", **params)
+    assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(frame)
+    # Real captured rows, minimally remove one; two writes can share a one-second stamp.
+    monkeypatch.setattr(market, "cached_response", lambda *args: None)
+    market.cached_query("report_rc", params, lambda: frame.iloc[1:])
+    assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(frame.iloc[1:])
+
+
+def test_deleted_cache_file_is_recreated_instead_of_written_through_a_stale_handle(monkeypatch):
+    monkeypatch.setenv("TUSHARE_CACHE", "1")
+    params = {"end_date": MARKET["trade_date"]}
+    fetch = lambda: pd.DataFrame([MARKET])
+    market.cached_query("daily_basic", params, fetch)
+    for path in db.DATA.glob("tushare_cache.db*"):
+        path.unlink()
+    market.cached_query("daily_basic", params, fetch)
+    with closing(market.tushare_connect()) as connection:
+        assert connection.execute("SELECT count(*) FROM tushare_cache").fetchone() == (1,)

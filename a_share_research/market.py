@@ -6,9 +6,9 @@ import logging
 import os
 import sqlite3
 import time
+import threading
 from collections.abc import Callable
 from typing import Any
-from contextlib import closing
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -65,25 +65,18 @@ def cached_response(api: str, params: dict) -> pd.DataFrame | None:
     key = _tushare_cache_key(api, params)
     if key is None:
         return None
-    path = db.DATA / "tushare_cache.db"
     try:
-        if not path.exists():
+        if not (db.DATA / "tushare_cache.db").exists():
             return None
-        uri = path.resolve().as_uri() + "?mode=ro"
-        with closing(sqlite3.connect(uri, uri=True, timeout=30, isolation_level=None)) as conn:
-            conn.execute("PRAGMA busy_timeout=30000")
-            conn.execute("PRAGMA temp_store=MEMORY")
-            row = conn.execute("SELECT data,created_at FROM tushare_cache WHERE key=?", (key,)).fetchone()
+        conn = _cache_connection()
+        row = conn.execute("SELECT data,created_at FROM tushare_cache WHERE key=?", (key,)).fetchone()
         if row:
             saved = json.loads(row[0])
             if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
                 raise ValueError("TuShare cache is not a split DataFrame")
             frame = pd.DataFrame(**saved)
             if api == "report_rc" and frame.empty:
-                # A recent empty response can be publication lag, not no coverage.
-                age = datetime.now(SHANGHAI).date() - date.fromisoformat(str(params["end_date"]))
-                ttl = timedelta(days=1 if age.days <= 7 else 7)
-                if datetime.now(SHANGHAI) - datetime.fromisoformat(row[1]) >= ttl:
+                if _report_rc_expired(params["end_date"], row[1]):
                     return None
             return frame
     except (OSError, sqlite3.Error, ValueError, TypeError):
@@ -99,14 +92,147 @@ class ReportRCCoolingDown(SourceError):
     pass
 
 
-def report_rc_connect():
-    path = db.DATA / "tushare_cache.db"
+_connections = threading.local()
+
+
+def tushare_connect():
+    """Return an owned connection; callers may safely use contextlib.closing."""
+    path = (db.DATA / "tushare_cache.db").resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=30, isolation_level=None)
-    conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
-    conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
+    conn = sqlite3.connect(path, timeout=5, isolation_level=None)
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        try:
+            db._enable_wal(conn, 5)  # concurrent first openers get BUSY without waiting
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
+            conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
+            conn.execute("CREATE TABLE IF NOT EXISTS report_rc_day_meta "
+                         "(day TEXT PRIMARY KEY, source_created_at TEXT, row_count INTEGER, empty INTEGER)")
+            conn.execute("CREATE TABLE IF NOT EXISTS report_rc_day_rows "
+                         "(day TEXT, code TEXT, org_name TEXT, row_json TEXT)")
+            conn.execute("CREATE INDEX IF NOT EXISTS report_rc_day_code ON report_rc_day_rows(day, code)")
+        except sqlite3.OperationalError as exc:
+            if exc.sqlite_errorcode & 0xFF != sqlite3.SQLITE_READONLY:
+                raise  # a read-only cache still serves hits
+    except BaseException:
+        conn.close()
+        raise
     return conn
+
+
+def report_rc_connect():
+    return tushare_connect()
+
+
+def _cache_connection():
+    """Keep one internal connection per thread, reopening when DATA or the file itself changes."""
+    path = (db.DATA / "tushare_cache.db").resolve()
+    identity = _file_identity(path)
+    if identity is None or identity != getattr(_connections, "identity", None):
+        previous = getattr(_connections, "conn", None)
+        _connections.conn = _connections.identity = None
+        if previous is not None:
+            previous.close()
+        _connections.conn = tushare_connect()
+        _connections.identity = _file_identity(path)
+    return _connections.conn
+
+
+def _file_identity(path):
+    """A deleted, replaced or re-permissioned cache file must not be served by an old handle."""
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return path, stat.st_dev, stat.st_ino, stat.st_mode
+
+
+def _report_rc_expired(day, created_at):
+    # A recent empty response can be publication lag, not no coverage.
+    age = datetime.now(SHANGHAI).date() - date.fromisoformat(str(day))
+    ttl = timedelta(days=1 if age.days <= 7 else 7)
+    return datetime.now(SHANGHAI) - datetime.fromisoformat(created_at) >= ttl
+
+
+def _index_report_rc(conn, day, frame, created_at):
+    rows = report_rc_rows(frame)
+    if any(row["report_date"] != date.fromisoformat(day).isoformat() for row in rows):
+        raise SourceError(f"report_rc {day} 返回了其他日期的预测")
+    conn.execute("DELETE FROM report_rc_day_rows WHERE day=?", (day,))
+    conn.executemany("INSERT INTO report_rc_day_rows VALUES (?,?,?,?)",
+                     [(day, row["ts_code"], row["org_name"], json.dumps(row, ensure_ascii=False)) for row in rows])
+    conn.execute("INSERT OR REPLACE INTO report_rc_day_meta VALUES (?,?,?,?)",
+                 (day, created_at, len(frame), int(frame.empty)))
+
+
+def cached_report_rc_day(day, *, code=None, include_rows=True, organizations_only=False):
+    """Read a validated daily index, bound to the raw cache entry and its empty TTL.
+
+    None means the index cannot answer; the caller then reads the raw cache itself.
+    """
+    key = _tushare_cache_key("report_rc", {"start_date": day, "end_date": day})
+    if key is None:
+        return None
+    try:
+        if not (db.DATA / "tushare_cache.db").exists():
+            return None
+        with _cache_connection() as conn:
+            conn.execute("BEGIN")
+            source, meta = _report_rc_index_state(conn, key, day)
+            if source is None or meta is None or source[0] != meta[0] or (meta[2] and _report_rc_expired(day, source[0])):
+                # Upgrade by reopening the snapshot under a write reservation, then
+                # reread both identities: another process may have refreshed this day.
+                conn.commit()
+                conn.execute("BEGIN IMMEDIATE")
+                source, meta = _report_rc_index_state(conn, key, day)
+                if source is None or (meta and source[0] == meta[0] and meta[2] and _report_rc_expired(day, source[0])):
+                    _delete_report_rc_index(conn, day)
+                    return None
+                if meta is None or source[0] != meta[0]:
+                    raw = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (key,)).fetchone()[0]
+                    try:
+                        saved = json.loads(raw)
+                        if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
+                            raise ValueError("TuShare cache is not a split DataFrame")
+                        frame = pd.DataFrame(**saved)
+                        expired = frame.empty and _report_rc_expired(day, source[0])
+                    except (ValueError, TypeError):
+                        log.warning("TuShare report_rc cache read failed; fetching upstream", exc_info=True)
+                        _delete_report_rc_index(conn, day)
+                        return None
+                    if expired:
+                        _delete_report_rc_index(conn, day)
+                        return None
+                    _index_report_rc(conn, day, frame, source[0])
+                    meta = (source[0], len(frame), frame.empty)
+            rows = []
+            if include_rows:
+                columns = "code,org_name" if organizations_only else "row_json"
+                sql, args = f"SELECT {columns} FROM report_rc_day_rows WHERE day=?", [day]
+                if code is not None:
+                    sql += " AND code=?"
+                    args.append(to_tushare_stock_code(code))
+                # Preserve provider order, including when selecting all companies.
+                selected = conn.execute(sql + " ORDER BY rowid", args)
+                rows = ([{"ts_code": r[0], "org_name": r[1]} for r in selected] if organizations_only
+                        else [json.loads(r[0]) for r in selected])
+            return {"rows": rows, "empty": bool(meta[2]), "truncated": meta[1] >= REPORT_RC_ROW_CAP}
+    except (OSError, sqlite3.Error):
+        log.warning("TuShare report_rc index unavailable; reading the raw cache", exc_info=True)
+        return None
+
+
+def _report_rc_index_state(conn, key, day):
+    source = conn.execute("SELECT created_at FROM tushare_cache WHERE key=?", (key,)).fetchone()
+    meta = conn.execute("SELECT source_created_at,row_count,empty FROM report_rc_day_meta WHERE day=?", (day,)).fetchone()
+    return source, meta
+
+
+def _delete_report_rc_index(conn, day):
+    conn.execute("DELETE FROM report_rc_day_rows WHERE day=?", (day,))
+    conn.execute("DELETE FROM report_rc_day_meta WHERE day=?", (day,))
 
 
 def _report_rc_control(conn) -> dict:
@@ -123,9 +249,9 @@ def report_rc_status() -> dict:
     """Read shared pacing state without an upstream request or quota reservation."""
     at = datetime.now(SHANGHAI)
     budget = int(os.environ.get("REPORT_RC_DAILY_BUDGET", REPORT_RC_DAILY_BUDGET))
-    with closing(report_rc_connect()) as conn:
-        state = _report_rc_control(conn)
-        row = conn.execute("SELECT calls FROM report_rc_budget WHERE day=?", (at.date().isoformat(),)).fetchone()
+    conn = _cache_connection()
+    state = _report_rc_control(conn)
+    row = conn.execute("SELECT calls FROM report_rc_budget WHERE day=?", (at.date().isoformat(),)).fetchone()
     used = row[0] if row else 0
     retry = datetime.fromisoformat(state["retry_at"]) if state.get("retry_at") else at
     if used >= budget:
@@ -142,7 +268,7 @@ def _defer_report_rc(exc: Exception) -> None:
         retry = at + timedelta(hours=1, seconds=1)
     else:
         retry = at + timedelta(seconds=REPORT_RC_MIN_INTERVAL if _report_rc_limited(exc) else 300)
-    with closing(report_rc_connect()) as conn, conn:
+    with _cache_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         state = _report_rc_control(conn)
         if state.get("retry_at"):
@@ -153,7 +279,7 @@ def _defer_report_rc(exc: Exception) -> None:
 def _reserve_report_rc_call() -> None:
     """Atomically reserve the daily budget AND minute slot across processes/restarts."""
     budget = int(os.environ.get("REPORT_RC_DAILY_BUDGET", REPORT_RC_DAILY_BUDGET))
-    with closing(report_rc_connect()) as conn, conn:
+    with _cache_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         at = datetime.now(SHANGHAI)
         day = at.date().isoformat()
@@ -177,19 +303,17 @@ def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any]) -
     key = _tushare_cache_key(api, params)
     if key is None:
         return frame
-    path = db.DATA / "tushare_cache.db"
     # Only report_rc caches empty historical days, with a bounded retry TTL.
     if isinstance(frame, pd.DataFrame) and (not frame.empty or api == "report_rc"):
         try:
             # Python's JSON float encoding preserves precision and leaves date/code strings intact.
             data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with closing(sqlite3.connect(path, timeout=30, isolation_level=None)) as conn:
-                conn.execute("PRAGMA busy_timeout=30000")
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA temp_store=MEMORY")
-                conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
+            with _cache_connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
                 conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
+                if api == "report_rc" and set(params) == {"start_date", "end_date"} and params["start_date"] == params["end_date"]:
+                    # created_at has one-second resolution; the next read rebuilds the index.
+                    _delete_report_rc_index(conn, params["end_date"])
         except Exception:
             log.warning("TuShare %s cache write failed", api, exc_info=True)
     return frame
@@ -202,7 +326,7 @@ def query(pro, api: str, **params) -> pd.DataFrame:
             _reserve_report_rc_call()
         if api == "shibor_lpr":
             # This account permits one upstream request per hour, shared across workers.
-            with closing(report_rc_connect()) as conn, conn:
+            with _cache_connection() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 at = datetime.now(SHANGHAI)
                 row = conn.execute("SELECT created_at FROM tushare_cache WHERE key='shibor_lpr:last-call'").fetchone()
@@ -234,10 +358,14 @@ def query(pro, api: str, **params) -> pd.DataFrame:
 
 def report_rc_rows(frame: pd.DataFrame, code: str | None = None) -> list[dict]:
     """Validate the response before handing sell-side data to the pure consensus calculator."""
+    return _report_rc_frame(frame, code).to_dict(orient="records")
+
+
+def _report_rc_frame(frame: pd.DataFrame, code: str | None = None) -> pd.DataFrame:
     if not isinstance(frame, pd.DataFrame):
         raise SourceError("TuShare report_rc 返回的不是数据表")
     if frame.empty:
-        return []
+        return frame
     required = {"ts_code", "report_date", "org_name", "quarter", "np"}
     if not required <= set(frame.columns):
         raise SourceError("TuShare report_rc 缺少 ts_code、report_date、org_name、quarter 或 np")
@@ -249,7 +377,7 @@ def report_rc_rows(frame: pd.DataFrame, code: str | None = None) -> list[dict]:
     # TuShare np is 万元, not 元. The captured 603606 response has 2028Q4 np=217800
     # (21.78 亿元); np/eps implies ~8.25 亿 shares, matching current shares. Treat np
     # as attributable net profit on this evidence (inference); tp is total profit.
-    return selected.astype(object).where(pd.notna(selected), None).to_dict(orient="records")
+    return selected.astype(object).where(pd.notna(selected), None)
 
 
 def _report_rc_limited(exc: Exception) -> bool:

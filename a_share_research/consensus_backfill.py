@@ -37,7 +37,7 @@ def tick() -> bool:
         return False
 
     as_of = (at.date() - timedelta(days=1)).isoformat()
-    window = sources.report_rc_window(as_of, max_calls=1)
+    window = sources.report_rc_window(as_of, max_calls=1, include_rows=False)
     pacing = market.report_rc_status()
     # A complete window needs only an hourly check. Calendar/provider failures
     # without a report reservation back off too, rather than spinning every tick.

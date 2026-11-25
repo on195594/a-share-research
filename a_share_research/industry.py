@@ -1,14 +1,17 @@
 """Reproducible SW constituent aggregates, using cached whole-market snapshots."""
 
 import hashlib
+import json
 import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import lru_cache
 from statistics import median
 
 import pandas as pd
 
 from a_share_research import conditions, db, sources, stock_codes
+from a_share_research.gate import canonical
 
 BASIS = ("当前申万成分回看，存在幸存者偏差，不是历史申万指数；收益用收盘价×复权因子，"
          "只纳入两端均有有效价格和因子的股票，停牌/未上市缺失不填零；等权口径为个股收益中位数，"
@@ -156,18 +159,28 @@ def industry_rows(data):
     return rows
 
 
+@lru_cache(maxsize=8)
+def _expected_rows(dataset_json):
+    # Decode an owned copy: industry_rows embeds its input in the anchor row.
+    # Caller mutations must neither change cached expectations nor reuse a stale key.
+    return {r['id']: r for r in industry_rows(json.loads(dataset_json))}
+
+
 def validate_rows(rows, table):
     """Recompute cited aggregates from the saved input bundle, including membership and dates."""
-    registry = {r['id']: r for r in table}
-    anchors = {r['source']['dataset_ref'] for r in rows if r.get('source', {}).get('api') == 'industry_constituents'}
-    for anchor in anchors:
-        try:
-            expected = {r['id']: r for r in industry_rows(registry[anchor]['source']['dataset'])}
+    incomplete = '行业出处输入不完整或成员/期间错配；请重新调用 industry_trend'
+    malformed = (AttributeError, IndexError, KeyError, TypeError, ArithmeticError, sources.SourceError)
+    try:
+        registry = {r['id']: r for r in table}
+        anchors = {r['source']['dataset_ref'] for r in rows
+                   if r.get('source', {}).get('api') == 'industry_constituents'}
+        for anchor in anchors:
+            expected = _expected_rows(canonical(registry[anchor]['source']['dataset']))
             for row in rows:
                 if row.get('source', {}).get('dataset_ref') == anchor and row != expected.get(row['id']):
                     raise ValueError('行业数值、成员或期间与原始输入复算不符')
-        except (KeyError, TypeError, ArithmeticError, sources.SourceError) as exc:
-            raise ValueError('行业出处输入不完整或成员/期间错配；请重新调用 industry_trend') from exc
+    except malformed as exc:
+        raise ValueError(incomplete) from exc
 
 
 def industry_trend(code, level='l2'):
