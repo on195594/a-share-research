@@ -1,7 +1,6 @@
 """Narrow disclosure discovery and K2 review scheduling; no account or notification writes."""
 
 from collections import Counter, defaultdict
-from collections.abc import Iterable
 from contextlib import nullcontext
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -295,11 +294,9 @@ def subscriptions(conn) -> list[dict]:
     return _with_closes(conn, subscription_scope(conn))
 
 
-def _holding_codes(conn, account_sources, holding_codes):
+def _holding_codes(conn, account_sources):
     if not account_sources:
         return ()
-    if holding_codes is not None:
-        return holding_codes
     from a_share_research.policy import account_view
 
     return account_view.current_holding_codes(conn, allow_unconfigured=True)
@@ -317,11 +314,11 @@ def _extend_scope(conn, items, holdings):
         _add_origin(items, code, 'holding')
 
 
-def scan_scope(conn, *, account_sources: bool = True, holding_codes: Iterable[str] | None = None) -> list[dict]:
+def scan_scope(conn, *, account_sources: bool = True) -> list[dict]:
     """Keep every source for a code, while preserving the primary origin for older clients."""
     with db.transaction(conn, immediate=False):
         items = subscription_scope(conn)
-        _extend_scope(conn, items, _holding_codes(conn, account_sources, holding_codes))
+        _extend_scope(conn, items, _holding_codes(conn, account_sources))
         return _with_closes(conn, items)
 
 
@@ -1000,13 +997,12 @@ def view(conn, scan_id: int, *, compact: bool = False) -> dict:
             'notify': summary.get('notify', [])}
 
 
-def weekly(conn, *, at: str | None = None, account_sources: bool = True, compact: bool = False,
-           holding_codes: Iterable[str] | None = None) -> dict:
+def weekly(conn, *, at: str | None = None, account_sources: bool = True, compact: bool = False) -> dict:
     with nullcontext() if conn.in_transaction else db.transaction(conn, immediate=False):
-        return _weekly(conn, at or db.now(), account_sources, compact, holding_codes)
+        return _weekly(conn, at or db.now(), account_sources, compact)
 
 
-def _weekly(conn, at, account_sources, compact, holding_codes):
+def _weekly(conn, at, account_sources, compact):
     from a_share_research.policy.registry import PolicyError
 
     since = instant(at) - timedelta(days=7)
@@ -1043,7 +1039,7 @@ def _weekly(conn, at, account_sources, compact, holding_codes):
     failed_reviews = [e for e in all_events if e['run_status'] == 'failed'
                       and e['judgment_completed_at'] and instant(e['judgment_completed_at']) >= since]
     try:
-        holdings = _holding_codes(conn, account_sources, holding_codes)
+        holdings = _holding_codes(conn, account_sources)
     except PolicyError as exc:
         log.warning('weekly scan report could not verify the holding scope: %s', exc)
         failures.append({'code': None, 'stage': 'holding_scope', 'reason': '本次周报未能核实账户持仓范围'})

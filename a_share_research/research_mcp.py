@@ -223,8 +223,6 @@ class ResearchSession:
         return {"draft": self.draft, "problems": problems, "reviewed": reviewed}
 
     def _call(self, name, args):
-        if name in {"submit_draft", "submit_patch", "review_decide"}:
-            self.flush()
         if name == "record_call":
             return _receipt(self._record_call(args))
         if name == "review_decide":

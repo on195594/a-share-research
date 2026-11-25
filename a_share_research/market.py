@@ -108,11 +108,6 @@ def tushare_connect():
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("CREATE TABLE IF NOT EXISTS tushare_cache (key TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
             conn.execute("CREATE TABLE IF NOT EXISTS report_rc_budget (day TEXT PRIMARY KEY, calls INTEGER)")
-            conn.execute("CREATE TABLE IF NOT EXISTS report_rc_day_meta "
-                         "(day TEXT PRIMARY KEY, source_created_at TEXT, row_count INTEGER, empty INTEGER)")
-            conn.execute("CREATE TABLE IF NOT EXISTS report_rc_day_rows "
-                         "(day TEXT, code TEXT, org_name TEXT, row_json TEXT)")
-            conn.execute("CREATE INDEX IF NOT EXISTS report_rc_day_code ON report_rc_day_rows(day, code)")
         except sqlite3.OperationalError as exc:
             if exc.sqlite_errorcode & 0xFF != sqlite3.SQLITE_READONLY:
                 raise  # a read-only cache still serves hits
@@ -154,85 +149,6 @@ def _report_rc_expired(day, created_at):
     age = datetime.now(SHANGHAI).date() - date.fromisoformat(str(day))
     ttl = timedelta(days=1 if age.days <= 7 else 7)
     return datetime.now(SHANGHAI) - datetime.fromisoformat(created_at) >= ttl
-
-
-def _index_report_rc(conn, day, frame, created_at):
-    rows = report_rc_rows(frame)
-    if any(row["report_date"] != date.fromisoformat(day).isoformat() for row in rows):
-        raise SourceError(f"report_rc {day} 返回了其他日期的预测")
-    conn.execute("DELETE FROM report_rc_day_rows WHERE day=?", (day,))
-    conn.executemany("INSERT INTO report_rc_day_rows VALUES (?,?,?,?)",
-                     [(day, row["ts_code"], row["org_name"], json.dumps(row, ensure_ascii=False)) for row in rows])
-    conn.execute("INSERT OR REPLACE INTO report_rc_day_meta VALUES (?,?,?,?)",
-                 (day, created_at, len(frame), int(frame.empty)))
-
-
-def cached_report_rc_day(day, *, code=None, include_rows=True, organizations_only=False):
-    """Read a validated daily index, bound to the raw cache entry and its empty TTL.
-
-    None means the index cannot answer; the caller then reads the raw cache itself.
-    """
-    key = _tushare_cache_key("report_rc", {"start_date": day, "end_date": day})
-    if key is None:
-        return None
-    try:
-        if not (db.DATA / "tushare_cache.db").exists():
-            return None
-        with _cache_connection() as conn:
-            conn.execute("BEGIN")
-            source, meta = _report_rc_index_state(conn, key, day)
-            if source is None or meta is None or source[0] != meta[0] or (meta[2] and _report_rc_expired(day, source[0])):
-                # Upgrade by reopening the snapshot under a write reservation, then
-                # reread both identities: another process may have refreshed this day.
-                conn.commit()
-                conn.execute("BEGIN IMMEDIATE")
-                source, meta = _report_rc_index_state(conn, key, day)
-                if source is None or (meta and source[0] == meta[0] and meta[2] and _report_rc_expired(day, source[0])):
-                    _delete_report_rc_index(conn, day)
-                    return None
-                if meta is None or source[0] != meta[0]:
-                    raw = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (key,)).fetchone()[0]
-                    try:
-                        saved = json.loads(raw)
-                        if not isinstance(saved, dict) or set(saved) != {"data", "index", "columns"}:
-                            raise ValueError("TuShare cache is not a split DataFrame")
-                        frame = pd.DataFrame(**saved)
-                        expired = frame.empty and _report_rc_expired(day, source[0])
-                    except (ValueError, TypeError):
-                        log.warning("TuShare report_rc cache read failed; fetching upstream", exc_info=True)
-                        _delete_report_rc_index(conn, day)
-                        return None
-                    if expired:
-                        _delete_report_rc_index(conn, day)
-                        return None
-                    _index_report_rc(conn, day, frame, source[0])
-                    meta = (source[0], len(frame), frame.empty)
-            rows = []
-            if include_rows:
-                columns = "code,org_name" if organizations_only else "row_json"
-                sql, args = f"SELECT {columns} FROM report_rc_day_rows WHERE day=?", [day]
-                if code is not None:
-                    sql += " AND code=?"
-                    args.append(to_tushare_stock_code(code))
-                # Preserve provider order, including when selecting all companies.
-                selected = conn.execute(sql + " ORDER BY rowid", args)
-                rows = ([{"ts_code": r[0], "org_name": r[1]} for r in selected] if organizations_only
-                        else [json.loads(r[0]) for r in selected])
-            return {"rows": rows, "empty": bool(meta[2]), "truncated": meta[1] >= REPORT_RC_ROW_CAP}
-    except (OSError, sqlite3.Error):
-        log.warning("TuShare report_rc index unavailable; reading the raw cache", exc_info=True)
-        return None
-
-
-def _report_rc_index_state(conn, key, day):
-    source = conn.execute("SELECT created_at FROM tushare_cache WHERE key=?", (key,)).fetchone()
-    meta = conn.execute("SELECT source_created_at,row_count,empty FROM report_rc_day_meta WHERE day=?", (day,)).fetchone()
-    return source, meta
-
-
-def _delete_report_rc_index(conn, day):
-    conn.execute("DELETE FROM report_rc_day_rows WHERE day=?", (day,))
-    conn.execute("DELETE FROM report_rc_day_meta WHERE day=?", (day,))
 
 
 def _report_rc_control(conn) -> dict:
@@ -308,12 +224,7 @@ def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any]) -
         try:
             # Python's JSON float encoding preserves precision and leaves date/code strings intact.
             data = json.dumps(frame.to_dict(orient="split"), ensure_ascii=False)
-            with _cache_connection() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
-                if api == "report_rc" and set(params) == {"start_date", "end_date"} and params["start_date"] == params["end_date"]:
-                    # created_at has one-second resolution; the next read rebuilds the index.
-                    _delete_report_rc_index(conn, params["end_date"])
+            _cache_connection().execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
         except Exception:
             log.warning("TuShare %s cache write failed", api, exc_info=True)
     return frame
@@ -341,13 +252,8 @@ def query(pro, api: str, **params) -> pd.DataFrame:
         try:
             frame = pro.query(api, **params)
             if api == "report_rc":
-                if not isinstance(frame, pd.DataFrame):
-                    raise SourceError("report_rc 返回值不是数据表")
-                report_rc_rows(frame)
-                if params.get("start_date") == params.get("end_date") and not frame.empty:
-                    if not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(
-                            date.fromisoformat(str(params["end_date"]))).all():
-                        raise SourceError(f"report_rc {params['end_date']} 返回了其他日期的预测")
+                day = params.get("end_date") if params.get("start_date") == params.get("end_date") else None
+                validate_report_rc_day(frame, day, include_rows=False)
         except Exception as exc:
             if api == "report_rc":
                 _defer_report_rc(exc)
@@ -356,28 +262,33 @@ def query(pro, api: str, **params) -> pd.DataFrame:
 
     return cached_query(api, params, fetcher)
 
-def report_rc_rows(frame: pd.DataFrame, code: str | None = None) -> list[dict]:
-    """Validate the response before handing sell-side data to the pure consensus calculator."""
-    return _report_rc_frame(frame, code).to_dict(orient="records")
 
+def validate_report_rc_day(frame: pd.DataFrame, day: str | None = None, code: str | None = None, *,
+                           include_rows: bool = True) -> list[dict]:
+    """Validate a report_rc response before handing sell-side data to the pure consensus calculator.
 
-def _report_rc_frame(frame: pd.DataFrame, code: str | None = None) -> pd.DataFrame:
+    With day, a daily query must never silently lend coverage to a different date.
+    """
     if not isinstance(frame, pd.DataFrame):
         raise SourceError("TuShare report_rc 返回的不是数据表")
     if frame.empty:
-        return frame
+        return []
     required = {"ts_code", "report_date", "org_name", "quarter", "np"}
     if not required <= set(frame.columns):
         raise SourceError("TuShare report_rc 缺少 ts_code、report_date、org_name、quarter 或 np")
+    dates = pd.to_datetime(frame["report_date"], errors="raise")
+    if day is not None and not dates.dt.date.eq(date.fromisoformat(str(day))).all():
+        raise SourceError(f"report_rc {day} 返回了其他日期的预测")
+    np_values = pd.to_numeric(frame["np"], errors="raise")
+    if not include_rows:
+        return []
+    selected = frame[sorted(required)].assign(report_date=dates.dt.strftime("%Y-%m-%d"), np=np_values)
     if code is not None:
-        frame = frame.loc[frame["ts_code"].eq(to_tushare_stock_code(code))]
-    selected = frame[sorted(required)].copy()
-    selected["report_date"] = pd.to_datetime(selected["report_date"], errors="raise").dt.strftime("%Y-%m-%d")
-    selected["np"] = pd.to_numeric(selected["np"], errors="raise")
+        selected = selected.loc[selected["ts_code"].eq(to_tushare_stock_code(code))]
     # TuShare np is 万元, not 元. The captured 603606 response has 2028Q4 np=217800
     # (21.78 亿元); np/eps implies ~8.25 亿 shares, matching current shares. Treat np
     # as attributable net profit on this evidence (inference); tp is total profit.
-    return selected.astype(object).where(pd.notna(selected), None)
+    return selected.astype(object).where(pd.notna(selected), None).to_dict(orient="records")
 
 
 def _report_rc_limited(exc: Exception) -> bool:

@@ -820,13 +820,10 @@ def latest_price(conn, code: str) -> dict | None:
 
 def latest_batch(conn, *, summary: bool = False):
     if summary:
-        # Only tracking/closed batches display returns. Other states need just the header.
-        columns = ", ".join(f"p.{column}" for column in batches.PERFORMANCE_COLUMNS)
+        # Skip the bulky universe and coverage JSON; only entered batches read the returns columns.
+        columns = ", ".join(batches.PERFORMANCE_COLUMNS)
         return conn.execute(
-            f"SELECT b.id, b.created_at, b.status, {columns} FROM batches b"
-            " LEFT JOIN batches p ON p.id = b.id AND b.status IN (?, ?)"
-            " ORDER BY b.id DESC LIMIT 1", batches.ENTERED,
-        ).fetchone()
+            f"SELECT id, created_at, status, {columns} FROM batches ORDER BY id DESC LIMIT 1").fetchone()
     return conn.execute("SELECT * FROM batches ORDER BY id DESC LIMIT 1").fetchone()
 
 

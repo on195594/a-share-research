@@ -87,9 +87,7 @@ def _ensure_schema(database_path: Path) -> None:
                     "policy v0 here only opens the application database"
                 )
         app_db.connect(database_path).close()
-        current, nonempty = app_db.database_file_state(database_path)
-        if nonempty and (key is None or current == key):
-            _SCHEMA_INITIALIZED = current
+        _SCHEMA_INITIALIZED = app_db.database_file_state(database_path)[0]
 
 
 def get_db(timeout: float = 30.0) -> sqlite3.Connection:

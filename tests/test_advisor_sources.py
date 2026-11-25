@@ -19,7 +19,7 @@ MARKET = json.loads((DATA / "600519-financials.json").read_text())["market"]
 
 
 def test_report_rc_boundary_preserves_verified_np_unit_and_dates():
-    rows = market.report_rc_rows(pd.DataFrame(ROWS), "603606")
+    rows = market.validate_report_rc_day(pd.DataFrame(ROWS), code="603606")
     assert len(rows) == 69
     huatai = next(r for r in rows if r["org_name"] == "华泰证券" and r["quarter"] == "2028Q4"
                  and r["report_date"] == "2026-10-30")
@@ -29,9 +29,9 @@ def test_report_rc_boundary_preserves_verified_np_unit_and_dates():
 
 
 def test_report_rc_boundary_filters_company_and_rejects_schema():
-    assert market.report_rc_rows(pd.DataFrame(ROWS), "600519") == []
+    assert market.validate_report_rc_day(pd.DataFrame(ROWS), code="600519") == []
     with pytest.raises(sources.SourceError, match="缺少"):
-        market.report_rc_rows(pd.DataFrame(ROWS).drop(columns="np"), "603606")
+        market.validate_report_rc_day(pd.DataFrame(ROWS).drop(columns="np"), code="603606")
 
 
 class CapturedReportRC:
@@ -105,7 +105,7 @@ def test_window_budget_accumulates_across_calls_and_recent_days_first(daily_repo
     assert budget_calls() == 8 and len(daily_reports.calls) == 8
     assert third["covered_days"] == 8  # Empty days no longer starve older missing days.
     captured = pd.DataFrame(ROWS)
-    expected_rows = market.report_rc_rows(captured.loc[captured["report_date"].isin(expected[:8])], "603606")
+    expected_rows = market.validate_report_rc_day(captured.loc[captured["report_date"].isin(expected[:8])], code="603606")
     assert third["rows"] == sorted(expected_rows, key=lambda row: row["report_date"], reverse=True)
 
 
@@ -458,69 +458,13 @@ def test_combined_valuation_fetches_daily_basic_once(monkeypatch, age):
     assert calls[0]["params"]["start_date"] <= boundary.strftime("%Y%m%d")
 
 
-def test_daily_index_matches_full_rows_and_skips_payload_for_metadata(daily_reports):
+def test_metadata_only_window_matches_full_window_without_rows(daily_reports):
     sources.report_rc_window("2026-09-18", days=1)
-    full = sources.report_rc_window("2026-09-18", days=1, cache_only=True)
-    statements = []
-    connection = market._cache_connection()
-    connection.set_trace_callback(statements.append)
-    try:
-        selected = sources.report_rc_window("2026-09-18", days=1, code="603606", cache_only=True)
-        assert selected == full | {"rows": [row for row in full["rows"] if row["ts_code"] == "603606.SH"]}
-        assert any("AND code='603606.SH'" in sql for sql in statements)
-        keys = [market._tushare_cache_key("report_rc", {"start_date": day, "end_date": day})
-                for day in ("20260918", "20260917")]
-        assert not any("SELECT data" in sql and any(key in sql for key in keys) for sql in statements)
-        statements.clear()
-        metadata = sources.report_rc_window("2026-09-18", days=1, cache_only=True, include_rows=False)
-        assert metadata == full | {"rows": []}
-        assert not any("row_json" in sql for sql in statements)
-    finally:
-        connection.set_trace_callback(None)
-
-
-def test_daily_index_rebuilds_legacy_timestamp_changes_and_deleted_source(daily_reports):
-    day = "20260918"
-    params = {"start_date": day, "end_date": day}
-    frame = market.query(daily_reports, "report_rc", **params)
-    key = market._tushare_cache_key("report_rc", params)
-    with closing(market.report_rc_connect()) as connection:
-        connection.execute("DELETE FROM report_rc_day_meta")
-        connection.execute("DELETE FROM report_rc_day_rows")
-        assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(frame)
-        # Real captured rows, minimally remove one to prove replacement is used.
-        replacement = frame.iloc[1:]
-        stamp = "2026-11-01T00:00:00+08:00"
-        connection.execute("UPDATE tushare_cache SET data=?,created_at=? WHERE key=?",
-                           (json.dumps(replacement.to_dict(orient="split")), stamp, key))
-        assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(replacement)
-        assert connection.execute("SELECT source_created_at FROM report_rc_day_meta WHERE day=?", (day,)).fetchone() == (stamp,)
-        connection.execute("DELETE FROM tushare_cache WHERE key=?", (key,))
-        assert market.cached_report_rc_day(day) is None
-        assert connection.execute("SELECT count(*) FROM report_rc_day_rows WHERE day=?", (day,)).fetchone()[0] == 0
-
-
-def test_daily_index_empty_ttl_uses_raw_created_at(daily_reports, monkeypatch):
-    class Clock(datetime):
-        current = datetime(2026, 9, 18, 9, tzinfo=db.SHANGHAI)
-
-        @classmethod
-        def now(cls, tz=None):
-            return cls.current
-
-    monkeypatch.setattr(sources, "datetime", Clock)
-    monkeypatch.setattr(market, "datetime", Clock)
-    day = "20260917"
-    market.query(daily_reports, "report_rc", start_date=day, end_date=day)
-    with closing(market.report_rc_connect()) as connection:
-        key = market._tushare_cache_key("report_rc", {"start_date": day, "end_date": day})
-        connection.execute("UPDATE tushare_cache SET created_at=? WHERE key=?", (Clock.current.isoformat(), key))
-        assert market.cached_report_rc_day(day) == {"rows": [], "empty": True, "truncated": False}
-        Clock.current += timedelta(hours=25)
-        window = sources.report_rc_window("2026-09-17", days=0, cache_only=True, include_rows=False)
-        assert window["covered_days"] == 0 and window["missing_days"] == [day]
-        assert market.cached_report_rc_day(day) is None
-        assert connection.execute("SELECT count(*) FROM report_rc_day_meta WHERE day=?", (day,)).fetchone()[0] == 0
+    full = sources.report_rc_window("2026-09-18", days=1)
+    metadata = sources.report_rc_window("2026-09-18", days=1, include_rows=False)
+    assert full["rows"] and full["empty_days"] == ["20260917"]
+    assert metadata.pop("retry_at") and full.pop("retry_at")
+    assert metadata == full | {"rows": []}
 
 
 def test_cache_connections_follow_data_path_and_external_close_is_independent(monkeypatch, tmp_path):
@@ -544,69 +488,6 @@ def test_cache_connections_follow_data_path_and_external_close_is_independent(mo
     assert second.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 0
     monkeypatch.setattr(db, "DATA", original)
     pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), pd.DataFrame([MARKET]))
-
-
-def test_batch_coverage_reads_only_indexed_organizations(daily_reports):
-    sources.report_rc_window("2026-09-18")
-    window = sources.report_rc_window("2026-09-18", cache_only=True)
-    codes = ["603606.SH", "600519.SH"]
-    expected = sources.coverage_counts(window, codes, "2026-09-18")
-    statements = []
-    connection = market._cache_connection()
-    connection.set_trace_callback(statements.append)
-    try:
-        result = sources.batch_coverage({"as_of": "2026-09-18", "q20": [{"code": code} for code in codes]})
-    finally:
-        connection.set_trace_callback(None)
-    assert result == expected
-    assert not any("row_json" in sql for sql in statements)
-    assert any("SELECT code,org_name" in sql for sql in statements)
-
-
-@pytest.mark.parametrize("broken", ["{", '{"data": []}', '{"data": [[1]], "index": [], "columns": []}'])
-def test_corrupt_legacy_daily_cache_remains_a_cache_miss(daily_reports, broken):
-    day = "20260918"
-    params = {"start_date": day, "end_date": day}
-    market.query(daily_reports, "report_rc", **params)
-    with closing(market.report_rc_connect()) as connection:
-        connection.execute("UPDATE tushare_cache SET data=?,created_at=? WHERE key=?",
-                           (broken, "2026-11-01T00:00:00+08:00", market._tushare_cache_key("report_rc", params)))
-    assert market.cached_report_rc_day(day) is None
-    result = sources.report_rc_window("2026-09-18", days=0)
-    assert result["covered_days"] == 1
-    assert daily_reports.calls == [day, day]
-    assert "reason" not in result
-
-
-@pytest.mark.parametrize("table", ["report_rc_day_meta", "report_rc_day_rows"])
-def test_unwritable_index_serves_the_raw_cache_without_an_upstream_call(daily_reports, table):
-    sources.report_rc_window("2026-09-18", days=1)
-    full = sources.report_rc_window("2026-09-18", days=1, code="603606", cache_only=True)
-    used = market.report_rc_status()["used"]
-    with closing(market.report_rc_connect()) as connection:
-        connection.execute("DELETE FROM report_rc_day_meta")
-        connection.execute("DELETE FROM report_rc_day_rows")
-        connection.execute(f"CREATE TRIGGER reject_index BEFORE INSERT ON {table} "
-                           "BEGIN SELECT RAISE(ABORT, 'index unavailable'); END")
-        assert sources.report_rc_window("2026-09-18", days=1, code="603606", cache_only=True) == full
-        # max_calls counts upstream work only, so backfill is not pinned to a cached day.
-        window = sources.report_rc_window("2026-09-18", days=1, code="603606", max_calls=0)
-        assert window["rows"] == full["rows"] and window["missing_days"] == []
-        assert market.report_rc_status()["used"] == used
-        # Empty days need no row inserts; no day with forecasts is left half indexed.
-        assert connection.execute("SELECT count(*) FROM report_rc_day_meta WHERE empty=0").fetchone() == (0,)
-
-
-def test_same_second_refresh_invalidates_the_daily_index(daily_reports, monkeypatch):
-    day = "20260918"
-    params = {"start_date": day, "end_date": day}
-    monkeypatch.setattr(db, "now", lambda: "2026-11-01T00:00:00+08:00")
-    frame = market.query(daily_reports, "report_rc", **params)
-    assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(frame)
-    # Real captured rows, minimally remove one; two writes can share a one-second stamp.
-    monkeypatch.setattr(market, "cached_response", lambda *args: None)
-    market.cached_query("report_rc", params, lambda: frame.iloc[1:])
-    assert market.cached_report_rc_day(day)["rows"] == market.report_rc_rows(frame.iloc[1:])
 
 
 def test_deleted_cache_file_is_recreated_instead_of_written_through_a_stale_handle(monkeypatch):

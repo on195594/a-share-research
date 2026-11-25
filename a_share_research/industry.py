@@ -174,13 +174,17 @@ def validate_rows(rows, table):
         registry = {r['id']: r for r in table}
         anchors = {r['source']['dataset_ref'] for r in rows
                    if r.get('source', {}).get('api') == 'industry_constituents'}
-        for anchor in anchors:
-            expected = _expected_rows(canonical(registry[anchor]['source']['dataset']))
-            for row in rows:
-                if row.get('source', {}).get('dataset_ref') == anchor and row != expected.get(row['id']):
-                    raise ValueError('行业数值、成员或期间与原始输入复算不符')
+        datasets = {anchor: canonical(registry[anchor]['source']['dataset']) for anchor in anchors}
     except malformed as exc:
         raise ValueError(incomplete) from exc
+    for anchor, dataset in datasets.items():
+        try:
+            expected = _expected_rows(dataset)
+        except malformed as exc:
+            raise ValueError(incomplete) from exc
+        for row in rows:
+            if row.get('source', {}).get('dataset_ref') == anchor and row != expected.get(row.get('id')):
+                raise ValueError('行业数值、成员或期间与原始输入复算不符')
 
 
 def industry_trend(code, level='l2'):

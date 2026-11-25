@@ -251,7 +251,7 @@ class TushareProviderBase:
         self._client = client
         self._client_factory = client_factory
         self._query_cache = query_cache
-        self._built_client: Any | None = None
+        self._uses_default_client = client is None and client_factory is None
         self._rate_limiter = rate_limiter or (_GLOBAL_RATE_LIMITER if client is None else TushareRateLimiter(10**9))
         # Exception behind the latest failed request; MarketDataResult is a serialized contract and stays exception-free.
         self.last_error: Exception | None = None
@@ -275,7 +275,7 @@ class TushareProviderBase:
             return call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
 
         try:
-            if self._query_cache is not None and self._client is None and self._client_factory is None:
+            if self._query_cache is not None and self._uses_default_client:
                 value = self._query_cache(endpoint, dict(params), fetcher)
             else:
                 value = fetcher()
@@ -300,16 +300,14 @@ class TushareProviderBase:
                 error_message="TUSHARE_TOKEN is not configured",
                 request_fingerprint=fingerprint,
             )
-        if self._client is not None:
-            return self._client
-        if self._built_client is None:
+        if self._client is None:
             try:
-                self._built_client = self._build_client()
+                self._client = self._build_client()
             except Exception as exc:
                 self.last_error = exc
                 code, message = classify_tushare_exception(exc, self.token)
                 return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
-        return self._built_client
+        return self._client
 
     def _build_client(self) -> Any:
         if self._client_factory is not None:

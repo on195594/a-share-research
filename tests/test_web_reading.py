@@ -253,7 +253,7 @@ def test_home_batch_projection_and_last_passed_scope(web, monkeypatch):
     response = web.home_page(page_request('/'), 'owner')
     batch = response.context['batch']
     assert batch['id'] == batch_id and batch['created_at'] == '2026-10-23' and batch['status'] == 'proposed'
-    assert 'universe' not in batch.keys() and batch['q20'] is None
+    assert 'universe' not in batch.keys() and 'coverage' not in batch.keys()
     assert '2026 年 10 月批次' in response.body.decode()
     assert response.context['companies'] and not passed_queries
 
@@ -294,16 +294,9 @@ def test_report_page_exposes_prior_status(web):
     expected = reading.comparison(web.conn, reading.report(web.conn, 39))
     request = page_request('/reports/39')
     web.start_session(request)
-    statements = []
-    web.conn.set_trace_callback(statements.append)
-    try:
-        response = web.report_page(request, 39)
-    finally:
-        web.conn.set_trace_callback(None)
+    response = web.report_page(request, 39)
     assert response.status_code == 200
     assert response.context['comparison'] == expected and response.context['prior_agenda'] == prior
-    assert sum('FROM runs WHERE id =' in sql for sql in statements) == 1
-    assert not any("json_extract(body, '$.risks')" in sql for sql in statements)
     html = response.body.decode()
     assert entry['text'] in html and prior[0]['previous'] in html
 

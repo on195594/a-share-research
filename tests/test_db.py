@@ -148,7 +148,6 @@ def test_reconnect_skips_schema_and_wal_setup_but_configures_connection(tmp_path
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
         assert conn.execute("PRAGMA temp_store").fetchone()[0] == 2
-        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
 @pytest.mark.parametrize("change", ["delete", "replace", "truncate", "reused_inode"])

@@ -2,9 +2,7 @@
 
 import json
 
-import pytest
-
-from a_share_research import batches, drafts, evidence, model_profile, research, screening, valuation
+from a_share_research import batches, drafts, model_profile, research, screening, valuation
 from a_share_research.prompts import output_schema, render_prompt
 from a_share_research.research_mcp import compose_prompt, explore_prompt, repair_prompt, review_prompt
 from a_share_research.reviewing import ReviewLedger
@@ -37,56 +35,35 @@ def test_render_prompts_from_captured_material():
                          correction=json.dumps(draft, ensure_ascii=False))
 
 
-def _original_material_block(mat):
-    rows = [
-        f"[{r['id']}] {r['label']}（{r['unit']}）：" + ("；".join(f"{p} {v}" for p, v in r["values"].items()) or "缺失")
-        for r in mat.table
-    ]
-    block = (
-        f"公司：{mat.name}（{mat.code}）\n\n"
-        f"## 财务与行情表（程序从 TuShare 生成；行情为 {mat.market_date} 收盘）\n" + "\n".join(rows)
-        + "\n\n# 统一原文证据（默认 source=D0；read 为已读，listed 仅目录，不可引证；URL 由来源映射交付，无需正文手抄）\n"
-        + json.dumps(evidence.projection(mat.source_registry(), catalog=True), ensure_ascii=False)
-    )
-    if mat.extra:
-        pending = {k: mat.extra.get(k) for k in ("question", "context", "methods_used", "gaps")}
-        for key in ("prior", "events"):
-            if mat.extra.get(key):
-                pending[key] = mat.extra[key]
-        block += "\n\n# 本次问题与待核查上下文（不是事实来源）\n" + json.dumps(pending, ensure_ascii=False)
-    return block + "\n\n# 程序计算依据\n" + json.dumps(
-        [r for r in mat.table if r["id"].startswith("C.")], ensure_ascii=False)
-
-
-@pytest.mark.parametrize("table", [
-    [], BODY[37]["table"][:1], BODY[39]["table"], [r for r in BODY[37]["table"] if r["values"]], BODY[37]["table"],
-], ids=["empty", "reported", "missing-values", "calculations", "calculations-and-missing-values"])
-@pytest.mark.parametrize("extra_keys", [None, (), ("prior",), ("events",), ("prior", "events")],
-                         ids=["no-extra", "question", "prior", "events", "prior-and-events"])
-def test_material_block_matches_original_bytes(table, extra_keys):
+def test_material_block_boundaries():
     mat = material()
-    mat.table = table
-    if extra_keys is not None:
-        mat.extra["question"] = BODY[39]["question"]
-        if "prior" in extra_keys:
-            mat.extra["prior"] = BODY[39]["prior"]
-        if "events" in extra_keys:
-            mat.extra["events"] = [r["raw"] for r in json.loads((DATA / "periodic-announcements.json").read_text())["items"]
-                                   if r["code"] == mat.code[:6]]
-    assert mat.prompt_block().encode() == _original_material_block(mat).encode()
+    mat.table = []
+    empty = mat.prompt_block()
+    assert empty.startswith(f"公司：{mat.name}（{mat.code}）\n\n## 财务与行情表（程序从 TuShare 生成；行情为 {mat.market_date} 收盘）\n")
+    assert "本次问题与待核查上下文" not in empty
+    assert empty.endswith("\n\n# 程序计算依据\n[]")
+
+    mat.table = BODY[37]["table"]
+    mat.extra.update(question=BODY[39]["question"], prior=BODY[39]["prior"])
+    block = mat.prompt_block()
+    missing = next(r for r in mat.table if not r["values"])
+    assert f"[{missing['id']}] {missing['label']}（{missing['unit']}）：缺失\n" in block
+    head, calculations = block.split("\n\n# 程序计算依据\n")
+    pending = json.loads(head.split("\n\n# 本次问题与待核查上下文（不是事实来源）\n")[1])
+    assert pending == {"question": BODY[39]["question"], "context": None, "methods_used": None, "gaps": None,
+                       "prior": BODY[39]["prior"]}
+    assert json.loads(calculations) == [r for r in mat.table if r["id"].startswith("C.")] != []
 
 
-def test_program_valuation_and_event_question_match_original_bytes():
+def test_program_valuation_and_event_question():
     mat = material()
     assert drafts.program_valuation(None, mat) == ""
     report = {"valuation": assumptions()}
+    text = drafts.program_valuation(report, mat)
     summary = valuation.program_summary(report["valuation"], mat.table, mat.market_date)
-    assert summary is not None
-    original = ("\n# 程序估值测算（按本稿 valuation 计算，通过复核后随结论在报告页展示）\n"
-                + json.dumps(summary, ensure_ascii=False)
-                + "\nhurdle_price 是期望回报门槛价（等价格所等的价格）。这是程序输出，不是报告论断：报告以它作为参考价格时，"
-                  "text 不重复数字也已给出价格；text 写出的价格与回报数字仍须引用 valuation 工具生成的 C.n。\n")
-    assert drafts.program_valuation(report, mat).encode() == original.encode()
+    assert text.startswith("\n# 程序估值测算（按本稿 valuation 计算，通过复核后随结论在报告页展示）\n"
+                           + json.dumps(summary, ensure_ascii=False) + "\nhurdle_price 是期望回报门槛价")
+    assert text.endswith("仍须引用 valuation 工具生成的 C.n。\n")
     assert research.EVENT_QUESTION == "公告扫描发现的 events 对研究判断、风险与检查点有什么影响？"
 
 

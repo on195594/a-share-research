@@ -316,15 +316,14 @@ def test_evidence_session_flush_batches_real_calculations_and_errors(tmp_path):
     from a_share_research.research_tools import EvidenceSession
     from a_share_research.evidence import EvidenceError
 
+    reject = ("CREATE TEMP TRIGGER reject_material BEFORE UPDATE OF material ON runs "
+              "BEGIN SELECT RAISE(ABORT, 'disk full'); END")
     material = Material.from_snapshot(json.loads(json.dumps(MATERIAL.snapshot())))
     with closing(db.connect(tmp_path / 'app.db')) as conn:
         run_id = db.create_run(conn, material.code)
         db.save_material(conn, run_id, material.snapshot())
         session = EvidenceSession(conn, run_id, material)
-        statements = []
-        conn.set_trace_callback(statements.append)
-        conn.execute("CREATE TEMP TRIGGER reject_material BEFORE UPDATE OF material ON runs "
-                     "BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+        conn.execute(reject)
         args = {'label': '经营现金流差额', 'operation': 'difference',
                 'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
                 'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}}
@@ -333,20 +332,18 @@ def test_evidence_session_flush_batches_real_calculations_and_errors(tmp_path):
         bad = args | {'left': {'ref': 'T.missing'}}
         assert session.call('calculate', bad, 'explore')[1]
         assert not session.call('calculate', bad, 'explore')[0]['charged']
-        assert not any(sql.startswith('UPDATE runs SET material') for sql in statements)
+        # Tool calls alone never write; the rejecting trigger would have raised.
+        assert not replay_material(conn, run_id).extra.get('tools')
         assert len(material.table) == len(MATERIAL.table) + 1
         # A failed write keeps the evidence pending for the next boundary.
         with pytest.raises(sqlite3.IntegrityError, match='disk full'):
             session.flush()
         conn.execute("DROP TRIGGER reject_material")
-        statements.clear()
         session.flush()
-        # SQLite repeats the statement trace while executing runs triggers.
-        assert len({sql for sql in statements if sql.startswith('UPDATE runs SET material')}) == 1
         assert replay_material(conn, run_id).extra['tools'] == session.traces
-        statements.clear()
-        session.flush()
-        assert statements == []  # Clean flush does not even serialize/query.
+        conn.execute(reject)
+        session.flush()  # A clean session has nothing to write.
+        conn.execute("DROP TRIGGER reject_material")
 
         # A deliberately misbound real document must retain the failed trace.
         material.extra['catalog']['D0']['period'] = '2024-12-31'
@@ -359,6 +356,7 @@ def test_evidence_session_flush_batches_real_calculations_and_errors(tmp_path):
 def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_path):
     from contextlib import closing
     from a_share_research import research_mcp
+    from a_share_research.drafts import program_valuation
     from a_share_research.reviewing import ReviewLedger
     from a_share_research.material import replay_material
 
@@ -368,22 +366,16 @@ def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_
         session = research_mcp.ResearchSession(conn, run_id, material, ReviewLedger())
         initial = session._context()
         assert initial['prompt'] == research_mcp.explore_prompt(material)
-        session.draft = report()
-        context = session._draft_context()
-        problems = [{'where': 'verdict', 'problem': '缺失'}]
-        assert research_mcp.repair_prompt(material, session.draft, problems, acquire=True) == research_mcp.repair_prompt(
-            material, session.draft, problems, acquire=True,
-            material_block=context['material_block'], valuation=context['program_valuation'])
-        binding = session.ledger.request(session.draft, material.snapshot()['sha256'])
-        assert research_mcp.review_prompt(material, session.draft, binding) == research_mcp.review_prompt(
-            material, session.draft, binding,
-            material_block=context['material_block'], valuation=context['program_valuation'])
         session._call('calculate', {'label': '经营现金流差额', 'operation': 'difference',
                                    'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
                                    'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}})
-        changed = session._draft_context()
-        assert changed['material_block'] == material.prompt_block() != initial['material_block']
-        session._stage('compose')
+        assert session._context()['material_block'] == material.prompt_block() != initial['material_block']
+        draft = report()
+        receipt = session._call('submit_draft', {'draft': draft}).structured_content
+        assert receipt['status'] == 'review' and receipt['material_block'] == material.prompt_block()
+        assert receipt['program_valuation'] == program_valuation(draft, material)
+        assert receipt['prompt'] == research_mcp.review_prompt(material, draft, receipt['binding'])
+        # Submitting moved to a new stage, which persisted the tool evidence.
         assert replay_material(conn, run_id).extra['tools'] == session.evidence.traces
         session.evidence.stop('tool_limit', 'explore')
         assert replay_material(conn, run_id).extra['stop_reasons'][0]['reason'] == 'tool_limit'
