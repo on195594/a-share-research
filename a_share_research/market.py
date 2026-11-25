@@ -117,10 +117,6 @@ def tushare_connect():
     return conn
 
 
-def report_rc_connect():
-    return tushare_connect()
-
-
 def _cache_connection():
     """Keep one internal connection per thread, reopening when DATA or the file itself changes."""
     path = (db.DATA / "tushare_cache.db").resolve()

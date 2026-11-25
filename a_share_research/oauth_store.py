@@ -139,8 +139,3 @@ def consume_refresh(conn: sqlite3.Connection, token: str, *, client_id: str, res
         AND revoked_at IS NULL AND expires_at>? AND grant_id IN (SELECT id FROM ({_ACTIVE_GRANTS}) WHERE client_id=?)
         RETURNING grant_id""", (db.now(), _digest(token), resource, time.time(), client_id)).fetchone()
     return row[0] if row else None
-
-
-def revoke_token(conn: sqlite3.Connection, token: str) -> bool:
-    return bool(conn.execute("UPDATE oauth_tokens SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL",
-                             (db.now(), _digest(token))).rowcount)

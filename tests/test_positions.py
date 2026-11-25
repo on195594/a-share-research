@@ -118,7 +118,8 @@ def test_duplicate_seed_ids_codes_and_business_ids_are_rejected():
 
 
 def test_fixed_decimal_context_and_inputs_remain_unchanged():
-    opening=seed();buy=event('buy',shares=1,price='11')
+    opening=seed()
+    buy=event('buy',shares=1,price='11')
     with localcontext() as context:
         context.prec=6
         a=replay([opening],[('buy',buy)],{})

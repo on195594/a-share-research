@@ -31,8 +31,7 @@ def test_package_ships_py_typed_marker() -> None:
 def test_now_is_timezone_aware_shanghai() -> None:
     from datetime import datetime, timedelta
 
-    from a_share_research.core.market_data import now, shanghai_today
+    from a_share_research.core.market_data import now
 
     parsed = datetime.fromisoformat(now())
     assert parsed.utcoffset() == timedelta(hours=8)
-    assert shanghai_today() in {parsed.date(), parsed.date() + timedelta(days=1)}

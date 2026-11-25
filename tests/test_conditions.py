@@ -86,7 +86,7 @@ def test_lpr_cooldown_is_shared_and_prevents_an_upstream_call(monkeypatch):
     from contextlib import closing
     from a_share_research import db
     monkeypatch.delenv('TUSHARE_CACHE')
-    with closing(market.report_rc_connect()) as conn:
+    with closing(market.tushare_connect()) as conn:
         conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES ('shibor_lpr:last-call', '{}', ?)", (db.now(),))
     # No provider is needed: the reservation must reject before any upstream access.
     with pytest.raises(sources.SourceError, match='每小时一次'):

@@ -489,13 +489,6 @@ def recent_report(conn, code: str):
     return report(conn, rows[0]["id"]) if rows else None
 
 
-def report_bodies(conn, ids: list[int]) -> dict:
-    if not ids:
-        return {}
-    return {r["id"]: report_body.load(r["body"]) for r in conn.execute(
-        f"SELECT id, body FROM reports WHERE id IN ({','.join('?' for _ in ids)})", ids)}
-
-
 CARD_BODY_FIELDS = (
     'summary', 'risks', 'checkpoints', 'table', 'market_date', 'valuation_calc',
     'open_questions', 'stance', 'stance_calc', 'prior', 'prior_status',

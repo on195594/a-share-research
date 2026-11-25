@@ -303,13 +303,11 @@ def test_scan_events_normalize_both_code_forms(conn, scan_event):
     assert scans.events(conn, code='603606.SH') == bare
 
 
-def test_latest_close_normalizes_both_code_forms(conn):
+def test_closing_prices_matches_suffixed_subscription_code(conn):
     day, close = next(iter(next(row for row in VALUATION_BODY['table'] if row['id'] == 'M.close')['values'].items()))
     conn.execute('INSERT INTO subscriptions(code,added_at,last_close,last_close_date) VALUES (?,?,?,?)',
                  (RECORD['code'], RECORD['created_at'], close, day))
-    bare = scans.latest_close(conn, '603606')
-    assert bare['last_close'] == float(close)
-    assert scans.latest_close(conn, '603606.SH') == bare
+    assert scans._closing_prices(conn, codes=['603606']) == {'603606': {'last_close': float(close), 'last_close_date': day}}
 
 
 @pytest.fixture

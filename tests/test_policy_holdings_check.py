@@ -122,7 +122,8 @@ def test_ledger_capture_scopes_open_holdings_and_defers_without_writes(tmp_path,
         monkeypatch.setattr(domain, 'cst_today', lambda: now.date().isoformat())
         quote_calls, market_calls = [], []
         def quotes(codes):
-            quote_calls.append(list(codes)); return {code: None for code in codes}
+            quote_calls.append(list(codes))
+            return {code: None for code in codes}
         monkeypatch.setattr(market_quotes, 'fetch_current_price_quotes', quotes)
         monkeypatch.setattr(market_quotes, 'fetch_market_limit_down_snapshot', lambda: market_calls.append(True))
         monkeypatch.setattr(capture.monitor_research, 'fetch_cards', lambda: pytest.fail('no research capture'))

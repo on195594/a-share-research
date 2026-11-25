@@ -52,9 +52,11 @@ def test_logout_revokes_device_and_all_its_sessions_only(server):
     conn, a, url, *_ = server
     register(a, url)
     stolen = peer(a)
-    stolen.cookies.clear(); stolen.cookies.set('remember_device', a.cookies.get('remember_device'))
+    stolen.cookies.clear()
+    stolen.cookies.set('remember_device', a.cookies.get('remember_device'))
     assert stolen.get(url + '/policy').status_code == 200
-    b = requests.Session(); b.trust_env = False
+    b = requests.Session()
+    b.trust_env = False
     register(b, url)
     response = a.post(url + '/logout', data={'csrf': csrf(a, url)}, headers={'Origin': url}, allow_redirects=False)
     assert response.status_code == 303
@@ -86,7 +88,8 @@ def test_expiry_owner_change_and_malformed_tokens(server):
     register(client, url)
     conn.execute("UPDATE remembered_devices SET owner_id='different-owner'")
     assert client.get(url + '/policy', allow_redirects=False).headers['location'] == '/login'
-    client.cookies.clear(); client.cookies.set('remember_device', 'invalid')
+    client.cookies.clear()
+    client.cookies.set('remember_device', 'invalid')
     assert client.get(url + '/policy', allow_redirects=False).headers['location'] == '/login'
 
 
@@ -95,7 +98,8 @@ def test_concurrent_recovery_and_logout(server):
     register(client, url)
     copies = [peer(client) for _ in range(8)]
     for copy in copies:
-        copy.cookies.clear(); copy.cookies.set('remember_device', client.cookies.get('remember_device'))
+        copy.cookies.clear()
+        copy.cookies.set('remember_device', client.cookies.get('remember_device'))
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert all(r.status_code == 200 for r in pool.map(lambda c: c.get(url + '/policy'), copies))
     assert len(conn.execute('SELECT * FROM device_sessions').fetchall()) == 9
@@ -193,5 +197,6 @@ def test_concurrent_registration_tokens_all_revoked_on_logout(server):
     assert conn.execute('SELECT COUNT(*) FROM remembered_devices').fetchone()[0] == 1
     assert client.post(url + '/logout', data={'csrf': valid_csrf}, headers={'Origin': url}, allow_redirects=False).status_code == 303
     for c, token in zip(copies, tokens):
-        c.cookies.clear(); c.cookies.set('remember_device', token)
+        c.cookies.clear()
+        c.cookies.set('remember_device', token)
         assert c.get(url + '/policy', allow_redirects=False).headers['location'] == '/login'

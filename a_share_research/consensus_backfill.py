@@ -18,7 +18,7 @@ _next_tick = 0.0
 
 
 def status() -> dict:
-    with closing(market.report_rc_connect()) as conn:
+    with closing(market.tushare_connect()) as conn:
         row = conn.execute("SELECT data FROM tushare_cache WHERE key=?", (STATUS_KEY,)).fetchone()
     return {"backfill": json.loads(row[0]) if row else None, "pacing": market.report_rc_status()}
 
@@ -52,7 +52,7 @@ def tick() -> bool:
     complete = window["trading_days"] > 0 and not window["missing_days"] and not window["truncated_days"] and not window.get("reason")
     snapshot.update(status="complete" if complete else "partial" if window["covered_days"] else "unavailable",
                     as_of=as_of, checked_at=db.now(), next_check_at=retry.isoformat())
-    with closing(market.report_rc_connect()) as conn:
+    with closing(market.tushare_connect()) as conn:
         conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES (?,?,?)",
                      (STATUS_KEY, json.dumps(snapshot, ensure_ascii=False), db.now()))
     log.info("report_rc backfill: covered=%s/%s empty=%s missing=%s truncated=%s attempts=%s budget=%s/%s next=%s reason=%s",

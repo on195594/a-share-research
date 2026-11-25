@@ -526,21 +526,6 @@ class ScanHistory:
         return dict(self.closes.get(code, {'last_close': None, 'last_close_date': None}))
 
 
-def latest_close(conn, code: str) -> dict:
-    code = stock_codes.normalize_key(code)
-    return _closing_prices(conn, codes=[code]).get(code, {'last_close': None, 'last_close_date': None})
-
-
-def announcement_failure(conn, code: str, *, scan_id: int | None = None) -> dict | None:
-    history = ScanHistory(conn, scan_id, fields=('failures', 'scope', 'announcements_succeeded'))
-    return history.announcements.get(code)
-
-
-def mechanical_failure(conn, code: str, report_id: int, *, scan_id: int | None = None) -> dict | None:
-    history = ScanHistory(conn, scan_id, fields=('check_failures', 'checks_succeeded'))
-    return history.checks.get((stock_codes.normalize_key(code), report_id))
-
-
 def last_extreme_zones(history: list[dict]) -> dict[str, str]:
     zones = {}
     for scan in history:

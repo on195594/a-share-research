@@ -253,7 +253,7 @@ def test_recent_empty_day_retries_daily(daily_reports, monkeypatch):
     monkeypatch.setattr(market, "datetime", Clock)
     params = dict(start_date="20260917", end_date="20260917")
     market.query(daily_reports, "report_rc", **params)
-    with closing(market.report_rc_connect()) as conn:
+    with closing(market.tushare_connect()) as conn:
         conn.execute("UPDATE tushare_cache SET created_at=? WHERE key=?",
                      (Clock.current.isoformat(), market._tushare_cache_key("report_rc", params)))
     Clock.current += timedelta(hours=23)
@@ -473,13 +473,12 @@ def test_cache_connections_follow_data_path_and_external_close_is_independent(mo
     market.cached_query("daily_basic", params, lambda: pd.DataFrame([MARKET]))
     first = market._cache_connection()
     assert market._cache_connection() is first
-    for connector in (market.tushare_connect, market.report_rc_connect):
-        with closing(connector()) as owned:
-            assert owned is not first
-            assert owned.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-            assert owned.execute("PRAGMA synchronous").fetchone()[0] == 1
-            assert owned.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
-        assert first.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 1
+    with closing(market.tushare_connect()) as owned:
+        assert owned is not first
+        assert owned.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert owned.execute("PRAGMA synchronous").fetchone()[0] == 1
+        assert owned.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    assert first.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 1
     original = db.DATA
     monkeypatch.setattr(db, "DATA", tmp_path / "other-data")
     assert market.cached_response("daily_basic", params) is None

@@ -37,7 +37,8 @@ def run(events, *, seeded=True, entries=None, distributions=None, opening_row=No
 
 
 def test_seed_without_events_preserves_historical_stop_and_fields():
-    row=opening();before=deepcopy(row)
+    row=opening()
+    before=deepcopy(row)
     result,_=run([],opening_row=row)
     assert result['holdings']==[before] and result['holding_events']==[] and row==before
     assert result['holdings'][0]['stop_loss_15']==8.5  # Current C factor would give 8.2.

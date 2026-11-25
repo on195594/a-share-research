@@ -458,11 +458,6 @@ def _first_stance_per_month(reports: list[dict]) -> list[dict]:
     return first_per_month([r for r in reports if r["stance"] != "未记录"])
 
 
-def load_stance_reports(database: str, contract: int | None = None) -> list[dict]:
-    """First report with a recorded stance per (source, code, natural month); unrecorded reports do not take slots."""
-    return _first_stance_per_month(_load_eligible_reports(database, contract))
-
-
 def load_agenda(database: str, contract: int | None = None) -> list[dict]:
     """Passed, non-replay, non-feedback continuations with their prior period and status, if recorded."""
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:

@@ -6,7 +6,7 @@
 
 | 路径 | 职责 |
 |---|---|
-| `a_share_research/` | 网页与鉴权（`web.py`、`web_*.py`、`oauth*.py`）、业务受理与读取（`service.py`、`reading.py`、`overview.py`）、研究与复核（`research.py`、`research_mcp.py`、`research_tools.py`、`checking.py`、`reviewing.py`、`prompts/`）、初筛与验证（`screening.py`、`backtest.py`、`validation.py`）、扫描与运维（`scans.py`、`worker.py`、`deploy.py`、`backup.py`、`integrity.py`）。 |
+| `a_share_research/` | 网页与鉴权（`web.py`、`web_*.py`、`oauth*.py`、`api_keys.py`）、业务受理与账本基础（`service.py`、`reading.py`、`overview.py`、`db.py`、`gate.py`）、研究与复核（`research.py`、`research_mcp.py`、`research_tools.py`、`runner_process.py`、`drafts.py`、`checking.py`、`reviewing.py`、`prompts/`）、初筛与验证（`screening.py`、`batches.py`、`backtest.py`、`validation.py`）、扫描与运维（`scans.py`、`worker.py`、`deploy.py`、`backup.py`、`integrity.py`）。 |
 | `a_share_research/core/`、`account/`、`policy/`、`tools/` | 依赖方向 `policy → account → core`：数据提供方与确定性计算、账户账本与对账、版本化政策、受控工具与远程 MCP。见 [Provider 手册](a_share_research/core/PROVIDERS.md)和[工具手册](a_share_research/tools/README.md)。 |
 | `agent-runner/` | worker 的 Node 24 TypeScript 子进程，通过宿主 pi 执行研究、复核、修补及批次比较。 |
 | `skill/`、`scripts/` | 统一外部 Agent Skill（`skill/a-share/SKILL.md`）、本机标准库 MCP 客户端（`scripts/ashare.py`）与同材料稳定性脚本（`scripts/stability.py`）。 |

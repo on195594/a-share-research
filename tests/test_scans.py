@@ -51,7 +51,7 @@ def test_consensus_prefetch_runs_without_subscriptions(conn, monkeypatch):
     assert prefetch['covered'] == 1 and len(prefetch['missing']) == prefetch['trading_days'] - 1
     assert '预算' in prefetch['reason']
     assert result['status'] == 'done' and result['summary']['failures'] == []
-    assert scans.announcement_failure(conn, '603606') is None
+    assert scans.ScanHistory(conn, fields=('failures', 'scope', 'announcements_succeeded')).announcements.get('603606') is None
 
 
 def test_consensus_prefetch_error_is_not_an_announcement_failure(conn):
@@ -65,7 +65,7 @@ def test_consensus_prefetch_error_is_not_an_announcement_failure(conn):
     assert result['status'] == 'done' and result['summary']['failures'] == []
     assert result['summary']['announcements_succeeded'] == ['603606']
     assert '频次超限' in result['summary']['consensus_prefetch']['reason']
-    assert scans.announcement_failure(conn, '603606') is None
+    assert scans.ScanHistory(conn, fields=('failures', 'scope', 'announcements_succeeded')).announcements.get('603606') is None
 
 
 def test_classify_captured_titles_and_adversarial_mutations():
@@ -192,7 +192,6 @@ def test_subscriptions_replace_atomic_validation_and_l5(conn):
     result = run_scan(conn)
     assert result['status'] == 'done' and not result['summary']['failures']
     assert result['summary']['closes']['600900']['last_close'] > 0
-    assert scans.latest_close(conn, '600900')['last_close_date']
     items = {r['code']: r for r in scans.subscriptions(conn)}
     for code in ('600900', '600519'):
         assert items[code]['last_close'] == result['summary']['closes'][code]['last_close']
@@ -218,7 +217,7 @@ def test_closing_prices_merge_last_scan_id_with_dated_subscription(conn):
     finally:
         conn.set_trace_callback(None)
     assert len(statements) == 1
-    assert scans.latest_close(conn, '600900.SH') == middle
+    assert scans._closing_prices(conn, codes=['600900']) == {'600900': middle}
     # Same-date correction from a subscription takes precedence; supplied history skips scans.
     conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=?', (early['last_close'], middle['last_close_date']))
     corrected = middle | {'last_close': early['last_close']}
@@ -794,7 +793,7 @@ def test_disclosure_failure_does_not_change_announcement_window(conn, disclosure
     assert first['status'] == 'done' and first['summary']['failures'] == []
     assert first['summary']['check_failures'] == [{'code': code, 'report_id': service.company_card(conn, code)['report_id'],
                                                   'stage': 'disclosure_checks', 'reason': '披露取数暂不可用'}]
-    assert scans.announcement_failure(conn, code) is None
+    assert scans.ScanHistory(conn, fields=('failures', 'scope', 'announcements_succeeded')).announcements.get(code) is None
     card = service.company_card(conn, code)
     second = run_scan(conn, failing, '2026-10-31T18:00:00+08:00')
     assert second['status'] == 'done' and failing.windows == [(code, 30), (code, 3)]

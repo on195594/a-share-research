@@ -14,7 +14,7 @@ from a_share_research.drafts import _verified_facts, merge_repair_patch, open_qu
 from a_share_research.research import _research_context
 from a_share_research.reviewing import target_exists
 from support.continuation import BODY, load
-from support.reports import CASH, MATERIAL, report
+from support.reports import MATERIAL, report
 from support.templates import render
 
 PRIOR = {"report_id": 37, "researched": "2026-10-20", "period": "2025-12-31",

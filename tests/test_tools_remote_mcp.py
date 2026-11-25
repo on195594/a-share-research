@@ -85,7 +85,7 @@ def test_public_auth_rechecks_each_credential_and_its_audience(remote, database)
         scan_args = {'request_id': 'scan-with-token-rotation'}
         scan = call(client, 'access', 'research_scan_request', scan_args)['structuredContent']['data']
         conn.execute("UPDATE scans SET status='done' WHERE id=?", (scan['scan_id'],))
-        assert oauth_store.revoke_token(conn, 'access')
+        conn.execute("UPDATE oauth_tokens SET expires_at=0 WHERE token_hash=?", (hashlib.sha256(b'access').hexdigest(),))
         assert api_keys.revoke(conn, api_keys.authenticate(conn, tokens['assistant']).key_id)
         for token in ['access', tokens['assistant']]:
             assert_unauthorized(rpc(client, token, 'tools/call', params))

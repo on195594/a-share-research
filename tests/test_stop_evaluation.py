@@ -144,7 +144,8 @@ def test_state_preserves_omitted_fields_and_copies_values():
     lambda v: v['quotes']['000963'].update(price='24.0'),
 ])
 def test_bundle_rejects_untyped_or_nonfinite_input(mutation):
-    value = bundle(); mutation(value)
+    value = bundle()
+    mutation(value)
     with pytest.raises(ValueError): evaluate(value)
 
 
@@ -161,7 +162,8 @@ def test_policy_identity_and_validity_window_are_checked():
 
 
 def test_evaluation_does_not_read_a_clock_database_file_or_provider(monkeypatch):
-    value = bundle(); before = deepcopy(value)
+    value = bundle()
+    before = deepcopy(value)
     def forbidden(*args,**kwargs): pytest.fail('pure stop evaluation must not read outside its bundle')
     monkeypatch.setattr(domain,'cst_now',forbidden)
     monkeypatch.setattr(commands_holdings.db,'read_only_db_session',forbidden)

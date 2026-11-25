@@ -55,8 +55,10 @@ def test_credentials_expire_and_revocation_covers_existing_and_new_credentials(g
     assert oauth_store.token_grant(conn, "access", kind="access", resource=RESOURCE + "/other") is None
     oauth_store.save_token(conn, "expired", grant_id=grant_id, kind="access", resource=RESOURCE, expires_at=0)
     assert oauth_store.token_grant(conn, "expired", kind="access", resource=RESOURCE) is None
-    assert oauth_store.revoke_token(conn, "access")
-    assert oauth_store.token_grant(conn, "access", kind="access", resource=RESOURCE) is None
+    oauth_store.save_token(conn, "rotated", grant_id=grant_id, kind="refresh", resource=RESOURCE, expires_at=expiry)
+    assert oauth_store.consume_refresh(conn, "rotated", client_id="browser", resource=RESOURCE) == grant_id
+    assert oauth_store.consume_refresh(conn, "rotated", client_id="browser", resource=RESOURCE) is None
+    assert oauth_store.token_grant(conn, "rotated", kind="refresh", resource=RESOURCE) is None
     if revoke == "client":
         assert oauth_store.revoke_client(conn, "browser")
         assert oauth_store.get_client(conn, "browser") is None

@@ -364,7 +364,6 @@ def test_waterfall_cash_bridge_and_paired_balance_structure_on_real_series_and_t
     assert not any("近12月滚动" in f["title"] for f in figures)
     bridge = figure(figures, "盈利与现金流转化")
     assert bridge["kind"] == "waterfall"
-    wf = bridge["chart"]
     html = str(ENV.get_template("_charts.html").module.figure(bridge))
     assert "利润" in html and "现金流" in html
     # Mutation check: a missing step or missing FCF in waterfall draws no capex bridge bar and suppresses connectors.

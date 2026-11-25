@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Generic, Literal, TypeVar
 
 __all__ = [
@@ -27,7 +27,6 @@ __all__ = [
     "MarketDataResult",
     "MarketDataStatus",
     "now",
-    "shanghai_today",
 ]
 
 T = TypeVar("T")
@@ -98,8 +97,3 @@ class MarketDataResult(Generic[T]):
 def now() -> str:
     """Timezone-aware Asia/Shanghai ISO-8601 timestamp for ``fetched_at``."""
     return datetime.now(SHANGHAI_TZ).isoformat()
-
-
-def shanghai_today() -> date:
-    """Current A-share calendar date, independent of the host timezone."""
-    return datetime.now(SHANGHAI_TZ).date()

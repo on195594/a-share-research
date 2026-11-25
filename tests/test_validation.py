@@ -336,7 +336,7 @@ def test_stance_dedup_ignores_earlier_same_month_unrecorded_report(tmp_path, mon
             conn.execute('UPDATE reports SET id=?, created_at=? WHERE run_id=?', (report_id, created, run_id))
         conn.commit()
     assert [r['id'] for r in validation.load_reports(str(path))] == [1]
-    assert [r['id'] for r in validation.load_stance_reports(str(path))] == [2]
+    assert [r['id'] for r in validation._first_stance_per_month(validation._load_eligible_reports(str(path)))] == [2]
 
     monkeypatch.setattr(validation.market, 'client', lambda: None)
     monkeypatch.setattr(validation, 'score', lambda pro, rows, today: [

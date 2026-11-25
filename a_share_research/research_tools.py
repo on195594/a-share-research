@@ -384,9 +384,6 @@ class ResearchTools:
             self.documents.update(additions)
         return found
 
-    def _register(self, doc: sources.Document) -> str:
-        return next(iter(self._register_documents([doc])))
-
     def run(self, name: str, args: dict) -> dict | list:
         if not isinstance(args, dict):
             raise ValueError("工具参数须为对象")

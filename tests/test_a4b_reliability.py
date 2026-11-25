@@ -123,7 +123,7 @@ def test_mechanical_failure_visible_separate_from_directory_and_cleared(disclosu
     card = service.company_card(conn, code)
     failure = card.get('check_failure')
     assert failure and failure['report_id'] == card['report_id'] and failure['scan_id'] == second['id']
-    assert scans.mechanical_failure(conn, code + '.SH', card['report_id']) == failure
+    assert scans.ScanHistory(conn, fields=('check_failures', 'checks_succeeded')).checks.get((code, card['report_id'])) == failure
     assert not any(e.get('kind') == 'scan_failure' for e in card['pending_events'])
     daily = advisor_text.render_scan(second, set())
     assert code in daily and 'financial fetch failed' in daily and '机械' in daily

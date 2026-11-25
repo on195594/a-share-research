@@ -2,7 +2,7 @@
 
 ## 组织
 
-`test_*.py` 按能力组织。`data/` 保存真实采集的财务、行情、报告、公告等回归输入。`support/` 提供共享构造器和装载器，覆盖报告与引文（`reports.py`）、接续记录（`continuation.py`）、财务与估值（`financials.py`、`valuation.py`）、跨页数字与页面渲染（`split_numbers.py`、`templates.py`）。修改用例输入前先复制公共样本。
+`test_*.py` 按能力组织。`data/` 保存真实采集的财务、行情、报告、公告等回归输入。`support/` 提供共享构造器和装载器，覆盖报告、立场与接续（`reports.py`、`stance.py`、`continuation.py`、`delivery.py`、`evaluations.py`），财务、估值、行情与初筛扫描（`financials.py`、`valuation.py`、`market_replay.py`、`screening.py`、`scans.py`），账户、持仓与政策（`accounts.py`、`positions.py`、`account_analysis.py`、`policy.py`、`policy_replay.py`、`backup.py`），以及 Web、MCP、Hermes 与模板渲染（`web.py`、`mcp.py`、`hermes.py`、`split_numbers.py`、`templates.py`）。修改用例输入前先复制公共样本。
 
 `conftest.py` 隔离数据与缓存，提供本地 Web、HTTP 服务及 pi 环境 fixture。依赖真实 pi 的用例在缺少环境时跳过；付费模型用例另需 `PI_LIVE_TEST=1`。
 

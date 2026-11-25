@@ -121,7 +121,6 @@ def test_saved_report_and_run_views_are_read_only(conn):
     report = reading.report(conn, 39)
     run = reading.api_run(conn, report['run_id'])
     assert run['report_id'] == 39 and run['code'] == report['code']
-    assert reading.report_bodies(conn, [39])[39] == json.loads(report['body']) | {'schema_version': 1}
     assert conn.total_changes == before
 
 
