@@ -6,6 +6,8 @@ import logging
 import os
 import sqlite3
 import time
+from collections.abc import Callable
+from typing import Any
 from contextlib import closing
 from datetime import date, datetime, timedelta
 
@@ -165,42 +167,13 @@ def _reserve_report_rc_call() -> None:
         _save_report_rc_control(conn, {"retry_at": (at + timedelta(seconds=REPORT_RC_MIN_INTERVAL)).isoformat()}, at)
 
 
-def query(pro, api: str, **params) -> pd.DataFrame:
-    """Cache historical raw responses, before a-stock-lib normalizes dates and numbers."""
+def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any]) -> Any:
+    """Reuse historical raw frames without invoking upstream pacing on a cache hit."""
     cached = cached_response(api, params)
     if cached is not None:
         cached.attrs["cache_hit"] = True
         return cached
-    if api == "report_rc":
-        _reserve_report_rc_call()
-    if api == "shibor_lpr":
-        # This account permits one upstream request per hour, shared across workers.
-        with closing(report_rc_connect()) as conn, conn:
-            conn.execute("BEGIN IMMEDIATE")
-            at = datetime.now(SHANGHAI)
-            row = conn.execute("SELECT created_at FROM tushare_cache WHERE key='shibor_lpr:last-call'").fetchone()
-            if row and at < datetime.fromisoformat(row[0]) + timedelta(seconds=3601):
-                retry = datetime.fromisoformat(row[0]) + timedelta(seconds=3601)
-                raise SourceError(f"LPR 每小时一次，冷却至 {retry.isoformat()}；请先使用其他宏观系列，勿重复查询")
-            conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES ('shibor_lpr:last-call', '{}', ?)", (at.isoformat(),))
-    if api in CONDITION_APIS:
-        global _condition_last_call
-        time.sleep(max(0, 0.35 - (time.monotonic() - _condition_last_call)))
-        _condition_last_call = time.monotonic()
-    try:
-        frame = pro.query(api, **params)
-        if api == "report_rc":
-            if not isinstance(frame, pd.DataFrame):
-                raise SourceError("report_rc 返回值不是数据表")
-            report_rc_rows(frame)
-            if params.get("start_date") == params.get("end_date") and not frame.empty:
-                if not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(
-                        date.fromisoformat(str(params["end_date"]))).all():
-                    raise SourceError(f"report_rc {params['end_date']} 返回了其他日期的预测")
-    except Exception as exc:
-        if api == "report_rc":
-            _defer_report_rc(exc)
-        raise
+    frame = fetcher()
     key = _tushare_cache_key(api, params)
     if key is None:
         return frame
@@ -221,6 +194,43 @@ def query(pro, api: str, **params) -> pd.DataFrame:
             log.warning("TuShare %s cache write failed", api, exc_info=True)
     return frame
 
+
+def query(pro, api: str, **params) -> pd.DataFrame:
+    """Cache historical raw responses, before a-stock-lib normalizes dates and numbers."""
+    def fetcher():
+        if api == "report_rc":
+            _reserve_report_rc_call()
+        if api == "shibor_lpr":
+            # This account permits one upstream request per hour, shared across workers.
+            with closing(report_rc_connect()) as conn, conn:
+                conn.execute("BEGIN IMMEDIATE")
+                at = datetime.now(SHANGHAI)
+                row = conn.execute("SELECT created_at FROM tushare_cache WHERE key='shibor_lpr:last-call'").fetchone()
+                if row and at < datetime.fromisoformat(row[0]) + timedelta(seconds=3601):
+                    retry = datetime.fromisoformat(row[0]) + timedelta(seconds=3601)
+                    raise SourceError(f"LPR 每小时一次，冷却至 {retry.isoformat()}；请先使用其他宏观系列，勿重复查询")
+                conn.execute("INSERT OR REPLACE INTO tushare_cache VALUES ('shibor_lpr:last-call', '{}', ?)", (at.isoformat(),))
+        if api in CONDITION_APIS:
+            global _condition_last_call
+            time.sleep(max(0, 0.35 - (time.monotonic() - _condition_last_call)))
+            _condition_last_call = time.monotonic()
+        try:
+            frame = pro.query(api, **params)
+            if api == "report_rc":
+                if not isinstance(frame, pd.DataFrame):
+                    raise SourceError("report_rc 返回值不是数据表")
+                report_rc_rows(frame)
+                if params.get("start_date") == params.get("end_date") and not frame.empty:
+                    if not pd.to_datetime(frame["report_date"], errors="raise").dt.date.eq(
+                            date.fromisoformat(str(params["end_date"]))).all():
+                        raise SourceError(f"report_rc {params['end_date']} 返回了其他日期的预测")
+        except Exception as exc:
+            if api == "report_rc":
+                _defer_report_rc(exc)
+            raise
+        return frame
+
+    return cached_query(api, params, fetcher)
 
 def report_rc_rows(frame: pd.DataFrame, code: str | None = None) -> list[dict]:
     """Validate the response before handing sell-side data to the pure consensus calculator."""

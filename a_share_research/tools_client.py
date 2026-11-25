@@ -29,7 +29,7 @@ class ToolCallError(Exception):
         self.code = code
 
 
-def _reply(response: requests.Response, request_id: str) -> dict:
+def _reply(response: requests.Response, request_id: str, read_only: bool = False) -> dict:
     status = response.status_code
     if status == 429:
         raise ToolCallError("unavailable", "服务限流，约 1 分钟后用原请求重试。")
@@ -46,6 +46,8 @@ def _reply(response: requests.Response, request_id: str) -> dict:
             if error.get("code") == "auth_unavailable":
                 raise ToolCallError("unavailable", "认证服务暂未受理，请稍后用原请求重试。")
     if status >= 500 or status == 408:
+        if read_only:
+            raise ToolCallError("unavailable", "工具服务暂不可用，请稍后重试。")
         raise ToolCallError("unknown", _UNKNOWN)
     if status != 200 and status not in (400, 404, 422):
         raise ToolCallError("business", f"工具服务拒绝请求（HTTP {status}），请核对账户工具配置。")
@@ -85,6 +87,8 @@ def _reply(response: requests.Response, request_id: str) -> dict:
             raise ValueError("missing account payload")
         return data
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        if read_only:
+            raise ToolCallError("unavailable", "工具服务响应异常，请稍后重试。") from exc
         raise ToolCallError("unknown", _UNKNOWN) from exc
 
 
@@ -118,6 +122,14 @@ class ToolsClient:
                 _worker.session.trust_env = False
             response = _worker.session.post(self.endpoint, data=body, headers=headers, allow_redirects=False,
                                             timeout=(5, 60))
-        except requests.RequestException as exc:
+        except requests.ConnectTimeout as exc:
+            raise ToolCallError("unavailable", "连接工具服务超时，请稍后用原请求重试。") from exc
+        except requests.Timeout as exc:
+            if read_only:
+                raise ToolCallError("unavailable", "工具服务响应超时，请稍后重试。") from exc
             raise ToolCallError("unknown", _UNKNOWN) from exc
-        return _reply(response, request_id)
+        except requests.RequestException as exc:
+            if read_only:
+                raise ToolCallError("unavailable", "工具服务连接错误，请稍后重试。") from exc
+            raise ToolCallError("unknown", _UNKNOWN) from exc
+        return _reply(response, request_id, read_only=read_only)

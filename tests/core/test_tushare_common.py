@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import os
+import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
+
+import pandas as pd
+import requests
 
 import pytest
 
 from datetime import date
 
+from a_share_research import db, market
 from a_share_research.core.market_data import (
     PERMISSION_DENIED,
     RATE_LIMITED,
@@ -168,3 +176,55 @@ def test_generic_api_error_with_timeout_text_is_not_retried() -> None:
 )
 def test_compact_date_normalizes_various_inputs(raw_input: str | date, expected: str) -> None:
     assert compact_date(raw_input) == expected
+
+
+def captured_market_frame():
+    path = Path(__file__).resolve().parents[1] / "data" / "600519-financials.json"
+    return pd.DataFrame([json.loads(path.read_text())["market"]])
+
+
+def test_checked_client_pools_one_session_per_thread(monkeypatch):
+    from a_share_research.core.providers.tushare_common import checked_client
+
+    frame = captured_market_frame()
+    reply = SimpleNamespace(ok=True, text=json.dumps({"code": 0, "data": {
+        "fields": list(frame.columns), "items": frame.values.tolist()}}))
+    calls = []
+
+    def post(session, url, **kwargs):
+        calls.append((session, kwargs))
+        return reply
+
+    monkeypatch.setattr(requests.Session, "post", post)
+    client = checked_client("captured-response-only", timeout=17)
+    for _ in range(2):
+        pd.testing.assert_frame_equal(client.daily_basic(ts_code="600519.SH"), frame)
+    with ThreadPoolExecutor(1) as pool:
+        pool.submit(client.daily_basic, ts_code="600519.SH").result()
+    sessions = [session for session, _ in calls]
+    assert sessions[0] is sessions[1] and sessions[2] is not sessions[0]
+    assert {kwargs["timeout"] for _, kwargs in calls} == {17}
+
+
+@pytest.mark.parametrize("injection", [None, "client", "client_factory"])
+def test_provider_cache_skips_limiter_and_respects_injected_clients(monkeypatch, injection):
+    monkeypatch.setenv("TUSHARE_CACHE", "1")
+    frame = captured_market_frame()
+    params = {"ts_code": "600519.SH", "end_date": frame["trade_date"].iloc[0]}
+    remote_calls, waits = [], []
+
+    def daily_basic(**kwargs):
+        remote_calls.append(kwargs)
+        return frame.copy()
+
+    client = SimpleNamespace(daily_basic=daily_basic)
+    monkeypatch.setattr(TushareProviderBase, "_build_client", lambda self: client)
+    kwargs = {injection: client if injection == "client" else lambda token: client} if injection else {}
+    provider = TushareProviderBase(token="captured-response-only", query_cache=market.cached_query,
+                                   rate_limiter=SimpleNamespace(wait=lambda: waits.append(1)), **kwargs)
+    for _ in range(2):
+        result = provider._request_frame("tushare.daily_basic", "daily_basic", params, {"ts_code", "trade_date"})
+        assert result.status == "ok"
+        pd.testing.assert_frame_equal(result.value, frame)
+    assert len(remote_calls) == len(waits) == (2 if injection else 1)
+    assert (db.DATA / "tushare_cache.db").exists() is (injection is None)

@@ -24,8 +24,10 @@ def upload(web, monkeypatch, tmp_path):
     principal = api_keys.authenticate(web.conn, token)
     ctx = registry.Context(web.conn, tmp_path / "app.db", principal, account_shadow_enabled=True)
 
-    async def call(client, name, arguments, *, request_id=None):
+    async def call(client, name, arguments, *, request_id=None, read_only=False):
         assert api_keys.authenticate(web.conn, client.token) == principal
+        # Only reads may report a failure as plainly retryable.
+        assert read_only == (name in ("account_state", "account_evidence_recent"))
         try:
             return registry.invoke(ctx, name, arguments)["data"]
         except registry.ToolError as exc:

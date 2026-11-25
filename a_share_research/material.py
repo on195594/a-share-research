@@ -406,14 +406,14 @@ def gather(code: str) -> Material:
     if annual is None:
         raise ResearchError("近 18 个月没有年报")
     sources.fetch(annual)
-    market = sources.valuation(code)
+    market, valuation_history = sources.valuation_with_history(code)
     table = financial_table(fin, market)
     for row in table:
         row["source"] = {"provider": "TuShare", "code": annual.code, "retrieved_at": retrieved_at}
     gaps = {f"{p}：{reason}" for row in table for p, reason in row.get("unavailable", {}).items()}
     market_date = str(market["trade_date"])
     try:
-        reference = sources.pe_reference(code, market_date)
+        reference = sources.pe_quantiles(valuation_history, code, market_date)
         for p in (30, 50, 70):
             value = reference[f"p{p}"]
             table.append({"id": f"M.pe_ttm_5y_p{p}", "label": f"近 5 年 PE TTM {p}% 分位", "unit": "倍",

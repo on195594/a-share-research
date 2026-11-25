@@ -254,7 +254,7 @@ def _frame(provider, fetch, *args, **kwargs) -> pd.DataFrame:
 def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     """Three statements and indicators for recent periods (TuShare)."""
     start = date(datetime.now(SHANGHAI).year - years, 1, 1).isoformat()
-    provider = TushareFinancialProvider()
+    provider = TushareFinancialProvider(query_cache=market.cached_query)
     indicator = _frame(provider, provider.fetch_indicator_history, code, start_date=start)
     if "profit_dedt" not in indicator.columns:
         raise SourceError("TuShare fina_indicator: 返回数据缺少必要列 profit_dedt")
@@ -271,12 +271,25 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
 def valuation(code: str) -> dict:
     """Latest daily_basic row: close, PE(TTM), PB, dividend yield, market cap."""
     end = datetime.now(SHANGHAI).date()
-    provider = TushareValuationProvider()
+    provider = TushareValuationProvider(query_cache=market.cached_query)
     frame = _frame(provider, provider.fetch_valuation_history,
                    code, start_date=(end - timedelta(days=14)).isoformat(), end_date=end.isoformat())
     if frame.empty:
         raise SourceError(f"no valuation rows for {code}")
     return frame.sort_values("trade_date").iloc[-1].to_dict()
+
+
+def valuation_with_history(code: str) -> tuple[dict, pd.DataFrame]:
+    """Fetch once for the latest valuation and the five-year PE reference."""
+    end = datetime.now(SHANGHAI).date()
+    provider = TushareValuationProvider(query_cache=market.cached_query)
+    # Include the days before today's five-year boundary when the latest close is older.
+    frame = _frame(provider, provider.fetch_valuation_history, code,
+                   start_date=str(end - timedelta(days=5 * 366 + 14)), end_date=str(end))
+    recent = frame.loc[pd.to_datetime(frame["trade_date"]).dt.date >= end - timedelta(days=14)]
+    if recent.empty:
+        raise SourceError(f"no valuation rows for {code}")
+    return recent.sort_values("trade_date").iloc[-1].to_dict(), frame
 
 
 def pe_quantiles(frame: pd.DataFrame, code: str, market_date: str) -> dict:
@@ -300,19 +313,6 @@ def pe_quantiles(frame: pd.DataFrame, code: str, market_date: str) -> dict:
             "n": len(values), "source": {"provider": "TuShare daily_basic.pe_ttm", "code": code,
             "start_date": str(start), "end_date": market_date, "samples": len(values),
             "method": "positive daily observations; linear quantile"}}
-
-
-def pe_reference(code: str, market_date: str) -> dict:
-    try:
-        end = date.fromisoformat(market_date)
-        start = end.replace(year=end.year - 5, day=28) if end.month == 2 and end.day == 29 else end.replace(year=end.year - 5)
-        provider = TushareValuationProvider()
-        frame = _frame(provider, provider.fetch_valuation_history, code, start_date=str(start), end_date=market_date)
-        return pe_quantiles(frame, code, market_date)
-    except SourceError:
-        raise
-    except Exception as exc:
-        raise SourceError(f"TuShare daily_basic 历史 PE 分位不可用：{exc}") from exc
 
 
 def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None,

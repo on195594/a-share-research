@@ -506,6 +506,7 @@ def test_tushare_http_error_names_the_status_instead_of_an_empty_frame(tmp_path,
     from tushare.pro.client import DataApi
     monkeypatch.setenv("TUSHARE_TOKEN", "captured-response-only")
     monkeypatch.setenv("TUSHARE_CACHE", "0")
+    monkeypatch.setattr(requests.Session, "post", lambda *a, **k: _tushare_response(502, TUSHARE_502))
     monkeypatch.setattr(requests, "post", lambda *a, **k: _tushare_response(502, TUSHARE_502))
     # The unchecked SDK client is why the failure used to read as "返回数据缺少必要列".
     assert DataApi("captured-response-only").fina_indicator(ts_code="601600.SH").shape == (0, 0)
@@ -525,18 +526,18 @@ def test_checked_tushare_client_keeps_sdk_decoding(monkeypatch):
     from a_share_research.core.providers.tushare_common import checked_client
     calls = []
 
-    def post(url, json, timeout):
+    def post(session, url, json, timeout):
         calls.append((url, json, timeout))
         body = '{"code": 0, "msg": "", "data": {"fields": ["ts_code", "end_date"], "items": [["601600.SH", "20250930"]]}}'
         return _tushare_response(200, body)
     pro = checked_client("captured-response-only")
-    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(requests.Session, "post", post)
     frame = pro.fina_indicator(ts_code="601600.SH", fields="ts_code,end_date")
     assert frame.to_dict("records") == [{"ts_code": "601600.SH", "end_date": "20250930"}]
     url, payload, timeout = calls[0]
     assert url == "http://api.waditu.com/dataapi/fina_indicator" and timeout == 30
     assert payload["token"] == "captured-response-only" and payload["params"]["ts_code"] == "601600.SH"
     rate_limited = '{"code": 40203, "msg": "抱歉，您每分钟最多访问该接口200次", "data": null}'
-    monkeypatch.setattr(requests, "post", lambda *a, **k: _tushare_response(200, rate_limited))
+    monkeypatch.setattr(requests.Session, "post", lambda *a, **k: _tushare_response(200, rate_limited))
     with pytest.raises(Exception, match="每分钟最多访问"):
         pro.fina_indicator(ts_code="601600.SH")

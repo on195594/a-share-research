@@ -59,7 +59,8 @@ async def page(request, session, client, render, form=None, *, connection):
     enabled = client is not None
     if enabled and (form is None or restored):
         try:
-            state = await client.call('account_state', {'account_id': fields.get('account_id', '')} if restored else {})
+            state = await client.call('account_state', {'account_id': fields.get('account_id', '')} if restored else {},
+                                      read_only=True)
             fresh_version = str(state['version'])
             if form is None:
                 fields = _initial(state)
@@ -87,7 +88,7 @@ async def page(request, session, client, render, form=None, *, connection):
                     return RedirectResponse(url, status_code=303)
     if enabled and not retry_only:
         try:
-            recent = (await client.call('account_evidence_recent', {}))['evidence']
+            recent = (await client.call('account_evidence_recent', {}, read_only=True))['evidence']
         except ToolCallError as exc:
             errors.append(str(exc))
     selected = fields.getlist('evidence_hashes')

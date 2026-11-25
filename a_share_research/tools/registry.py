@@ -330,9 +330,10 @@ def _nav_suspended(result, code) -> set[date]:
 
 
 def _account_nav(ctx: Context, args: AccountNav) -> Payload:
+    from a_share_research import market
     from a_share_research.core.providers import TushareMarketDataProvider
 
-    provider = TushareMarketDataProvider()
+    provider = TushareMarketDataProvider(query_cache=market.cached_query)
     return Payload(data=nav.daily(
         ctx.connection, ctx.principal, args.account_id, today=nav.latest_close_day(datetime.now(db.SHANGHAI)),
         start=args.start, end=args.end,

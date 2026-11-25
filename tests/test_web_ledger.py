@@ -20,7 +20,9 @@ class BoundTools:
         self.submissions = []
         self.reply_loss = None
 
-    async def call(self, name, arguments, *, request_id=None):
+    async def call(self, name, arguments, *, request_id=None, read_only=False):
+        # Only reads may report a failure as plainly retryable.
+        assert read_only == (name in ('account_state', 'account_evidence_recent'))
         try:
             result = registry.invoke(self.ctx, name, arguments)['data']
         except registry.ToolError as exc:

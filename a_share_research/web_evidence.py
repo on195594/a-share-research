@@ -49,7 +49,7 @@ async def page(request, session, client, render, form=None):
             rows.append(await _upload(client, file, label))
     if client:
         try:
-            recent = (await client.call("account_evidence_recent", {}))["evidence"]
+            recent = (await client.call("account_evidence_recent", {}, read_only=True))["evidence"]
         except ToolCallError as exc:
             recent_error = str(exc)
     return render(request, "account_evidence.html", session, enabled=client is not None, max_bytes=MAX_BYTES,

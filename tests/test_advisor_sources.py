@@ -6,10 +6,11 @@ import subprocess
 import sys
 import time
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import pytest
+import requests
 
 from a_share_research import market, db, sources, valuation
 from support.market_replay import CALENDAR, DATA, ROWS, DailyReports, budget_calls
@@ -372,3 +373,86 @@ def test_idle_backfill_complete_window_waits_without_new_upstream_calls(daily_re
     monkeypatch.setattr(consensus_backfill, "_next_tick", 0)
     assert not consensus_backfill.tick()
     assert daily_reports.calls == calls
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_cached_query_reuses_only_historical_frames(monkeypatch, historical):
+    monkeypatch.setenv("TUSHARE_CACHE", "1")
+    frame = pd.DataFrame([MARKET])
+    end = MARKET["trade_date"] if historical else datetime.now(db.SHANGHAI).date().isoformat()
+    params = {"ts_code": "600519.SH", "end_date": end}
+    calls = []
+
+    def fetcher():
+        calls.append(1)
+        return frame.copy()
+
+    original = market.cached_query("daily_basic", params, fetcher)
+    restored = market.cached_query("daily_basic", params, fetcher)
+    pd.testing.assert_frame_equal(original, restored)
+    restored.iloc[0, restored.columns.get_loc("close")] = -1  # Mutation must not leak into the cache.
+    pd.testing.assert_frame_equal(market.cached_query("daily_basic", params, fetcher), frame)
+    assert len(calls) == (1 if historical else 3)
+    assert (db.DATA / "tushare_cache.db").exists() is historical
+
+
+@pytest.mark.parametrize("invalid", [None, "not-a-frame", "empty"])
+def test_cached_query_does_not_persist_invalid_results(monkeypatch, invalid):
+    monkeypatch.setenv("TUSHARE_CACHE", "1")
+    value = pd.DataFrame([MARKET]).iloc[:0] if invalid == "empty" else invalid
+    market.cached_query("daily_basic", {"end_date": MARKET["trade_date"]}, lambda: value)
+    assert not (db.DATA / "tushare_cache.db").exists()
+
+
+def test_cached_query_disabled_and_failure_do_not_write(monkeypatch):
+    params = {"end_date": MARKET["trade_date"]}
+    calls = []
+    for _ in range(2):
+        market.cached_query("daily_basic", params, lambda: calls.append(1) or pd.DataFrame([MARKET]))
+    assert len(calls) == 2 and not (db.DATA / "tushare_cache.db").exists()
+    monkeypatch.setenv("TUSHARE_CACHE", "1")
+
+    def fail():
+        raise ConnectionError("upstream disconnected")
+
+    with pytest.raises(ConnectionError):
+        market.cached_query("daily_basic", params, fail)
+    assert not (db.DATA / "tushare_cache.db").exists()
+
+
+@pytest.mark.parametrize("age", [0, 14, 15])
+def test_combined_valuation_fetches_daily_basic_once(monkeypatch, age):
+    close_day = date.fromisoformat(MARKET["trade_date"])
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.combine(close_day + timedelta(days=age), cls.min.time(), tz)
+
+    monkeypatch.setattr(sources, "datetime", Clock)
+    monkeypatch.setenv("TUSHARE_TOKEN", "captured-response-only")
+    calls = []
+    # Replay a captured raw row at the HTTP boundary through the real provider.
+    body = json.dumps({"code": 0, "data": {"fields": list(MARKET), "items": [list(MARKET.values())]}}).encode()
+
+    def post(session, url, json, timeout):
+        calls.append(json)
+        reply = requests.Response()
+        reply.status_code, reply._content = 200, body
+        return reply
+
+    monkeypatch.setattr(requests.Session, "post", post)
+    if age > 14:
+        with pytest.raises(sources.SourceError, match="no valuation rows"):
+            sources.valuation_with_history("600519")
+        return
+    latest, history = sources.valuation_with_history("600519")
+    assert latest == MARKET
+    # A single captured day cannot supply 250 distinct PE observations; this
+    # remains a nonfatal evidence gap in gather and must not trigger another fetch.
+    with pytest.raises(sources.SourceError, match="少于 250"):
+        sources.pe_quantiles(history, "600519", latest["trade_date"])
+    assert len(calls) == 1 and calls[0]["api_name"] == "daily_basic"
+    # The one window still reaches five years before a close that is two weeks old.
+    boundary = close_day.replace(year=close_day.year - 5)
+    assert calls[0]["params"]["start_date"] <= boundary.strftime("%Y%m%d")

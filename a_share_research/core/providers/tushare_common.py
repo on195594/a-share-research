@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 import pandas as pd
+import requests
 
 from a_share_research.core.market_data import (
     AUTH_MISSING,
@@ -27,6 +28,7 @@ from a_share_research.core.market_data import (
     MarketDataResult,
     now,
 )
+
 T = TypeVar("T")
 Clock = Callable[[], float]
 Sleeper = Callable[[float], None]
@@ -93,16 +95,22 @@ def checked_client(token: str, timeout: int = 30) -> Any:
     tushare 1.4.29's DataApi.query returns an empty DataFrame for any non-2xx response, which
     downstream reads as missing columns or no data, and report_rc would cache as a real empty day.
     """
-    import requests
     from tushare.pro.client import DataApi
 
     class CheckedDataApi(DataApi):
-        # Same request and decoding as DataApi.query; only the HTTP status check differs.
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            # Screening shares one client across threads and requests.Session is not guaranteed thread-safe.
+            self._local = threading.local()
+
+        # Preserve SDK request/decoding while pooling connections and checking HTTP status.
         def query(self, api_name, fields="", **kwargs):
             url = getattr(self, "_DataApi__http_url")
             kwargs.setdefault("ts_type_name", url)
             payload = {"api_name": api_name, "token": token, "params": kwargs, "fields": fields}
-            res = requests.post(f"{url}/{api_name}", json=payload, timeout=timeout)
+            if not hasattr(self._local, "session"):
+                self._local.session = requests.Session()
+            res = self._local.session.post(f"{url}/{api_name}", json=payload, timeout=timeout)
             if not res.ok:
                 raise TushareHTTPError(api_name, res.status_code)
             result = json.loads(res.text)
@@ -235,12 +243,15 @@ class TushareProviderBase:
         client_factory: ClientFactory | None = None,
         env_path: Path | None = None,
         rate_limiter: TushareRateLimiter | None = None,
+        query_cache: Callable[[str, dict[str, Any], Callable[[], Any]], Any] | None = None,
     ) -> None:
         self.token = token if token is not None else os.environ.get("TUSHARE_TOKEN") or (
             read_tushare_token(env_path) if env_path is not None else None
         )
         self._client = client
         self._client_factory = client_factory
+        self._query_cache = query_cache
+        self._built_client: Any | None = None
         self._rate_limiter = rate_limiter or (_GLOBAL_RATE_LIMITER if client is None else TushareRateLimiter(10**9))
         # Exception behind the latest failed request; MarketDataResult is a serialized contract and stays exception-free.
         self.last_error: Exception | None = None
@@ -258,9 +269,16 @@ class TushareProviderBase:
         client_result = self._client_or_failure(source, fingerprint)
         if isinstance(client_result, MarketDataResult):
             return client_result
-        try:
+
+        def fetcher():
             method = getattr(client_result, endpoint)
-            value = call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
+            return call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
+
+        try:
+            if self._query_cache is not None and self._client is None and self._client_factory is None:
+                value = self._query_cache(endpoint, dict(params), fetcher)
+            else:
+                value = fetcher()
         except Exception as exc:
             self.last_error = exc
             code, message = classify_tushare_exception(exc, self.token)
@@ -282,14 +300,16 @@ class TushareProviderBase:
                 error_message="TUSHARE_TOKEN is not configured",
                 request_fingerprint=fingerprint,
             )
-        if self._client is None:
+        if self._client is not None:
+            return self._client
+        if self._built_client is None:
             try:
-                self._client = self._build_client()
+                self._built_client = self._build_client()
             except Exception as exc:
                 self.last_error = exc
                 code, message = classify_tushare_exception(exc, self.token)
                 return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
-        return self._client
+        return self._built_client
 
     def _build_client(self) -> Any:
         if self._client_factory is not None:
