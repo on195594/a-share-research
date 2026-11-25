@@ -1,5 +1,7 @@
 """Capture monitor and dividend evidence for a replayable v0 daily brief."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 from a_share_research.policy import monitor
 
 
@@ -36,9 +38,12 @@ def collect(parameters: dict, *, source: dict | None = None) -> dict:
             holdings = conn.execute('SELECT id,code,name,shares FROM holdings WHERE exit_date IS NULL ORDER BY code').fetchall()
             events = {row[0]: commands_holdings._load_lifecycle_events(conn, row[0]) for row in holdings}
         today = domain.cst_today()
+        # Per-holding TuShare calls are network-bound; serial fetches used ~9s of the 25s capture budget.
+        with ThreadPoolExecutor(max(1, min(8, len(holdings)))) as pool:
+            providers = list(pool.map(_dividend_response, [row[1] for row in holdings]))
         dividends = [dict(holding_id=hid, code=code, name=name, current_shares=shares,
-                          events=[list(event) for event in events[hid]], provider=_dividend_response(code))
-                     for hid, code, name, shares in holdings]
+                          events=[list(event) for event in events[hid]], provider=provider)
+                     for (hid, code, name, shares), provider in zip(holdings, providers)]
         bundle.update(dividend_today=today, brief_today=domain.cst_today(), dividends=dividends)
         bundle = evaluation.pack(bundle)
         capture._current_policy(parameters, domain.cst_now())

@@ -60,6 +60,8 @@ def current_slot(job, now=None):
 
 ADVISOR_SECONDS = 540
 POLICY_SECONDS = 270
+# One schedule_run call is capped at 40s; retry only when a full call still fits.
+RETRY_MIN_SECONDS = 45
 
 
 def failure_line(error):
@@ -104,6 +106,7 @@ def deliver(job, slot, *, stdout, deadline=None):
     try:
         args = dict(job=job, slot=slot)
         backlog_error = None
+        retried = False
         while True:
             row = _call('schedule_run', args, deadline)
             run_id = row.get('run_id')
@@ -132,6 +135,11 @@ def deliver(job, slot, *, stdout, deadline=None):
             if status == 'failed':
                 error = f"{row['error_code']}：{row['error']}"
                 if not backlog:
+                    # A capture timeout is transient; schedule_run reruns a failed row under a new attempt.
+                    if (row.get('error_code') == 'timeout' and not row.get('text') and not retried
+                            and deadline - time.monotonic() >= RETRY_MIN_SECONDS):
+                        retried = True
+                        continue
                     raise ToolsError(error)
                 backlog_error = error
                 write(failure_line(error), body=False)

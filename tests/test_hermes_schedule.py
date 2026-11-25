@@ -370,3 +370,40 @@ def test_interactive_cli_codes_use_the_ordinary_failure_path(client, code):
     assert result.returncode == 1 and result.stdout == ''
     assert '调用失败' in result.stderr and 'private diagnostic' not in result.stderr
     assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize('remaining,retried', [(270, True), (44, False)])
+def test_capture_timeout_reruns_the_slot_once_while_a_call_fits(monkeypatch, remaining, retried):
+    # 2026-11-25 run #173: one slow capture left the day without a brief.
+    calls = []
+    def call(name, args, *, timeout):
+        calls.append(name)
+        if name == 'schedule_ack':
+            return dict(run_id=41, status='acked')
+        if calls.count('schedule_run') == 2 and remaining == 270:
+            return dict(run_id=41, job='daily_brief', slot='2026-11-20', status='ready', text='日报\n')
+        return dict(run_id=41, job='daily_brief', slot='2026-11-20', status='failed',
+                    error_code='timeout', error='行情与政策输入采集超时')
+    monkeypatch.setattr(schedule, 'tool', call)
+    monkeypatch.setattr(schedule, 'time', SimpleNamespace(sleep=lambda s: None, monotonic=lambda: 0))
+    stream = StringIO()
+    if retried:
+        schedule.deliver('daily_brief', '2026-11-20', stdout=stream, deadline=remaining)
+        assert (stream.getvalue(), calls) == ('日报\n', ['schedule_run', 'schedule_run', 'schedule_ack'])
+    else:
+        with pytest.raises(schedule.ToolsError, match='timeout'):
+            schedule.deliver('daily_brief', '2026-11-20', stdout=stream, deadline=remaining)
+        assert calls == ['schedule_run']
+
+
+def test_capture_timeout_is_retried_only_once(monkeypatch):
+    calls = []
+    def call(name, args, *, timeout):
+        calls.append(name)
+        return dict(run_id=41, job='daily_brief', slot='2026-11-20', status='failed',
+                    error_code='timeout', error='行情与政策输入采集超时')
+    monkeypatch.setattr(schedule, 'tool', call)
+    monkeypatch.setattr(schedule, 'time', SimpleNamespace(sleep=lambda s: None, monotonic=lambda: 0))
+    with pytest.raises(schedule.ToolsError, match='timeout'):
+        schedule.deliver('daily_brief', '2026-11-20', stdout=StringIO(), deadline=270)
+    assert calls == ['schedule_run', 'schedule_run']
