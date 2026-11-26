@@ -50,7 +50,9 @@
 
 ## 当前部署
 
-生产数据库为 **v26**（11-23 由 `51b1c61` 发布，新增 `scheduled_runs`），判断契约 **9**（11-23 由 `9c55f91` 发布），生效政策激活记录 **34**（政策身份 schema 3，11-24 由 `e53dbdb` 发布按原参数自动激活，前驱 33）。模型只经 `agent-runner/` 调用，配置在[模型配置档](../a_share_research/model_profile.json)：作者 `openai-codex / gpt-6.2-sol / medium`，复核 `openai-codex / gpt-6.1-sol / high`。12-01 月批沿用此配置档，用契约 9，11-18 主模型切换前后的报告分开记分。
+生产数据库为 **v26**（11-23 由 `51b1c61` 发布，新增 `scheduled_runs`），判断契约 **9**（11-23 由 `9c55f91` 发布）。模型只经 `agent-runner/` 调用，配置在[模型配置档](../a_share_research/model_profile.json)：作者 `openai-codex / gpt-6.2-sol / medium`，复核 `openai-codex / gpt-6.1-sol / high`。12-01 月批沿用此配置档，用契约 9，11-18 主模型切换前后的报告分开记分。
+
+生效政策以生产服务的只读查询 [`policy_current`](../a_share_research/tools/README.md#政策登记与切换) 为准。用[本宿主的客户端配置](../ops/clients/README.md#cli-与本机-cron)运行 `ashare --config <client.json> call policy_current`，读取 `activation.id`（当前编号）和 `installed`（实装身份是否一致）。核对某次发布时的状态则看该次 `release-state.json`。
 
 回退按[部署入口](../README.md#回退)重新发布目标提交的镜像，保留 v26 数据库与新账本。发布工具只留当前与两级回退的镜像及最近三份发布前备份，实际可用项以 `docker images` 和 `DATA_DIR/backup-pre-*.db` 为准。
 
