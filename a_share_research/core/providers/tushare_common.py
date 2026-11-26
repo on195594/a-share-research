@@ -243,7 +243,7 @@ class TushareProviderBase:
         client_factory: ClientFactory | None = None,
         env_path: Path | None = None,
         rate_limiter: TushareRateLimiter | None = None,
-        query_cache: Callable[[str, dict[str, Any], Callable[[], Any]], Any] | None = None,
+        query_cache: Callable[[str, dict[str, Any], Callable[[], Any], Callable[[Any], bool]], Any] | None = None,
     ) -> None:
         self.token = token if token is not None else os.environ.get("TUSHARE_TOKEN") or (
             read_tushare_token(env_path) if env_path is not None else None
@@ -274,16 +274,23 @@ class TushareProviderBase:
             method = getattr(client_result, endpoint)
             return call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
 
+        def valid(value: Any) -> bool:
+            # The cache is shared with the raw path, so it only keeps frames this request accepts.
+            return self._frame_error(value, source, fingerprint, required_columns, allow_empty) is None
+
         try:
             if self._query_cache is not None and self._uses_default_client:
-                value = self._query_cache(endpoint, dict(params), fetcher)
+                value = self._query_cache(endpoint, dict(params), fetcher, valid)
             else:
                 value = fetcher()
         except Exception as exc:
             self.last_error = exc
             code, message = classify_tushare_exception(exc, self.token)
             return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
-        return self._validate_frame(value, source, fingerprint, required_columns, allow_empty)
+        error = self._frame_error(value, source, fingerprint, required_columns, allow_empty)
+        if error is not None:
+            return error
+        return MarketDataResult(value.copy(), "ok", source, now(), request_fingerprint=fingerprint, row_count=len(value))
 
     def _client_or_failure(
         self,
@@ -315,13 +322,13 @@ class TushareProviderBase:
         return checked_client(cast(str, self.token))
 
     @staticmethod
-    def _validate_frame(
+    def _frame_error(
         value: Any,
         source: str,
         fingerprint: str,
         required_columns: set[str],
         allow_empty: bool,
-    ) -> MarketDataResult[pd.DataFrame]:
+    ) -> MarketDataResult[pd.DataFrame] | None:
         if value is None:
             return MarketDataResult(None, "failed", source, now(), error_code=EMPTY_RESPONSE, request_fingerprint=fingerprint)
         if not isinstance(value, pd.DataFrame):
@@ -347,14 +354,7 @@ class TushareProviderBase:
             )
         if value.empty and not allow_empty:
             return MarketDataResult(None, "failed", source, now(), error_code=EMPTY_RESPONSE, request_fingerprint=fingerprint)
-        return MarketDataResult(
-            value.copy(),
-            "ok",
-            source,
-            now(),
-            request_fingerprint=fingerprint,
-            row_count=len(value),
-        )
+        return None
 
 
 def invalid_argument_result(source: str, exc: Exception) -> MarketDataResult[Any]:

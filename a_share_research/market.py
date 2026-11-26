@@ -205,15 +205,22 @@ def _reserve_report_rc_call() -> None:
         _save_report_rc_control(conn, {"retry_at": (at + timedelta(seconds=REPORT_RC_MIN_INTERVAL)).isoformat()}, at)
 
 
-def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any]) -> Any:
-    """Reuse historical raw frames without invoking upstream pacing on a cache hit."""
+def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any],
+                 valid: Callable[[Any], bool] | None = None) -> Any:
+    """Reuse historical raw frames without invoking upstream pacing on a cache hit.
+
+    ``valid`` is the caller's acceptance check: a cached frame failing it is refetched and
+    replaced under the same key, and a fetched frame failing it is returned but never stored.
+    """
     cached = cached_response(api, params)
     if cached is not None:
-        cached.attrs["cache_hit"] = True
-        return cached
+        if valid is None or valid(cached):
+            cached.attrs["cache_hit"] = True
+            return cached
+        log.warning("TuShare %s cached frame rejected by caller; refetching", api)
     frame = fetcher()
     key = _tushare_cache_key(api, params)
-    if key is None:
+    if key is None or (valid is not None and not valid(frame)):
         return frame
     # Only report_rc caches empty historical days, with a bounded retry TTL.
     if isinstance(frame, pd.DataFrame) and (not frame.empty or api == "report_rc"):
