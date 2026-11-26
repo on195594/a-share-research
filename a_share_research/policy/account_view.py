@@ -26,8 +26,13 @@ def bound_account_id(conn: sqlite3.Connection) -> str:
 
 
 def verified_current(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True) -> dict:
-    """Read codes and provenance within the caller's snapshot of the shared database."""
-    source = monitor._source(conn, directory, verify_evidence=verify_evidence)
+    """Read codes and provenance within the caller's snapshot of the shared database.
+
+    Economic positions stay readable while a new cycle awaits v0 context or its analysis
+    branch; policy_gaps names what is pending.
+    """
+    source, policy_gaps = monitor._source(conn, directory, verify_evidence=verify_evidence,
+                                          require_v0_projection=False)
     if source['mode'] == 'mirror':
         codes = [row[0] for row in conn.execute('SELECT code FROM holdings WHERE exit_date IS NULL')]
     else:
@@ -38,7 +43,7 @@ def verified_current(conn: sqlite3.Connection, directory: Path, *, verify_eviden
         codes = sorted({normalize_key(code) for code in codes})
     except (ValueError, TypeError):
         raise registry.PolicyError('在仓代码不能转换为研究公司代码；未返回空账户，请核对来源', 409) from None
-    return dict(codes=codes, source=source)
+    return dict(codes=codes, source=source, policy_gaps=policy_gaps)
 
 
 def current_holding_codes(conn: sqlite3.Connection, *, allow_unconfigured: bool = False) -> list[str]:

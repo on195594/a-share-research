@@ -33,7 +33,7 @@ ASHARE_PUBLIC_MCP_URL=http://127.0.0.1:8610/mcp DATA_DIR=/absolute/private/copy 
 
 ## 账户凭证与对账
 
-带 `account_id` 的工具默认使用 `account_source` 唯一绑定的账本；显式传入须与绑定一致。`account_current` 读取已核对的在仓代码及来源，`account_positions` 读取成本和持仓周期，现金流只从期初累计。
+带 `account_id` 的工具默认使用 `account_source` 唯一绑定的账本；显式传入须与绑定一致。`account_current` 读取已核对的在仓代码、来源及 `policy_gaps`（待补 v0 政策框架或尚未初始化周期分析的新周期），`account_positions` 读取成本和持仓周期，现金流只从期初累计。
 
 1. 上传原件。向 `account_evidence` 提交 `content_base64`（解码后最多 20 MiB），可带 `filename` 和 `label`。服务按 SHA-256 保存内容，每次上传都记录来源。`account_evidence_recent` 倒序返回近期凭证，每个哈希取最近一次上传记录，`limit` 为 1–100，默认 10。
 2. 用 `account_state` 读取版本、现金、股数和容差。有完整原件时用 `account_submit` 提交预期版本、事件、证据哈希和期末券商快照。更正时用 `account_events` 查原事件编号，提交作废与替代事件。已并入现金的活期产品自动申赎不另记；实际派发的收益用无证券代码的 `cash_income`，增加现金和净值，不计外部入金，也不关联持仓周期。仅有不完整截图时用 `account_observe` 保存资产观察。
@@ -47,7 +47,7 @@ ASHARE_PUBLIC_MCP_URL=http://127.0.0.1:8610/mcp DATA_DIR=/absolute/private/copy 
 
 ## 成本、周期与分析
 
-已配置成本期初的账本在入账事务中同时重建成本及周期。新开仓在 `batch.position_entries` 中按本批事件下标（字符串键）提供 `policy_identity`；已绑定 v0 政策期初时还需对应参数版本的 `framework`。分红可通过 `batch.position_dividends` 指定 `cycle_id`，有多个周期或没有活动周期时须明确绑定。每股现金除权数用 `batch.position_distributions` 指定，与实际分红到账金额分别提供。
+已配置成本期初的账本在入账事务中同时重建成本及周期。新开仓可在 `batch.position_entries` 中按本批事件下标（字符串键）提供 `policy_identity` 与对应参数版本的 `framework`；省略时照常建立成本周期，但 v0 监控（`policy_monitor` 及派生评估）返回 409 并指明待补的公司与周期，`account_current` 与总览照常返回持仓并在 `policy_gaps`/缺口中提示。开仓元数据只能随买入首次入账提供：已入账的买入重复提交时补填或修改 `position_entries` 返回 `conflict`，须以 `void_event_ids` 作废原买入并在同批重提完整流水。分红可通过 `batch.position_dividends` 指定 `cycle_id`，有多个周期或没有活动周期时须明确绑定。每股现金除权数用 `batch.position_distributions` 指定，与实际分红到账金额分别提供。
 
 - `account_cycle_analysis_initialize` 接收 `cycle_id` 及 `initialize` 对象。对象内提供 `expected_account_version` 与 `evidence_hashes`，期初导入的旧周期还须提供当前的 `legacy_revision_id`。新周期从空论点、待查状态开始。
 - `account_cycle_analysis_current`、`account_cycle_analysis_history` 按账户和周期读取最新分析及分页历史。`account_cycle_analysis_update` 以分析版本 `expected_version`、证据、原因和 `changes` 追加论点、L3、预警或 Tier 变更。论点重写须覆盖原活动条件，并与条件状态更新分批提交。已关闭或失效的周期保留历史。

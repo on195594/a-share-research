@@ -29,13 +29,20 @@ def _mirror(conn: sqlite3.Connection, directory: Path) -> dict:
     return dict(mode='mirror',source_sha256=row[1],updated_at=row[2],watermark=watermark)
 
 
-def _source(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True) -> dict:
+def _source(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True,
+            require_v0_projection: bool = True):
+    """Return the verified source; with require_v0_projection=False return (source, policy_gaps)."""
     row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source WHERE id=1').fetchone()
     if row is None or row[0]=='mirror':
-        return _mirror(conn,directory)
+        source=_mirror(conn,directory)
+        return source if require_v0_projection else (source,[])
     from a_share_research.policy import account_input
+    from a_share_research.policy.v0 import account_store
     try:
-        return account_input.read(conn,directory,row,verify_evidence=verify_evidence)
+        return account_input.read(conn,directory,row,verify_evidence=verify_evidence,
+                                  require_v0_projection=require_v0_projection)
+    except (account_store.PolicyProjectionGap,account_input.AnalysisBaselineGap) as exc:
+        raise registry.PolicyError(str(exc),409) from None
     except (ValueError,OSError,sqlite3.Error):
         raise registry.PolicyError('账户账本绑定、投影或证据无法核对；不能保存评估，请检查账户来源',409) from None
 

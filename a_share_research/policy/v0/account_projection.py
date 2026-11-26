@@ -23,18 +23,24 @@ def _mapped(mapping, key, label):
 
 
 class OpeningFrameworkError(ValueError):
-    def __init__(self, business_id, identity, frameworks):
-        self.business_id = business_id
-        super().__init__(f'新开仓须明确框架，参数版本 {identity} 可选：{"、".join(sorted(frameworks))}')
+    """A new economic cycle lacks the v0 policy identity or framework; the books are intact."""
+
+    def __init__(self, business_id, identity, frameworks, *, cycle_id=None, code=None):
+        self.business_id, self.identity, self.cycle_id, self.code = business_id, identity, cycle_id, code
+        if identity is None:
+            detail = '未绑定 v0 政策身份'
+        elif frameworks is None:
+            detail = f'绑定的 {identity} 不是已登记的 v0 参数版本'
+        else:
+            detail = f'须明确框架，参数版本 {identity} 可选：{"、".join(sorted(frameworks))}'
+        super().__init__(f'新开仓 {code} 周期 {cycle_id} {detail}')
 
 
-def _parameters(profiles, identity, framework, *, opening_event=None):
+def _parameters(profiles, identity, framework):
     profile = profiles.get(identity)
     if not isinstance(profile, dict):
         raise ValueError(f'缺少已绑定政策：{identity}')
     stops = profile.get('stops', {})
-    if opening_event is not None and framework not in stops:
-        raise OpeningFrameworkError(opening_event, identity, stops)
     pair = stops.get(framework)
     if not isinstance(pair, (list, tuple)) or len(pair) != 2:
         raise ValueError(f'政策 {identity} 未定义框架 {framework} 的止损参数')
@@ -89,9 +95,14 @@ def _project(openings, economic, records, entries, profiles, default_profile, cy
         before, after = step['before_shares'], step['after_shares']
         opening = cycle not in states
         if opening:
-            entry = entries.get(key)
-            if event.kind != 'buy' or before != 0 or entry is None:
+            if event.kind != 'buy' or before != 0:
                 raise ValueError('新周期缺少开仓上下文')
+            entry = entries.get(key) or PositionEntry()
+            profile = profiles.get(entry.policy_identity) if entry.policy_identity is not None else None
+            if not isinstance(profile, dict):
+                raise OpeningFrameworkError(key, entry.policy_identity, None, cycle_id=cycle, code=event.code)
+            if entry.framework not in profile.get('stops', {}):
+                raise OpeningFrameworkError(key, entry.policy_identity, profile.get('stops', {}), cycle_id=cycle, code=event.code)
             selected[cycle] = entry.policy_identity
             states[cycle] = dict.fromkeys(MANIFEST['holdings'])
             states[cycle].update(id=_mapped(cycle_ids,cycle,'周期'),code=event.code,name=entry.name,
@@ -102,8 +113,7 @@ def _project(openings, economic, records, entries, profiles, default_profile, cy
         if row['code'] != event.code or row['shares'] != before:
             raise ValueError('周期公司或步骤前股数不一致')
         reference_changed = event.kind in ('buy','adjustment') or key in distributions
-        parameters = (_parameters(profiles, selected[cycle], row['framework'], opening_event=key if opening else None)
-                      if reference_changed else None)
+        parameters = _parameters(profiles, selected[cycle], row['framework']) if reference_changed else None
         reference = money(row['reference_cost']) if row['reference_cost'] is not None else None
         notes = None
         if event.kind == 'buy':

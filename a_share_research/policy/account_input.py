@@ -14,6 +14,15 @@ class AccountInputError(ValueError):
     """The selected ledger source cannot support a reproducible monitoring read."""
 
 
+class AnalysisBaselineGap(AccountInputError):
+    """New open cycles have no account analysis history yet; initializing it resolves the gap."""
+
+    def __init__(self, account_id, cycles):
+        named = '、'.join(f"{c['code']} 周期 {c['cycle_id']}" for c in cycles)
+        super().__init__(f'新周期尚未建立账户周期分析：账户 {account_id} {named}；'
+                         '须调用 account_cycle_analysis_initialize 建立周期分析，补建分析无需作废成交')
+
+
 def _object(value, keys):
     if not isinstance(value, dict) or set(value) != set(keys):
         raise AccountInputError('账本采集来源字段不完整或包含未知字段')
@@ -105,7 +114,7 @@ def _rows(conn, sql, args=()):
     return [dict(zip(fields,row)) for row in cursor]
 
 
-def _read(conn, directory, row, *, verify_evidence):
+def _read(conn, directory, row, *, verify_evidence, require_v0_projection):
     from a_share_research.account import cycle_analysis, evidence, ledger, projection_ids
     from a_share_research.account.reconciliation import Event, Opening, identity, project, reconcile
     from a_share_research.policy.v0 import account_store
@@ -148,15 +157,24 @@ def _read(conn, directory, row, *, verify_evidence):
         raise AccountInputError('账本资金投影与事件重放不一致')
     versions={r['batch_id'] for r in journals}|{r['batch_id'] for r in state['account_voids']}
     if book['version']!=len(versions): raise AccountInputError('账本版本与入账批次不一致')
-    projected=account_store.project(conn,account)
-    state['v0_projection']=projected
+    try:
+        state['v0_projection']=account_store.project(conn,account)
+        gap=None
+    except account_store.PolicyProjectionGap as exc:
+        # The economic replay inside project() already matched both books before the gap.
+        state['v0_projection'],gap=None,exc
     cost=_json(state['account_position_books'][0]['projection'])
     ids=projection_ids.lookup(conn,account,'cycle')
-    active_ids={r['id'] for r in projected['holdings'] if r['exit_date'] is None}
-    cycles={ids[c['cycle_id']]:c for c in cost['cycles']}
-    for hid in active_ids:
-        cycle=cycles.get(hid)
-        if cycle is None: raise AccountInputError('活动持仓没有账本周期')
+    analysed={r['holding_id'] for r in state['account_analysis_history']}
+    unanalysed=[]
+    for cycle in cost['cycles']:
+        hid=ids[cycle['cycle_id']]
+        if cycle['exit_date'] is not None: continue
+        # A new cycle may await its analysis branch; display reads show it, monitoring refuses below.
+        # Any saved revision makes it a branch that must verify, even if its baseline is gone.
+        if cycle['legacy_holding_id'] is None and hid not in analysed:
+            unanalysed.append(cycle)
+            continue
         cycle_analysis.projected_snapshot(conn,account,cycle['cycle_id'],hid,cycle['code'])
     hashes={book['opening_evidence']}
     for table in ('account_position_books','policy_v0_account_openings'):
@@ -180,7 +198,8 @@ def _read(conn, directory, row, *, verify_evidence):
             raise AccountInputError('账户分析原始基线哈希不一致')
         hashes.update(_json(original['evidence_hashes']))
         state['legacy_analysis_sources'].append(original)
-    codes=sorted({r['code'] for r in projected['holdings']})
+    opening_holdings=_json(state['policy_v0_account_openings'][0]['snapshot'])['holdings']
+    codes=sorted({r['code'] for r in opening_holdings}|{c['code'] for c in cost['cycles']})
     state['stock_fundamentals']=[]
     for code in codes:
         state['stock_fundamentals']+=_rows(conn,'SELECT * FROM main.stock_fundamentals WHERE code=? ORDER BY code',(code,))
@@ -242,14 +261,33 @@ def _read(conn, directory, row, *, verify_evidence):
     result=dict(mode='ledger',source_sha256=row[1],updated_at=row[2],watermark=binding,
                 state_sha256=gate.digest(state),account_version=book['version'],asset=selected)
     validate_source(result)
-    return result
+    if require_v0_projection:
+        if gap is not None:
+            raise gap
+        if unanalysed:
+            raise AnalysisBaselineGap(account,unanalysed)
+    gaps=[str(gap)] if gap is not None else []
+    # The cycle named by the framework gap is repaired first; do not give it a second instruction.
+    pending=[c for c in unanalysed if gap is None or c['cycle_id']!=gap.cycle_id]
+    if pending: gaps.append(str(AnalysisBaselineGap(account,pending)))
+    return result, gaps
 
 
-def read(conn: sqlite3.Connection, directory: Path, row, *, verify_evidence: bool = True) -> dict:
-    """Verify the ledger snapshot; display reads may inspect file metadata only."""
+def read(conn: sqlite3.Connection, directory: Path, row, *, verify_evidence: bool = True,
+         require_v0_projection: bool = True):
+    """Verify the ledger snapshot; display reads may inspect file metadata only.
+
+    Evaluation inputs require a complete v0 projection and return the source; a missing
+    v0 context raises PolicyProjectionGap, and a missing new-cycle analysis raises
+    AnalysisBaselineGap, only after every other check passed. Display reads pass
+    require_v0_projection=False and get (source, policy_gaps) instead.
+    """
+    from a_share_research.policy.v0 import account_store
     try:
         with nullcontext() if conn.in_transaction else db.transaction(conn,immediate=False):
-            return _read(conn,Path(directory),row,verify_evidence=verify_evidence)
+            source,gaps=_read(conn,Path(directory),row,verify_evidence=verify_evidence,
+                              require_v0_projection=require_v0_projection)
     except (ValueError, TypeError, KeyError, IndexError, ArithmeticError, sqlite3.Error, OSError, RecursionError) as exc:
-        if isinstance(exc,AccountInputError): raise
+        if isinstance(exc,(AccountInputError,account_store.PolicyProjectionGap)): raise
         raise AccountInputError('无法核对账本、资产证据或账户周期分析') from None
+    return source if require_v0_projection else (source,gaps)

@@ -8,7 +8,7 @@ import pytest
 from a_share_research.account.mirror import MANIFEST
 from a_share_research.account.positions import PositionSeed, PositionEntry, replay
 from a_share_research.account.reconciliation import Event
-from a_share_research.policy.v0.account_projection import project
+from a_share_research.policy.v0.account_projection import OpeningFrameworkError, project
 from support.positions import opening
 
 PROFILE = {'stops':{'A通用':['0.85','0.80'],'C资源':['0.82','0.75']},'main_entry_ratio':'0.5'}
@@ -93,10 +93,18 @@ def test_new_cycle_requires_entry_framework_and_bound_profile():
     assert row['cost_price']==10.02 and row['reference_cost']==10 and row['main_entry_basis']==1002
     assert row['framework_confident']==1 and row['buy_score'] is None
     assert set(result['holding_events'][0])==set(MANIFEST['holding_events'])
-    with pytest.raises(ValueError,match='明确框架'):
-        run(events,seeded=False,entries={'new':entry(None)})
-    with pytest.raises(ValueError,match='缺少已绑定政策'):
-        run(events,seeded=False,entries={'new':entry(identity='unknown')})
+    for entries,message in (({'new':entry(None)},'明确框架'),({'new':entry(identity='unknown')},'不是已登记'),
+                            ({},'未绑定 v0 政策身份'),({'new':entry(identity=None)},'未绑定 v0 政策身份')):
+        with pytest.raises(OpeningFrameworkError,match=message) as gap:
+            run(events,seeded=False,entries=entries)
+        assert (gap.value.business_id,gap.value.cycle_id,gap.value.code)==('new','event:new','600001')
+
+
+def test_missing_opening_profile_is_corruption_not_a_framework_gap():
+    economic=replay([],[],{})
+    with pytest.raises(ValueError,match='缺少期初绑定') as caught:
+        project({},economic,[],{},{'v0':PROFILE},'missing',{},{})
+    assert not isinstance(caught.value,OpeningFrameworkError)
 
 
 def test_close_then_new_cycle_uses_separate_ids_and_old_cash_dividend_binding():

@@ -26,7 +26,7 @@ class PositionSeed(Value):
 
 
 class PositionEntry(Value):
-    policy_identity: Text
+    policy_identity: Text | None = None
     name: str | None = None
     framework: Text | None = None
     framework_confident: StrictBool = False
@@ -34,6 +34,8 @@ class PositionEntry(Value):
     @model_serializer(mode='wrap')
     def serialize(self, handler):
         data = handler(self)
+        if self.policy_identity is None:
+            data.pop('policy_identity', None)  # Preserve hashes of requests that named a policy.
         if self.framework is None:
             data.pop('framework', None)
             data.pop('framework_confident', None)
@@ -41,7 +43,7 @@ class PositionEntry(Value):
 
 
 class MissingBasis(ValueError):
-    """The caller must supply the policy reference for a newly opened cycle."""
+    """The caller must supply a binding the journal alone cannot determine."""
 
 
 class Cycle(Value):
@@ -53,7 +55,7 @@ class Cycle(Value):
     exit_date: date | None = None
     exit_price: Money | None = None
     legacy_holding_id: PositiveId | None = None
-    policy_identity: Text
+    policy_identity: Text | None = None
     name: str | None = None
     realized_pnl_since_opening: Money = Decimal(0)
     invested_since_opening: Money = Decimal(0)
@@ -65,8 +67,9 @@ def replay(seeds: list[PositionSeed], records: list[tuple[str, Event]],
            entries: dict[str, PositionEntry], *, dividend_cycles: dict[str, str] | None = None) -> dict:
     """Rebuild cycles deterministically, retaining input order for equal execution timestamps.
 
-    Corrections are handled by the caller supplying only active journal records. Missing
-    entries, duplicate identities, oversells and ambiguous dividends fail the whole replay.
+    Corrections are handled by the caller supplying only active journal records. A new
+    opening without an entry still opens its economic cycle with no policy identity.
+    Duplicate identities, oversells and ambiguous dividends fail the whole replay.
     Explicit dividend bindings may target a closed cycle; multiple cycles for a company
     require a binding rather than assuming its currently active position earned the cash.
     The result is JSON-ready with decimal strings, never a lifetime cash-flow assertion.
@@ -108,12 +111,10 @@ def replay(seeds: list[PositionSeed], records: list[tuple[str, Event]],
             if event.code is None:
                 continue
             if opening:
-                if key not in entries:
-                    raise MissingBasis(f'新开仓事件 {key} 缺少政策身份元数据')
                 cycle_id = 'event:' + key
                 if cycle_id in cycle_ids:
                     raise ValueError('新开仓生命周期身份与已有周期冲突')
-                entry = entries[key]
+                entry = entries.get(key, PositionEntry())
                 cycle = Cycle(cycle_id=cycle_id,code=event.code,shares=0,cost_price=event.price,
                               buy_date=event.occurred_at.date(),policy_identity=entry.policy_identity,name=entry.name)
                 cycles.append(cycle)

@@ -45,7 +45,7 @@ def test_missing_evidence_or_late_initialization_is_rejected(position_book):
         initialize(book)
 
 
-def test_buy_partial_and_full_sell_then_reopen_requires_new_context(position_book):
+def test_buy_partial_and_full_sell_then_reopen_without_context_cannot_be_backfilled(position_book):
     book = position_book
     before=initialize(book)
     value=batch(book,[event()])
@@ -59,18 +59,28 @@ def test_buy_partial_and_full_sell_then_reopen_requires_new_context(position_boo
     closed=submit(book,batch(book,[event('sell',shares=150,price='15',broker_id='sell-2',occurred_at='2026-11-04T10:00:00')],version=2,shares=0,cash='11800'))
     assert closed['status']=='posted' and state(book)['projection']['cycles'][0]['exit_date']=='2026-11-04'
     reopen=event(price='14',broker_id='reopen',occurred_at='2026-11-05T10:00:00')
-    missing=submit(book,batch(book,[reopen],version=3,shares=100,cash='10400'))
-    assert missing['status']=='missing_material' and state(book)['version']==3
-    ready=batch(book,[reopen],version=3,shares=100,cash='10400',entries={'0':{'policy_identity':'new-structural-policy','name':'Structural'}})
-    result=submit(book,ready)
-    assert result['status']=='posted' and submit(book,ready)==result
+    bare=batch(book,[reopen],version=3,shares=100,cash='10400')
+    opened=submit(book,bare)
+    assert opened['status']=='posted' and submit(book,bare)==opened and state(book)['version']==4
     cycles=state(book)['projection']['cycles']
     assert len(cycles)==2 and cycles[0]['shares']==0 and cycles[1]['shares']==100
-    assert cycles[1]['policy_identity']=='new-structural-policy' and cycles[1]['cycle_id'].startswith('event:')
+    assert cycles[1]['policy_identity'] is None and cycles[1]['cycle_id'].startswith('event:')
     assert position_store.inspect(book[0])==[]
-    changed=ready.model_copy(update={'expected_version':4,'position_entries':{'0':positions.PositionEntry(policy_identity='different-policy')}})
+    projection=state(book)['projection']
+    backfill=batch(book,[reopen],version=4,shares=100,cash='10400',entries={'0':{'policy_identity':'new-structural-policy','name':'Structural'}})
+    rejected=submit(book,backfill)
+    assert rejected['status']=='conflict' and rejected['problems'][0]['field']=='position_entries'
+    assert state(book)['version']==4 and state(book)['projection']==projection
+    reopen_id,=book[0].execute('SELECT max(id) FROM account_journal').fetchone()
+    ready=backfill.model_copy(update={'void_event_ids':[reopen_id]})
+    result=submit(book,ready)
+    assert result['status']=='posted' and submit(book,ready)==result and state(book)['version']==5
+    cycles=state(book)['projection']['cycles']
+    assert len(cycles)==2 and cycles[1]['policy_identity']=='new-structural-policy'
+    assert position_store.inspect(book[0])==[]
+    changed=ready.model_copy(update={'expected_version':5,'void_event_ids':[],'position_entries':{'0':positions.PositionEntry(policy_identity='different-policy')}})
     assert submit(book,changed)['status']=='conflict'
-    assert state(book)['version']==4
+    assert state(book)['version']==5
 
 
 def test_void_replace_replays_cost_and_retains_original_receipt(position_book):

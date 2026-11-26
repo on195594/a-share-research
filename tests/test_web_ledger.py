@@ -133,3 +133,23 @@ def test_reopened_position_uses_selected_registered_profile(web, bound_book):
     assert 'name="framework" required' in restored and '<option value="A通用" selected>' in restored
     assert show(web, client, FormData(fields)).status_code == 303
     assert client.submissions[0][1]['batch']['position_entries'] == {'0': {'policy_identity': profile, 'framework': 'A通用'}}
+
+
+def test_new_position_without_policy_context_posts_without_an_empty_entry(web, bound_book):
+    path, conn, principal, directory, sha = bound_book
+    client = BoundTools(registry.Context(conn, path, principal, account_shadow_enabled=True))
+    closing_trade = position_batch((conn, principal, directory, sha), [position_event('sell')], shares=0, cash='11200')
+    assert ledger.submit(conn, principal, 'a', closing_trade, directory)['status'] == 'posted'
+    page = show(web, client)
+    event = position_event(price='10', occurred_at='2026-11-03T10:00:00+08:00')
+    fields = dict(page.context['fields']) | {
+        'kind': event.kind, 'code': event.code, 'occurred_at': event.occurred_at.isoformat(),
+        'price': str(event.price), 'shares': str(event.shares), 'trade_ending': '100', 'trade_value': '1000',
+        'cash': '10200', 'total_assets': '11200', 'evidence_hashes': sha, 'policy_identity': '', 'framework': '',
+    }
+    assert 'position_entries' not in web_ledger._arguments(FormData(fields | {'framework': ''}))['batch']
+    assert web_ledger._arguments(FormData(fields | {'framework': 'A通用'}))['batch']['position_entries'] == {
+        '0': {'framework': 'A通用'}}
+    assert show(web, client, FormData(fields)).status_code == 303
+    assert 'position_entries' not in client.submissions[0][1]['batch']
+    assert ledger.state(conn, principal, 'a')['version'] == 2

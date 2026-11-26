@@ -9,7 +9,7 @@ from pathlib import Path
 from a_share_research import db, gate
 from a_share_research.account import evidence, ledger, positions, position_store, projection_ids
 from a_share_research.account.mirror import MANIFEST
-from a_share_research.account.reconciliation import Event, identity
+from a_share_research.account.reconciliation import Event
 from a_share_research.policy.v0 import account_projection, domain
 
 
@@ -72,14 +72,17 @@ def initialize(conn, principal, account_id, evidence_directory: Path, evidence_h
     return read(conn,principal,account_id)
 
 
-def validate_submission(conn, account_id, batch):
-    if conn.execute('SELECT 1 FROM policy_v0_account_openings WHERE account_id=?', (account_id,)).fetchone():
-        fields = {identity(batch.events[int(i)], account_id): f'position_entries.{i}.framework'
-                  for i in batch.position_entries}
-        project(conn, account_id, framework_fields=fields)
+class PolicyProjectionGap(ledger.LedgerError):
+    """Economic books replayed cleanly; a new cycle only lacks v0 policy context."""
+
+    def __init__(self, account_id, error: account_projection.OpeningFrameworkError):
+        self.account_id, self.cycle_id, self.code, self.business_id = account_id, error.cycle_id, error.code, error.business_id
+        super().__init__(f'v0 政策框架待补：账户 {account_id} {error}；股数与成本已核实。'
+                         '须用 void_event_ids 作废该买入并重提带 policy_identity 与 framework 的流水后再做 v0 监控；'
+                         '若同成交时刻已有后续加仓流水，须按原顺序一并作废重提该时刻流水', 409)
 
 
-def project(conn, account_id, *, framework_fields=None):
+def project(conn, account_id):
     """Project within the caller's transaction without creating identities or metadata."""
     opening = _rows(conn,'SELECT * FROM main.policy_v0_account_openings WHERE account_id=?',(account_id,))
     costs = _rows(conn,'SELECT * FROM main.account_position_books WHERE account_id=?',(account_id,))
@@ -110,23 +113,22 @@ def project(conn, account_id, *, framework_fields=None):
     originals = {r['id']:r for r in source['holdings']}
     selected = {s.cycle_id:originals[s.legacy_holding_id] for s in seeds}
     records = [dict(business_id=r['business_id'],event=Event.model_validate_json(r['event']),created_at=r['created_at']) for r in rows]
+    cycle_ids = projection_ids.lookup(conn,account_id,'cycle')
+    event_ids = projection_ids.lookup(conn,account_id,'event')
+    # Identity collisions need no framework, so check them first: a pending gap must not hide them.
+    if any(c['cycle_id'] not in selected and cycle_ids.get(c['cycle_id']) in originals for c in economic['cycles']):
+        raise ledger.LedgerError('新周期编号与保存的旧周期冲突')
+    old_event_ids = {r['id'] for r in source['holding_events']}
+    if any(r['event'].code is not None and event_ids.get(r['business_id']) in old_event_ids for r in records):
+        raise ledger.LedgerError('新事件编号与保存的旧事件冲突')
     try:
         projected = account_projection.project(selected,economic,records,entries,profiles,opening['profile_identity'],
-            projection_ids.lookup(conn,account_id,'cycle'),projection_ids.lookup(conn,account_id,'event'),
-            position_store.batch_context(account_id, batches, 'position_distributions'))
+            cycle_ids,event_ids,position_store.batch_context(account_id, batches, 'position_distributions'))
+    except account_projection.OpeningFrameworkError as exc:
+        raise PolicyProjectionGap(account_id, exc) from None
     except (ValueError, KeyError) as exc:
-        if isinstance(exc, account_projection.OpeningFrameworkError) and framework_fields:
-            if field := framework_fields.get(exc.business_id):
-                raise ledger.LedgerError(f'{field}: {exc}', 422) from None
-        raise ledger.LedgerError(f'政策投影缺口：{exc}') from None
-    seed_ids = {s.legacy_holding_id for s in seeds}
-    for row in projected['holdings']:
-        if row['id'] in originals and row['id'] not in seed_ids:
-            raise ledger.LedgerError('新周期编号与保存的旧周期冲突')
-        originals[row['id']] = row
-    old_event_ids = {r['id'] for r in source['holding_events']}
-    if any(r['id'] in old_event_ids for r in projected['holding_events']):
-        raise ledger.LedgerError('新事件编号与保存的旧事件冲突')
+        raise ledger.LedgerError(f'政策投影无法重放：{exc}') from None
+    originals.update((row['id'],row) for row in projected['holdings'])
     return dict(account_id=account_id,version=cost['version'],mode='shadow',profile_identity=opening['profile_identity'],
                 source_hash=opening['source_hash'],holdings=sorted(originals.values(),key=lambda r:r['id']),
                 holding_events=source['holding_events']+projected['holding_events'],history_precision='legacy dates plus journal timestamps')
@@ -165,6 +167,8 @@ def inspect(conn):
     for (account,) in conn.execute('SELECT account_id FROM policy_v0_account_openings').fetchall():
         try:
             project(conn,account)
+        except PolicyProjectionGap:
+            continue  # Pending v0 context is not corruption; monitoring reports it as 409.
         except (ValueError,TypeError,KeyError,IndexError) as exc:
             problems.append(f'账户政策投影 {account}：{exc}')
     return problems

@@ -5,11 +5,13 @@ import sqlite3
 
 import pytest
 
-from a_share_research import db, gate
+from a_share_research import db, gate, integrity
 from a_share_research.account import cycle_analysis, ledger
 from a_share_research.policy import account_input
+from a_share_research.policy.v0 import account_store
+from support.account_analysis import open_alert, request
 from support.policy import observe
-from support.positions import batch
+from support.positions import batch, event, state, submit
 
 
 def source(book):
@@ -62,10 +64,81 @@ def test_scoped_baseline_is_required_even_when_legacy_analysis_exists(bound_book
     with pytest.raises(account_input.AccountInputError): source(bound_book)
 
 
+def reopen(bound_book, framework=None):
+    """Close the seed cycle and open a new one, optionally with complete v0 context."""
+    _,conn,principal,directory,sha=bound_book
+    book=(conn,principal,directory,sha)
+    assert submit(book,batch(book,[event('sell')],shares=0,cash='11200'))['status']=='posted'
+    buy=event(price='10',broker_id='structural-reopen',occurred_at='2026-11-03T10:00:00+08:00')
+    entries=None
+    if framework:
+        profile=account_store.read(conn,principal,'a')['profile_identity']
+        entries={'0':dict(policy_identity=profile,framework=framework,name='Structural reopened')}
+    assert submit(book,batch(book,[buy],version=1,shares=100,cash='10200',entries=entries))['status']=='posted'
+    return state(book)['projection']['cycles'][-1]['cycle_id']
+
+
+@pytest.mark.parametrize('kind,legacy_id',[('cycle',2),('event',20)])
+def test_identity_collision_is_corruption_even_while_framework_is_missing(bound_book,tmp_path,kind,legacy_id):
+    path,conn=bound_book[:2]
+    cycle_id=reopen(bound_book)
+    assert integrity.check(path,tmp_path/'pdf')[0]==[]
+    identity=cycle_id if kind=='cycle' else cycle_id.removeprefix('event:')
+    conn.execute('DROP TRIGGER account_projection_ids_no_update')
+    # Explicitly tampered mapping: the new identity takes a number owned by saved legacy history.
+    assert conn.execute('UPDATE account_projection_ids SET legacy_id=? WHERE kind=? AND identity=?',
+                        (legacy_id,kind,identity)).rowcount==1
+    for read_corrupt in (lambda:account_store.project(conn,'a'),lambda:account_store.read(conn,bound_book[2],'a')):
+        with pytest.raises(ledger.LedgerError,match='编号与保存的旧.*冲突') as caught: read_corrupt()
+        assert not isinstance(caught.value,account_store.PolicyProjectionGap)
+    assert any('冲突' in item for item in account_store.inspect(conn))
+    assert any('冲突' in item for item in integrity.check(path,tmp_path/'pdf')[0])
+    for strict in (True,False):
+        row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source').fetchone()
+        with pytest.raises(account_input.AccountInputError):
+            account_input.read(conn,path.parent,row,require_v0_projection=strict)
+
+
+def test_new_cycle_branch_without_its_baseline_is_corruption_not_uninitialised(bound_book):
+    path,conn,principal,directory,sha=bound_book
+    book=(conn,principal,directory,sha)
+    cycle_id=reopen(bound_book,'A通用')
+    base=cycle_analysis.initialize(conn,principal,'a',cycle_id,cycle_analysis.Initialize(
+        expected_account_version=2,evidence_hashes=[sha]),directory)
+    cycle_analysis.update(conn,principal,'a',cycle_id,request(book,[open_alert()]),directory)
+    source(bound_book)
+    conn.execute('DROP TRIGGER account_analysis_no_delete')
+    conn.execute('PRAGMA foreign_keys=OFF')  # Version 1 references the baseline being removed.
+    assert conn.execute("DELETE FROM account_analysis_history WHERE account_id='a' AND holding_id=? AND version=0",
+                        (base['holding_id'],)).rowcount==1
+    row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source').fetchone()
+    for strict in (True,False):
+        with pytest.raises(account_input.AccountInputError) as caught:
+            account_input.read(conn,path.parent,row,require_v0_projection=strict)
+        assert not isinstance(caught.value,account_input.AnalysisBaselineGap)
+
+
 def test_missing_or_altered_actual_evidence_fails_closed(bound_book):
     observe(bound_book)
     (bound_book[3]/bound_book[4]).write_bytes(b'explicit malformed evidence variant')
     with pytest.raises(account_input.AccountInputError): source(bound_book)
+
+
+def test_v0_gap_is_raised_only_after_ledger_and_evidence_verify(bound_book):
+    path,conn,principal,directory,sha=bound_book
+    book=(conn,principal,directory,sha)
+    assert ledger.submit(conn,principal,'a',batch(book,[event('sell')],shares=0,cash='11200'),directory)['status']=='posted'
+    reopen=event(price='10',broker_id='structural-reopen',occurred_at='2026-11-03T10:00:00+08:00')
+    assert ledger.submit(conn,principal,'a',batch(book,[reopen],version=1,shares=100,cash='10200'),directory)['status']=='posted'
+    row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source').fetchone()
+    with pytest.raises(account_store.PolicyProjectionGap): source(bound_book)
+    lenient,gaps=account_input.read(conn,path.parent,row,require_v0_projection=False)
+    account_input.validate_source(lenient)
+    assert lenient['account_version']==2 and len(gaps)==1 and '600001' in gaps[0]
+    (directory/sha).write_bytes(b'explicit malformed evidence variant')
+    for strict in (True,False):
+        with pytest.raises(account_input.AccountInputError):
+            account_input.read(conn,path.parent,row,require_v0_projection=strict)
 
 
 def test_cash_projection_corruption_cannot_be_hidden_by_cost_projection(bound_book):
@@ -144,7 +217,6 @@ def test_posted_snapshot_must_reconcile_with_its_receipt(bound_book):
 
 
 def test_scoped_analysis_append_changes_source_without_account_version(bound_book):
-    from support.account_analysis import open_alert, request
     before=source(bound_book)
     _,conn,principal,directory,sha=bound_book
     change=request((conn,principal,directory,sha),[open_alert()])

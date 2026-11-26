@@ -20,7 +20,6 @@ from a_share_research import api_keys, db, scans, service
 from a_share_research.account import trades, ledger, evidence, analysis, position_store, cycle_analysis
 from a_share_research.account import nav
 from a_share_research.policy import account_view, registry as policies
-from a_share_research.policy.v0 import account_store
 from a_share_research.policy.position_request import Proposal
 from a_share_research.policy.scenario_request import Proposal as ScenarioProposal
 
@@ -448,7 +447,7 @@ _TOOLS = (
          lambda c,a: Payload(data=ledger.state(c.connection,c.principal,a.account_id)), account=True),
     Tool('account_submit', '完整对账后追加账户流水与回执，支持作废并提交更正流水', frozenset({'assistant'}), AccountSubmit, Payload,
          lambda c,a: Payload(data=ledger.submit(c.connection, c.principal, a.account_id, a.batch,
-             _evidence_directory(c), validate_projection=account_store.validate_submission)),
+             _evidence_directory(c))),
          access='write', account=True, destructive=True),
     Tool('account_events', '分页读取原事件与作废状态，按事件编号更正', frozenset({'assistant'}), AccountEvents, Payload,
          lambda c,a: Payload(data=ledger.events(c.connection,c.principal,a.account_id,after_id=a.after_id,limit=a.limit)), account=True),

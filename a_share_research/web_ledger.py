@@ -31,11 +31,11 @@ def _arguments(form):
         snapshot['portfolio_value_as_of'] = stamp + '+08:00'
     batch = dict(expected_version=_integer(form.get('expected_version')), events=[event], snapshot=snapshot,
                  evidence_hashes=sorted(form.getlist('evidence_hashes')))
-    if form.get('kind') == 'buy' and form.get('policy_identity') and 'opening.' + code not in form:
-        entry = {'policy_identity': form['policy_identity']}
-        if form.get('framework'):
-            entry['framework'] = form['framework']
-        batch['position_entries'] = {'0': entry}
+    if form.get('kind') == 'buy' and 'opening.' + code not in form:
+        # A new cycle may open without v0 context; never submit an empty entry.
+        entry = {key: form[key] for key in ('policy_identity', 'framework') if form.get(key)}
+        if entry:
+            batch['position_entries'] = {'0': entry}
     return {'account_id': form.get('account_id', ''), 'batch': batch}
 
 

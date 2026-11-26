@@ -18,12 +18,14 @@ def _positions(conn, source, code: str | None = None):
         if cycle['exit_date'] is not None or (code is not None and cycle['code'] != code):
             continue
         hid = ids[cycle['cycle_id']]
-        # verified_current already checked this exact account/cycle revision in this transaction.
+        # verified_current already checked this exact account/cycle revision in this transaction;
+        # only a new cycle may still lack its analysis branch.
         revision = analysis.latest_revision(conn, hid, account_id=account_id)
-        theses = json.loads(revision['snapshot'])['holding_thesis_versions']
+        theses = json.loads(revision['snapshot'])['holding_thesis_versions'] if revision else []
         positions[cycle['code']] = {
             **{k: cycle[k] for k in ('cycle_id', 'name', 'shares', 'cost_price', 'buy_date')},
-            'holding_id': hid, 'revision_id': revision['id'], 'revision_at': revision['created_at'],
+            'holding_id': hid, 'revision_id': revision['id'] if revision else None,
+            'revision_at': revision['created_at'] if revision else None,
             'theses': [{k: item[k] for k in ('version', 'l1', 'l2', 'created_at')}
                        for item in theses if item['status'] == 'active'],
         }
@@ -169,6 +171,8 @@ def _overview(conn, code=None, *, history=None):
                 raise
             current = None
             account_gaps.append(str(exc))
+        else:
+            account_gaps.extend(current['policy_gaps'])
         source = current['source'] if current else None
         account = None
         positions = {}

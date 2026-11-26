@@ -1,5 +1,4 @@
 """Invented account/policy contracts; fixtures are not broker acceptance evidence."""
-import json
 import sqlite3
 
 import pytest
@@ -74,8 +73,8 @@ def test_future_buy_sell_stable_mapping_keeps_history_and_main_untouched(policy_
     assert account_store.inspect(book[0]) == []
 
 
-@pytest.mark.parametrize('missing', ['profile', 'framework'])
-def test_inspection_detects_historical_financial_posting_with_missing_policy_context(policy_book, missing):
+@pytest.mark.parametrize('missing', ['entry', 'profile', 'framework'])
+def test_new_cycle_missing_v0_context_is_a_policy_gap_not_corruption(policy_book, missing):
     book = policy_book
     profile = initialize(book)['profile_identity']
     assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
@@ -84,12 +83,15 @@ def test_inspection_detects_historical_financial_posting_with_missing_policy_con
     if missing != 'framework':
         metadata['framework'] = 'A通用'
     reopened = event(price='10', broker_id='structural-reopen', occurred_at='2026-11-03T10:00:00+08:00')
+    entries = None if missing == 'entry' else {'0': metadata}
     assert submit(book, batch(book, [reopened], version=1, shares=100, cash='10200',
-                             entries={'0': metadata}))['status'] == 'posted'
+                             entries=entries))['status'] == 'posted'
     assert position_store.state(book[0], book[1], 'a')['version'] == 2
-    with pytest.raises(ledger.LedgerError, match='政策投影缺口'):
+    with pytest.raises(account_store.PolicyProjectionGap, match='v0 政策框架待补.*600001') as gap:
         read(book)
-    assert any('政策投影缺口' in item for item in account_store.inspect(book[0]))
+    assert gap.value.status == 409 and gap.value.code == '600001'
+    assert gap.value.cycle_id == 'event:' + gap.value.business_id
+    assert account_store.inspect(book[0]) == []
 
 
 def test_new_cycle_explicit_context_gets_fresh_stable_identity(policy_book):
@@ -109,30 +111,33 @@ def test_new_cycle_explicit_context_gets_fresh_stable_identity(policy_book):
     assert result['holding_events'][-1]['holding_id'] == new['id']
 
 
-def test_account_submit_rolls_back_invalid_opening_framework_then_projects_valid_entry(policy_book, tmp_path, bind_account):
+def test_account_submit_opens_without_framework_rejects_backfill_then_void_repost_projects(policy_book, tmp_path, bind_account):
     book = policy_book
     conn, principal, directory, _ = book
     profile = initialize(book)['profile_identity']
     directory.rename(tmp_path / 'account-evidence')
     bind_account(conn, 'a')
     ctx = registry.Context(conn, tmp_path / 'app.db', principal, account_shadow_enabled=True)
-    parameters, = conn.execute('SELECT parameters FROM policy_v0_profiles WHERE identity=?', (profile,)).fetchone()
     close = event('sell')
     reopen = event(price='10', broker_id='structural-reopen', occurred_at='2026-11-03T10:00:00+08:00')
-    def post(entry):
-        value = batch(book, [close, reopen], shares=100, cash='10200', entries={'1': entry})
+    def post(version, entries=None, voids=()):
+        value = batch(book, [close, reopen], version=version, shares=100, cash='10200', entries=entries, voids=voids)
         return registry.invoke(ctx, 'account_submit', {'batch': value.model_dump(mode='json')})['data']
 
-    for invalid in ({}, {'framework': 'A'}):
-        with pytest.raises(registry.ToolError, match=r'position_entries\.1\.framework') as rejected:
-            post({'policy_identity': profile, **invalid})
-        assert rejected.value.code == 'invalid_arguments'
-        assert all(option in str(rejected.value) for option in json.loads(parameters)['stops'])
-        assert ledger.state(conn, principal, 'a')['version'] == 0
-        assert account_store.project(conn, 'a')['version'] == 0
-        assert conn.execute('SELECT count(*) FROM account_batches').fetchone()[0] == 0
-    receipt = post({'policy_identity': profile, 'framework': 'A通用'})
-    assert receipt['status'] == 'posted' and receipt['version'] == 1
+    receipt = post(0)
+    assert receipt['status'] == 'posted' and receipt['version'] == 1 and post(0) == receipt
+    with pytest.raises(account_store.PolicyProjectionGap):
+        account_store.project(conn, 'a')
+    assert account_store.inspect(conn) == []
+    projection = position_store.state(conn, principal, 'a')['projection']
+    complete = {'1': {'policy_identity': profile, 'framework': 'A通用'}}
+    backfill = post(1, complete)
+    assert backfill['status'] == 'conflict' and backfill['problems'][0]['field'] == 'position_entries'
+    assert ledger.state(conn, principal, 'a')['version'] == 1
+    assert position_store.state(conn, principal, 'a')['projection'] == projection
+    ids = [row[0] for row in conn.execute('SELECT id FROM account_journal ORDER BY id')]
+    corrected = post(1, complete, voids=ids)
+    assert corrected['status'] == 'posted' and corrected['version'] == 2
     projected = account_store.project(conn, 'a')
     assert projected['holdings'][-1]['framework'] == 'A通用'
     assert account_store.inspect(conn) == []

@@ -60,9 +60,16 @@ def test_close_and_reopen_has_stable_new_identity_and_explicit_policy():
     assert result['positions'] == {'600001':50}
 
 
-def test_new_opening_requires_metadata():
-    with pytest.raises(MissingBasis,match='政策身份'):
-        replay([],[('buy',event('buy',shares=100,price='10'))],{})
+def test_new_opening_without_metadata_opens_an_economic_cycle():
+    result = replay([],[('buy',event('buy',shares=100,price='10'))],{})
+    cycle, = result['cycles']
+    assert cycle['cycle_id'] == 'event:buy' and cycle['shares'] == 100 and cycle['cost_price'] == '10'
+    assert cycle['policy_identity'] is None and cycle['name'] is None
+
+
+def test_entry_serialization_keeps_hashes_of_requests_that_named_a_policy():
+    assert PositionEntry(policy_identity='p',name='n').model_dump(mode='json') == {'policy_identity':'p','name':'n'}
+    assert PositionEntry(framework='A通用').model_dump(mode='json') == {'name':None,'framework':'A通用','framework_confident':False}
 
 
 @pytest.mark.parametrize('records,entries',[

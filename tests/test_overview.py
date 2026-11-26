@@ -5,8 +5,9 @@ from html import unescape
 
 import pytest
 
-from a_share_research import overview, reading, scans, service, template_filters
+from a_share_research import integrity, overview, reading, scans, service, template_filters
 from a_share_research.account import cycle_analysis
+from a_share_research.policy import account_input, registry as policies
 from a_share_research.tools.registry import Context, invoke
 from support.account_analysis import request, rewrite
 from support.policy import run_monitor as save_monitor
@@ -156,6 +157,114 @@ def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_moni
     for read, record_id in ((overview.monitor_detail, receipt['id']), (overview.receipt_detail, posted['receipt_id'])):
         with pytest.raises(service.RequestError, match='绑定账户'):
             read(conn, record_id)
+
+
+def test_reopening_without_v0_framework_keeps_positions_readable_until_void_and_repost(ledger_monitor, tmp_path):
+    configured = ledger_monitor
+    (path, conn, principal, directory, sha), _, _, _ = configured
+    book = (conn, principal, directory, sha)
+    ctx = Context(conn, path, principal, account_shadow_enabled=True)
+    assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
+    buy = event(price='10', broker_id='structural-reopen', occurred_at='2026-11-03T10:00:00+08:00')
+    bare = batch(book, [buy], version=1, shares=100, cash='10200')
+    posted = invoke(ctx, 'account_submit', {'batch': bare.model_dump(mode='json')})['data']
+    assert posted['status'] == 'posted' and posted['version'] == 2
+    cycle = state(book)['projection']['cycles'][-1]
+    assert cycle['policy_identity'] is None and cycle['shares'] == 100
+
+    assert integrity.check(path, tmp_path / 'pdf')[0] == []
+    current = invoke(ctx, 'account_current', {})['data']
+    assert current['codes'] == ['600001']
+    gap, = current['policy_gaps']
+    assert 'v0 政策框架待补' in gap and '600001' in gap and cycle['cycle_id'] in gap
+    portfolio = overview.portfolio_overview(conn)
+    holding, = portfolio['holdings']
+    assert holding['position']['cycle_id'] == cycle['cycle_id'] and holding['position']['shares'] == 100
+    assert holding['position']['cost_price'] == '10' and holding['position']['buy_date'] == '2026-11-03'
+    assert holding['position']['revision_id'] is None and holding['position']['theses'] == []
+    assert gap in portfolio['gaps']
+    company = invoke(ctx, 'research_company_overview', {'code': '600001'})['data']
+    assert company['held'] and company['position'] == holding['position'] and gap in company['account_gaps']
+    with pytest.raises(policies.PolicyError, match='v0 政策框架待补') as refused:
+        save_monitor(configured)
+    assert refused.value.status == 409 and cycle['cycle_id'] in str(refused.value)
+
+    profile = conn.execute("SELECT profile_identity FROM policy_v0_account_openings WHERE account_id='a'").fetchone()[0]
+    complete = {'0': dict(policy_identity=profile, framework='A通用', name='Structural reopened')}
+    backfill = invoke(ctx, 'account_submit', {'batch': batch(book, [buy], version=2, shares=100, cash='10200',
+                                                              entries=complete).model_dump(mode='json')})['data']
+    assert backfill['status'] == 'conflict' and state(book)['version'] == 2
+    buy_id, = conn.execute('SELECT max(id) FROM account_journal').fetchone()
+    corrected = batch(book, [buy], version=2, shares=100, cash='10200', entries=complete, voids=[buy_id])
+    assert invoke(ctx, 'account_submit', {'batch': corrected.model_dump(mode='json')})['data']['status'] == 'posted'
+    cycle_id = state(book)['projection']['cycles'][-1]['cycle_id']
+    cycle_analysis.initialize(conn, principal, 'a', cycle_id, cycle_analysis.Initialize(
+        expected_account_version=3, evidence_hashes=[sha]), directory)
+    assert invoke(ctx, 'account_current', {})['data']['policy_gaps'] == []
+    receipt = save_monitor(configured)
+    assert receipt['capture_context']['source']['account_version'] == 3
+    assert integrity.check(path, tmp_path / 'pdf')[0] == []
+
+
+def test_new_cycle_without_analysis_names_the_initialization_tool(ledger_monitor):
+    (path, conn, principal, directory, sha), _, _, calls = ledger_monitor
+    book = (conn, principal, directory, sha)
+    ctx = Context(conn, path, principal, account_shadow_enabled=True)
+    assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
+    profile = conn.execute("SELECT profile_identity FROM policy_v0_account_openings WHERE account_id='a'").fetchone()[0]
+    buy = event(price='10', broker_id='structural-reopen', occurred_at='2026-11-03T10:00:00+08:00')
+    complete = {'0': dict(policy_identity=profile, framework='A通用', name='Structural reopened')}
+    assert submit(book, batch(book, [buy], version=1, shares=100, cash='10200', entries=complete))['status'] == 'posted'
+    cycle_id = state(book)['projection']['cycles'][-1]['cycle_id']
+
+    gap, = invoke(ctx, 'account_current', {})['data']['policy_gaps']
+    for expected in ('新周期尚未建立账户周期分析', '600001', cycle_id,
+                     'account_cycle_analysis_initialize', '无需作废成交'):
+        assert expected in gap
+    portfolio = overview.portfolio_overview(conn)
+    assert portfolio['gaps'].count(gap) == 1
+    holding, = portfolio['holdings']
+    assert holding['position']['revision_id'] is None and gap not in holding['gaps']
+    company = overview.company_overview(conn, '600001')
+    assert company['account_gaps'].count(gap) == 1 and gap not in company['gaps']
+    with pytest.raises(account_input.AnalysisBaselineGap):
+        account_input.read(conn, path.parent, conn.execute(
+            'SELECT mode,source_sha256,updated_at,watermark FROM account_source').fetchone())
+    with pytest.raises(policies.PolicyError) as refused:
+        save_monitor(ledger_monitor)
+    assert refused.value.status == 409 and str(refused.value) == gap and calls == []
+
+    cycle_analysis.initialize(conn, principal, 'a', cycle_id, cycle_analysis.Initialize(
+        expected_account_version=2, evidence_hashes=[sha]), directory)
+    assert invoke(ctx, 'account_current', {})['data']['policy_gaps'] == []
+    assert save_monitor(ledger_monitor)['capture_context']['source']['account_version'] == 2
+
+
+def test_same_instant_open_and_add_recover_only_when_voided_and_reposted_together(ledger_monitor):
+    (_, conn, principal, directory, sha), _, _, _ = ledger_monitor
+    book = (conn, principal, directory, sha)
+    assert submit(book, batch(book, [event('sell')], shares=0, cash='11200'))['status'] == 'posted'
+    buys = [event(price='10', broker_id=f'structural-{name}', occurred_at='2026-11-03T10:00:00+08:00')
+            for name in ('same-instant-open', 'same-instant-add')]
+    assert submit(book, batch(book, buys, version=1, cash='9200'))['status'] == 'posted'
+    with pytest.raises(policies.PolicyError, match='若同成交时刻已有后续加仓流水.*一并作废重提'):
+        save_monitor(ledger_monitor)
+
+    profile = conn.execute("SELECT profile_identity FROM policy_v0_account_openings WHERE account_id='a'").fetchone()[0]
+    complete = {'0': dict(policy_identity=profile, framework='A通用', name='Structural reopened')}
+    opening_id, addition_id = [row[0] for row in conn.execute('SELECT id FROM account_journal ORDER BY id')][-2:]
+    alone = batch(book, buys[:1], version=2, cash='9200', entries=complete, voids=[opening_id])
+    assert submit(book, alone)['status'] == 'conflict' and state(book)['version'] == 2
+    together = batch(book, buys, version=2, cash='9200', entries=complete, voids=[opening_id, addition_id])
+    assert submit(book, together)['status'] == 'posted'
+    cycle = state(book)['projection']['cycles'][-1]
+    assert cycle['shares'] == 200 and cycle['cycle_id'] == 'event:' + conn.execute(
+        'SELECT business_id FROM account_journal WHERE id=?', (opening_id,)).fetchone()[0]
+    cycle_analysis.initialize(conn, principal, 'a', cycle['cycle_id'], cycle_analysis.Initialize(
+        expected_account_version=3, evidence_hashes=[sha]), directory)
+    receipt = save_monitor(ledger_monitor)
+    assert receipt['capture_context']['source']['account_version'] == 3
+    assert [h['shares'] for h in receipt['input']['local']['holdings']] == [200]
 
 
 def test_corrupt_monitor_is_a_gap_in_overviews_and_a_conflict_on_its_deep_link(ledger_monitor, web, owner_request):
