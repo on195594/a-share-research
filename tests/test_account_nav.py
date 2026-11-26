@@ -267,32 +267,31 @@ def nav_market(monkeypatch):
             return MarketDataResult(_frame(selected), 'ok', source, datetime.now(db.SHANGHAI).isoformat())
         return fetch
 
-    def raw_frame(provider, source, endpoint, params, required_columns, allow_empty=False):
-        day = date.fromisoformat(params['start_date'])
-        end = date.fromisoformat(params['end_date'])
-        if endpoint == 'trade_cal':
-            assert params['exchange'] == 'SSE'
+    class CalendarClient:
+        def trade_cal(self, *, exchange, start_date, end_date, fields):
+            assert exchange == 'SSE'
+            day, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
             rows = []
             while day <= end:
                 if day != data['missing_calendar_day']:
                     rows.append(dict(cal_date=day.strftime('%Y%m%d'), is_open=int(day in data['open_days'])))
                 day += timedelta(days=1)
-            frame = pd.DataFrame(rows, columns=['cal_date', 'is_open'])
-        else:
-            assert endpoint == 'suspend_d' and params['suspend_type'] == 'S'
-            # Exercise the exact provider field selection and public tool adapter.
-            frame = pd.DataFrame(
+            return pd.DataFrame(rows, columns=fields.split(','))
+
+        def suspend_d(self, *, ts_code, start_date, end_date, suspend_type, fields):
+            assert suspend_type == 'S'
+            start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+            return pd.DataFrame(
                 [dict(trade_date=d.strftime('%Y%m%d'), suspend_type='S', suspend_timing=timing)
-                 for d, timing in data['suspended'].items() if day <= d <= end],
-                columns=params['fields'].split(','),
+                 for d, timing in data['suspended'].items() if start <= d <= end],
+                columns=fields.split(','),
             )
-        assert required_columns <= set(frame.columns)
-        return MarketDataResult(frame, 'ok', source, datetime.now(db.SHANGHAI).isoformat())
 
     monkeypatch.setattr(nav, 'latest_close_day', lambda now: max(INDEX))
     monkeypatch.setattr(TushareMarketDataProvider, 'fetch_index_bars', bars(lambda code: data['index'], 'tushare.index_daily'))
     monkeypatch.setattr(TushareMarketDataProvider, 'fetch_daily_bars', bars(lambda code: data['closes'][code], 'tushare.daily'))
-    monkeypatch.setattr(TushareMarketDataProvider, '_request_frame', raw_frame)
+    monkeypatch.setenv('TUSHARE_TOKEN', 'offline-calendar')
+    monkeypatch.setattr(TushareMarketDataProvider, '_build_client', lambda self: CalendarClient())
     return data
 
 
@@ -324,17 +323,20 @@ def test_tool_only_carries_confirmed_full_day_suspensions(tool, nav_market, timi
         assert Decimal(result['days'][-1]['total_assets']) == 10000 + 1000 * CLOSES['601600'][date(2026, 11, 20)]
 
 
-def test_tool_reports_missing_benchmark_or_a_calendar_failure(tool, nav_market):
+def test_tool_reports_missing_benchmark_or_a_calendar_failure(tool, nav_market, monkeypatch):
     last_day = max(INDEX)
     nav_market['index'].pop(last_day)
     result = tool({})
     assert result['as_of'] == '2026-11-20'
     assert result['gaps'] == ['H00906.CSI 的 2026-11-23 收盘值缺失，净值最晚截至此前一个交易日']
 
+    monkeypatch.setenv('TUSHARE_CACHE', '1')
     nav_market['missing_calendar_day'] = last_day
     with pytest.raises(ToolError, match='交易日历暂不可用') as exc:
         tool({})
     assert exc.value.code == 'unavailable'
+    nav_market['missing_calendar_day'] = None
+    assert tool({}) == result  # The incomplete calendar did not poison the same historical key.
 
 
 def test_web_page_renders_the_tool_result_and_reports_tool_errors(web, tool, owner_request, monkeypatch):

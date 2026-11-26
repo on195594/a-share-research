@@ -16,6 +16,8 @@ TuShare 版本由 `pyproject.toml` 锁定。Token 按构造参数、`TUSHARE_TOK
 
 `TushareMarketDataProvider` 提供以下查询。结果中的 `source_as_of` 取实际最后观察日，`freshness_days` 相对请求截止日计算。股票和指数可分别用 `to_tushare_stock_code`、`to_tushare_index_code` 规范化代码。
 
+接入共享历史行情缓存时，命中与回源都按下列接口的同一口径校验。命中不合格就按原键回源；只有通过校验的响应才写入，缓存保留 TuShare 原始列和单位。
+
 - `fetch_index_bars(symbol, start_date, end_date)` 在闭区间内返回按日期升序排列的 `date/close` 点位，支持 SH、SZ、CSI（含 H00300.CSI 等全收益指数）。非法参数、缺列、非正或非有限点位、重复日期、区间外数据均返回失败。
 - `fetch_daily_bars(code, start_date, end_date)` 返回闭区间内的不复权日线，停牌日无行。
 - `fetch_suspended_days(code, start_date, end_date)` 仅返回 `suspend_d` 同时满足 `suspend_type=S`、`suspend_timing` 为空的全天停牌；日内暂停不是旧价补齐依据。

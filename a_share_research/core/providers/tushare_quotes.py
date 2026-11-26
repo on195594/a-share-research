@@ -40,7 +40,7 @@ class TushareMarketDataProvider(TushareProviderBase):
             start = target - timedelta(days=10)
         except (ValueError, OverflowError) as exc:
             return invalid_argument_result(DAILY_SOURCE, exc)
-        result = self._fetch_daily(code, compact_date(start), compact_date(target), "close_price")
+        result = self._fetch_daily(code, start, target, "close_price")
         if result.value is None or result.value.empty:
             return _scalar_failure(result, DAILY_SOURCE)
         return _scalar_price_result(result, target)
@@ -53,7 +53,7 @@ class TushareMarketDataProvider(TushareProviderBase):
                 raise ValueError("start_date must not be after end_date")
         except (ValueError, OverflowError) as exc:
             return invalid_argument_result(DAILY_SOURCE, exc)
-        return self._fetch_daily(code, compact_date(start), compact_date(end), "daily_bars")
+        return self._fetch_daily(code, start, end, "daily_bars")
 
     def fetch_suspended_days(self, code: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
         """Whole-day suspensions as `trade_date` rows (YYYYMMDD); an empty frame means none."""
@@ -64,25 +64,14 @@ class TushareMarketDataProvider(TushareProviderBase):
                 raise ValueError("start_date must not be after end_date")
         except (ValueError, OverflowError) as exc:
             return invalid_argument_result(SUSPEND_SOURCE, exc)
-        result = self._request_frame(
+        return self._request_frame(
             SUSPEND_SOURCE,
             "suspend_d",
             {"ts_code": ts_code, "start_date": compact_date(start), "end_date": compact_date(end),
              "suspend_type": "S", "fields": "trade_date,suspend_type,suspend_timing"},
             {"trade_date", "suspend_type", "suspend_timing"},
-            allow_empty=True,
+            allow_empty=True, normalize=_whole_day_suspensions,
         )
-        if result.value is None:
-            return result
-        try:
-            frame = result.value
-            # TuShare labels both full-day and intraday halts S. Only a blank timing marks a full day.
-            full_day = frame["suspend_timing"].isna() | frame["suspend_timing"].eq("")
-            selected = frame.loc[frame["suspend_type"].eq("S") & full_day].copy()
-            selected["trade_date"] = selected["trade_date"].map(lambda value: compact_date(str(value)))
-        except (TypeError, ValueError) as exc:
-            return schema_failure_result(result, exc)
-        return replace(result, value=selected, row_count=len(selected))
 
     def fetch_trading_calendar(self, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
         """Shanghai Stock Exchange calendar, including closed days for coverage validation."""
@@ -92,26 +81,12 @@ class TushareMarketDataProvider(TushareProviderBase):
                 raise ValueError("start_date must not be after end_date")
         except (ValueError, OverflowError) as exc:
             return invalid_argument_result(TRADE_CAL_SOURCE, exc)
-        result = self._request_frame(
+        return self._request_frame(
             TRADE_CAL_SOURCE, "trade_cal",
             {"exchange": "SSE", "start_date": compact_date(start), "end_date": compact_date(end),
              "fields": "cal_date,is_open"},
-            {"cal_date", "is_open"},
+            {"cal_date", "is_open"}, normalize=lambda raw: _trading_calendar(raw, start, end),
         )
-        if result.value is None:
-            return result
-        try:
-            frame = result.value.copy()
-            frame["cal_date"] = frame["cal_date"].map(lambda value: parse_date(str(value)))
-            frame["is_open"] = frame["is_open"].map(str)
-            count = (end - start).days + 1
-            if (len(frame) != count or frame["cal_date"].nunique() != count
-                    or not frame["cal_date"].map(lambda day: start <= day <= end).all()
-                    or not frame["is_open"].isin({"0", "1"}).all()):
-                raise ValueError("invalid or incomplete SSE calendar range")
-        except (TypeError, ValueError) as exc:
-            return schema_failure_result(result, exc)
-        return replace(result, value=frame)
 
     def fetch_index_bars(self, symbol: str, start_date: str, end_date: str) -> MarketDataResult[pd.DataFrame]:
         """Index closing points only; total-return indices need not have OHLC/volume."""
@@ -123,34 +98,58 @@ class TushareMarketDataProvider(TushareProviderBase):
                 raise ValueError("start_date must not be after end_date")
         except ValueError as exc:
             return invalid_argument_result(INDEX_DAILY_SOURCE, exc)
-        result = self._request_frame(
+        return self._request_frame(
             INDEX_DAILY_SOURCE,
             "index_daily",
             {"ts_code": ts_code, "start_date": compact_date(start), "end_date": compact_date(end),
              "fields": "trade_date,close"},
-            {"trade_date", "close"},
+            {"trade_date", "close"}, normalize=lambda raw: _normalize_requested_bars(raw, "index_bars", start, end),
         )
-        normalized = _normalize_requested_bars(result, "index_bars", end)
-        return _validate_range(normalized, start, end)
 
-    def _fetch_daily(self, code: str, start_date: str, end_date: str, purpose: str) -> MarketDataResult[pd.DataFrame]:
+    def _fetch_daily(self, code: str, start: date, end: date, purpose: str) -> MarketDataResult[pd.DataFrame]:
         try:
             ts_code = to_tushare_stock_code(code)
         except ValueError as exc:
             return invalid_argument_result(DAILY_SOURCE, exc)
-        raw = self._request_frame(
+        return self._request_frame(
             DAILY_SOURCE,
             "daily",
             {
                 "ts_code": ts_code,
-                "start_date": start_date,
-                "end_date": end_date,
+                "start_date": compact_date(start),
+                "end_date": compact_date(end),
                 "fields": "ts_code,trade_date,open,high,low,close,vol,amount",
             },
             {"trade_date", "open", "high", "low", "close"},
+            normalize=lambda raw: _normalize_requested_bars(raw, purpose, start, end),
         )
-        result = _normalize_requested_bars(raw, purpose, parse_date(end_date))
-        return _validate_range(result, parse_date(start_date), parse_date(end_date))
+
+
+def _whole_day_suspensions(result: MarketDataResult[pd.DataFrame]) -> MarketDataResult[pd.DataFrame]:
+    try:
+        frame = result.value
+        # Only blank timing marks a full-day halt.
+        full_day = frame["suspend_timing"].isna() | frame["suspend_timing"].eq("")
+        selected = frame.loc[frame["suspend_type"].eq("S") & full_day].copy()
+        selected["trade_date"] = selected["trade_date"].map(lambda value: compact_date(str(value)))
+    except (TypeError, ValueError) as exc:
+        return schema_failure_result(result, exc)
+    return replace(result, value=selected, row_count=len(selected))
+
+
+def _trading_calendar(result: MarketDataResult[pd.DataFrame], start: date, end: date) -> MarketDataResult[pd.DataFrame]:
+    try:
+        frame = result.value
+        frame["cal_date"] = frame["cal_date"].map(lambda value: parse_date(str(value)))
+        frame["is_open"] = frame["is_open"].map(str)
+        count = (end - start).days + 1
+        if (len(frame) != count or frame["cal_date"].nunique() != count
+                or not frame["cal_date"].map(lambda day: start <= day <= end).all()
+                or not frame["is_open"].isin({"0", "1"}).all()):
+            raise ValueError("invalid or incomplete SSE calendar range")
+    except (TypeError, ValueError) as exc:
+        return schema_failure_result(result, exc)
+    return replace(result, value=frame)
 
 
 def to_tushare_stock_code(code: str) -> str:
@@ -250,10 +249,9 @@ def _normalize_tushare_bars(df: Any, source: str, purpose: str) -> MarketDataRes
 def _normalize_requested_bars(
     raw: MarketDataResult[pd.DataFrame],
     purpose: str,
-    reference_date: date,
+    start: date,
+    end: date,
 ) -> MarketDataResult[pd.DataFrame]:
-    if raw.value is None:
-        return raw
     normalized = _normalize_tushare_bars(raw.value, raw.source, purpose)
     if normalized.value is None:
         return MarketDataResult(
@@ -267,27 +265,19 @@ def _normalize_requested_bars(
             row_count=raw.row_count,
         )
     source_as_of = str(normalized.value["date"].max())
-    return MarketDataResult(
+    result = MarketDataResult(
         normalized.value,
         raw.status,
         raw.source,
         raw.fetched_at,
         adjusted=normalized.adjusted,
         volume_unit=normalized.volume_unit,
-        freshness_days=max(0, (reference_date - date.fromisoformat(source_as_of)).days),
+        freshness_days=max(0, (end - date.fromisoformat(source_as_of)).days),
         source_as_of=source_as_of,
         request_fingerprint=raw.request_fingerprint,
         row_count=len(normalized.value),
     )
-
-
-def _validate_range(
-    result: MarketDataResult[pd.DataFrame], start: date, end: date
-) -> MarketDataResult[pd.DataFrame]:
-    if result.value is not None and (
-        result.value["date"].min() < start.isoformat()
-        or result.value["date"].max() > end.isoformat()
-    ):
+    if result.value["date"].min() < start.isoformat() or source_as_of > end.isoformat():
         return replace(result, value=None, status="failed", error_code=SOURCE_STALE,
                        error_message="source observation is outside requested date range")
     return result

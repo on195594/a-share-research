@@ -33,6 +33,8 @@ T = TypeVar("T")
 Clock = Callable[[], float]
 Sleeper = Callable[[float], None]
 ClientFactory = Callable[[str], Any]
+FrameResult = MarketDataResult[pd.DataFrame]
+FrameCache = Callable[[str, dict[str, Any], Callable[[], Any], Callable[[Any], FrameResult]], FrameResult]
 
 
 def read_tushare_token(env_path: Path) -> str | None:
@@ -243,7 +245,7 @@ class TushareProviderBase:
         client_factory: ClientFactory | None = None,
         env_path: Path | None = None,
         rate_limiter: TushareRateLimiter | None = None,
-        query_cache: Callable[[str, dict[str, Any], Callable[[], Any], Callable[[Any], bool]], Any] | None = None,
+        query_cache: FrameCache | None = None,
     ) -> None:
         self.token = token if token is not None else os.environ.get("TUSHARE_TOKEN") or (
             read_tushare_token(env_path) if env_path is not None else None
@@ -263,7 +265,8 @@ class TushareProviderBase:
         params: Mapping[str, Any],
         required_columns: set[str],
         allow_empty: bool = False,
-    ) -> MarketDataResult[pd.DataFrame]:
+        *, normalize: Callable[[FrameResult], FrameResult] | None = None,
+    ) -> FrameResult:
         self.last_error = None
         fingerprint = request_fingerprint(endpoint, params)
         client_result = self._client_or_failure(source, fingerprint)
@@ -274,23 +277,23 @@ class TushareProviderBase:
             method = getattr(client_result, endpoint)
             return call_with_network_retry(method, limiter=self._rate_limiter, **dict(params))
 
-        def valid(value: Any) -> bool:
-            # The cache is shared with the raw path, so it only keeps frames this request accepts.
-            return self._frame_error(value, source, fingerprint, required_columns, allow_empty) is None
+        def decode(value: Any) -> FrameResult:
+            error = self._frame_error(value, source, fingerprint, required_columns, allow_empty)
+            if error is not None:
+                return error
+            raw = MarketDataResult(value.copy(), "ok", source, now(), request_fingerprint=fingerprint, row_count=len(value))
+            return normalize(raw) if normalize is not None else raw
 
         try:
-            if self._query_cache is not None and self._uses_default_client:
-                value = self._query_cache(endpoint, dict(params), fetcher, valid)
-            else:
-                value = fetcher()
+            # A caller that still has endpoint checks to run must not publish the raw frame.
+            if self._query_cache is not None and self._uses_default_client and normalize is not None:
+                return self._query_cache(endpoint, dict(params), fetcher, decode)
+            value = fetcher()
         except Exception as exc:
             self.last_error = exc
             code, message = classify_tushare_exception(exc, self.token)
             return MarketDataResult(None, "failed", source, now(), error_code=code, error_message=message, request_fingerprint=fingerprint)
-        error = self._frame_error(value, source, fingerprint, required_columns, allow_empty)
-        if error is not None:
-            return error
-        return MarketDataResult(value.copy(), "ok", source, now(), request_fingerprint=fingerprint, row_count=len(value))
+        return decode(value)
 
     def _client_or_failure(
         self,

@@ -1,9 +1,13 @@
 """Consumer-facing price contracts, using injected clients only."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
+from a_share_research import market
 from a_share_research.core.market_data import (
     EMPTY_RESPONSE, INVALID_ARGUMENT, MISSING_COLUMNS, SCHEMA_CHANGED, SOURCE_STALE,
 )
@@ -77,6 +81,37 @@ def test_index_fails_closed(frame, error):
     assert result.status == "failed" and result.value is None
     assert result.error_code == error
     assert result.request_fingerprint
+
+
+@pytest.mark.parametrize('defect, expected_error', [
+    ('missing_close', MISSING_COLUMNS), ('zero_close', SCHEMA_CHANGED), ('outside_range', SOURCE_STALE),
+])
+@pytest.mark.parametrize('already_cached', [False, True])
+def test_historical_index_cache_recovers(monkeypatch, defect, expected_error, already_cached):
+    monkeypatch.setenv('TUSHARE_CACHE', '1')
+    # Two real H00906 closes; the bad response changes just the column, the price or the date.
+    series = json.loads((Path(__file__).parents[1] / 'data/account-nav-closes-202611.json').read_text())['index']
+    day = '2026-11-12'
+    good = pd.DataFrame([{'trade_date': '20261112', 'close': series[day]}])
+    bad = {'missing_close': good.drop(columns='close'), 'zero_close': good.assign(close=0),
+           'outside_range': pd.DataFrame([{'trade_date': '20261113', 'close': series['2026-11-13']}])}[defect]
+    client = Client(bad)
+    monkeypatch.setattr(TushareMarketDataProvider, '_build_client', lambda self: client)
+    provider = TushareMarketDataProvider(token='offline', query_cache=market.cached_query)
+    params = dict(ts_code='H00906.CSI', start_date='20261112', end_date='20261112', fields='trade_date,close')
+    if already_cached:
+        market.cached_query('index_daily', params, lambda: bad)
+    else:
+        rejected = provider.fetch_index_bars('H00906.CSI', day, day)
+        assert rejected.error_code == expected_error and rejected.value is None
+        assert market.cached_response('index_daily', params) is None
+
+    client.frame = good
+    for _ in range(2):
+        result = provider.fetch_index_bars('H00906.CSI', day, day)
+        assert result.status == 'ok' and result.value.to_dict('records') == [{'date': day, 'close': series[day]}]
+    assert len(client.calls) == (1 if already_cached else 2)
+    pd.testing.assert_frame_equal(market.cached_response('index_daily', params), good)
 
 
 @pytest.mark.parametrize(("target", "status", "age"), [

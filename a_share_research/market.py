@@ -12,6 +12,7 @@ from typing import Any
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+from a_share_research.core.market_data import MarketDataResult
 from a_share_research.core.providers.tushare_common import checked_client
 from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
 
@@ -206,22 +207,22 @@ def _reserve_report_rc_call() -> None:
 
 
 def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any],
-                 valid: Callable[[Any], bool] | None = None) -> Any:
-    """Reuse historical raw frames without invoking upstream pacing on a cache hit.
-
-    ``valid`` is the caller's acceptance check: a cached frame failing it is refetched and
-    replaced under the same key, and a fetched frame failing it is returned but never stored.
-    """
+                 decode: Callable[[Any], MarketDataResult[pd.DataFrame]] | None = None) -> Any:
+    """Store raw responses; a provider accepts hits and misses through its endpoint decoder."""
     cached = cached_response(api, params)
     if cached is not None:
-        if valid is None or valid(cached):
-            cached.attrs["cache_hit"] = True
+        cached.attrs["cache_hit"] = True
+        if decode is None:
             return cached
-        log.warning("TuShare %s cached frame rejected by caller; refetching", api)
+        result = decode(cached)
+        if result.status == "ok":
+            return result
+        log.warning("TuShare %s cached frame rejected (%s); refetching", api, result.error_code)
     frame = fetcher()
+    result = decode(frame) if decode is not None else frame
     key = _tushare_cache_key(api, params)
-    if key is None or (valid is not None and not valid(frame)):
-        return frame
+    if key is None or (decode is not None and result.status != "ok"):
+        return result
     # Only report_rc caches empty historical days, with a bounded retry TTL.
     if isinstance(frame, pd.DataFrame) and (not frame.empty or api == "report_rc"):
         try:
@@ -230,7 +231,7 @@ def cached_query(api: str, params: dict[str, Any], fetcher: Callable[[], Any],
             _cache_connection().execute("INSERT OR REPLACE INTO tushare_cache VALUES (?, ?, ?)", (key, data, db.now()))
         except Exception:
             log.warning("TuShare %s cache write failed", api, exc_info=True)
-    return frame
+    return result
 
 
 def query(pro, api: str, **params) -> pd.DataFrame:

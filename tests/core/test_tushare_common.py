@@ -15,7 +15,6 @@ from datetime import date
 
 from a_share_research import db, market
 from a_share_research.core.market_data import (
-    MISSING_COLUMNS,
     PERMISSION_DENIED,
     RATE_LIMITED,
     REMOTE_DISCONNECTED,
@@ -210,58 +209,22 @@ def test_checked_client_pools_one_session_per_thread(monkeypatch):
 @pytest.mark.parametrize("injection", [None, "client", "client_factory"])
 def test_provider_cache_skips_limiter_and_respects_injected_clients(monkeypatch, injection):
     monkeypatch.setenv("TUSHARE_CACHE", "1")
-    frame = captured_market_frame()
-    params = {"ts_code": "600519.SH", "end_date": frame["trade_date"].iloc[0]}
+    series = json.loads((Path(__file__).parents[1] / "data/account-nav-closes-202611.json").read_text())["index"]
+    day = "2026-11-12"
+    frame = pd.DataFrame([{"trade_date": "20261112", "close": series[day]}])
     remote_calls, waits = [], []
 
-    def daily_basic(**kwargs):
+    def index_daily(**kwargs):
         remote_calls.append(kwargs)
         return frame.copy()
 
-    client = SimpleNamespace(daily_basic=daily_basic)
-    monkeypatch.setattr(TushareProviderBase, "_build_client", lambda self: client)
+    client = SimpleNamespace(index_daily=index_daily)
+    monkeypatch.setattr(TushareMarketDataProvider, "_build_client", lambda self: client)
     kwargs = {injection: client if injection == "client" else lambda token: client} if injection else {}
-    provider = TushareProviderBase(token="captured-response-only", query_cache=market.cached_query,
-                                   rate_limiter=SimpleNamespace(wait=lambda: waits.append(1)), **kwargs)
+    provider = TushareMarketDataProvider(token="captured-response-only", query_cache=market.cached_query,
+                                         rate_limiter=SimpleNamespace(wait=lambda: waits.append(1)), **kwargs)
     for _ in range(2):
-        result = provider._request_frame("tushare.daily_basic", "daily_basic", params, {"ts_code", "trade_date"})
-        assert result.status == "ok"
-        pd.testing.assert_frame_equal(result.value, frame)
+        result = provider.fetch_index_bars("H00906.CSI", day, day)
+        assert result.status == "ok" and result.value["close"].tolist() == [series[day]]
     assert len(remote_calls) == len(waits) == (2 if injection else 1)
     assert (db.DATA / "tushare_cache.db").exists() is (injection is None)
-
-
-@pytest.mark.parametrize("seeded", [False, True])
-def test_provider_cache_rejects_and_recovers_from_frames_missing_required_columns(monkeypatch, seeded):
-    monkeypatch.setenv("TUSHARE_CACHE", "1")
-    frame = captured_market_frame()
-    broken = frame.drop(columns="trade_date")  # minimal marked variant of the captured response
-    params = {"ts_code": "600519.SH", "end_date": frame["trade_date"].iloc[0]}
-    if seeded:  # the raw path stores whatever upstream returned under the shared key
-        market.cached_query("daily_basic", dict(params), lambda: broken.copy())
-        pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), broken)
-    replies = [frame] if seeded else [broken, frame]
-    remote_calls = []
-
-    def daily_basic(**kwargs):
-        remote_calls.append(kwargs)
-        return replies[min(len(remote_calls), len(replies)) - 1].copy()
-
-    client = SimpleNamespace(daily_basic=daily_basic)
-    monkeypatch.setattr(TushareProviderBase, "_build_client", lambda self: client)
-    provider = TushareProviderBase(token="captured-response-only", query_cache=market.cached_query,
-                                   rate_limiter=SimpleNamespace(wait=lambda: None))
-
-    def request():
-        return provider._request_frame("tushare.daily_basic", "daily_basic", params, {"ts_code", "trade_date"})
-
-    if not seeded:
-        rejected = request()
-        assert rejected.status == "failed" and rejected.error_code == MISSING_COLUMNS
-        assert market.cached_response("daily_basic", params) is None
-    for _ in range(2):
-        result = request()
-        assert result.status == "ok"
-        pd.testing.assert_frame_equal(result.value, frame)
-    assert len(remote_calls) == len(replies)
-    pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), frame)
