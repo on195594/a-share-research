@@ -109,6 +109,14 @@ def test_session_share_counts_only_trading_minutes():
     assert values == [Decimal(1), Decimal(1), Decimal('0.75'), Decimal('0.5'), Decimal('0.25'), Decimal(0)]
 
 
+def test_cash_income_earns_return_without_external_flow_or_position_cycle(book):
+    baseline = daily(book)['days'][1]
+    post(book, [Event(kind='cash_income', cash='9.22', occurred_at='2026-11-13T12:00:00+08:00')])
+    day = daily(book)['days'][1]
+    assert Decimal(day['total_assets']) == Decimal(baseline['total_assets']) + Decimal('9.22')
+    assert Decimal(day['flow']) == 0 and Decimal(day['nav']) > Decimal(baseline['nav'])
+
+
 def test_same_day_preopen_deposit_and_lunch_withdrawal_work_through_ledger(book):
     post(book, [
         Event(kind='deposit', cash='5000', occurred_at='2026-11-13T09:00:00+08:00', broker_id='preopen-in'),

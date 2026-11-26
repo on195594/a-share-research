@@ -71,7 +71,7 @@ class Snapshot(Opening):
 
 
 class Event(Value):
-    kind: Literal['buy', 'sell', 'dividend', 'adjustment', 'deposit', 'withdrawal', 'fee']
+    kind: Literal['buy', 'sell', 'dividend', 'adjustment', 'deposit', 'withdrawal', 'fee', 'cash_income']
     code: Code | None = None
     occurred_at: datetime
     broker_id: str | None = None
@@ -141,7 +141,7 @@ def project(opening: Opening, events: list[Event]) -> Projection:
         elif event.kind == 'adjustment':
             positions[event.code] = positions.get(event.code, 0) + event.shares
         else:
-            cash += event.cash if event.kind in ('deposit', 'dividend') else -event.cash
+            cash += event.cash if event.kind in ('deposit', 'dividend', 'cash_income') else -event.cash
         if cash < 0 or any(n < 0 for n in positions.values()):
             raise ValueError('事件重放产生负现金或负持仓')
     return Projection(positions={k: v for k, v in positions.items() if v}, cash=cash)

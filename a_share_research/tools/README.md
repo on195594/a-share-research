@@ -41,7 +41,7 @@ ASHARE_PUBLIC_MCP_URL=http://127.0.0.1:8610/mcp DATA_DIR=/absolute/private/copy 
 带 `account_id` 的工具默认使用 `account_source` 唯一绑定的账本；显式传入须与绑定一致。`account_current` 读取已核对的在仓代码及来源，`account_positions` 读取成本和持仓周期，现金流只从期初累计。
 
 1. 上传原件。向 `account_evidence` 提交 `content_base64`（解码后最多 20 MiB），可带 `filename` 和 `label`。服务按 SHA-256 保存内容，每次上传都记录来源。`account_evidence_recent` 倒序返回近期凭证，每个哈希取最近一次上传记录，`limit` 为 1–100，默认 10。
-2. 用 `account_state` 读取版本、现金、股数和容差。有完整原件时用 `account_submit` 提交预期版本、事件、证据哈希和期末券商快照。更正时用 `account_events` 查原事件编号，提交作废与替代事件。仅有不完整截图时用 `account_observe` 保存资产观察。
+2. 用 `account_state` 读取版本、现金、股数和容差。有完整原件时用 `account_submit` 提交预期版本、事件、证据哈希和期末券商快照。更正时用 `account_events` 查原事件编号，提交作废与替代事件。已并入现金的活期产品自动申赎不另记；实际派发的收益用无证券代码的 `cash_income`，增加现金和净值，不计外部入金，也不关联持仓周期。仅有不完整截图时用 `account_observe` 保存资产观察。
 3. 读取 `data.status`。只有 `posted` 表示成功入账；`missing_material`、`conflict` 或 `service_failure` 保留原交易投影。通过 `account_receipt` 按回执编号核查。成功批次的相同输入返回原回执。Web 表单写入也记录实际授权的 `key_id`。
 
 观察和快照只有在原件给出估值时点时才填 `portfolio_value_as_of`（完整、带时区的时间）。观察须有总资产，`observed_at` 不早于估值时点。快照的估值时点不得早于期初或本次有效事件，不得在未来。
