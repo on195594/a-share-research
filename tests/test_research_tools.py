@@ -365,7 +365,8 @@ def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_
         run_id = db.create_run(conn, material.code)
         session = research_mcp.ResearchSession(conn, run_id, material, ReviewLedger())
         initial = session._context()
-        assert initial['prompt'] == research_mcp.explore_prompt(material)
+        prompt_fields = ('system_prompt', 'prompt')
+        assert {k: initial[k] for k in prompt_fields} == research_mcp.explore_prompt(material)
         session._call('calculate', {'label': '经营现金流差额', 'operation': 'difference',
                                    'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
                                    'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}})
@@ -374,7 +375,7 @@ def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_
         receipt = session._call('submit_draft', {'draft': draft}).structured_content
         assert receipt['status'] == 'review' and receipt['material_block'] == material.prompt_block()
         assert receipt['program_valuation'] == program_valuation(draft, material)
-        assert receipt['prompt'] == research_mcp.review_prompt(material, draft, receipt['binding'])
+        assert {k: receipt[k] for k in prompt_fields} == research_mcp.review_prompt(material, draft, receipt['binding'])
         # Submitting moved to a new stage, which persisted the tool evidence.
         assert replay_material(conn, run_id).extra['tools'] == session.evidence.traces
         session.evidence.stop('tool_limit', 'explore')

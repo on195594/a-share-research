@@ -6,7 +6,7 @@ import { createRuntime, loadPi, resolveModels } from "./runtime.ts";
 import type { Pi, ResolvedRole } from "./runtime.ts";
 import { readProfile, RunnerError } from "./profile.ts";
 import { runResearch } from "./research.ts";
-import { runSingle } from "./single.ts";
+import { runBatch } from "./batch.ts";
 
 export async function withWorker(pi: Pi, input: Readable, output: Writable, work: (client: McpClient) => Promise<void>,
                                  requestTimeoutMs: number) {
@@ -49,13 +49,13 @@ async function main() {
   } });
   const check = mode === "--check";
   const positiveId = (value?: string) => /^\d+$/.test(value ?? "") && Number.isSafeInteger(Number(value)) && Number(value) > 0;
-  if (!values.profile || (!check && mode !== "single" && mode !== "run")
-      || (mode === "single" && !positiveId(values["batch-id"])) || (mode === "run" && !positiveId(values["run-id"]))
+  if (!values.profile || (!check && mode !== "batch" && mode !== "run")
+      || (mode === "batch" && !positiveId(values["batch-id"])) || (mode === "run" && !positiveId(values["run-id"]))
       || (values.replay !== undefined && (mode !== "run" || !positiveId(values.replay)))) {
-    throw new RunnerError(2, "Expected run --run-id N [--replay N], single --batch-id B or --check, with --profile PATH");
+    throw new RunnerError(2, "Expected run --run-id N [--replay N], batch --batch-id B or --check, with --profile PATH");
   }
-  const profile = await readProfile(values.profile);
   const pi = await loadPi();
+  const profile = await readProfile(values.profile, pi.schema);
   async function work(client?: McpClient) {
     const runtime = await createRuntime(pi, check);
     let readiness;
@@ -64,25 +64,32 @@ async function main() {
       const stream = runtime.streamSimple.bind(runtime);
       if (client) {
         try {
-          await runResearch(client, pi, models, profile, stream, Number(values["run-id"]));
+          if (mode === "run") {
+            await runResearch(client, pi, models, profile, stream, Number(values["run-id"]));
+          } else {
+            await runBatch(client, pi, models, profile, stream, Number(values["batch-id"]));
+          }
         } catch (error) {
           if (error instanceof RunnerError) throw error;
           console.error(error);
-          throw new RunnerError(1, "Research MCP protocol failed");
+          throw new RunnerError(1, mode === "run" ? "Research MCP protocol failed" : "Batch MCP protocol failed");
         }
       } else if (check) {
         readiness = { ready: true, pi_version: pi.version, node_version: process.version,
           ...roleInfo(models.author), review: roleInfo(models.reviewer) };
-      } else {
-        await runSingle(process.stdin, process.stdout, pi, models, profile, stream);
       }
     } finally {
       await runtime.settleCredentialWrites();
     }
     if (readiness) process.stdout.write(JSON.stringify(readiness) + "\n");
   }
-  if (mode === "run") await withWorker(pi, process.stdin, process.stdout, work, profile.limits.run_seconds * 1000);
-  else await work();
+  if (mode === "run" || mode === "batch") {
+    const { run_seconds, comparison_attempts_per_task, model_call_seconds } = profile.limits;
+    const timeoutMs = (mode === "run" ? run_seconds : 3 * comparison_attempts_per_task * (model_call_seconds + 30)) * 1000;
+    await withWorker(pi, process.stdin, process.stdout, work, timeoutMs);
+  } else {
+    await work();
+  }
 }
 
 if (import.meta.main) {

@@ -50,7 +50,11 @@ def prepare(output: Path, home: Path, mcp_url: str, role: str='assistant') -> di
           f'bearer_token_env_var = "{token_vars["codex"]}"\n'
           'enabled = false\nstartup_timeout_sec = 10\ntool_timeout_sec = 40\n')
     dump('configs/hermes.config.json', {'mcp_servers': {'ashare': http('hermes', enabled=False, connect_timeout=10, timeout=40)}})
-    dump('configs/pi.mcp.json', {'mcpServers': {'ashare': http('pi', enabled=False, timeout=40, exposure='direct')}})
+    # Pi declares only the role's entry tools to the model; the rest stay reachable through codemode.
+    direct = (('research_card', 'research_company_overview', 'account_portfolio_overview', 'policy_current')
+              if role == 'assistant' else ('research_card', 'research_search'))
+    dump('configs/pi.mcp.json', {'mcpServers': {'ashare': http(
+        'pi', enabled=False, timeout=40, exposure='codemode', toolExposure=dict.fromkeys(direct, 'direct'))}})
     # AGY substitutes plugin setup variables in headers, not process environment variables.
     dump('configs/agy/ashare/plugin.json', {
         'name': 'ashare', 'displayName': 'A 股研究', 'version': '1.0.0', 'description': '连接 A 股研究 MCP 服务。',

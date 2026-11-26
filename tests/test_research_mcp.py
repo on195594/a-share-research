@@ -16,7 +16,7 @@ from a_share_research import db
 from a_share_research.drafts import program_valuation
 from a_share_research.evidence import EvidenceError
 from a_share_research.material import Material, replay_material
-from a_share_research.research_mcp import AcquisitionStop, ResearchSession
+from a_share_research.research_mcp import AcquisitionStop, ModelError, ResearchSession, repair_prompt
 from a_share_research.reviewing import ReviewLedger, digest
 from support.reports import report
 from support.valuation import STORED, with_probabilities
@@ -129,6 +129,8 @@ async def test_replay_repair_and_review_bound_to_frozen_material(conn, defect):
             await client.call_tool("disclosures", {"code": "600519"})
         submission = await client.call_tool("submit_draft", {"draft": good | {"verdict": ""}})
         assert submission.structured_content["status"] == "repair"
+        assert repair_prompt(run.material, good | {"verdict": ""}, submission.structured_content["problems"], acquire=False) \
+            == {k: submission.structured_content[k] for k in ("system_prompt", "prompt")}
         assert submission.structured_content["program_valuation"] == prices
         assert any(p["where"] == "verdict" for p in submission.structured_content["problems"])
 
@@ -231,3 +233,21 @@ async def test_runner_audit_round_trip_including_failed_completion(conn):
         else:
             assert row["prompt_base"] == first and row["response"] is None and audit["stop_reason"] == "error"
             assert row["error"] and "private provider detail" not in row["error"]
+
+
+async def test_terminal_model_error_preserves_the_last_provider_attempt(conn):
+    run = bind(conn)
+    async with connected(run) as client:
+        context = json.loads((await client.read_resource("research://run/context")).contents[0].text)
+        call = await client.call_tool("record_call", {
+            "step": "explore", "messages": [{"role": "user", "content": context["prompt"]}], "tools": [],
+            "response": None, "identity": {}, "usage": None, "seconds": 0.125,
+            "stop_reason": "error", "error_kind": "provider_error",
+        })
+        assert not call.is_error and run.last_error_kind == "provider_error"
+        rows = conn.execute("SELECT * FROM calls WHERE run_id=?", (run.run_id,)).fetchall()
+        assert len(rows) == 1 and "provider_error" in rows[0]["error"]
+        request = types.Request[ModelError, str](method="research/model_error", params=ModelError(kind="timeout"))
+        await client.send_request(request, types.EmptyResult)
+        assert run.last_error_kind == "timeout"
+        assert conn.execute("SELECT * FROM calls WHERE run_id=?", (run.run_id,)).fetchall() == rows

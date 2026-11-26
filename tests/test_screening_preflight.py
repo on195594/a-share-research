@@ -2,7 +2,6 @@
 import copy
 import json
 import sqlite3
-from contextlib import contextmanager
 
 import pandas as pd
 import pytest
@@ -143,19 +142,21 @@ def test_stale_comparison_cannot_overwrite_winning_freeze(connections, monkeypat
     candidates, _ = completed_pools(worker, large_passed=True, small_passed=False, rule=s.RULE)
     after_owner = []
 
-    @contextmanager
-    def single(batch_id):
-        def request(task, attempt, prompt):
-            web.execute("UPDATE batches SET status='proposed' WHERE id=?", (batch_id,))
-            s.freeze(web, batch_id, [candidates[0]['code']], 'owner')
-            after_owner.append(snapshot(web))
-            if reply == "failure":
-                raise RuntimeError('synthetic comparison failure')
-            return {'text': '{"picks":[]}', 'identity': {'prompt_sha256': 'test'}, 'seconds': 0, 'usage': None}
+    def run_batch(session, *, batch_id):
+        task = session._next()
+        assert task['task'] == 'q20_select'
+        web.execute("UPDATE batches SET status='proposed' WHERE id=?", (batch_id,))
+        s.freeze(web, batch_id, [candidates[0]['code']], 'owner')
+        after_owner.append(snapshot(web))
+        error_kind = None if reply == 'success' else 'provider_error'
+        with pytest.raises(s._BatchChanged) as changed:
+            session._record({'step': task['task'], 'messages': [], 'tools': [], 'identity': {},
+                             'seconds': 0, 'usage': None, 'error_kind': error_kind,
+                             'stop_reason': 'toolUse' if error_kind is None else 'error',
+                             'response': {} if error_kind is None else None})
+        raise changed.value
 
-        yield request
-
-    monkeypatch.setattr(s.runner_process, 'single_batch', single)
+    monkeypatch.setattr(s.runner_process, 'run_batch', run_batch)
     assert s.tick(worker) is False
     assert snapshot(worker) == after_owner[0]
 
@@ -166,9 +167,9 @@ def test_comparison_failure_still_retries_then_fails(connections, monkeypatch):
     worker, _ = connections
     completed_pools(worker, large_passed=True, small_passed=False, rule=s.RULE)
     monkeypatch.setattr(s, '_waiting', lambda *args: False)
-    def fail(*args):
+    def fail(session, *, batch_id):
         raise RuntimeError('synthetic comparison failure')
-    monkeypatch.setattr(s.runner_process, 'single_batch', fail)
+    monkeypatch.setattr(s.runner_process, 'run_batch', fail)
     for count in (1, 2):
         assert s.tick(worker)
         b = s.load(worker.execute('SELECT * FROM batches').fetchone())

@@ -51,7 +51,10 @@ def test_bundle_is_parseable_disabled_and_keeps_host_state_untouched(tmp_path,ro
     assert all(records[host]['enabled'] is False for host in ('codex','hermes','pi'))
     assert records['claude']['type']=='http' and 'enabled' not in records['claude']
     assert records['hermes']['timeout']==40 and 'tool_timeout' not in records['hermes']
-    assert records['pi']['exposure']=='direct'
+    assert records['pi']['exposure']=='codemode'
+    assert records['pi']['toolExposure']==dict.fromkeys(
+        {'assistant': ['research_card','research_company_overview','account_portfolio_overview','policy_current'],
+         'research': ['research_card','research_search']}[role], 'direct')
 
 
 def test_existing_review_bundle_is_never_overwritten(tmp_path):

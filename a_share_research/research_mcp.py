@@ -23,7 +23,7 @@ from a_share_research.drafts import RepairFormatError, indexed_draft, merge_repa
 from a_share_research.evidence import EvidenceError
 from a_share_research.material import Material, replay_material
 from a_share_research.prompts import output_schema, render_prompt, schema_facts
-from a_share_research.research_tools import TOOLS, EvidenceSession
+from a_share_research.research_tools import TOOLS, TOOL_VALIDATORS, EvidenceSession
 from a_share_research.reviewing import PROTOCOL, ReviewFormatError, ReviewLedger, digest
 
 log = logging.getLogger(__name__)
@@ -33,6 +33,10 @@ ERROR_KINDS = ("timeout", "provider_error", "pi_runtime", "incomplete:length", "
 
 class AcquisitionStop(types.RequestParams):
     reason: Literal["time_limit", "tool_limit", "no_new_evidence", "round_limit", "fetch_limit", "model_limit"]
+
+
+class ModelError(types.RequestParams):
+    kind: Literal[*ERROR_KINDS]
 
 
 def _tool(name, description, fields):
@@ -55,6 +59,7 @@ CONTROL_TOOLS = [
         "seconds": {"type": "number", "minimum": 0}, "error_kind": {"enum": [None, *ERROR_KINDS]},
         "identity": {"type": "object"}, "stop_reason": {"type": ["string", "null"]}}),
 ]
+VALIDATORS = {tool.name: Draft202012Validator(tool.input_schema) for tool in CONTROL_TOOLS} | TOOL_VALIDATORS
 
 
 def _receipt(value, *, error=False):
@@ -63,35 +68,41 @@ def _receipt(value, *, error=False):
         structured_content=value, is_error=error)
 
 
-def explore_prompt(material: Material, *, material_block: str | None = None) -> str:
+def _prompts(stage: str, **facts) -> dict[str, str]:
+    """The system prompt holds the stage's instructions and the user prompt this run's inputs, so the provider
+    can cache the instructions across calls."""
+    return {"system_prompt": render_prompt(f"{stage}_system.j2"), "prompt": render_prompt(f"{stage}.j2", **facts)}
+
+
+def explore_prompt(material: Material, *, material_block: str | None = None) -> dict[str, str]:
     latest = max(material.extra["catalog"].items(), key=lambda item: item[1].get("period", ""), default=None)
     cards = [m["title"] for m in material.extra.get("method_catalog", []) if "card" in m]
-    return render_prompt("explore.j2", latest=latest if latest and latest[1].get("period", "") > material.doc.period else None,
-                         cards=cards, material_block=material.prompt_block() if material_block is None else material_block,
-                         **schema_facts(material))
+    return _prompts("explore", latest=latest if latest and latest[1].get("period", "") > material.doc.period else None,
+                    cards=cards, material_block=material.prompt_block() if material_block is None else material_block,
+                    **schema_facts(material))
 
 
-def compose_prompt(material: Material, *, material_block: str | None = None) -> str:
-    return render_prompt("compose.j2", material_block=material.prompt_block() if material_block is None else material_block,
-                         **schema_facts(material))
+def compose_prompt(material: Material, *, material_block: str | None = None) -> dict[str, str]:
+    return _prompts("compose", material_block=material.prompt_block() if material_block is None else material_block,
+                    **schema_facts(material))
 
 
 def review_prompt(material: Material, report: dict, binding: dict, *,
-                  material_block: str | None = None, valuation: str | None = None) -> str:
-    return render_prompt("review.j2", binding=json.dumps(binding, ensure_ascii=False),
-                         report=json.dumps(report, ensure_ascii=False, indent=1),
-                         program_valuation=program_valuation(report, material) if valuation is None else valuation,
-                         material_block=material.prompt_block() if material_block is None else material_block,
-                         # Only the reviewer judges absence claims; the author already saw each tool result.
-                         searches=material.extra.get("announcement_searches") or [])
+                  material_block: str | None = None, valuation: str | None = None) -> dict[str, str]:
+    return _prompts("review", binding=json.dumps(binding, ensure_ascii=False),
+                    report=json.dumps(report, ensure_ascii=False, indent=1),
+                    program_valuation=program_valuation(report, material) if valuation is None else valuation,
+                    material_block=material.prompt_block() if material_block is None else material_block,
+                    # Only the reviewer judges absence claims; the author already saw each tool result.
+                    searches=material.extra.get("announcement_searches") or [])
 
 
 def repair_prompt(material: Material, report: dict, problems: list[dict], *, acquire: bool,
-                  material_block: str | None = None, valuation: str | None = None) -> str:
-    return render_prompt("repair.j2", acquire=acquire, problems=json.dumps(problems, ensure_ascii=False, indent=1),
-                         indexed_report=json.dumps(indexed_draft(report), ensure_ascii=False, indent=1),
-                         program_valuation=program_valuation(report, material) if valuation is None else valuation,
-                         material_block=material.prompt_block() if material_block is None else material_block)
+                  material_block: str | None = None, valuation: str | None = None) -> dict[str, str]:
+    return _prompts("repair", acquire=acquire, problems=json.dumps(problems, ensure_ascii=False, indent=1),
+                    indexed_report=json.dumps(indexed_draft(report), ensure_ascii=False, indent=1),
+                    program_valuation=program_valuation(report, material) if valuation is None else valuation,
+                    material_block=material.prompt_block() if material_block is None else material_block)
 
 
 class ResearchSession:
@@ -142,8 +153,8 @@ class ResearchSession:
     def _context(self):
         return {"run_id": self.run_id, "mode": "replay" if self.evidence is None else "run",
                 "material_block": self.material_block(), "question": self.material.extra.get("question", ""),
-                "prompt": compose_prompt(self.material, material_block=self.material_block()) if self.evidence is None
-                else explore_prompt(self.material, material_block=self.material_block()),
+                **(compose_prompt(self.material, material_block=self.material_block()) if self.evidence is None
+                   else explore_prompt(self.material, material_block=self.material_block())),
                 "output_schema": output_schema(self.material), "profile_sha256": self.profile_sha256,
                 "effective_model_call_limit": self.effective_model_call_limit,
                 "remaining_ms": max(0, int((self.deadline - time.monotonic()) * 1000)) if self.deadline is not None else None}
@@ -154,8 +165,8 @@ class ResearchSession:
         self._chains.pop("repair", None)
         context = self._draft_context()
         return {"status": "repair", "problems": self.problems, "indexed_draft": indexed_draft(self.draft),
-                "prompt": repair_prompt(self.material, self.draft, self.problems, acquire=self.evidence is not None,
-                                        material_block=context["material_block"], valuation=context["program_valuation"]),
+                **repair_prompt(self.material, self.draft, self.problems, acquire=self.evidence is not None,
+                                material_block=context["material_block"], valuation=context["program_valuation"]),
                 **context}
 
     def _submit(self, draft):
@@ -173,8 +184,8 @@ class ResearchSession:
         binding = self.ledger.request(draft, self.material.snapshot()["sha256"])
         context = self._draft_context()
         return {"status": "review", "draft": draft, "binding": binding, "material_block": context["material_block"],
-                "prompt": review_prompt(self.material, draft, binding,
-                                        material_block=context["material_block"], valuation=context["program_valuation"]),
+                **review_prompt(self.material, draft, binding,
+                                material_block=context["material_block"], valuation=context["program_valuation"]),
                 "program_valuation": context["program_valuation"]}
 
     def _review(self, args):
@@ -252,7 +263,6 @@ class ResearchSession:
         evidence_tools = {s["name"]: types.Tool(name=s["name"], description=s["description"], input_schema=s["parameters"])
                           for s in TOOLS} if self.evidence is not None else {}
         catalog.update(evidence_tools)
-        validators = {name: Draft202012Validator(tool.input_schema) for name, tool in catalog.items()}
         resource = types.Resource(uri=CONTEXT_URI, name="run_context", mime_type="application/json")
 
         async def list_tools(ctx, params):
@@ -263,7 +273,7 @@ class ResearchSession:
             if name not in catalog:
                 raise MCPError(types.INVALID_PARAMS, f"工具 {name} 不可用；请用 tools/list 查询本次工具集")
             try:
-                if problem := next(validators[name].iter_errors(args), None):
+                if problem := next(VALIDATORS[name].iter_errors(args), None):
                     message = f"{problem.json_path}: {problem.message}"
                     if name == "record_call":
                         raise ValueError("调用审计字段无效：" + problem.json_path)
@@ -309,6 +319,12 @@ class ResearchSession:
                 return types.EmptyResult()
 
             server.add_request_handler("research/acquisition_stop", AcquisitionStop, stop)
+        if not self.standalone:
+            async def model_error(ctx, params):
+                self.last_error_kind = params.kind
+                return types.EmptyResult()
+
+            server.add_request_handler("research/model_error", ModelError, model_error)
         return server
 
     async def serve(self, read_stream, write_stream):

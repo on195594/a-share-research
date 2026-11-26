@@ -9,6 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 
+from jsonschema import Draft202012Validator
+
 from a_share_research import report as report_body
 from a_share_research import db, sources, evidence, market, stock_codes, valuation as valuations
 from a_share_research.checking import quote_found
@@ -388,9 +390,10 @@ class ResearchTools:
         if not isinstance(args, dict):
             raise ValueError("工具参数须为对象")
         key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
-        spec = next((tool for tool in TOOLS if tool["name"] == name), None)
-        if spec is None or set(args) - spec["parameters"]["properties"].keys() or not set(spec["parameters"]["required"]) <= args.keys():
-            raise ValueError("未知工具或参数不完整")
+        if name not in TOOL_VALIDATORS:
+            raise ValueError(f"未知工具 {name}")
+        if problem := next(TOOL_VALIDATORS[name].iter_errors(args), None):
+            raise ValueError(f"{problem.json_path}: {problem.message}")
         if key in self.cache:
             return self.cache[key]
         result = getattr(self, name)(**args)
@@ -572,6 +575,7 @@ class ResearchTools:
         return rows
 
 
+TOOL_VALIDATORS = {tool["name"]: Draft202012Validator(tool["parameters"]) for tool in TOOLS}
 COMPUTE_TOOLS = {"calculate", "valuation"}  # program arithmetic on held evidence, not evidence fetches
 
 

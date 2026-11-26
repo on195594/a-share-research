@@ -1,11 +1,11 @@
-import type { AgentContext, AgentTool, AgentToolResult, StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentTool, AgentToolResult, StreamFn } from "@earendil-works/pi-agent-core";
 import type { JsonObject } from "@earendil-works/pi-ai";
 import type { McpClient } from "@earendil-works/pi-mcp";
 import { auditedStream, sessionId } from "./calls.ts";
-import { RunnerError } from "./profile.ts";
+import { RunnerError, safeInt } from "./profile.ts";
 import type { Profile, Stage } from "./profile.ts";
-import { nextDecision } from "./prompts.ts";
-import type { Decision, RunContext } from "./prompts.ts";
+import { decisions, runContextSchema } from "./prompts.ts";
+import type { Decision } from "./prompts.ts";
 import type { Models, Pi } from "./runtime.ts";
 
 // Schemas and material are supplied by this run's MCP server. Only role selection lives here.
@@ -18,17 +18,23 @@ const computes = new Set(["calculate", "valuation"]);
 type Submission = Decision & { result?: AgentToolResult };
 type Receipt = JsonObject & { charged?: boolean; evidence_delta?: 0 | 1 };
 
+function receipts(s: Pi["schema"]) {
+  return {
+    evidence: s.compile(s.obj({ charged: s.bool(), evidence_delta: s.oneOf([0, 1]) }, { open: true })),
+    call: s.compile(s.obj({ call_id: safeInt(s) }, { open: true })),
+    decision: decisions(s),
+  };
+}
+
 export async function runResearch(client: McpClient, pi: Pi, models: Models, profile: Profile, stream: StreamFn, runId: number) {
   const resource = await client.readResource("research://run/context");
   const contents = resource.contents[0];
   if (!contents || !("text" in contents)) throw new RunnerError(1, "Missing research context");
-  const start: RunContext = JSON.parse(contents.text);
-  if (start.run_id !== runId || !["run", "replay"].includes(start.mode) || typeof start.prompt !== "string"
-      || typeof start.output_schema !== "string"
-      || !Number.isSafeInteger(start.effective_model_call_limit)
-      || !Number.isFinite(start.remaining_ms) || start.profile_sha256 !== profile.sha256) {
+  const start = JSON.parse(contents.text);
+  if (!pi.schema.compile(runContextSchema(pi.schema, runId, profile.sha256)).check(start)) {
     throw new RunnerError(2, "Research context or frozen profile mismatch");
   }
+  const valid = receipts(pi.schema);
   const limits = profile.limits;
   const deadline = performance.now() + Math.min(start.remaining_ms, limits.run_seconds * 1000);
   const catalog = await client.listTools();
@@ -61,7 +67,6 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
     let triedSubmission = false;
     let sealed = false;
     let fatal: RunnerError | undefined;
-    let nextMessage: string | undefined;
 
     function fail(error: unknown) {
       if (!(error instanceof RunnerError)) console.error(error);
@@ -70,28 +75,17 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
       agent.abort();
     }
 
+    // Admission (sealed batches, one submission per batch, acquisition limits) runs in beforeToolCall.
     async function execute(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
-      const isEvidence = evidence.includes(name);
-      if (sealed || (!isEvidence && triedSubmission)) {
-        return { content: [{ type: "text", text: "该次提交已处理，本批后续调用已关闭。" }], details: null, terminate: sealed };
-      }
       try {
-        const reason = isEvidence && acquisitionStop(step, !computes.has(name));
-        if (reason) {
-          await recordStop(reason);
-          return { content: [{ type: "text", text: "本项取证已到上限，请用已有资料完成提交。" }], details: null, isError: true };
-        }
-        if (!isEvidence) triedSubmission = true;
         const reply = await client.callTool(name, args, { signal });
         const data = reply.structuredContent as Receipt | undefined;
         const result: AgentToolResult = {
           content: pi.mcp.toLlmContent(reply), structuredContent: data, isError: reply.isError,
           details: null,
         };
-        if (isEvidence) {
-          if (!data || (data.evidence_delta !== 0 && data.evidence_delta !== 1) || typeof data.charged !== "boolean") {
-            throw new RunnerError(1, "Invalid evidence receipt");
-          }
+        if (evidence.includes(name)) {
+          if (!valid.evidence.check(data)) throw new RunnerError(1, "Invalid evidence receipt");
           result.details = { charged: data.charged, evidence_delta: data.evidence_delta };
           if (data.charged) {
             charged++;
@@ -103,12 +97,12 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
         // No more calls in this batch may mutate the draft or its material, including during nested review.
         sealed = true;
         if (!data) throw new RunnerError(1, "Missing worker control receipt");
-        outcome = { ...nextDecision(data), result };
+        outcome = { ...valid.decision(data), result };
         canReturnDraft = outcome.status !== "review";
         if (outcome.status === "review") {
           if (step === "review") throw new RunnerError(1, "Unexpected nested review receipt");
           if (callsLeft <= 0 || performance.now() >= deadline) throw new RunnerError(4, "No budget for required review");
-          outcome = await reviewer.ask(outcome.prompt);
+          outcome = await reviewer.ask(outcome.system_prompt, outcome.prompt);
         }
         return { ...(outcome.result ?? result), terminate: true };
       } catch (error) {
@@ -129,32 +123,42 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
       return available.filter(tool => tool.name === control || (evidence.includes(tool.name)
         && callsLeft > limits.draft_call_reserve && !acquisitionStop(step, !computes.has(tool.name))));
     }
-    let tools = loadout();
-    const setTools = ({ context }: { context: AgentContext }) => ({ context: { ...context, tools } });
 
     const agent = new pi.core.Agent({
-      initialState: { model: role.model, thinkingLevel: role.config.reasoning, tools },
+      initialState: { model: role.model, thinkingLevel: role.config.reasoning },
       toolExecution: "sequential",
-      async prepareRequest(request) {
-        if (availableEvidence) {
-          const reason = acquisitionStop(step, true) ?? (callsLeft <= limits.draft_call_reserve ? "model_limit" : null);
-          if (reason) {
-            try {
-              await recordStop(reason);
-            } catch (error) {
-              fail(error);
-              throw fatal;
-            }
-          }
+      async beforeToolCall({ toolCall }) {
+        const isEvidence = evidence.includes(toolCall.name);
+        if (sealed || (!isEvidence && triedSubmission)) {
+          return { block: true, reason: "该次提交已处理，本批后续调用已关闭。", terminate: sealed };
         }
-        return setTools(request);
+        if (!isEvidence) {
+          triedSubmission = true;
+          return undefined;
+        }
+        const reason = acquisitionStop(step, !computes.has(toolCall.name));
+        if (!reason) return undefined;
+        try {
+          await recordStop(reason);
+        } catch (error) {
+          fail(error);
+          return { block: true, reason: "", terminate: true };
+        }
+        return { block: true, reason: "本项取证已到上限，请用已有资料完成提交。" };
       },
-      prepareNextTurnWithContext(turn) {
-        const update = setTools(turn);
-        const text = nextMessage;
-        nextMessage = undefined;
-        return text ? { ...update, messages: [{ role: "user", content: text, timestamp: Date.now() }] } : update;
+      async prepareRequest() {
+        if (!availableEvidence) return;
+        const reason = acquisitionStop(step, true) ?? (callsLeft <= limits.draft_call_reserve ? "model_limit" : null);
+        if (!reason) return;
+        try {
+          await recordStop(reason);
+        } catch (error) {
+          fail(error);
+          throw fatal;
+        }
       },
+      // Runs before the loop declares tool changes, so the model sees exactly the tools the worker will execute.
+      prepareNextTurnWithContext: ({ context }) => ({ context: { ...context, tools: loadout() } }),
       finishTurn({ toolResults, message }) {
         // Only calls that reached the evidence executor have a delta (including cached failures).
         const evidenceResults = toolResults.filter(r => (r.details as Receipt | undefined)?.evidence_delta !== undefined);
@@ -165,20 +169,22 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
         if (sealed || message.stopReason === "error" || message.stopReason === "aborted") return { action: "end" };
         triedSubmission = false;
         if (rewrite && toolResults.some(r => r.toolName === "submit_draft")) rewritesLeft--;
+        let correction: string | undefined;
         if (step === "review") {
           // The worker can classify an audited review with no valid decision as review_format.
           canReturnDraft = true;
           if (++rejectedReviews > limits.review_format_corrections) return { action: "end" };
-          nextMessage = "请用 review_decide 提交完整、有效的本轮决议。";
+          correction = "请用 review_decide 提交完整、有效的本轮决议。";
         } else if (step === "repair" && toolResults.some(r => r.toolName === "submit_patch" && r.isError)) {
           rewrite = true;
-          nextMessage = `补丁无效，请用 submit_draft 提交一份完整修订稿。\n${start.output_schema}`;
+          correction = `补丁无效，请用 submit_draft 提交一份完整修订稿。\n${start.output_schema}`;
         } else if (!toolResults.length) {
-          nextMessage = `请用 ${rewrite ? "submit_draft" : submit} 提交本轮结果。`;
+          correction = `请用 ${rewrite ? "submit_draft" : submit} 提交本轮结果。`;
         }
         if (rewrite && rewritesLeft <= 0) return { action: "end" };
         if (canReturnDraft && (callsLeft <= 0 || performance.now() >= deadline)) return { action: "end" };
-        tools = loadout();
+        // The loop polls steering right after this hook and appends the message to the next turn.
+        if (correction) agent.steer({ role: "user", content: correction, timestamp: Date.now() });
         return { action: "continue" };
       },
       streamFn(_model, context, options = {}) {
@@ -187,26 +193,38 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
           fail(new RunnerError(4, "Research call or time limit reached"));
           throw fatal;
         }
+        const acquiring = pi.ai.getCurrentTools(context.messages).some(t => evidence.includes(t.name));
         callsLeft--;
         // Pi adds assistant partials and tool results to the live transcript during streaming.
         return auditedStream({
           pi, stream, role, context, options, timeoutMs, abort: () => agent.abort(),
         }, async call => {
           const receipt = await client.callTool("record_call", { step, ...call });
-          if (receipt.isError || !Number.isSafeInteger((receipt.structuredContent as Receipt)?.call_id)) {
+          if (receipt.isError || !valid.call.check(receipt.structuredContent)) {
             throw new RunnerError(1, "record_call failed");
           }
-        }, fail);
+        }, fail, {
+          available: () => Math.max(0, callsLeft - (acquiring ? limits.draft_call_reserve : 0)),
+          consume: () => { callsLeft--; },
+        }, async kind => { await client.request("research/model_error", { kind }); });
       },
     });
     return {
-      async ask(prompt: string): Promise<Submission> {
+      async ask(systemPrompt: string, prompt: string): Promise<Submission> {
         agent.reset();
         outcome = undefined;
         sealed = false;
         rejectedReviews = 0;
         triedSubmission = false;
-        agent.sessionId = sessionId(prompt);
+        rewrite = false;
+        rewritesLeft = limits.full_rewrites_per_invalid_patch;
+        // Each ask is a fresh transcript: the worker's instructions and tool loadout lead as one cacheable prefix.
+        const initialTools = loadout();
+        const declared = initialTools.map(pi.ai.toToolDeclaration);
+        agent.state.tools = initialTools;
+        const system = pi.ai.createInitialSystemMessage(systemPrompt, declared);
+        agent.state.messages = system ? [system] : [];
+        agent.sessionId = sessionId(systemPrompt, declared);
         await agent.prompt(prompt);
         if (fatal) throw fatal;
         const last = agent.state.messages.findLast(m => m.role === "assistant");
@@ -220,9 +238,9 @@ export async function runResearch(client: McpClient, pi: Pi, models: Models, pro
   }
 
   const reviewer = roleAgent("review");
-  let result = await roleAgent(start.mode === "replay" ? "compose" : "explore").ask(start.prompt);
+  let result = await roleAgent(start.mode === "replay" ? "compose" : "explore").ask(start.system_prompt, start.prompt);
   for (let draft = 1; result.status === "repair" && draft < limits.review_rounds; draft++) {
     if (callsLeft < limits.draft_call_reserve || performance.now() >= deadline) break;
-    result = await roleAgent("repair").ask(result.prompt);
+    result = await roleAgent("repair").ask(result.system_prompt, result.prompt);
   }
 }

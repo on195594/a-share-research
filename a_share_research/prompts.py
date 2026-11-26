@@ -1,7 +1,6 @@
-"""Render the model-facing templates and parse the model's JSON response."""
+"""Render the model-facing templates and hash their model-visible contents."""
 
 import hashlib
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,12 +50,3 @@ def schema_facts(material: "Material") -> dict:
 
 def output_schema(material: "Material") -> str:
     return render_prompt("output_schema.j2", **schema_facts(material))
-
-
-def parse_json(text: str) -> dict | None:
-    start, end = text.find("{"), text.rfind("}")
-    try:
-        value = json.loads(text[start:end + 1])
-    except ValueError:
-        return None
-    return value if isinstance(value, dict) else None

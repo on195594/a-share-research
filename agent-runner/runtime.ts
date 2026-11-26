@@ -5,7 +5,8 @@ import { pathToFileURL } from "node:url";
 import type * as Core from "@earendil-works/pi-agent-core";
 import type * as Ai from "@earendil-works/pi-ai";
 import type * as Mcp from "@earendil-works/pi-mcp";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type * as CodingAgent from "@earendil-works/pi-coding-agent";
+import type * as Schema from "@earendil-works/pi-schema";
 import { RunnerError, sha256 } from "./profile.ts";
 import type { ModelConfig, Profile, Role } from "./profile.ts";
 
@@ -22,18 +23,22 @@ export async function loadPi(agentDir = process.env.PI_AGENT_DIR || join(homedir
   }
   base = resolve(base);
   const sibling = (name: string) => load(join(dirname(base), name, "dist/index.js"));
+  const codingAgent = await load(join(base, "dist/index.js")) as typeof CodingAgent;
   return {
+    codingAgent,
     core: await sibling("pi-agent-core") as typeof Core,
     ai: await sibling("pi-ai") as typeof Ai,
     mcp: await sibling("pi-mcp") as typeof Mcp,
-    version: JSON.parse(await readFile(join(base, "package.json"), "utf8")).version as string,
+    schema: await sibling("pi-schema") as typeof Schema,
+    version: codingAgent.VERSION,
+    // Internal modules without a public export: the catalog file store, in-memory auth and the explicit extension loader.
     coding: (file: string) => load(join(base, "dist/core", file)),
     base, agentDir,
   };
 }
 export type Pi = Awaited<ReturnType<typeof loadPi>>;
 
-async function readStore(path: string) {
+async function readStore<T>(path: string): Promise<Record<string, T>> {
   let text;
   try {
     text = await readFile(path, "utf8");
@@ -46,18 +51,23 @@ async function readStore(path: string) {
   return value;
 }
 
-export async function createRuntime(pi: Pi, check: boolean): Promise<ModelRuntime> {
-  const { ModelRuntime } = await pi.coding("model-runtime.js");
-  const { AuthStorage } = await pi.coding("auth-storage.js");
-  const { FileModelsStore, InMemoryCodingAgentModelsStore } = await pi.coding("models-store.js");
+// ModelRuntime ignores modelsStorePath when modelsPath is null, so runs pass the locked file store explicitly:
+// the host pi shares this agent dir and may rewrite the catalog cache while a run starts.
+export async function createRuntime(pi: Pi, check: boolean): Promise<CodingAgent.ModelRuntime> {
   const storePath = join(pi.agentDir, "models-store.json");
   const authPath = join(pi.agentDir, "auth.json");
-  const modelsStore = check ? new InMemoryCodingAgentModelsStore() : new FileModelsStore(storePath);
-  if (check) {
-    for (const [provider, entry] of Object.entries(await readStore(storePath))) await modelsStore.write(provider, entry);
+  const options = { modelsPath: null, refreshOnCreate: false, allowModelNetwork: false };
+  if (!check) {
+    const { FileModelsStore } = await pi.coding("models-store.js");
+    return pi.codingAgent.ModelRuntime.create({ ...options, authPath, modelsStore: new FileModelsStore(storePath) });
   }
-  const credentials = check ? AuthStorage.inMemory(await readStore(authPath)) : AuthStorage.create(authPath);
-  return ModelRuntime.create({ credentials, modelsStore, modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
+  // --check reads both stores into memory so it never creates auth.json, the catalog cache or their lock files.
+  const modelsStore = new pi.ai.InMemoryModelsStore();
+  for (const [provider, entry] of Object.entries(await readStore<Ai.ModelsStoreEntry>(storePath))) await modelsStore.write(provider, entry);
+  const { AuthStorage } = await pi.coding("auth-storage.js");
+  return pi.codingAgent.ModelRuntime.create({
+    ...options, modelsStore, credentials: AuthStorage.inMemory(await readStore(authPath)),
+  });
 }
 
 export interface ResolvedRole {
@@ -68,7 +78,7 @@ export interface ResolvedRole {
 }
 export type Models = Record<Role, ResolvedRole>;
 
-export async function resolveModels(pi: Pi, runtime: ModelRuntime, profile: Profile, check: boolean): Promise<Models> {
+export async function resolveModels(pi: Pi, runtime: CodingAgent.ModelRuntime, profile: Profile, check: boolean): Promise<Models> {
   const models = {} as Models;
   const extensions = new Map<string, NonNullable<ResolvedRole["extension"]>>();
   for (const role of ["author", "reviewer"] as const) {

@@ -4,15 +4,21 @@ comparison → automatic draft freeze (owner selection if unavailable) → forwa
 Design: docs/screening-experiment.md. Runs in the worker only (TuShare and model credentials).
 """
 
+import hashlib
 import json
 import logging
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta
+from typing import NoReturn
 
+import anyio
 import pandas as pd
+from jsonschema import Draft202012Validator
+from mcp import types
+from mcp.server import Server
+from mcp.shared.exceptions import MCPError
 
 from a_share_research import report as report_body
 from a_share_research import market, db, model_profile, runner_process, service, sources, stock_codes
@@ -22,7 +28,8 @@ from a_share_research.batches import POLL_COLUMNS, horizons_complete, load, grou
 from a_share_research.reading import research_state
 from a_share_research.service import freeze_batch as freeze
 from a_share_research.material import METRICS
-from a_share_research.prompts import parse_json, prompts_sha256, render_prompt
+from a_share_research.prompts import prompts_sha256, render_prompt
+from a_share_research.research_mcp import ERROR_KINDS, _receipt
 # Keep the existing import surface for callers and frozen backtest experiments.
 from a_share_research.screening_factors import (
     RULE, _months_after, announced_by, annual_rows,
@@ -263,13 +270,13 @@ def selectable(report: dict | None) -> bool:
     return bool(report) and report.get("verdict") != "暂不值得"
 
 
-def selection_prompt(candidates: list[dict], rule: dict) -> str:
+def selection_prompt(candidates: list[dict], rule: dict) -> dict[str, str]:
+    """The cacheable system prompt holds selection instructions; the user prompt holds parameters and candidates."""
     flag = rule.get("windfall_flag", {"min_growth": 0.5, "max_pe": 10})  # legacy comparison hint
-    return render_prompt(
-        "selection.j2", picks=str(rule["picks"]), picks_per_industry=str(rule["picks_per_industry"]),
-        min_growth=f"{flag['min_growth']:.0%}", max_pe=str(flag["max_pe"]),
-        candidates=json.dumps(candidates, ensure_ascii=False, indent=1),
-    )
+    return {"system_prompt": render_prompt("selection_system.j2"),
+            "prompt": render_prompt("selection.j2", picks=rule["picks"], picks_per_industry=rule["picks_per_industry"],
+                                    min_growth=f"{flag['min_growth']:.0%}", max_pe=flag["max_pe"],
+                                    candidates=json.dumps(candidates, ensure_ascii=False, indent=1))}
 
 
 PICK_FIELDS = ("code", "return_source", "why_over_higher_ranked", "invalidation")
@@ -313,13 +320,11 @@ def rankable(candidates: list[dict]) -> list[str]:
     return [c["code"] for c in candidates if c.get("report")]
 
 
-def ranking_prompt(candidates: list[dict], rule: dict) -> str:
+def ranking_prompt(candidates: list[dict], rule: dict) -> dict[str, str]:
     pool = [c for c in candidates if c.get("report")]
-    benchmark = next(iter(rule["benchmarks"].values()))
-    return render_prompt(
-        "ranking.j2", benchmark=benchmark, count=len(pool),
-        candidates=json.dumps(pool, ensure_ascii=False, indent=1),
-    )
+    return {"system_prompt": render_prompt("ranking_system.j2"),
+            "prompt": render_prompt("ranking.j2", count=len(pool), benchmark=next(iter(rule["benchmarks"].values())),
+                                    candidates=json.dumps(pool, ensure_ascii=False, indent=1))}
 
 
 def ranking_problems(draft: dict | None, candidates: list[dict]) -> list[str]:
@@ -349,132 +354,294 @@ def candidate_digests(conn, batch: dict) -> list[dict]:
             for i, r in enumerate(batch["q20"])]
 
 
-@contextmanager
-def _comparison_requests(conn, batch: dict, judgment: dict):
-    """Open one runner on the first paid request and count calls across the monthly batch."""
-    remaining = None
-    if str(batch.get("request_id") or "").startswith("monthly:"):
-        research_calls = conn.execute("SELECT count(*) FROM calls c JOIN runs r ON r.id = c.run_id"
-                                      " WHERE r.batch_id = ?", (batch["id"],)).fetchone()[0]
-        selection = batch.get("selection") or {}
-        saved = [selection, selection.get("ranking") or {}, batch.get("small_selection") or {}]
-        remaining = (model_profile.PROFILE.limits.monthly_batch_model_calls - research_calls
-                     - sum(len(task.get("attempts", [])) for task in saved))
-    with ExitStack() as processes:
-        single = None
+# ---------- model comparison over the runner's stdio MCP ----------
 
-        def request(task, attempt, prompt):
-            nonlocal single, remaining
-            if remaining is not None:
-                if remaining <= 0:
-                    raise ScreenError("自动月批模型调用已达整批上限")
-                remaining -= 1
-            if single is None:
-                if judgment != model_profile.judgment_identity():
-                    raise ScreenError("批次开始时冻结的判断配置已变更，无法继续比较")
-                single = processes.enter_context(runner_process.single_batch(batch["id"]))
-            return single(task, attempt, prompt)
-
-        yield request
+def _object(properties: dict) -> dict:
+    return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
 
-def _compare(task, candidates, rule, request, judgment, previous, save):
-    ranking = task == "q20_rank"
-    prompt = ranking_prompt(candidates, rule) if ranking else selection_prompt(candidates, rule)
-    log.info("batch comparison %s: %s candidates, %s prompt characters", task, len(candidates), len(prompt))
-    attempts = list(previous.get("attempts", []))
-    limit = model_profile.PROFILE.limits.comparison_attempts_per_task
-    result = {"judgment": judgment, "attempts": attempts, "order" if ranking else "draft": None}
-    if len(attempts) >= limit:
-        return previous
-    template_digest = prompts_sha256()
-    correction = previous.get("correction")
-    for attempt in range(len(attempts) + 1, limit + 1):
-        if correction is not None:
-            problems = json.dumps(attempts[-1]["problems"], ensure_ascii=False)
-            prompt += render_prompt("correction.j2", problems=problems, correction=correction)
-        reply = request(task, attempt, prompt)
-        detail = {key: reply[key] for key in ("identity", "usage", "seconds")}
-        detail["identity"] = detail["identity"] | {"prompts_sha256": template_digest}
-        attempts.append(detail)
-        if "error_kind" in reply:
-            detail["error_kind"] = reply["error_kind"]
-            return result | {"error_kind": reply["error_kind"], "error": reply["error_kind"]}
-        text = reply["text"]
-        draft = parse_json(text)
-        problems = ranking_problems(draft, candidates) if ranking else selection_problems(draft, candidates, rule)
-        detail["problems"] = problems
-        if not problems:
-            if ranking:
-                return result | {"order": draft["order"], "basis": draft["basis"]}
-            return result | {"draft": draft, "prompt_sha256": detail["identity"]["prompt_sha256"]}
-        if attempt < limit:
-            correction = text[:8000 if ranking else 20000]
-            save(task, result | {"correction": correction})
-    return result | {"error": "；".join(problems)}
+_TEXT = {"type": "string"}
+COMPARISONS = ("q20_select", "q20_rank", "s10_select")
+COMPARISON_TOOLS = [
+    types.Tool(name="next_comparison", description="runner-only：领取下一项比较任务；仅供 runner 使用。",
+               input_schema=_object({})),
+    types.Tool(name="submit_selection", description=render_prompt("submit_selection_tool.j2").strip(),
+               input_schema=_object({
+                   "picks": {"type": "array", "items": _object({field: _TEXT for field in PICK_FIELDS})},
+                   "rejected": {"type": "array", "items": _object({"code": _TEXT, "reason": _TEXT})},
+                   "concentration": {"type": "string"},
+                   "gaps": {"type": "array", "items": {"type": "string"}}})),
+    types.Tool(name="submit_ranking", description=render_prompt("submit_ranking_tool.j2").strip(),
+               input_schema=_object({"order": {"type": "array", "items": _TEXT}, "basis": _TEXT})),
+    types.Tool(name="record_call", description="runner-only：记录一次实际模型请求；仅供 runner 使用。",
+               input_schema=_object({
+                   "step": {"enum": list(COMPARISONS)}, "messages": {"type": "array"}, "tools": {"type": "array"},
+                   "response": {"type": ["object", "string", "null"]}, "usage": {"type": ["object", "null"]},
+                   "seconds": {"type": "number", "minimum": 0}, "error_kind": {"enum": [None, *ERROR_KINDS]},
+                   "identity": {"type": "object"}, "stop_reason": {"type": ["string", "null"]}})),
+]
+COMPARISON_VALIDATORS = {tool.name: Draft202012Validator(tool.input_schema) for tool in COMPARISON_TOOLS}
+SUBMIT_TOOL = {"q20_select": "submit_selection", "q20_rank": "submit_ranking", "s10_select": "submit_selection"}
+_OUTPUT = {"q20_select": "draft", "q20_rank": "order", "s10_select": "draft"}
+NO_SUBMISSION = "未调用提交工具"
+BUDGET_SPENT = "自动月批模型调用已达整批上限"
 
 
 class _BatchChanged(Exception):
     """Another writer won the batch while a comparison was running."""
 
 
-def _compare_groups(conn, batch, large_selectable, small):
-    selection = batch.get("selection") or {}
-    judgment = selection.get("judgment") or (batch.get("marks") or {}).get("judgment") or model_profile.judgment_identity()
+class ComparisonSession:
+    """One batch's model comparisons, served to a single runner over stdio MCP.
 
-    def save(task, result):
-        nonlocal selection
-        field = "small_selection" if task == "s10_select" else "selection"
-        if task == "q20_rank":
-            selection = selection | {"ranking": result}
-        elif task == "q20_select":
-            selection = result
-        value = result if field == "small_selection" else selection
-        row = conn.execute(f"UPDATE batches SET {field}=?, updated_at=? WHERE id=? AND status='selecting' RETURNING id",
-                           (json.dumps(value, ensure_ascii=False), db.now(), batch["id"])).fetchone()
+    The runner takes one task at a time, so every paid attempt and each task's result are saved before the
+    next comparison starts. A save that finds the batch taken by another writer ends the session at once.
+    """
+
+    def __init__(self, conn, batch: dict, large_selectable: bool, small: bool):
+        self.conn, self.batch, self.large_selectable, self.small = conn, batch, large_selectable, small
+        self.selection = batch.get("selection") or {}
+        self.small_selection = batch.get("small_selection") or {}
+        self.judgment = (self.selection.get("judgment") or (batch.get("marks") or {}).get("judgment")
+                         or model_profile.judgment_identity())
+        limits = model_profile.PROFILE.limits
+        self.attempt_limit = limits.comparison_attempts_per_task
+        # Each attempt is bounded by the runner's model timer; allow for startup and the pipe transfer.
+        self.deadline = time.monotonic() + len(COMPARISONS) * self.attempt_limit * (limits.model_call_seconds + 30)
+        self.budget = None
+        if str(batch.get("request_id") or "").startswith("monthly:"):
+            research_calls = conn.execute("SELECT count(*) FROM calls c JOIN runs r ON r.id = c.run_id"
+                                          " WHERE r.batch_id = ?", (batch["id"],)).fetchone()[0]
+            saved = [self.selection, self.selection.get("ranking") or {}, self.small_selection]
+            self.budget = (limits.monthly_batch_model_calls - research_calls
+                           - sum(len(task.get("attempts", [])) for task in saved))
+        self.task: dict | None = None
+        self.failure: Exception | None = None
+        self.last_error_kind: str | None = None
+        self._fatal: Exception | None = None
+        self._step: str | None = "q20_select"
+        self._groups: dict[str, tuple[list[dict], dict]] = {}
+        self._prompts_sha256 = prompts_sha256()
+        self._server = self._build_server()
+
+    def ready(self) -> bool:
+        """Save every result that needs no model call; True when a comparison waits for the runner."""
+        self._advance()
+        return self.task is not None
+
+    def abandon_ranking(self, exc: Exception) -> bool:
+        """Record a ranking cut off by a runner failure; ranking is scored separately from the saved watchlist."""
+        if self.task is None or self.task["name"] != "q20_rank":
+            return False
+        log.exception("batch %s ranking failed", self.batch["id"])
+        result = self.task["result"]
+        self.task = None
+        self._save("q20_rank", result | {"order": None, "error": str(exc)})
+        return True
+
+    def _group(self, name: str) -> tuple[list[dict], dict]:
+        group = "s10" if name == "s10_select" else "q20"
+        if group not in self._groups:
+            self._groups[group] = ((candidate_digests(self.conn, self.batch | {"q20": self.batch["s10"]}),
+                                    small_rule(self.batch["rule"])) if group == "s10"
+                                   else (candidate_digests(self.conn, self.batch), self.batch["rule"]))
+        return self._groups[group]
+
+    def _saved(self, name: str) -> dict:
+        if name == "q20_rank":
+            return self.selection.get("ranking") or {}
+        return self.small_selection if name == "s10_select" else self.selection
+
+    def _save(self, name: str, result: dict) -> None:
+        if name == "q20_rank":
+            self.selection = self.selection | {"ranking": result}
+        elif name == "q20_select":
+            self.selection = result
+        else:
+            self.small_selection = result
+        field, value = (("small_selection", self.small_selection) if name == "s10_select"
+                        else ("selection", self.selection))
+        row = self.conn.execute(f"UPDATE batches SET {field}=?, updated_at=? WHERE id=? AND status='selecting' RETURNING id",
+                                (json.dumps(value, ensure_ascii=False), db.now(), self.batch["id"])).fetchone()
         if row is None:
             raise _BatchChanged
 
-    candidates = None
-    with _comparison_requests(conn, batch, judgment) as request:
-        if not large_selectable:
-            selection = {"judgment": judgment, "draft": {"picks": [], "rejected": [], "concentration": "",
-                         "gaps": ["大市值组没有研究通过的候选，全部席位留现金"]}, "attempts": []}
-            save("q20_select", selection)
-        elif "draft" not in selection or "correction" in selection or selection.get("error_kind"):
-            candidates = candidate_digests(conn, batch)
-            selection = _compare("q20_select", candidates, batch["rule"], request, judgment, selection, save)
-            if selection.get("error_kind"):
-                save("q20_select", selection)
-                raise ScreenError(selection["error"])
-            selection["ranking"] = None
-            save("q20_select", selection)
-        ranking = selection.get("ranking")
-        if "ranking" in selection and (ranking is None or "correction" in ranking):
-            # Ranking is scored separately and its failure never discards the watchlist.
-            try:
-                ranking = _compare("q20_rank", candidates or candidate_digests(conn, batch),
-                                   batch["rule"], request, judgment, ranking or {}, save)
-            except _BatchChanged:
-                raise
-            except Exception as exc:
-                log.exception("batch %s ranking failed", batch["id"])
-                recorded = (selection.get("ranking") or {}).get("attempts", [])
-                ranking = {"judgment": judgment, "order": None, "error": str(exc), "attempts": recorded}
-            save("q20_rank", ranking)
-        small_selection = batch.get("small_selection") or {}
-        if small and not small_selection.get("draft"):
-            rule = small_rule(batch["rule"])
-            candidates = candidate_digests(conn, batch | {"q20": batch["s10"]})
-            if any(selectable(c["report"]) for c in candidates):
-                small_selection = _compare("s10_select", candidates, rule, request, judgment, small_selection, save)
+    def _pending(self) -> str | None:
+        """Save the steps that need no model call and name the next comparison, if any."""
+        if self._step == "q20_select":
+            if not self.large_selectable:
+                self._save("q20_select", {"judgment": self.judgment, "attempts": [], "draft": {
+                    "picks": [], "rejected": [], "concentration": "", "gaps": ["大市值组没有研究通过的候选，全部席位留现金"]}})
+                self._step = "s10_select"
+            elif "draft" in self.selection and not self.selection.get("error_kind"):
+                self._step = "q20_rank"
             else:
-                small_selection = {"judgment": judgment, "draft": {"picks": [], "rejected": [], "concentration": "",
-                                   "gaps": ["小市值组没有研究通过且可选的候选，全部席位留现金"]}, "attempts": []}
-            save("s10_select", small_selection)
-            if small_selection["draft"] is None:
-                raise ScreenError(small_selection["error"])
-    return selection
+                return "q20_select"
+        if self._step == "q20_rank":
+            ranking = self.selection.get("ranking")
+            if "ranking" in self.selection and (ranking is None or "order" not in ranking):
+                return "q20_rank"
+            self._step = "s10_select"
+        if self._step == "s10_select":
+            if self.small and not isinstance(self.small_selection.get("draft"), dict):
+                if any(selectable(c["report"]) for c in self._group("s10_select")[0]):
+                    return "s10_select"
+                self._save("s10_select", {"judgment": self.judgment, "attempts": [], "draft": {
+                    "picks": [], "rejected": [], "concentration": "", "gaps": ["小市值组没有研究通过且可选的候选，全部席位留现金"]}})
+            self._step = None
+        return None
+
+    def _advance(self) -> None:
+        while self.failure is None and self.task is None and (name := self._pending()):
+            # A retried task keeps the attempts already paid for; the transcript starts afresh.
+            attempts = list(self._saved(name).get("attempts", []))
+            self.task = {"name": name, "result": {"judgment": self.judgment, "attempts": attempts}, "left": None}
+            if len(attempts) >= self.attempt_limit:
+                self._conclude()
+            elif self.budget is not None and self.budget <= 0:
+                if name == "q20_rank":
+                    self._conclude(BUDGET_SPENT)
+                else:
+                    self.task, self.failure = None, ScreenError(BUDGET_SPENT)
+
+    def _conclude(self, error: str | None = None) -> None:
+        """End the current task without an accepted submission and save why."""
+        name, result = self.task["name"], self.task["result"]
+        self.task = None
+        last = result["attempts"][-1] if result["attempts"] else {}
+        kind = None if error else last.get("error_kind")
+        error = error or kind or "；".join(last.get("problems") or [NO_SUBMISSION])
+        final = result | {_OUTPUT[name]: None, "error": error} | ({"error_kind": kind} if kind else {})
+        if name == "q20_select" and not kind:
+            final["ranking"] = None
+        self._save(name, final)
+        # Ranking failure never discards the watchlist; a selection without a draft fails the batch.
+        if name == "s10_select" or (name == "q20_select" and kind):
+            self.failure = ScreenError(error)
+
+    def _next(self) -> dict:
+        if self.task is not None and self.task["left"] is not None:
+            self._conclude()
+        self._advance()
+        if self.task is None:
+            return {"status": "done"}
+        name = self.task["name"]
+        candidates, rule = self._group(name)
+        prompts = ranking_prompt(candidates, rule) if name == "q20_rank" else selection_prompt(candidates, rule)
+        log.info("batch %s comparison %s: %s candidates, %s prompt characters", self.batch["id"], name,
+                 len(candidates), len(prompts["system_prompt"]) + len(prompts["prompt"]))
+        left = self.attempt_limit - len(self.task["result"]["attempts"])
+        self.task["left"] = left if self.budget is None else min(left, self.budget)
+        return {"status": "task", "batch_id": self.batch["id"], "task": name, "tool": SUBMIT_TOOL[name],
+                "max_attempts": self.task["left"], **prompts, "profile_sha256": model_profile.PROFILE_SHA256,
+                "remaining_ms": max(0, int((self.deadline - time.monotonic()) * 1000))}
+
+    def _record(self, args: dict) -> dict:
+        task = self.task
+        if task is None or task["left"] is None or args["step"] != task["name"]:
+            raise ValueError("调用审计与当前比较任务不符")
+        if task["left"] <= 0:
+            raise ValueError("比较尝试超过本项上限")
+        if self.budget is not None:
+            if self.budget <= 0:
+                raise ScreenError(BUDGET_SPENT)
+            self.budget -= 1
+        task["left"] -= 1
+        prompt = json.dumps({"messages": args["messages"], "tools": args["tools"]}, ensure_ascii=False)
+        identity = args["identity"] | {"stop_reason": args["stop_reason"],
+                                       "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                                       "prompts_sha256": self._prompts_sha256}
+        detail = {"identity": identity, "usage": args["usage"], "seconds": args["seconds"]}
+        if kind := args["error_kind"]:
+            detail["error_kind"] = kind
+        else:
+            detail["problems"] = [NO_SUBMISSION]  # replaced once this attempt's submission is checked
+        task["result"]["attempts"].append(detail)
+        self.last_error_kind = kind
+        # Persist each paid attempt at once: a later transport failure must not lose it.
+        self._save(task["name"], task["result"])
+        return {"attempt": len(task["result"]["attempts"])}
+
+    def _submit(self, tool: str, args: dict) -> types.CallToolResult:
+        task = self.task
+        if task is None or task["left"] is None or SUBMIT_TOOL[task["name"]] != tool or not task["result"]["attempts"]:
+            raise ValueError("提交与当前比较任务不符")
+        name, result = task["name"], task["result"]
+        attempt = result["attempts"][-1]
+        candidates, rule = self._group(name)
+        if problem := next(COMPARISON_VALIDATORS[tool].iter_errors(args), None):
+            problems = [f"{problem.json_path}: {problem.message}"]
+        elif name == "q20_rank":
+            problems = ranking_problems(args, candidates)
+        else:
+            problems = selection_problems(args, candidates, rule)
+        attempt["problems"] = problems
+        if problems:
+            self._save(name, result)
+            return _receipt({"error": "；".join(problems)}, error=True)
+        self.task = None
+        if name == "q20_rank":
+            self._save(name, result | {"order": args["order"], "basis": args["basis"]})
+        else:
+            final = result | {"draft": args, "prompt_sha256": attempt["identity"]["prompt_sha256"]}
+            self._save(name, final | ({"ranking": None} if name == "q20_select" else {}))
+        return _receipt({"status": "accepted"})
+
+    async def _abort(self, exc: Exception) -> NoReturn:
+        self.failure = self._fatal = exc
+        self._scope.cancel()
+        await anyio.sleep_forever()
+
+    def _build_server(self) -> Server:
+        catalog = {tool.name: tool for tool in COMPARISON_TOOLS}
+
+        async def list_tools(ctx, params):
+            return types.ListToolsResult(tools=list(catalog.values()))
+
+        async def call_tool(ctx, params):
+            name, args = params.name, params.arguments or {}
+            if name not in catalog:
+                raise MCPError(types.INVALID_PARAMS, f"工具 {name} 不可用；请用 tools/list 查询本次工具集")
+            try:
+                if name in ("submit_selection", "submit_ranking"):
+                    return self._submit(name, args)
+                if problem := next(COMPARISON_VALIDATORS[name].iter_errors(args), None):
+                    raise ValueError(f"{name} 参数无效：{problem.json_path}")
+                return _receipt(self._record(args) if name == "record_call" else self._next())
+            except (_BatchChanged, ScreenError) as exc:
+                await self._abort(exc)
+            except Exception:
+                log.exception("batch %s comparison failed in %s", self.batch["id"], name)
+                await self._abort(RuntimeError("批次比较服务执行失败，请核对比较记录"))
+
+        return Server("a-share-batch", on_list_tools=list_tools, on_call_tool=call_tool,
+                      get_tool_input_schema=lambda name: catalog[name].input_schema if name in catalog else None)
+
+    async def serve(self, read_stream, write_stream):
+        """Serve MCP until the runner's EOF or a fatal error, which the worker then raises."""
+        with anyio.CancelScope() as self._scope:
+            await self._server.run(read_stream, write_stream, self._server.create_initialization_options())
+        if self._fatal is not None:
+            raise self._fatal
+
+
+def _compare_groups(conn, batch, large_selectable, small):
+    session = ComparisonSession(conn, batch, large_selectable, small)
+    while session.failure is None and session.ready():
+        if session.judgment != model_profile.judgment_identity():
+            raise ScreenError("批次开始时冻结的判断配置已变更，无法继续比较")
+        try:
+            runner_process.run_batch(session, batch_id=batch["id"])
+            if session.failure is None and session.ready():
+                raise runner_process.RunnerError("pipeline_error", "批次 runner 未完成全部比较即退出")
+        except _BatchChanged:
+            raise
+        except Exception as exc:
+            if session.failure is not None or not session.abandon_ranking(exc):
+                raise
+    if session.failure is not None:
+        raise session.failure
+    return session.selection
 
 
 # ---------- simulation ----------

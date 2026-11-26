@@ -238,7 +238,8 @@ def test_forced_ranking_must_cover_every_reviewed_candidate_once():
     assert screening.ranking_problems({"order": codes, "basis": ""}, candidates) == ["basis 必须是非空字符串"]
     assert screening.ranking_problems(None, candidates) == ["order 必须是候选代码字符串数组"]
     prompt = screening.ranking_prompt(candidates, screening.RULE)
-    assert candidates[5]["code"] not in prompt and "中证800全收益" in prompt
+    assert (candidates[5]["code"] not in prompt["prompt"] and candidates[5]["code"] not in prompt["system_prompt"]
+            and "中证800全收益" in prompt["prompt"])
 
 
 def test_returns_add_ranking_halves_and_skip_the_middle_of_an_odd_count():

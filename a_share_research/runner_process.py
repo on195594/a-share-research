@@ -4,14 +4,14 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
 import anyio
 
 from a_share_research.model_profile import PROFILE, PROFILE_PATH
-from a_share_research.research_mcp import ERROR_KINDS, ResearchSession, serve_stdio
+from a_share_research.research_mcp import ResearchSession, serve_stdio
 
 MAIN = Path(__file__).resolve().parents[1] / "agent-runner" / "main.ts"
 
@@ -77,16 +77,14 @@ def _check_exit(code: int, model_error: str | None = None):
     raise RunnerError("pipeline_error", f"runner 通信中断（退出码 {code}）；请核对阶段记录。")
 
 
-def run_research(session: ResearchSession, *, replay_of: int | None = None) -> None:
-    args = ["run", "--run-id", str(session.run_id)]
-    if replay_of is not None:
-        args.extend(["--replay", str(replay_of)])
+def _serve_process(args: list[str], session, deadline: float) -> None:
+    """Serve `session` over the runner's stdio MCP until it exits; the session's own failure outranks the exit code."""
     with subprocess.Popen(_command(*args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=_env()) as proc:
         async def serve():
             await serve_stdio(session, proc.stdout, proc.stdin, terminate=proc.kill)
 
         try:
-            with time_left(session.deadline, terminate=proc.kill):
+            with time_left(deadline, terminate=proc.kill):
                 try:
                     anyio.run(serve)
                 except Exception:
@@ -104,51 +102,16 @@ def run_research(session: ResearchSession, *, replay_of: int | None = None) -> N
                 proc.kill()
 
 
-@contextmanager
-def single_batch(batch_id: int) -> Iterator[Callable[[str, int, str], dict]]:
-    with subprocess.Popen(_command("single", "--batch-id", str(batch_id)), env=_env(),
-                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1) as proc:
-        broken = False
+def run_research(session: ResearchSession, *, replay_of: int | None = None) -> None:
+    args = ["run", "--run-id", str(session.run_id)]
+    if replay_of is not None:
+        args.extend(["--replay", str(replay_of)])
+    _serve_process(args, session, session.deadline)
 
-        def request(task: str, attempt: int, prompt: str) -> dict:
-            nonlocal broken
-            # Allow for startup and the pipe transfer in addition to the runner's model timer.
-            try:
-                with time_left(time.monotonic() + PROFILE.limits.model_call_seconds + 30, terminate=proc.kill):
-                    proc.stdin.write(json.dumps(dict(task=task, attempt=attempt, prompt=prompt), ensure_ascii=False) + "\n")
-                    line = proc.stdout.readline()
-                    if not line:
-                        _check_exit(proc.wait())
-                        raise RunnerError("pipeline_error", "批次 runner 未返回比较结果")
-                    reply = json.loads(line)
-                    valid_output = (reply["error_kind"] in ERROR_KINDS if "error_kind" in reply
-                                    else isinstance(reply["text"], str))
-                    if (reply["task"] != task or reply["attempt"] != attempt or not valid_output
-                            or not isinstance(reply["identity"], dict) or not isinstance(reply["usage"], dict | None)
-                            or not isinstance(reply["seconds"], (int, float))):
-                        raise ValueError("invalid completion")
-                    return reply
-            except RunnerError:
-                broken = True
-                raise
-            except (OSError, ValueError, KeyError, TypeError) as exc:
-                broken = True
-                raise RunnerError("pipeline_error", "批次 runner 通信失败或回执与请求不符") from exc
 
-        try:
-            yield request
-        finally:
-            # EOF lets pi finish credential writes, including on a rejected comparison.
-            # A broken transport has already been reported to the individual task.
-            if broken:
-                proc.kill()
-            else:
-                try:
-                    proc.stdin.close()
-                    _check_exit(proc.wait(timeout=30))
-                finally:
-                    if proc.poll() is None:
-                        proc.kill()
+def run_batch(session, *, batch_id: int) -> None:
+    """One runner serves every model comparison the batch session hands out."""
+    _serve_process(["batch", "--batch-id", str(batch_id)], session, session.deadline)
 
 
 def preflight() -> dict:

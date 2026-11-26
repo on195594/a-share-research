@@ -1,12 +1,13 @@
 """Batch C storage, sequencing and accounting using captured screening/report/market rows."""
 import copy
-import hashlib
 import json
 import re
 import sqlite3
-from contextlib import contextmanager
 
+import anyio
 import pytest
+from mcp.client.session import ClientSession
+from mcp.shared.memory import create_client_server_memory_streams
 
 from a_share_research import batches, charts, db, model_profile, reading, screening, service, sources
 from support.templates import ENV
@@ -150,49 +151,109 @@ def test_small_comparison_still_runs_when_large_selection_is_saved(tmp_path, mon
     conn.close()
 
 
-def test_q20_ranking_and_small_corrections_share_one_runner_and_freeze(tmp_path, monkeypatch):
+@pytest.fixture
+def comparison_replies():
+    # Public excerpts of batch 1 picks, batch 2 ranking. Pool assignment exercises workflow only.
+    selection = {'rejected': [], 'concentration': '', 'gaps': []}
+    return {
+        'q20_select': selection | {'picks': [{'code': '300750.SZ', 'return_source': '盈利继续增长、后续现金分红及实际完成的注销式回购',
+                                 'why_over_higher_ranked': '其前三季度扣非增长32.68%，且有可跟踪的注销回购执行窗口。',
+                                 'invalidation': '单位盈利继续承压、成本无法传导'}]},
+        'q20_rank': {'order': ['300750.SZ'], 'basis': '宁德时代居首：12.29倍估值、份额提升和利润增长'},
+        's10_select': selection | {'picks': [{'code': '002648.SZ', 'return_source': '现有盈利延续、市场提高对可持续利润的认可',
+                                 'why_over_higher_ranked': '相比株冶集团、中国铝业，保留其盈利观察价值',
+                                 'invalidation': '收入增长但毛利率、扣非利润明显下降'}]},
+    }
+
+
+def _comparison_call(task):
+    return {'step': task['task'], 'messages': [{'role': 'system', 'content': task['system_prompt']},
+                                              {'role': 'user', 'content': task['prompt']}],
+            'tools': [{'name': task['tool']}], 'response': {}, 'error_kind': None, 'identity': {},
+            'usage': None, 'seconds': 0, 'stop_reason': 'toolUse'}
+
+
+def test_q20_ranking_and_small_corrections_share_one_runner_and_freeze(tmp_path, monkeypatch, comparison_replies):
     cache_partial_window(monkeypatch)
     conn = db.connect(tmp_path / 'c.db')
     large, small = completed_pools(conn, large_passed=True, small_passed=True, small_draft=False)
     db.update_batch(conn, 1, request_id='monthly:2026-12')
-    # Public excerpts of batch 1 picks, batch 2 ranking. Pool assignment exercises workflow only.
-    replies = {
-        'q20_select': {'picks': [{'code': '300750.SZ', 'return_source': '盈利继续增长、后续现金分红及实际完成的注销式回购',
-                                 'why_over_higher_ranked': '其前三季度扣非增长32.68%，且有可跟踪的注销回购执行窗口。',
-                                 'invalidation': '单位盈利继续承压、成本无法传导'}]},
-        'q20_rank': {'order': ['300750.SZ'], 'basis': '宁德时代居首：12.29倍估值、份额提升和利润增长'},
-        's10_select': {'picks': [{'code': '002648.SZ', 'return_source': '现有盈利延续、市场提高对可持续利润的认可',
-                                 'why_over_higher_ranked': '相比株冶集团、中国铝业，保留其盈利观察价值',
-                                 'invalidation': '收入增长但毛利率、扣非利润明显下降'}]},
-    }
-    starts, calls = [], []
-    malformed = '无效输出' * 5001
+    starts, problems = [], {}
 
-    @contextmanager
-    def single(batch_id):
+    def run_batch(session, *, batch_id):
         starts.append(batch_id)
 
-        def request(task, attempt, prompt):
-            calls.append((task, attempt))
-            if attempt == 2:
-                assert prompt.split('# 上一次输出\n')[1] == malformed[:8000 if task == 'q20_rank' else 20000]
-            return {'text': malformed if attempt == 1 else json.dumps(replies[task]),
-                    'identity': {'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()},
-                    'usage': None, 'seconds': 0}
+        async def compare():
+            async with create_client_server_memory_streams() as (client_io, server_io), anyio.create_task_group() as group:
+                group.start_soon(session.serve, *server_io)
+                async with ClientSession(*client_io) as client:
+                    await client.initialize()
+                    for name, valid in comparison_replies.items():
+                        task = (await client.call_tool('next_comparison', {})).structured_content
+                        assert task['status'] == 'task' and task['task'] == name and task['batch_id'] == batch_id
+                        invalid = (valid | {'basis': ' '} if name == 'q20_rank'
+                                   else valid | {'picks': [valid['picks'][0] | {'return_source': ''}]})
+                        for attempt, submission in enumerate((invalid, valid), start=1):
+                            audit = await client.call_tool('record_call', _comparison_call(task))
+                            assert not audit.is_error and audit.structured_content == {'attempt': attempt}
+                            result = await client.call_tool(task['tool'], submission)
+                            if attempt == 1:
+                                assert result.is_error
+                                expected = ('basis 必须是非空字符串' if name == 'q20_rank' else
+                                            f"picks 必须是对象列表，每项含非空字符串字段 {'、'.join(screening.PICK_FIELDS)}")
+                                assert result.structured_content == {'error': expected}
+                                problems[name] = expected
+                            else:
+                                assert not result.is_error and result.structured_content == {'status': 'accepted'}
+                    assert (await client.call_tool('next_comparison', {})).structured_content == {'status': 'done'}
+                await client_io[1].aclose()
 
-        yield request
+        anyio.run(compare)
 
-    monkeypatch.setattr(screening.runner_process, 'single_batch', single)
+    monkeypatch.setattr(screening.runner_process, 'run_batch', run_batch)
     assert screening.tick(conn)
     saved = batches.load(conn.execute('SELECT * FROM batches').fetchone())
     assert saved['status'] == 'frozen' and starts == [1]
-    assert calls == [(task, attempt) for task in replies for attempt in (1, 2)]
     assert saved['l5']['codes'] == [large[0]['code']] and saved['sl3']['codes'] == [small[0]['code']]
-    for task in (saved['selection'], saved['selection']['ranking'], saved['small_selection']):
+    ranking = saved['selection']['ranking']
+    assert ranking['order'] == comparison_replies['q20_rank']['order']
+    for name, task in zip(comparison_replies, (saved['selection'], ranking, saved['small_selection']), strict=True):
         assert task['judgment'] == model_profile.judgment_identity()
         invalid, valid = task['attempts']
-        assert invalid['problems'] and not valid['problems']
+        assert invalid['problems'] == [problems[name]] and valid['problems'] == []
         assert all(key in valid for key in ('identity', 'seconds', 'usage'))
+    conn.close()
+
+
+def test_ranking_transport_failure_still_completes_small_selection_and_freezes(tmp_path, monkeypatch, comparison_replies):
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    large, small = completed_pools(conn, large_passed=True, small_passed=True, small_draft=False)
+    db.update_batch(conn, 1, request_id='monthly:2026-12')
+    sessions = []
+    failure = 'offline ranking transport failure'
+
+    def run_batch(session, *, batch_id):
+        task = session._next()
+        sessions.append((batch_id, task['task']))
+        session._record(_comparison_call(task))
+        assert not session._submit(task['tool'], comparison_replies[task['task']]).is_error
+        task = session._next()
+        if task['status'] == 'task':
+            assert task['task'] == 'q20_rank'
+            session._record(_comparison_call(task))
+            raise RuntimeError(failure)
+        assert task == {'status': 'done'}
+
+    monkeypatch.setattr(screening.runner_process, 'run_batch', run_batch)
+    assert screening.tick(conn)
+    saved = batches.load(conn.execute('SELECT * FROM batches').fetchone())
+    assert sessions == [(1, 'q20_select'), (1, 's10_select')]
+    assert saved['status'] == 'frozen' and saved['error'] is None
+    assert saved['l5']['codes'] == [large[0]['code']] and saved['sl3']['codes'] == [small[0]['code']]
+    ranking = saved['selection']['ranking']
+    assert ranking['order'] is None and ranking['error'] == failure
+    assert len(ranking['attempts']) == 1
     conn.close()
 
 
@@ -306,24 +367,24 @@ def test_csi1000_mapping_and_shared_total_return_entry_derivation():
             total['pre_close'] * price['open'] / price['pre_close'])
 
 
-def test_automatic_monthly_comparison_failure_never_requeues_paid_work(tmp_path, monkeypatch):
+def test_automatic_monthly_comparison_failure_never_requeues_paid_work(tmp_path, monkeypatch, comparison_replies):
     conn = db.connect(tmp_path / 'automatic.db')
     completed_pools(conn, large_passed=True, small_passed=False, small_draft=False)
     db.update_batch(conn, 1, request_id='monthly:2026-12')
     calls = []
 
-    @contextmanager
-    def single(batch_id):
-        def request(task, attempt, prompt):
-            calls.append(attempt)
-            if attempt == 2:
-                raise screening.ScreenError('offline comparison transport failure')
-            return {'text': 'malformed', 'identity': {'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest()},
-                    'usage': None, 'seconds': 0}
+    def run_batch(session, *, batch_id):
+        task = session._next()
+        assert task['task'] == 'q20_select' and task['max_attempts'] == 2
+        calls.append(1)
+        assert session._record(_comparison_call(task)) == {'attempt': 1}
+        valid = comparison_replies['q20_select']
+        invalid = valid | {'picks': [valid['picks'][0] | {'invalidation': ''}]}
+        assert session._submit(task['tool'], invalid).is_error
+        calls.append(2)
+        raise screening.ScreenError('offline comparison transport failure')
 
-        yield request
-
-    monkeypatch.setattr(screening.runner_process, 'single_batch', single)
+    monkeypatch.setattr(screening.runner_process, 'run_batch', run_batch)
     assert screening.tick(conn)
     failed = batches.load(conn.execute('SELECT * FROM batches').fetchone())
     assert failed['status'] == 'failed' and 'offline comparison transport failure' in failed['error']
