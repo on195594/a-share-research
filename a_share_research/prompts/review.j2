@@ -22,4 +22,10 @@
 {{ report }}
 {{ program_valuation }}
 # 资料
-{{ material_block }}
+{{ material_block }}{% if searches %}
+
+# 本次公告目录检索记录（程序记录的查询范围，不是事实来源，不可引证）
+{% for s in searches %}- {{ s.code }}：{{ s.since }} 至 {{ s.until }}，{{ "标题关键词「" ~ s.query ~ "」" if s.query else "全部标题" }}，扫描目录 {{ s.scanned }} 条，{{ "超出扫描上限，结果被截断" if s.truncated else "未截断" }}
+{% endfor %}结合目录标题核对“本次未发现”：未截断且公司、日期和关键词覆盖所述范围的记录，可证明查过该范围，不证明没有披露。目录中有对应公告、检索被截断或范围不符时，不能用这条记录排除披露。
+{#- 样本: 报告 187；评估 judgment-check-20261123 东缆 263、比亚迪 265（复核看不到本轮检索，对“未发现新增或更正披露”提 question，作者补写检索断言无出处被拒） -#}
+{% endif %}

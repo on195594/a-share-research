@@ -1,6 +1,7 @@
 """Render every research and comparison prompt with captured company data."""
 
 import json
+from copy import deepcopy
 
 from a_share_research import batches, drafts, model_profile, research, screening, valuation
 from a_share_research.prompts import output_schema, render_prompt
@@ -55,6 +56,42 @@ def test_material_block_boundaries():
     assert json.loads(calculations) == [r for r in mat.table if r["id"].startswith("C.")] != []
 
 
+def test_review_prompt_shows_recorded_announcement_searches_only():
+    mat = material()
+    draft = BODY[39]
+    mat.extra.update(catalog={key: item["document"] for key, item in draft["sources"].items()},
+                     question=draft["question"], gaps=[])
+    binding = ReviewLedger().request(draft, mat.snapshot()["sha256"])
+    heading = "\n\n# 本次公告目录检索记录（程序记录的查询范围，不是事实来源，不可引证）\n"
+
+    # Missing or empty coverage: nothing claims a search happened.
+    for extra in ({}, {"announcement_searches": []}):
+        case = deepcopy(mat)
+        case.extra.update(extra)
+        prompt = review_prompt(case, draft, binding)
+        assert "公告目录检索" not in prompt and prompt.endswith(case.prompt_block())
+
+    # Captured 603606 directory searches, plus one explicitly truncated variant.
+    searches = deepcopy(draft["announcement_searches"])
+    truncated = searches[1] | {"query": "更正", "truncated": True, "scanned": 150}  # Marked minimal variant.
+    mat.extra["announcement_searches"] = [*searches, truncated]
+    prompt = review_prompt(mat, draft, binding)
+    section = prompt.split(mat.prompt_block(), 1)[1]
+    lines = section.removeprefix(heading).split("\n")
+    assert section.startswith(heading) and lines[:3] == [
+        "- 603606：2026-04-30 至 2026-10-27，全部标题，扫描目录 7 条，未截断",
+        "- 603606：2026-04-30 至 2026-10-27，标题关键词「中标」，扫描目录 2 条，未截断",
+        "- 603606：2026-04-30 至 2026-10-27，标题关键词「更正」，扫描目录 150 条，超出扫描上限，结果被截断",
+    ]
+    assert "样本" not in prompt
+    assert mat.extra["announcement_searches"] == [*searches, truncated]  # Rendering does not mutate material.
+
+    # Other stages keep their inputs; the record only enters review.
+    problems = json.loads((DATA / "603606-review.json").read_text())["problems"]
+    for other in (explore_prompt(mat), compose_prompt(mat), repair_prompt(mat, draft, problems, acquire=True)):
+        assert "公告目录检索记录" not in other
+
+
 def test_program_valuation_and_event_question():
     mat = material()
     assert drafts.program_valuation(None, mat) == ""
@@ -85,11 +122,14 @@ def test_prompts_sha256_ignores_jinja_comments(tmp_path, monkeypatch):
     import hashlib
     from a_share_research import prompts
 
+    # Every real template is hashed by sorted relative path; comment stripping is pinned by the cases below.
     expected_real = hashlib.sha256()
     for path in sorted(prompts._PROMPTS.rglob("*")):
         if path.is_file():
-            expected_real.update(path.relative_to(prompts._PROMPTS).as_posix().encode() + b"\0")
-            expected_real.update(path.read_bytes() + b"\0")
+            relative = path.relative_to(prompts._PROMPTS).as_posix()
+            text = path.read_text(encoding="utf-8")
+            expected_real.update(relative.encode() + b"\0")
+            expected_real.update(prompts._strip_jinja_comments(text, relative).encode() + b"\0")
     assert prompts.prompts_sha256() == expected_real.hexdigest()
 
     template = tmp_path / "rule.j2"

@@ -81,7 +81,9 @@ def review_prompt(material: Material, report: dict, binding: dict, *,
     return render_prompt("review.j2", binding=json.dumps(binding, ensure_ascii=False),
                          report=json.dumps(report, ensure_ascii=False, indent=1),
                          program_valuation=program_valuation(report, material) if valuation is None else valuation,
-                         material_block=material.prompt_block() if material_block is None else material_block)
+                         material_block=material.prompt_block() if material_block is None else material_block,
+                         # Only the reviewer judges absence claims; the author already saw each tool result.
+                         searches=material.extra.get("announcement_searches") or [])
 
 
 def repair_prompt(material: Material, report: dict, problems: list[dict], *, acquire: bool,
