@@ -2,11 +2,6 @@
 
 `/mcp` 按调用授权开放工具。用 `ashare tools` 或 MCP 的 `tools/list` 获取实际可见的名称、输入输出 schema、读写属性与错误分类。[接入与授权](../../README.md#web-与-mcp-接入) · [CLI 配置与退出码](../../ops/clients/README.md#cli-与本机-cron)
 
-```sh
-ashare --config /absolute/private/client.json tools
-ashare --config /absolute/private/client.json call research_card --json '{"code":"600519"}'
-```
-
 `research` 和 `assistant` 均可读取、提交研究与操作月批。启用账户工具的实例另向 `assistant` 开放扫描、订阅、公司与组合总览、账户和政策工具。远程 MCP 拒绝 `owner` 凭据。调用的业务权限、参数与结果类型由[注册表](registry.py)定义，进程内可用 `registry.invoke(context, name, arguments)` 走同一套校验。
 
 ## 服务与控制
@@ -102,4 +97,4 @@ python -m a_share_research.policy.registry activate policy:IDENTITY \
 
 采集先按原凭据和 `request_id` 查找回执。已有相同请求返回原结果；同号不同内容为 `conflict`。只有确定原请求未写入且原生效指针确已变化时，才返回 `policy_activation_changed`。一般身份、权限与账户来源冲突须按各自错误处理。
 
-CLI 收到该确定拒绝时退出 20；暂停、繁忙或拒绝连接时退出 21；结果未知时退出 22，应先查回执再用原身份和原请求重试。定时任务由服务端处理政策切换后的重新受理。
+CLI 的退出码与恢复策略见[客户端手册](../../ops/clients/README.md#cli-与本机-cron)；定时任务由服务端处理政策切换后的重新受理。

@@ -2,7 +2,7 @@
 
 Reuses the live screen's filters, factors, scoring and picks; only the data is rebuilt per date:
 the pool includes later-delisted companies, industry and names (ST) come from dated records, and
-statements count only once announced (see docs/screening-experiment.md §5 for the residual bias).
+statements count only once announced (see docs/screening-experiment.md#历史回测 for the residual bias).
 Results are evidence of rule weaknesses, not of rule validity.
 
     uv run --env-file .env python -m a_share_research.backtest --out DIR [--start 201601 --end 202510]

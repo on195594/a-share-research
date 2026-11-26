@@ -75,7 +75,7 @@ RULE = {
     "min_avg_amount_yi": 1,
     "amount_days": 20,
     "momentum_days": 60, "drawdown_flag": -0.3,  # recorded and shown, never scored
-    # Recorded and shown, never scored: in the 2016–2025 backtest these picks lagged the rest (screening-experiment §5).
+    # Recorded and shown, never scored: in the 2016–2025 backtest these picks lagged the rest (screening-experiment#历史回测).
     "windfall_flag": {"min_growth": 0.5, "max_pe": 10},
     "weights": {"roe": 0.2, "cash": 0.2, "growth": 0.2, "pe": 0.4},
     "industry": "SW2021 L1",

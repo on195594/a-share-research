@@ -11,7 +11,7 @@
 | `agent-runner/` | worker 的 Node 24 TypeScript 子进程，通过宿主 pi 执行研究、复核、修补及批次比较。 |
 | `skill/`、`scripts/` | 统一外部 Agent Skill（`skill/a-share/SKILL.md`）、本机标准库 MCP 客户端（`scripts/ashare.py`）与同材料稳定性脚本（`scripts/stability.py`）。 |
 | `compose.yaml`、`ops/` | Web、worker、tools 容器部署，以及[宿主客户端](ops/clients/README.md)和 [Hermes 调度](ops/hermes/README.md)。 |
-| `docs/`、`tests/` | 专题方案与[实施计划](docs/implementation-plan.md)；回归用例、真实样本与公共支撑（见[测试说明](tests/README.md)）。 |
+| `docs/`、`tests/` | [研究规范](docs/research.md)、[初筛实验](docs/screening-experiment.md)、[判断验证](docs/judgment-validation.md)与[实施计划](docs/implementation-plan.md)；回归用例、真实样本与公共支撑（见[测试说明](tests/README.md)）。 |
 
 ## 运行
 
@@ -72,7 +72,7 @@ DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys list
 DATA_DIR=/path/to/data uv run python -m a_share_research.api_keys revoke 授权编号
 ```
 
-`ashare` 读取私有配置 `~/.config/ashare/client.json`，可用 `--config` 指定其他文件。先发现可用工具与参数，再发起调用。[客户端配置与退出码](ops/clients/README.md#cli-与本机-cron) · [业务工具](a_share_research/tools/README.md)
+`ashare` 读取私有配置 `~/.config/ashare/client.json`（可用 `--config` 指定），先发现工具与参数再调用；安装与退出码见[客户端手册](ops/clients/README.md#cli-与本机-cron)，业务参数见[工具手册](a_share_research/tools/README.md)。
 
 ```bash
 ashare tools
@@ -81,7 +81,7 @@ ashare call research_card --json '{"code":"600519"}'
 
 ## 运行身份与材料重放
 
-运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取 Wiki 方法卡。[方法库](docs/proposal.md#研究方法库)
+运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取 Wiki 方法卡。[方法库](docs/research.md#方法库与评估集)
 
 `--replay` 按原任务编号复用已保存且哈希匹配的材料，重新成文、核验与复核，生成独立任务。以下命令分别建立评估集基线并重放指定任务。
 
@@ -104,7 +104,7 @@ uv run python -m a_share_research.backup verify /absolute/private/new-backup
 uv run python -m a_share_research.backup restore /absolute/private/new-backup /absolute/private/new-recovery
 ```
 
-备份默认读取数据库同目录的 `pdf/`、`account-evidence/`，也可用 `--pdf-directory`、`--evidence-directory` 指定原件。备份与恢复均使用尚不存在的目标目录。恢复生成独立副本；切换数据前须核对序列高水位、引用和备份后的写入。[数据层治理](docs/data-foundation.md)
+备份默认读取数据库同目录的 `pdf/`、`account-evidence/`，也可用 `--pdf-directory`、`--evidence-directory` 指定原件。备份与恢复均使用尚不存在的目标目录。恢复生成独立副本；切换数据前须核对序列高水位、引用和备份后的写入。[数据层治理](ARCHITECTURE.md#数据层与迁移治理)
 
 ## 候选初筛
 
@@ -134,7 +134,7 @@ uv run python scripts/stability.py --db /path/to/app.db
 
 ### 卖方覆盖补取与区间诊断
 
-论点卡与扫描工具见[工具手册](a_share_research/tools/README.md#研究订阅与扫描)，设计见[顾问闭环方案](docs/investment-advisor.md)。worker 空闲时补取缺少的卖方覆盖数据。以下命令分别查看补取进度和计算区间条件收益诊断。
+论点卡与扫描工具见[工具手册](a_share_research/tools/README.md#研究订阅与扫描)，设计见[研究与主动跟踪规范](docs/research.md#论点卡披露扫描与买卖复核)。worker 空闲时补取缺少的卖方覆盖数据。以下命令分别查看补取进度和计算区间条件收益诊断。
 
 ```bash
 docker exec a-share-research-worker python -m a_share_research.consensus_backfill
