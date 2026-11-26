@@ -3,7 +3,7 @@
 New reports choose 现在分批, 等价格 or 回避. A next-disclosure add_trigger is optional for
 现在分批 and never blocks the first tranche. Legacy 等证据 remains readable and scoreable.
 
-Sizing and real orders stay with the policy layer and account owner. See docs/judgment-validation.md.
+Position sizing stays with the policy layer; real orders stay solely with the account owner. See docs/judgment-validation.md.
 """
 from decimal import Decimal, DecimalException, InvalidOperation, localcontext
 from math import isfinite
