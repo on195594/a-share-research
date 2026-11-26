@@ -73,7 +73,7 @@
 宿主只有 2 vCPU / 11 GiB：超过 10 秒的命令加 `nice -n 15`，预计超过 5 分钟的放后台。
 
 - 依赖：`uv sync`；增删依赖用 `uv add`/`uv remove` 并提交 `uv.lock`。
-- 测试：按受影响入口靶向运行 `nice -n 15 uv run pytest -x -q tests/<文件>`（入口表见[测试说明](tests/README.md)）；整个 `tests/` 只在跨模块改动时后台跑，不作默认验证。runner 测试 `node --test agent-runner/tests/`。改 `policy/` 时加跑 `tests/test_policy_samples.py`。
+- 测试：按受影响入口靶向运行 `nice -n 15 uv run pytest -x -q tests/<文件>`（入口表见[测试说明](tests/README.md)）；整个 `tests/` 只在跨模块改动时后台跑，不作默认验证。runner 测试 `node --test 'agent-runner/tests/*.test.ts'`。改 `policy/` 时加跑 `tests/test_policy_samples.py`。
 - 开发实例：Web 固定 `--port 8610`（Host 校验取自 `PUBLIC_BASE_URL`），启动方式见 [README 运行](README.md#运行)；停止时按 `ss -ltnp` 查到的自己的 PID，不用 `pkill -f`。
 - 删除模块或重命名后，用 `git grep -nw <名称>` 查裸名引用，导入路径搜索会漏掉字符串表。
 

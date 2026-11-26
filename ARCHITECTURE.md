@@ -28,8 +28,8 @@ Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布
 ## 研究与模型调用
 
 1. **采集与启动。** `research.execute` 在采集前保存本次运行的判断契约、模型配置档哈希和生效上限。采集完成后，worker 保存材料快照，通过 `runner_process.py` 启动一个 `node agent-runner/main.ts run` 子进程。总时限从采集前起算，到期由 worker 结束并回收子进程。
-2. **运行时与工具。** Node 24 直接运行 TypeScript。runner 从宿主 pi 安装加载 pi-agent-core、pi-ai、pi-mcp 和 pi-coding-agent 的 ModelRuntime，通过模型配置档为各阶段选取模型。worker 在子进程的标准输入输出上提供本次研究专用的 MCP 服务，runner 是客户端，从 `research://run/context` 读取提示词、材料和预算，再从工具目录选择当前角色可用的工具。模型只能调用授予该角色的研究工具。
-3. **取证与复核。** 研究员按需取证。worker 在内存中累积工具证据和调用轨迹，在提交稿件、补丁或复核决议前，以及阶段切换、停止取证和会话退出时，将有变动的材料批量写入 `runs.material`。提交稿件后先做机械检查，通过后由独立复核员提交绑定稿件与材料的整轮决议。worker 的回执判定需要修补时，runner 按回执中的修补提示（索引化原稿、问题和材料）开一段新对话。每次模型调用都由 runner 通过内部 `record_call` 将实际请求、模型身份、耗时、用量和完成原因交给 worker 记账。
+2. **运行时与工具。** Node 24 直接运行 TypeScript。runner 从宿主 pi 安装加载 pi-agent-core、pi-ai、pi-mcp、pi-schema 和 pi-coding-agent 的 ModelRuntime，通过模型配置档为各阶段选取模型。阶段的静态指令与声明的工具构成开头的 `SystemMessage` 前缀，本次运行的材料进入用户消息。worker 在子进程的标准输入输出上提供本次研究专用的 MCP 服务，runner 是客户端，从 `research://run/context` 读取提示词、材料和预算，再从工具目录选择当前角色可用的工具。模型只能调用授予该角色的研究工具。
+3. **取证与复核。** 研究员按需取证。worker 在内存中累积工具证据和调用轨迹，在提交稿件、补丁或复核决议前，以及阶段切换、停止取证和会话退出时，将有变动的材料批量写入 `runs.material`。提交稿件后先做机械检查，通过后由独立复核员提交绑定稿件与材料的整轮决议。worker 的回执判定需要修补时，runner 按回执中的修补提示（索引化原稿、问题和材料）开一段新对话。每次模型调用都由 runner 通过内部 `record_call` 将实际请求、模型身份、耗时、用量和完成原因交给 worker 记账。服务商瞬时错误在剩余调用预算内重试（取证阶段保留 `draft_call_reserve`），每次实际尝试都经 `record_call` 记账，重试退避期间的超时经 `research/model_error` 单独上报。
 4. **交付与重放。** worker 用最终稿、问题和复核绑定判定能否交付，在同一事务内保存报告、估值、冻结立场、事件证据及任务终态。历史 `--replay` 使用来源任务的冻结材料，只注册试稿、复核、修补与调用审计工具，交付前核对材料哈希。普通带请求编号的研究中断后最多重跑一次，自动月批研究中断后记为失败。
 
 批次比较通过 `batch` 子进程的 stdio MCP 逐项领取 Q20 选股、强制排序与 S10 比较任务，每项任务开启独立上下文。runner 在执行 `submit_selection` 或 `submit_ranking` 前调用 `record_call`，worker 即时保存每次尝试，核查结构化提交，返回具体问题供下一次尝试修正，并根据通过的选股结果冻结名单。各角色、阶段映射、上限和取值依据见[模型配置档](a_share_research/model_profile.json)。

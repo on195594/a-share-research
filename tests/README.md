@@ -25,7 +25,7 @@ nice -n 15 uv run pytest -x -q tests/test_account_ledger.py
 
 `test_policy_samples.py` 重放真实政策评估，只在改动 `a_share_research/policy/` 时运行；样本含真实持仓，存放在私有证据目录 `~/.local/share/a-share-research-evaluations/policy-samples/`（可用 `POLICY_SAMPLES` 指定），不进仓库。
 
-需要跨模块离线回归时运行 `nice -n 15 uv run pytest -x -q tests`。已有项目环境可用 `uv run --no-sync --offline pytest ...`。各类变更的真实样本、浏览器与模型验证要求见[验证与交付](../AGENTS.md#验证与交付)。
+需要跨模块离线回归时运行 `nice -n 15 uv run pytest -x -q tests`。已有项目环境可用 `uv run --no-sync --offline pytest ...`。`agent-runner` 的 TypeScript 测试用 `node --test 'agent-runner/tests/*.test.ts'` 运行。各类变更的真实样本、浏览器与模型验证要求见[验证与交付](../AGENTS.md#验证与交付)。
 
 ## 清理边界
 

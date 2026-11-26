@@ -24,7 +24,7 @@ python3 ops/clients/prepare.py \
 | Pi | 将 `configs/pi.mcp.json` 合入 `~/.pi/agent/mcp.json` 并启用 | `ASHARE_PI_ASSISTANT_TOKEN` | `~/.agents/skills/a-share/` |
 | AGY | 将 `configs/agy/ashare/` 放在 `~/.gemini/config/plugins/ashare/`，在插件设置中填写“A 股研究 PAT”并启用，与全局同名条目择一使用 | 插件设置变量 `ASHARE_AGY_ASSISTANT_TOKEN` | `~/.gemini/config/skills/a-share/`（CLI 同步 `~/.gemini/antigravity-cli/skills/a-share/`） |
 
-前四个宿主的模板从各自的进程环境取得令牌。AGY 插件从宿主设置取得变量。重载后在宿主内列举工具，再调用 `research_card` 核对权限与回执。共享的 Skill 目录只更新一次。
+前四个宿主的模板从各自的进程环境取得令牌。AGY 插件从宿主设置取得变量。重载后在宿主内列举工具，再调用 `research_card` 核对权限与回执。共享的 Skill 目录只更新一次。`configs/pi.mcp.json` 使用 `exposure: "codemode"`，只把各角色的入口工具保留为 `direct`（`assistant`：`research_card`、`research_company_overview`、`account_portfolio_overview`、`policy_current`；`research`：`research_card`、`research_search`）。
 
 本机常驻宿主使用各自的 0600 配置直接保存授权头。Claude、Hermes、Pi 使用上表位置的 `headers`，Codex 使用 `http_headers`，AGY 使用 `~/.gemini/config/mcp_config.json` 的全局 `serverUrl` 与 `headers` 条目。换发 PAT 时一并更新相应宿主配置与 `~/.config/ashare/<host>-assistant.json`，避免令牌进入终端输出与命令历史。
 
