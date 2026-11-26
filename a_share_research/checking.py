@@ -9,7 +9,7 @@ from a_share_research.material import Material
 
 VERDICTS = ("值得继续研究", "需要谨慎", "暂不值得")
 SECTIONS = {"risks": "主要风险与反证", "business": "业务", "financial": "财务"}
-REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a-z_]+)")
+REF_IN_TEXT = re.compile(r"(?<![A-Za-z])(?:[TM]\.[a-z_]+|C\.\d+|P\d{6}\.[TM]\.[a-z_]+|X\.(?:forecast|express)\.\d{6})")
 
 
 def _without_codes(text: str, material: Material) -> str:

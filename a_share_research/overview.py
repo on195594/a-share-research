@@ -1,5 +1,7 @@
 """Compact read models shared by authenticated owner and assistant entry points."""
 from contextlib import nullcontext
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 import json
 import sqlite3
 
@@ -146,6 +148,15 @@ def _company(conn, code, held, position, saved, history):
             gaps.append(card['check_failure']['reason'])
     elif held:
         gaps.append('暂无通过复核的研究报告')
+    # Holdings-aware research sits beside the blind card; it never replaces it.
+    aware = conn.execute(
+        "SELECT r.id, r.created_at, r.verdict, json_extract(r.body, '$.summary') AS summary,"
+        " json_extract(u.request, '$.holdings_snapshot.status') AS snapshot_status,"
+        " json_extract(u.request, '$.holdings_snapshot.frozen_at') AS frozen_at"
+        " FROM reports r JOIN runs u ON u.id = r.run_id WHERE r.company_key = ?"
+        f" AND {db.RESEARCH_ORIGINAL} AND {db.HOLDINGS_AWARE} AND r.passed = 1 AND u.status = 'done'"
+        " ORDER BY r.created_at DESC, r.id DESC LIMIT 1", (code,)).fetchone()
+    holdings_research = (dict(aware) | {'path': f"/reports/{aware['id']}"}) if aware else None
     if failure := history.announcements.get(code):
         gaps.append(failure['reason'])
 
@@ -156,7 +167,8 @@ def _company(conn, code, held, position, saved, history):
         gaps.append('本次持仓周期暂无可引用的监控评估')
     return dict(code=code, name=card['name'] if card else (position or {}).get('name'), path=path,
                 evidence_path=f'/stock/{code}/overview#evidence-{code}',
-                held=held, position=position, research=research, announcements=_announcements(events, reviews, path),
+                held=held, position=position, research=research, holdings_research=holdings_research,
+                announcements=_announcements(events, reviews, path),
                 policy=policy, gaps=gaps)
 
 
@@ -215,3 +227,74 @@ def company_overview(conn: sqlite3.Connection, code: str, *, history=None) -> di
 
 def portfolio_overview(conn: sqlite3.Connection) -> dict:
     return _overview(conn)
+
+
+def _weight(position, close, asset) -> dict:
+    """Freeze a weight only from a stored close and a verified total-asset record; never estimate one."""
+    frozen = {'close': close['last_close'], 'close_date': close['last_close_date'],
+              'total_assets': asset['portfolio_value'] if asset else None,
+              'total_assets_as_of': asset['portfolio_value_as_of'] if asset else None,
+              'total_assets_source': {k: asset[k] for k in ('source', 'record_id', 'recorded_at')} if asset else None,
+              'weight_pct': None}
+    if close['last_close'] is None:
+        return frozen | {'reason': '没有已保存的收盘价'}
+    if asset is None:
+        return frozen | {'reason': '没有已核实的账户总资产记录'}
+    if asset['portfolio_value_as_of'] is None:
+        # Record time is when the figure was saved, not when it was true.
+        return frozen | {'reason': '账户总资产记录缺少估值时点，无法核对分母时间'}
+    try:
+        total = Decimal(str(asset['portfolio_value']))
+        value = Decimal(str(position['shares'])) * Decimal(str(close['last_close']))
+    except (InvalidOperation, TypeError, ValueError):
+        return frozen | {'reason': '股数、收盘价或总资产不是有效数值'}
+    if total <= 0:
+        return frozen | {'reason': '已核实总资产不为正'}
+    return frozen | {'weight_pct': float(round(value / total * 100, 2))}
+
+
+def holdings_snapshot(conn: sqlite3.Connection, code: str, *, frozen_at: str) -> dict:
+    """The target company's position as accepted, from stored records only (no market or model calls).
+
+    held / unheld need a verified ledger binding; anything that cannot be verified is unverified, never unheld.
+    """
+    code = stock_codes.normalize_key(code)
+    snapshot = {'code': code, 'frozen_at': frozen_at}
+    try:
+        current = account_view.verified_current(conn, mirror.target_directory(conn), verify_evidence=False,
+                                                gap_code=code)
+    except policies.PolicyError as exc:
+        return snapshot | {'status': 'unverified', 'reason': str(exc)}
+    source = current['source']
+    if source['mode'] != 'ledger':
+        return snapshot | {'status': 'unverified', 'reason': '当前来源为已核实镜像，缺少绑定账本的持仓周期'}
+    account = {'account_id': source['watermark']['account_id'], 'version': source['account_version'],
+               'source_updated_at': source['updated_at']}
+    snapshot |= {'account': account, 'policy_gaps': current['policy_gaps']}
+    if code not in current['codes']:
+        return snapshot | {'status': 'unheld'}
+    position = _positions(conn, source, code).get(code)
+    if position is None:
+        return snapshot | {'status': 'unverified', 'reason': '账本显示在仓，但持仓周期投影缺少该公司'}
+    try:
+        held_days = (datetime.fromisoformat(frozen_at).date() - date.fromisoformat(str(position['buy_date'])[:10])).days
+    except (TypeError, ValueError):
+        held_days = None
+    gaps = [] if position['theses'] else ['本次持仓周期缺少在仓论点']
+    try:
+        monitor = _policy(_saved_monitor(conn), position)
+    except policies.PolicyError as exc:
+        monitor, gaps = None, gaps + [str(exc)]
+    if monitor is None:
+        gaps.append('本次持仓周期暂无可引用的监控评估')
+    close = scans._closing_prices(conn, codes=[code]).get(code) or {'last_close': None, 'last_close_date': None}
+    weight = _weight(position, close, source.get('asset'))
+    if weight['weight_pct'] is None:
+        gaps.append(f"仓位权重缺失：{weight['reason']}")
+    return snapshot | {
+        'status': 'held',
+        'position': {k: position[k] for k in ('cycle_id', 'name', 'shares', 'cost_price', 'buy_date')}
+                    | {'holding_days': held_days, 'revision_id': position['revision_id'], 'theses': position['theses']},
+        'monitor': {'evaluation_id': monitor['id'], 'as_of': monitor['as_of'],
+                    'stop_risk_pct': monitor['stop_risk_pct']} if monitor else None,
+        'weight': weight, 'gaps': gaps}

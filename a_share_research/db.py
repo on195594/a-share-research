@@ -17,6 +17,23 @@ DATA = Path(os.environ.get("DATA_DIR", "data"))  # production keeps data outside
 RESEARCH_ORIGINAL = "u.kind = 'research' AND u.replay_of IS NULL AND NOT u.is_feedback"
 FORMAL_REPORT = f"{RESEARCH_ORIGINAL} AND r.passed = 1 AND u.status = 'done'"
 
+
+def holdings_aware(alias: str = "u") -> str:
+    """A run accepted with holdings_context; older requests omit the key and are blind."""
+    return f"COALESCE(json_extract({alias}.request, '$.holdings_context'), 0) = 1"
+
+
+HOLDINGS_AWARE = holdings_aware()
+INPUT_MODE = f"CASE WHEN {HOLDINGS_AWARE} THEN 'holdings_context' ELSE 'blind' END"
+# Blind research never reads a holdings-aware run's report, feedback or methods.
+RESEARCH_BLIND = f"{RESEARCH_ORIGINAL} AND NOT ({HOLDINGS_AWARE})"
+BLIND_FORMAL_REPORT = f"{RESEARCH_BLIND} AND r.passed = 1 AND u.status = 'done'"
+
+
+def input_mode(request: dict | None) -> str:
+    """Scoring and display label of a saved request; the key is omitted (blind) unless set."""
+    return "holdings_context" if (request or {}).get("holdings_context") is True else "blind"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY,
@@ -759,15 +776,19 @@ def transaction(conn: sqlite3.Connection, *, immediate: bool = True):
 
 
 def create_run(conn: sqlite3.Connection, code: str, request_id: str | None = None,
-               kind: str = "research", name: str | None = None, status: str = "queued") -> int:
-    """Insert a queued run; a repeated request_id returns the existing run."""
+               kind: str = "research", name: str | None = None, status: str = "queued",
+               request: dict | None = None) -> int:
+    """Insert a queued run; a repeated request_id returns the existing run.
+
+    `request` lands in the same insert, so a run is never visible without the input mode it carries."""
     if request_id:
         row = conn.execute("SELECT id FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row:
             return row["id"]
     cur = conn.execute(
-        "INSERT INTO runs (request_id, kind, code, name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (request_id, kind, code, name, status, now()),
+        "INSERT INTO runs (request_id, kind, code, name, status, created_at, request) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (request_id, kind, code, name, status, now(),
+         json.dumps(request, ensure_ascii=False, sort_keys=True) if request else None),
     )
     return cur.lastrowid
 

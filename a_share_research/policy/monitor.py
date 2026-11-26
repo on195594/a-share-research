@@ -30,7 +30,7 @@ def _mirror(conn: sqlite3.Connection, directory: Path) -> dict:
 
 
 def _source(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True,
-            require_v0_projection: bool = True):
+            require_v0_projection: bool = True, gap_code: str | None = None):
     """Return the verified source; with require_v0_projection=False return (source, policy_gaps)."""
     row=conn.execute('SELECT mode,source_sha256,updated_at,watermark FROM account_source WHERE id=1').fetchone()
     if row is None or row[0]=='mirror':
@@ -40,7 +40,7 @@ def _source(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool 
     from a_share_research.policy.v0 import account_store
     try:
         return account_input.read(conn,directory,row,verify_evidence=verify_evidence,
-                                  require_v0_projection=require_v0_projection)
+                                  require_v0_projection=require_v0_projection,gap_code=gap_code)
     except (account_store.PolicyProjectionGap,account_input.AnalysisBaselineGap) as exc:
         raise registry.PolicyError(str(exc),409) from None
     except (ValueError,OSError,sqlite3.Error):

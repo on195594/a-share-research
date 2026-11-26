@@ -33,6 +33,7 @@ class ResearchRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=128)
     question: str = Field(default="", max_length=4000)
     parent_report_id: int | None = Field(default=None, gt=0)
+    holdings_context: bool = False
 
 
 class FeedbackRequest(BaseModel):
@@ -59,15 +60,54 @@ def _request_key(requester: str, request_id: str) -> str:
     return f"research:{digest}"
 
 
-def _previous_request(conn, requester: str, request_id: str):
+def _previous_request(conn, requester: str, request_id: str, *, status_only: bool = False):
     key = _request_key(requester, request_id)
+    fields = f"id, {db.INPUT_MODE} AS input_mode" if status_only else "id, kind, company_key, name, request"
     # Legacy web research and feedback shared bare IDs with system-generated tasks.
     return conn.execute(
-        "SELECT id, kind, company_key, name, request FROM runs WHERE request_id=? "
+        f"SELECT {fields} FROM runs u WHERE request_id=? "
         "OR (request_id=? AND kind='research' AND request_id NOT GLOB 'batch-*' "
         "AND request_id NOT GLOB 'scan-*' AND request_id NOT GLOB 'web-retry:*') "
         "ORDER BY request_id=? DESC LIMIT 1", (key, request_id, key),
     ).fetchone()
+
+
+def _intent(request: str | None) -> dict:
+    """What a request asked for; the server's holdings snapshot is not part of it."""
+    saved = json.loads(request or "null") or {}
+    saved.pop("holdings_snapshot", None)
+    return saved
+
+
+def run_input_mode(conn, run_id: int) -> str | None:
+    row = conn.execute(f"SELECT {db.INPUT_MODE} FROM runs u WHERE u.id=?", (run_id,)).fetchone()
+    return row[0] if row else None
+
+
+def report_input_mode(conn, report_id: int) -> str | None:
+    row = conn.execute(f"SELECT {db.INPUT_MODE} FROM reports r JOIN runs u ON u.id=r.run_id WHERE r.id=?",
+                       (report_id,)).fetchone()
+    return row[0] if row else None
+
+
+def snapshot_summary(snapshot: dict | None) -> dict | None:
+    """The frozen position in one line of fields; theses and account details stay in the stored snapshot."""
+    if not snapshot:
+        return None
+    position = snapshot.get("position") or {}
+    return {"status": snapshot["status"], "frozen_at": snapshot["frozen_at"], "reason": snapshot.get("reason"),
+            **{key: position.get(key) for key in ("shares", "cost_price", "buy_date", "holding_days")},
+            "weight_pct": (snapshot.get("weight") or {}).get("weight_pct"),
+            "weight_reason": (snapshot.get("weight") or {}).get("reason"),
+            "thesis_versions": [thesis["version"] for thesis in position.get("theses", [])],
+            "monitor_evaluation_id": (snapshot.get("monitor") or {}).get("evaluation_id")}
+
+
+def mode_view(request: str | None) -> dict:
+    saved = json.loads(request or "null") or {}
+    mode = db.input_mode(saved)
+    return {"input_mode": mode,
+            "holdings_snapshot": snapshot_summary(saved.get("holdings_snapshot")) if mode != "blind" else None}
 
 
 def _form_query(query: str) -> str:
@@ -79,15 +119,17 @@ def run_link(run_id: int) -> dict:
 
 
 def request_research(conn, requester: str, request_id: str, code: str, *, question: str = "",
-                     parent_report_id: int | None = None, form: bool = False, again: bool = False) -> dict:
+                     parent_report_id: int | None = None, holdings_context: bool = False,
+                     form: bool = False, again: bool = False) -> dict:
     """Replay the accepted intent before consulting the directory, including browser name searches."""
     query = _form_query(code) if form else code
     previous = _previous_request(conn, requester, request_id)
     if previous:
-        saved = json.loads(previous["request"] or "null") or {}
+        saved = _intent(previous["request"])
         queries = (previous["company_key"], saved.get("company_query", previous["name"]))
         if (previous["kind"] != "research" or query not in queries or saved.get("feedback") or saved.get("events")
-                or saved.get("question", "") != question.strip() or saved.get("parent_report_id") != parent_report_id):
+                or saved.get("question", "") != question.strip() or saved.get("parent_report_id") != parent_report_id
+                or db.input_mode(saved) != db.input_mode({"holdings_context": holdings_context})):
             raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
         return run_link(previous["id"])
 
@@ -108,33 +150,39 @@ def request_research(conn, requester: str, request_id: str, code: str, *, questi
         if form:
             return {"q": code, "error": f"{name}属于银行、保险、券商等金融类公司，暂不支持研究。"}
         raise RequestError("金融类公司暂不支持研究")
-    if form and not again and not question.strip() and parent_report_id is None:
+    if form and not again and not question.strip() and parent_report_id is None and not holdings_context:
         from a_share_research import reading
         if recent := reading.recent_report(conn, company["code"]):
             return {"q": company["code"], "recent": recent}
     run_id = submit(conn, company["code"], request_id, name=name, question=question, parent_report_id=parent_report_id,
-                    requester=requester, company_query=query if query != company["code"] else None)
+                    holdings_context=holdings_context, requester=requester,
+                    company_query=query if query != company["code"] else None)
     return run_link(run_id)
 
 
 def request_feedback(conn, requester: str, report_id: int, request_id: str, location: str, text: str,
-                     *, code: str = "") -> dict:
+                     *, code: str = "", holdings_snapshot: dict | None = None) -> dict:
     feedback = {"location": location, "text": text.strip()}
     previous = _previous_request(conn, requester, request_id)
     if previous:
-        saved = json.loads(previous["request"] or "null") or {}
+        saved = _intent(previous["request"])
         if (previous["kind"] != "research" or (code and previous["company_key"] != code)
                 or saved.get("parent_report_id") != report_id or saved.get("feedback") != feedback):
             raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
         run_id = previous["id"]
     else:
-        run_id = submit(conn, code, request_id, requester=requester, parent_report_id=report_id, feedback=feedback)
+        run_id = submit(conn, code, request_id, requester=requester, parent_report_id=report_id, feedback=feedback,
+                        holdings_snapshot=holdings_snapshot)
     return run_link(run_id)
 
 
 def submit(conn, code: str, request_id: str, *, name: str | None = None,
            question: str = "", parent_report_id: int | None = None, feedback: dict | None = None,
-           events: list[dict] | None = None, requester: str | None = None, company_query: str | None = None) -> int:
+           events: list[dict] | None = None, requester: str | None = None, company_query: str | None = None,
+           holdings_context: bool | None = None, holdings_snapshot: dict | None = None) -> int:
+    """Queue one research run. holdings_context=None follows the parent for feedback and is blind otherwise;
+    a holdings-aware run freezes the target's position in the same write transaction unless a retry passes
+    the original snapshot."""
     valid_code = stock_codes.normalize_key(code) if stock_codes.CODE_RE.fullmatch(code) else ""
     if (not valid_code and (code or parent_report_id is None)) or not 1 <= len(request_id) <= 128 or len(question) > 4000:
         raise RequestError("需要 6 位公司代码、1–128 字请求编号；问题不超过 4000 字")
@@ -142,8 +190,8 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     question = question.strip()
     if parent_report_id is not None:
         parent = conn.execute(
-            "SELECT r.company_key, r.name, r.passed, r.body, u.status, u.kind FROM reports r"
-            " JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (parent_report_id,),
+            f"SELECT r.company_key, r.name, r.passed, r.body, u.status, u.kind, {db.INPUT_MODE} AS input_mode"
+            " FROM reports r JOIN runs u ON u.id = r.run_id WHERE r.id = ?", (parent_report_id,),
         ).fetchone()
         if parent is None:
             raise RequestError("原报告不存在", 404)
@@ -155,6 +203,13 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
         name = name or parent["name"]
         if parent["company_key"] != code:
             raise RequestError("原报告与研究公司不一致")
+        parent_aware = parent["input_mode"] == "holdings_context"
+        if feedback is not None:
+            if holdings_context is not None and holdings_context != parent_aware:
+                raise RequestError("纠错沿用原报告的输入模式，不能切换 holdings_context", 409)
+            holdings_context = parent_aware
+        elif parent_aware and not holdings_context:
+            raise RequestError("知仓报告不能作为盲研究的追问基础；请改用知仓模式或选择盲研究报告", 409)
         if feedback is not None:
             location, text = feedback.get("location", ""), feedback.get("text", "").strip()
             body = report_body.load(parent["body"])
@@ -177,19 +232,35 @@ def submit(conn, code: str, request_id: str, *, name: str | None = None,
     if events:
         # Frozen public announcement identities from the scanner; older requests keep their exact payload.
         request["events"] = events
-    payload = json.dumps(request, ensure_ascii=False, sort_keys=True)
-    # The unique request_id resolves simultaneous submissions without a read/insert race.
-    row = conn.execute(
-        "INSERT INTO runs (request_id, kind, code, name, status, created_at, request)"
-        " VALUES (?, 'research', ?, ?, 'queued', ?, ?) ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, code, name, db.now(), payload),
-    ).fetchone()
-    if row:
-        return row["id"]
-    previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-    if previous["kind"] != "research" or previous["company_key"] != code or previous["request"] != payload:
-        raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
-    return previous["id"]
+    if holdings_context:
+        # Blind requests omit the key, so their payloads stay byte-identical to earlier ones.
+        request["holdings_context"] = True
+    elif holdings_snapshot is not None:
+        raise RequestError("盲研究不能携带持仓快照")
+    # Only a freshly captured snapshot needs a write transaction around the account read.
+    capture = holdings_context and holdings_snapshot is None
+    with db.transaction(conn) if capture and not conn.in_transaction else nullcontext():
+        created_at = db.now()
+        payload = request
+        if holdings_context:
+            from a_share_research import overview  # account reads stay out of service import time
+            previous = conn.execute("SELECT id FROM runs WHERE request_id=?", (request_id,)).fetchone()
+            if previous is None:
+                snapshot = (overview.holdings_snapshot(conn, code, frozen_at=created_at)
+                            if capture else holdings_snapshot)
+                payload = request | {"holdings_snapshot": snapshot}
+        row = conn.execute(
+            "INSERT INTO runs (request_id, kind, code, name, status, created_at, request)"
+            " VALUES (?, 'research', ?, ?, 'queued', ?, ?) ON CONFLICT(request_id) DO NOTHING RETURNING id",
+            (request_id, code, name, created_at, json.dumps(payload, ensure_ascii=False, sort_keys=True)),
+        ).fetchone()
+        if row:
+            return row["id"]
+        previous = conn.execute("SELECT id, kind, company_key, request FROM runs WHERE request_id=?",
+                                (request_id,)).fetchone()
+        if previous["kind"] != "research" or previous["company_key"] != code or _intent(previous["request"]) != request:
+            raise RequestError("请求编号已用于不同内容，请换一个编号", 409)
+        return previous["id"]
 
 
 def ready(status: str, passed: int) -> bool:
@@ -220,8 +291,10 @@ def retry_feedback(conn, run_id: int, request_id: str, *, requester: str) -> int
     if payload is None:
         raise RequestError('仅支持重试已失败且保留完整原反馈的核查任务', 409)
     feedback = payload['feedback']
+    # A holdings-aware check retries on the snapshot it was accepted with.
     return request_feedback(conn, requester, payload['parent_report_id'], request_id,
-                            feedback['location'], feedback['text'], code=run['company_key'])['run_id']
+                            feedback['location'], feedback['text'], code=run['company_key'],
+                            holdings_snapshot=(json.loads(run['request'] or '{}') or {}).get('holdings_snapshot'))['run_id']
 
 
 def retry_view(run) -> dict:
@@ -251,7 +324,8 @@ def retry_run(conn, run_id: int) -> int:
         payload = json.loads(run['request'] or '{}') or {}
         retried = submit(conn, run['code'], key, name=run['name'], question=payload.get('question') or '',
                          parent_report_id=payload.get('parent_report_id'), feedback=payload.get('feedback'),
-                         events=payload.get('events'))
+                         events=payload.get('events'), holdings_context=payload.get('holdings_context') is True,
+                         holdings_snapshot=payload.get('holdings_snapshot'))
         # Scan events follow the retry, so their pending state tracks the task that can still finish.
         conn.execute('UPDATE scan_events SET run_id=? WHERE run_id=?', (retried, run_id))
         return retried
@@ -292,6 +366,7 @@ def report_view(conn: sqlite3.Connection, report_id: int, *, compact: bool = Fal
             "name": row["name"], "created_at": row["created_at"], "status": row["status"],
             "passed": bool(row["passed"]), "error": row["error"],
             "question": (json.loads(row["request"] or "{}") or {}).get("question", ""),
+            **mode_view(row["request"]),
             "report": body if row["passed"] else {key: body.get(key, default) for key, default in
                                                    zip(report_body.FAILED_FIELDS, ({}, None, []))} |
                                                    ({'producer': body['producer']} if 'producer' in body else {}),
@@ -337,14 +412,15 @@ def card_checks(conn: sqlite3.Connection, report_id: int) -> list[dict]:
 
 
 # Resolve the winning row before projecting JSON, even when several reports match.
+# Cards, scan reviews and entry decisions read blind research only; holdings-aware reports sit beside them.
 LATEST_FORMAL_REPORT_ID = (
     "SELECT r.id FROM reports r JOIN runs u ON u.id=r.run_id "
-    f"WHERE r.company_key=? AND {db.FORMAL_REPORT} ORDER BY r.created_at DESC,r.id DESC LIMIT 1"
+    f"WHERE r.company_key=? AND {db.BLIND_FORMAL_REPORT} ORDER BY r.created_at DESC,r.id DESC LIMIT 1"
 )
 
 
 def company_card(conn: sqlite3.Connection, code: str, *, scan_id: int | None = None, history=None, reviews=None) -> dict:
-    """A2 read-only projection of the latest reviewed, non-feedback company research."""
+    """A2 read-only projection of the latest reviewed, non-feedback blind company research."""
     if not stock_codes.KEY_RE.fullmatch(code):
         raise RequestError("公司代码必须为六位数字")
     keys = ",".join(f"'{key}'" for key in report_body.CARD_FIELDS)
@@ -541,7 +617,7 @@ def run_view(conn, *, run_id: int | None = None, request_id: str | None = None) 
         if key not in body and key in metadata | extra:
             body[key] = (extra | metadata)[key]
     public = {key: row[key] for key in row.keys() if key not in {"report_body", "material", "identity", "request"}}
-    return {"version": VERSION, **public,
+    return {"version": VERSION, **public, **mode_view(row["request"]),
             "budget": run_budget(conn, row["id"]),
             "diagnostics": diagnostics(row["status"], body, gaps=extra.get("gaps"),
                                        announcement_searches=extra.get("announcement_searches"),
@@ -553,7 +629,8 @@ def run_summary(conn, run_id: int, *, include_gaps: bool = False) -> dict:
     row = reading.api_run(conn, run_id, include_gaps=include_gaps)
     if row is None:
         raise RequestError("任务不存在", 404)
-    result = {"version": VERSION, **dict(row)}
+    result = {"version": VERSION, **dict(row),
+              **mode_view(conn.execute("SELECT request FROM runs WHERE id=?", (run_id,)).fetchone()[0])}
     if include_gaps:
         gaps = json.loads(result["gaps"] or "[]")
         result["gaps"] = ([row["error"]] if row["error"] else []) + gaps
@@ -561,14 +638,19 @@ def run_summary(conn, run_id: int, *, include_gaps: bool = False) -> dict:
 
 
 def research_status(conn, *, requester: str | None = None, request_id: str | None = None,
-                    run_id: int | None = None, compact: bool = True) -> dict:
+                    run_id: int | None = None, compact: bool = True, blind_only: bool = False) -> dict:
     if (run_id is None) == (request_id is None):
         raise RequestError("run_id 与 request_id 须提供且仅提供一个")
     if request_id is not None:
-        previous = _previous_request(conn, requester, request_id)
+        previous = _previous_request(conn, requester, request_id, status_only=True)
         if previous is None:
             raise RequestError("研究任务不存在；未找到不代表原提交确定失败，请勿换编号重复提交", 404)
         run_id = previous["id"]
+        mode = previous["input_mode"]
+    else:
+        mode = run_input_mode(conn, run_id) if blind_only else None
+    if blind_only and mode == "holdings_context":
+        raise RequestError("知仓研究仅限启用账户工具的助手凭据", 403)
     if not compact:
         return run_view(conn, run_id=run_id)
     summary = run_summary(conn, run_id, include_gaps=True)

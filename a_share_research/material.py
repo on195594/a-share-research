@@ -9,6 +9,7 @@ from typing import Self
 import pandas as pd
 
 from a_share_research import db, sources, evidence, stock_codes
+from a_share_research.disclosure_checks import IDENTITY_CONFLICT_REASON
 from a_share_research.prompts import render_prompt
 from a_share_research.sources import Document
 from a_share_research.evidence import material_hash
@@ -41,6 +42,13 @@ MARKET = [
     ("dv_ttm", "股息率TTM", "%", 1),
     ("total_mv", "总市值", "亿元", 1e4),  # TuShare reports 万元
 ]
+# Ratios whose source definition this table cannot recompute; material_block.j2 words the caveat.
+SOURCE_DEFINED_RATIOS = ("pb", "dv_ttm")
+# disclosure_checks metric -> (label, TuShare column per estimate source)
+ESTIMATE_METRICS = {
+    "T.net_profit": ("归母净利润", {"forecast": ("net_profit_min", "net_profit_max"), "express": ("n_income",)}),
+    "T.revenue": ("营业收入", {"express": ("revenue",)}),
+}
 
 
 class ScopeError(Exception):
@@ -100,10 +108,26 @@ class Material:
                     pending[key] = self.extra[key]
         return render_prompt(
             "material_block.j2", name=self.name, code=self.code, market_date=self.market_date, table=self.table,
+            holdings_snapshot=holdings_projection(self.extra.get("holdings_snapshot")),
             sources=json.dumps(evidence.projection(self.source_registry(), catalog=True), ensure_ascii=False),
             pending=json.dumps(pending, ensure_ascii=False) if pending is not None else None,
             calculations=json.dumps([r for r in self.table if r["id"].startswith("C.")], ensure_ascii=False),
         )
+
+
+def holdings_projection(snapshot: dict | None) -> dict | None:
+    """The researcher sees the position facts, not account identity, ledger ids or account size."""
+    if not snapshot:
+        return None
+    position = snapshot.get("position")
+    weight = snapshot.get("weight")
+    view = {k: snapshot[k] for k in ("status", "reason", "monitor", "gaps") if snapshot.get(k) is not None}
+    if position:
+        view["position"] = {k: position[k] for k in ("shares", "cost_price", "buy_date", "holding_days", "theses")}
+    if weight:
+        view["weight"] = {k: weight[k] for k in ("weight_pct", "close", "close_date", "total_assets_as_of", "reason")
+                          if k in weight}
+    return {"status": snapshot["status"], "facts": json.dumps(view, ensure_ascii=False)}
 
 
 def replay_material(conn, source_run: int) -> Material:
@@ -189,10 +213,68 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
             value = Decimal(str(market[key])) / Decimal(str(divisor))
-            table.append({"id": f"M.{key}", "label": label, "unit": unit,
-                          "values": {market["trade_date"]: f"{value:.2f}"},
-                          "exact_values": {market["trade_date"]: str(value)}})
+            row = {"id": f"M.{key}", "label": label, "unit": unit,
+                   "values": {market["trade_date"]: f"{value:.2f}"},
+                   "exact_values": {market["trade_date"]: str(value)}}
+            if key in SOURCE_DEFINED_RATIOS:
+                row["basis_meta"] = {"ratio": key, "latest_period": latest}
+            table.append(row)
     return table
+
+
+def estimate_source(title: str) -> str | None:
+    """The one structured source an announcement title names; None when it names both or neither."""
+    express = "快报" in title
+    forecast = any(word in title for word in ("预告", "预增", "预减", "预亏", "预盈"))
+    return None if express == forecast else "express" if express else "forecast"
+
+
+def estimate_rows(observations: list[dict], *, code: str, period: str, announced: str,
+                  revenue_basis: tuple[bool | None, str | None], retrieved_at: str,
+                  expected_source: str | None = None) -> tuple[list[dict], str | None]:
+    """Citable rows for the one forecast or express published on `announced`, or why there are none.
+
+    Takes disclosure_checks' normalized observations; carries disclosed figures only, never a judgment.
+    `expected_source` keeps a same-day record of the other kind from standing in for this announcement.
+    `revenue_basis` is disclosure_checks.revenue_basis for this company and period.
+    """
+    wanted = {"forecast": "业绩预告", "express": "业绩快报"}.get(expected_source, "预告或快报")
+    matches = [o for o in observations if o["period"] == period and o["announced"] == announced
+               and expected_source in (None, o["source"])]
+    if not matches:
+        return [], f"结构化数据中没有公告日 {announced}、期间 {period} 的{wanted}记录"
+    if len(matches) > 1:
+        return [], f"公告日 {announced}、期间 {period} 匹配到 {len(matches)} 条结构化记录，无法确定对应本公告"
+    observation = matches[0]
+    if observation.get("type_conflict") or any(
+            v.get("reason") == IDENTITY_CONFLICT_REASON for v in observation["values"].values()):
+        return [], IDENTITY_CONFLICT_REASON
+    source = observation["source"]
+    kind = {"forecast": "业绩预告", "express": "业绩快报"}[source]
+    detail = f"，类型 {observation['type']}" if observation.get("type") else ""
+    rows = []
+    for metric, interval in observation["values"].items():
+        name, columns = ESTIMATE_METRICS[metric]
+        bounds = ((interval["low"], "下限"), (interval["high"], "上限")) if source == "forecast" else (
+            (interval["low"], ""),)
+        for (number, bound), column in zip(bounds, columns[source]):
+            if number is None:
+                continue
+            matched, reference = revenue_basis
+            note = render_prompt(
+                "estimate_note.j2", tolerance=f"{t.normalize():f}" if (t := interval.get("tolerance")) else None,
+                revenue=source == "express" and metric == "T.revenue",
+                period=period, matched=matched, reference=reference)
+            row = {"id": f"X.{source}.{code}.{period}.{announced}.{column}",
+                   "label": f"{kind}·{name}{bound}（{announced} 公告{detail}）", "unit": "亿元",
+                   "values": {period: f"{number:.4f}"}, "exact_values": {period: str(number)},
+                   "source": {"provider": "TuShare", "api": source, "field": column, "code": code,
+                              "params": {"period": period.replace("-", "")}, "announced": announced,
+                              "identity": observation["identity"], "retrieved_at": retrieved_at}}
+            if note:
+                row["note"] = note
+            rows.append(row)
+    return rows, None if rows else "结构化记录未给出可用数值"
 
 
 def financial_series(fin: dict[str, pd.DataFrame], code: str, retrieved_at: str) -> dict:

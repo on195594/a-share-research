@@ -80,7 +80,7 @@ def pe_percentile_labels(pe: dict[str, float | None], trade_days: list[str], *,
 
 def observations(reports: list[dict], trade_days: list[str], closes: dict[str, float],
                  pe_labels: dict[str, str | None]) -> list[dict]:
-    """One company's report windows and independent segment starts for both rules."""
+    """One company's report windows (in one input mode) and independent segment starts for both rules."""
     schedule = {}
     for report in sorted(reports, key=lambda r: (r["completed"], r["id"])):
         if entry := validation.entry_day(report["completed"], trade_days):
@@ -132,13 +132,17 @@ def summarize(rows: list[dict]) -> list[dict]:
     """Per rule/zone/horizon, show empty/pending groups rather than implying zero returns."""
     groups = {}
     for row in rows:
-        groups.setdefault((row.get("profile_sha256") or "未记录", row["rule"], row["zone"]), []).append(row)
+        groups.setdefault((row.get("contract"), row.get("profile_sha256") or "未记录", validation.row_mode(row), row["rule"], row["zone"]),
+                          []).append(row)
     out = []
-    for (profile, rule, zone), group in sorted(groups.items()):
+    partitioned = len({(r.get("contract"), validation.row_mode(r)) for r in rows}) > 1
+    for (contract, profile, mode, rule, zone), group in sorted(groups.items(), key=lambda item: str(item[0])):
+        identity = {"contract": contract, "input_mode": mode} if partitioned or mode != "blind" else {}
         for horizon in HORIZONS:
             done = [r for r in group if horizon in r["returns"]]
             values = [r["returns"][horizon]["excess"] for r in done]
-            out.append({"profile_sha256": profile, "rule": rule, "zone": zone, "horizon": horizon, "n": len(done),
+            out.append({**identity, "profile_sha256": profile, "rule": rule, "zone": zone,
+                        "horizon": horizon, "n": len(done),
                         "companies": len({r["code"] for r in done}), "observations": len(group),
                         "pending": len(group) - len(done),
                         "periods": sorted({r["period"] for r in done if r.get("period")}),
@@ -150,6 +154,17 @@ def summarize(rows: list[dict]) -> list[dict]:
 
 
 def diagnostics(rows: list[dict]) -> dict:
+    """Blind observations, with holdings-aware ones counted apart; the maturity gate never pools them."""
+    contracts = {row.get("contract") for row in rows}
+    if len(contracts) > 1:
+        return {"contract_groups": [
+            {"contract": contract, **diagnostics([r for r in rows if r.get("contract") == contract])}
+            for contract in sorted(contracts, key=lambda c: -1 if c is None else c)]}
+    blind, aware = validation.split_modes(rows)
+    return _diagnostics(blind) | ({"holdings_context": _diagnostics(aware)} if aware else {})
+
+
+def _diagnostics(rows: list[dict]) -> dict:
     """Count opposing directions once per company/day, plus correlated observations.
 
     v1-versus-PE metrics ignore v2 shadow rows; v2 only adds its own maturity and v1-difference counts.
@@ -269,13 +284,19 @@ def load_market(pro, reports: list[dict], today: date) -> tuple[list[str], dict,
 def diagnose(reports: list[dict], trade_days: list[str], market: dict, benchmark: dict) -> dict:
     """Offline-capable composition: pure analysis of already loaded inputs."""
     rows = []
-    for code in sorted({r["code"] for r in reports}):
+    # Holdings-aware research forms its own report windows, never superseding a blind window.
+    windows = {}
+    for report in reports:
+        windows.setdefault((report["code"], report.get("contract"), validation.row_mode(report)), []).append(report)
+    for (code, _, _), group in sorted(windows.items(), key=lambda item: str(item[0])):
         data = market[code]
         labels = pe_percentile_labels(data["pe"], trade_days)
-        company_rows = observations([r for r in reports if r["code"] == code], trade_days, data["close"], labels)
+        company_rows = observations(group, trade_days, data["close"], labels)
         rows.extend(score_observations(company_rows, trade_days, data["adjusted"], benchmark))
+    blind, aware = validation.split_modes(reports)
     return {"benchmark": validation.BENCHMARK, "benchmark_last": max(benchmark, default=None),
-            "reports": len(reports), "contracts": validation.contract_counts(reports), "method": METHOD, "rows": rows,
+            "reports": len(blind), **({"holdings_context_reports": len(aware)} if aware else {}),
+            "contracts": validation.contract_counts(reports), "method": METHOD, "rows": rows,
             "summary": summarize(rows), "diagnostics": diagnostics(rows)}
 
 
@@ -292,7 +313,9 @@ def main() -> None:
     reports = load_reports(args.database, args.contract)
     calendar, market, benchmark = load_market(market_gateway.client() if reports else None, reports, datetime.now(SHANGHAI).date())
     result = diagnose(reports, calendar, market, benchmark)
-    log.info("A3 区间条件收益诊断：%s 份有效报告，基准 %s，截至 %s", result["reports"], validation.BENCHMARK, result["benchmark_last"])
+    log.info("A3 区间条件收益诊断：%s 份有效报告%s，基准 %s，截至 %s", result["reports"],
+             f"（知仓 {result['holdings_context_reports']} 份单列）" if "holdings_context_reports" in result else "",
+             validation.BENCHMARK, result["benchmark_last"])
     log.info("%s", validation.contract_line(reports))
     for description in METHOD.values():
         log.info("%s", description)

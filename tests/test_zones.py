@@ -259,3 +259,16 @@ def test_v2_shadow_rule_scores_beside_v1_without_touching_v1_and_pe_diagnostics(
     assert with_v2["v2_observations"] == len(shadow)
     assert with_v2["v2_differs_from_v1"] == sum(r["zone"] != r["valuation_zone"] for r in shadow) > 0
     assert any(g["rule"] == "valuation-v2" for g in zones.summarize(scored_rows))
+
+
+def test_maturity_threshold_is_per_contract_and_mode():
+    # Count-only variant: repeat a captured observation and mark its return as matured.
+    # No return value enters a performance assessment.
+    (original,) = scored()
+    row = original | {"contract": 12, "returns": {"120d": original["returns"]["latest"]}}
+    aware = row | {"source": "holdings_context"}
+    other = row | {"contract": 11}
+    by_contract = {g["contract"]: g for g in zones.diagnostics([row, aware, other] * 30)["contract_groups"]}
+    for group in (by_contract[11], by_contract[12], by_contract[12]["holdings_context"]):
+        assert group["matured_120d"] == 30 and group["evidence"] == "证据不足"
+    assert zones.diagnostics([row] * 60)["evidence"] != "证据不足"

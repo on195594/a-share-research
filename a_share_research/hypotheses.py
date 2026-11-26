@@ -110,20 +110,22 @@ def summarize_h1(results: list[dict]) -> list[dict]:
 
 
 def load_samples(conn) -> list[dict]:
-    """Mirror service.company_card eligibility/order as-of run creation without changing live services."""
+    """Mirror service.company_card eligibility/order (blind reports) as-of run creation without changing live services."""
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT r.id AS report,r.run_id,r.code,r.company_key,u.created_at AS created,"
         "COALESCE(u.finished_at,r.created_at) AS completed,r.body,e.announced,e.doc_key "
         "FROM scan_events e JOIN runs u ON u.id=e.run_id JOIN reports r ON r.run_id=u.id "
         "WHERE e.action='queued_review' AND r.passed=1 AND e.company_key=r.company_key "
+        f"AND NOT ({db.HOLDINGS_AWARE}) "
         "ORDER BY r.id,e.announced,e.id").fetchall()
     grouped = {}
     for r in rows:
         if r['report'] not in grouped:
             prior = conn.execute(
                 "SELECT r.id,r.body FROM reports r JOIN runs u ON u.id=r.run_id "
-                f"WHERE r.company_key=? AND {db.FORMAL_REPORT} "
+                # Follow-up and prior share the blind input mode, as on the live card.
+                f"WHERE r.company_key=? AND {db.BLIND_FORMAL_REPORT} "
                 "AND julianday(COALESCE(u.finished_at,r.created_at)) < julianday(?) "
                 "ORDER BY r.created_at DESC,r.id DESC LIMIT 1", (r['company_key'], r['created'])).fetchone()
             grouped[r['report']] = {k: r[k] for k in ('report', 'run_id', 'code', 'created', 'completed', 'announced')}

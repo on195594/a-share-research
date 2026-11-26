@@ -778,6 +778,32 @@ def test_disclosure_scan_append_only_pending_retry_and_cooldown(conn, disclosure
     assert not [n for n in repeated['notify'] if n['kind'] == 'disclosure_check']
 
 
+@pytest.mark.parametrize('has_annual_statement', [True, False])
+def test_scan_express_revenue_uses_each_observations_period(conn, disclosure_replay, has_annual_statement):
+    code, body, source = disclosure_replay
+    # Route captured 605016 figures through the replay card. Change only routing, period and basis.
+    capture = DISCLOSURES['tushare']
+    express = capture['express']['605016.SH'][0] | {'ts_code': code + '.SH'}
+    annual = capture['income']['605016.SH'][0] | {'ts_code': code + '.SH'}
+    half = annual | {'end_date': '20260630'}
+    if has_annual_statement:
+        half['revenue'] -= 1
+    checkpoint = body['checkpoints'][0]
+    body['checkpoints'] = [checkpoint | {'forecast': checkpoint['forecast'] | {'metric': 'T.revenue', 'period': p}}
+                           for p in ('2025-12-31', '2026-06-30')]
+    report_id = service.company_card(conn, code)['report_id']
+    conn.execute('UPDATE reports SET body=? WHERE id=?', (json.dumps(body), report_id))
+    source.disclosures = lambda *_: {
+        'forecast': [], 'periodic': [], 'express': [express, express | {'end_date': '20260630'}],
+        'income': [annual, half] if has_annual_statement else [half]}
+    run_scan(conn, source)
+    result = {c['period']: c for c in scans.stored_checks(conn, report_id) if c['metric'] == 'T.revenue'}
+    for period, confirmed in [('2025-12-31', has_annual_statement), ('2026-06-30', not has_annual_statement)]:
+        assert (result[period]['reason'] is None) == confirmed
+        if not confirmed:
+            assert result[period]['outcome'] == 'undetermined'
+
+
 def test_disclosure_failure_does_not_change_announcement_window(conn, disclosure_replay):
     code, _, source = disclosure_replay
     # Use 603606's captured close only as an explicit identity variant so this test

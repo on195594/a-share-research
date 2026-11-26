@@ -20,5 +20,6 @@ ENV.globals.update(report_source_view=report_source_view, citation_link=citation
 def render(name: str, **context) -> str:
     if name == 'report.html':
         context['evidence'] = reading.evidence_context(context['body'], context['report'].get('period'))
+        context.setdefault('mode', {'input_mode': 'blind', 'holdings_snapshot': None})
     return ENV.get_template(name).render(csrf="", steps={}, request_id="r", **context)
 

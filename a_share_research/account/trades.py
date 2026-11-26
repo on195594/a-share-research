@@ -23,7 +23,7 @@ def research_available_at_trade(conn: sqlite3.Connection, account_id: str) -> li
                substr(available.created_at, 1, 10) = substr(t.occurred_at, 1, 10) AS same_day
           FROM trades t LEFT JOIN reports available ON available.id = (
                SELECT r.id FROM reports r JOIN runs u ON u.id = r.run_id
-                WHERE r.company_key = t.company_key AND {db.FORMAL_REPORT}
+                WHERE r.company_key = t.company_key AND {db.BLIND_FORMAL_REPORT}
                   AND r.created_at <= t.occurred_at AND (u.finished_at IS NULL OR u.finished_at <= t.occurred_at)
                 ORDER BY r.created_at DESC, r.id DESC LIMIT 1
           )

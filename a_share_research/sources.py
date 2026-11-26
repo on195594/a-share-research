@@ -268,6 +268,23 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
     }
 
 
+def earnings_estimates(code: str, period: str) -> dict[str, list[dict]]:
+    """Raw TuShare forecast and express rows of one period, with the income rows that fix the revenue basis."""
+    pro = market.client()
+    ts_code = to_tushare_stock_code(code)
+
+    def rows(api: str, **params) -> list[dict]:
+        frame = market.query(pro, api, ts_code=ts_code, **params)
+        return frame.astype(object).where(frame.notna(), None).to_dict(orient="records")
+
+    result = {api: rows(api, period=period.replace("-", "")) for api in ("forecast", "express")}
+    result["income"] = []
+    if result["express"]:
+        # An absent target statement leaves the latest disclosed basis as a dated reference only.
+        result["income"] = rows("income", period=period.replace("-", ""), report_type="1") or rows("income", report_type="1")
+    return result
+
+
 def valuation(code: str) -> dict:
     """Latest daily_basic row: close, PE(TTM), PB, dividend yield, market cap."""
     end = datetime.now(SHANGHAI).date()

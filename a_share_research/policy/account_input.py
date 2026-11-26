@@ -114,7 +114,7 @@ def _rows(conn, sql, args=()):
     return [dict(zip(fields,row)) for row in cursor]
 
 
-def _read(conn, directory, row, *, verify_evidence, require_v0_projection):
+def _read(conn, directory, row, *, verify_evidence, require_v0_projection, gap_code):
     from a_share_research.account import cycle_analysis, evidence, ledger, projection_ids
     from a_share_research.account.reconciliation import Event, Opening, identity, project, reconcile
     from a_share_research.policy.v0 import account_store
@@ -266,27 +266,29 @@ def _read(conn, directory, row, *, verify_evidence, require_v0_projection):
             raise gap
         if unanalysed:
             raise AnalysisBaselineGap(account,unanalysed)
-    gaps=[str(gap)] if gap is not None else []
+    # A company-scoped read names only that company's gaps; other holdings' codes and cycles stay out.
+    gaps=[str(gap)] if gap is not None and gap_code in (None, gap.code) else []
     # The cycle named by the framework gap is repaired first; do not give it a second instruction.
-    pending=[c for c in unanalysed if gap is None or c['cycle_id']!=gap.cycle_id]
+    pending=[c for c in unanalysed if (gap is None or c['cycle_id']!=gap.cycle_id) and gap_code in (None, c['code'])]
     if pending: gaps.append(str(AnalysisBaselineGap(account,pending)))
     return result, gaps
 
 
 def read(conn: sqlite3.Connection, directory: Path, row, *, verify_evidence: bool = True,
-         require_v0_projection: bool = True):
+         require_v0_projection: bool = True, gap_code: str | None = None):
     """Verify the ledger snapshot; display reads may inspect file metadata only.
 
     Evaluation inputs require a complete v0 projection and return the source; a missing
     v0 context raises PolicyProjectionGap, and a missing new-cycle analysis raises
     AnalysisBaselineGap, only after every other check passed. Display reads pass
-    require_v0_projection=False and get (source, policy_gaps) instead.
+    require_v0_projection=False and get (source, policy_gaps) instead, limited to
+    gap_code's company when given.
     """
     from a_share_research.policy.v0 import account_store
     try:
         with nullcontext() if conn.in_transaction else db.transaction(conn,immediate=False):
             source,gaps=_read(conn,Path(directory),row,verify_evidence=verify_evidence,
-                              require_v0_projection=require_v0_projection)
+                              require_v0_projection=require_v0_projection,gap_code=gap_code)
     except (ValueError, TypeError, KeyError, IndexError, ArithmeticError, sqlite3.Error, OSError, RecursionError) as exc:
         if isinstance(exc,(AccountInputError,account_store.PolicyProjectionGap)): raise
         raise AccountInputError('无法核对账本、资产证据或账户周期分析') from None

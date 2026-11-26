@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import items, cites, research_form, price_block, snapshot_date_notice, financial_period, followup_link, feedback_retry_form, flip_sensitivity %}
+{% from "_macros.html" import holdings_summary, items, cites, research_form, price_block, snapshot_date_notice, financial_period, followup_link, feedback_retry_form, flip_sensitivity %}
 {% from "_charts.html" import figure, verdict_scale, vitals as vitals_panel %}
 {% block title %}{{ report.name }} · {{ '研究诊断' if purpose == 'diagnostic' else '研究报告' }}{% endblock %}
 {% block main %}
@@ -12,6 +12,10 @@
     <p class="meta"><span class="code">{{ report.code }}</span> · <span class="date">报告生成于 {{ report.created_at[:16].replace("T", " ") }}</span></p>
     <p class="meta">财务覆盖至 {{ evidence.coverage if evidence and evidence.coverage else '未记录' }}（经营所属期，非公告日期）</p>
     {% if newer_report %}<p class="notice caution" role="status">正在阅读历史报告，以下判断与价格属于本报告时点。<a href="/reports/{{ newer_report.id }}">查看 {{ newer_report.created_at[:10] }} 的最新正式研究（{{ '复核通过' if newer_report.passed else '复核未通过' }}）</a>。</p>{% endif %}
+    {% set holdings_aware = mode.input_mode == 'holdings_context' %}
+    {% set holdings_blocked = holdings_aware and not holdings_actions %}
+    {% if holdings_aware %}<p class="notice caution" role="status">知仓研究：受理时冻结持仓快照（{{ holdings_summary(mode.holdings_snapshot) }}）。不进入月批、扫描卡片与盲研究记分。</p>
+    {% elif purpose != 'diagnostic' %}<p class="meta">输入模式 · 盲研究</p>{% endif %}
     {% if replay_of %}<p class="notice caution" role="status">材料重放：沿用任务 {{ replay_of }} 的原始资料，未刷新财报或行情。</p>{% endif %}
     {# The stance price grid already shows the report close; the market grid then skips it. #}
     {% set stance_close_shown = namespace(value=false) %}
@@ -59,7 +63,7 @@
       <p class="notice caution" role="status">研究未通过完整核查，不展示结论。以下资料仅供核对。</p>
       {% endif %}
       {% if body.failure %}<p class="small">停止阶段：{{ {'check': '原文与计算检查', 'review': '独立复核'}.get(body.failure.stage, '研究处理') }}；{{ {'review_format': '复核响应无效，未接受解决声明', 'substantive_review': '实质问题仍未解决', 'citation_calculation': '引用、数字或报告结构检查未通过', 'source_input': '来源身份存在冲突', 'generation_format': '成文响应格式无效'}.get(body.failure.category, '流程未能完成') }}。<a href="?scope=1#research-scope">查看具体问题与已存原文</a>；不会自动重跑。</p>{% endif %}
-      {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
+      {% if feedback_retry and not holdings_blocked %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{{ feedback_retry_form(report.run_id, csrf, request_id) }}{% endif %}
     {% endif %}
     {% if market %}
     {% set grid = namespace(pe_bands=[], cells=[]) %}
@@ -110,7 +114,7 @@
 
   <section id="risks" class="risks" tabindex="-1">
     <h2>主要风险与反证</h2>
-    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", focus, followup=purpose != 'diagnostic' and not replay_of) }}
+    {% if content.risks %}{{ items(content.risks, rows, "可列出的风险", documents, "risks", focus, followup=purpose != 'diagnostic' and not replay_of and not holdings_aware) }}
     {% else %}<p class="muted">本报告未记录可列出的风险。</p>{% endif %}
   </section>
   {% if body.question or content.answer %}
@@ -191,7 +195,7 @@
   <section id="checkpoints" tabindex="-1">
     <h2>下期检查点</h2>
     <p class="muted">标“预测”的条目在下一期披露后由程序记分。</p>
-    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus, followup=purpose != 'diagnostic' and not replay_of) }}
+    {{ items(content.checkpoints, rows, "检查点", documents, "checkpoints", focus, followup=purpose != 'diagnostic' and not replay_of and not holdings_aware) }}
   </section>
   {% endif %}
   {% if prior_agenda %}
@@ -244,6 +248,9 @@
 
   {% if purpose != 'diagnostic' %}<section id="more">
     <h2>继续研究</h2>
+    {% if holdings_aware %}
+    <p class="hint">知仓报告的追问须通过启用账户权限的助手入口发起（<code>research_request</code> 带 <code>holdings_context=true</code>）。</p>
+    {% else %}
     <form method="post" action="/research" class="search">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="request_id" value="{{ request_id }}-question">
@@ -254,6 +261,10 @@
       <textarea id="followup" aria-describedby="followup-status" name="question" rows="3" maxlength="4000" required></textarea>
       <button class="btn" type="submit">继续追问</button>
     </form>
+    {% endif %}
+    {% if holdings_blocked %}
+    <p class="hint">本页面未启用账户工具或未绑定账本，知仓报告的核查请通过启用账户权限的助手入口提交。</p>
+    {% else %}
     <details>
       <summary>请求核查</summary>
       <form method="post" action="/reports/{{ report.id }}/feedback" class="search">
@@ -272,6 +283,7 @@
         <button class="btn secondary" type="submit">提交核查</button>
       </form>
     </details>
+    {% endif %}
     {% if followups %}<h2>关联研究</h2><ul class="list">{% for followup in followups %}<li>{{ followup_link(followup) }} · {{ {'queued':'排队中','running':'研究中','done':'已完成','failed':'未完成'}.get(followup.status) }}</li>{% endfor %}</ul>{% endif %}
   </section>{% endif %}
 
@@ -279,9 +291,9 @@
     <a class="btn secondary" href="/stock/{{ report.code }}">公司档案</a>
     {% if purpose != 'diagnostic' and not replay_of %}
       {% if report.passed %}{{ research_form(report.code[:6], csrf, request_id, "重新研究") }}
-      {% elif not feedback_retry %}<form method="post" action="/runs/{{ report.run_id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ retry.label }}</button></form>{% endif %}
+      {% elif not feedback_retry and not holdings_blocked %}<form method="post" action="/runs/{{ report.run_id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ retry.label }}</button></form>{% endif %}
     {% endif %}
   </div>
-  {% if purpose != 'diagnostic' and not replay_of and not report.passed and not feedback_retry and retry.note %}<p class="hint">{{ retry.note }}</p>{% endif %}
+  {% if purpose != 'diagnostic' and not replay_of and not report.passed and not feedback_retry and not holdings_blocked and retry.note %}<p class="hint">{{ retry.note }}</p>{% endif %}
 </article>
 {% endblock %}

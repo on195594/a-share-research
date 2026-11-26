@@ -15,6 +15,7 @@ from a_share_research import report as report_body
 from a_share_research import db, sources, evidence, market, stock_codes, valuation as valuations
 from a_share_research.checking import quote_found
 from a_share_research.material import financial_table
+from a_share_research.prompts import render_prompt
 from a_share_research.reviewing import digest
 
 log = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ TOOLS = [
     {"name": "disclosures", "description": "列出本公司或同业的官方定期报告，最新在前。code 为六位代码。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": stock_codes.KEY_PATTERN}},
                     "required": ["code"], "additionalProperties": False}},
-    {"name": "read_disclosure", "description": "从已列出的文档读取原文。query 支持空格分隔多关键词同页匹配，返回匹配页号及最多 count 页原文（结合 page 可跳过目录或向后翻页）；不传 query 则从 page 起连续读 count 页（最多5页）。",
+    {"name": "read_disclosure", "description": "从已列出的文档读取原文。query 支持空格分隔多关键词同页匹配，返回匹配页号及最多 count 页原文（结合 page 可跳过目录或向后翻页）；不传 query 则从 page 起连续读 count 页（最多5页）。unit_hints 按页给出本页单位声明 declared，以及从连续已读前序页承接到页首的 carried（来源页 from_page）；续表计算前须先连续读到写明单位的表头页。",
      "parameters": {"type": "object", "properties": {
          "source": {"type": "string"}, "query": {"type": "string"},
          "page": {"type": "integer", "minimum": 1}, "count": {"type": "integer", "minimum": 1, "maximum": 5}},
@@ -72,7 +73,31 @@ CURRENCY_UNITS = {
     "元": Decimal(1), "千元": Decimal("1e3"), "万元": Decimal("1e4"),
     "百万元": Decimal("1e6"), "亿元": Decimal("1e8"),
 }
-DECLARED_UNIT = re.compile(r"单位\s*[：:]\s*(?:人民币)?(亿元|百万元|万元|千元|元)")
+# The same unit vocabulary applies to a declaration, a header cell and a numeric suffix.
+FIGURE_UNIT = r"元/股|亿元|百万元|万元|千元|元|[%％]|个百分点|倍|万股|亿股|股|万吨|吨|万人|人|家"
+DECLARED_UNIT = re.compile(rf"单位[ \t]*(?:[：:]|为)[ \t]*(?:人民币)?({FIGURE_UNIT})")
+HEADER_UNIT = re.compile(rf"(?:人民币|[（(](?:单位[：:])?|^)[ \t]*({FIGURE_UNIT})(?=[）)\s]|$)")
+UNIT_SPACE = r"[ \t]*(?:\n[ \t]*)?"
+TRAILING_UNIT = re.compile(rf"(?:{UNIT_SPACE}[-−－–—～~至到]{UNIT_SPACE}\d[\d,.]*)?"
+                           rf"{UNIT_SPACE}(?:[（(][ \t]*)?({FIGURE_UNIT})")
+UNIT_LOOKBACK_PAGES = 5
+ROW_LOOKAHEAD_LINES = 3
+# Titles that open a new table or section, ending the previous unit's scope unless marked as a continuation.
+TABLE_HEADING = re.compile(r"^(?:(?:[一二三四五六七八九十]{1,3}|\d{1,2})、|[（(](?:[一二三四五六七八九十]{1,3}|\d{1,2})[）)])"
+                           r"|(?:合并|母公司)[^、]{0,10}表$|主要产品")
+# A column header that follows another table's rows with no declaration in between opens a new table.
+COLUMN_HEADER = re.compile(r"^项目.*(?:期末|期初|本期|上期|年末|年初|本年|上年|发生额|余额)")
+PERSONNEL_HEADING = re.compile(r"(?:研发人员|员工|职工)(?:情况|(?:学历|年龄)?结构)(?:表)?$"
+                               r"|^(?:项目|类别)?(?:(?:人数|数量|占比|比例)(?:[（(][^）)]*[）)])?)+$"
+                               r"|结构人数$")
+CONTINUATION_MARK = re.compile(r"续表|续上表|接上页|[（(]续[）)]")
+# Statement and note tables number rows like headings: rows carry amounts, end in a colon, label a 分类 group
+# or name a line of the income, cash-flow or equity statement (a table title ending in 表 is still a title).
+AMOUNT_CELL = re.compile(r"\d{1,3}(?:,\d{3})+|\d+\.\d+")
+ROW_LABEL = re.compile(r"[，。；]|[：:]\s*$|分类\s*$"
+                       r"|(?:现金流|损益|综合收益|所有者|股东权益|利润分配|专项储备)(?!.*表\s*$)")
+# Market ratios are not amounts; market_ratio_guidance.j2 words what to do instead.
+MARKET_RATIOS = ("M.pb", "M.dv_ttm")
 OPERATION_NAMES = {"difference": "差额", "sum": "合计", "growth_pct": "相对变动率",
                    "change_pct": "相对变动率", "ratio": "比值", "ratio_pct": "比值（百分比）",
                    "multiply": "乘积", "annual_return": "持有期复合年化回报"}
@@ -85,8 +110,11 @@ ACTIVE_METHODS = (
     " WHERE r.passed = 1 AND u.status = 'done' AND u.kind = 'research'"
     " AND json_type(u.request, '$.feedback') = 'object'"
     " AND json_type(r.body, '$.methods') = 'array'"
+    # Methods learned with holdings in view neither join the shared library nor retire a blind method.
+    f" AND NOT ({db.holdings_aware('u')})"
     " AND NOT EXISTS (SELECT 1 FROM reports newer JOIN runs n ON n.id = newer.run_id"
     " WHERE newer.passed = 1 AND n.status = 'done' AND n.kind = 'research'"
+    f" AND NOT ({db.holdings_aware('n')})"
     " AND json_type(newer.body, '$.methods') = 'array'"
     " AND n.parent_report_id = r.id"
     " AND json_extract(n.request, '$.feedback.location') = 'methods[' || m.key || ']')"
@@ -170,6 +198,139 @@ def research_methods(conn, query: str, *, catalog=None) -> list[dict]:
     return found[:5]
 
 
+def _table_headings(text: str) -> list[int]:
+    """Offsets of the lines that open a new table or section.
+
+    A numbered line with amounts among the next few lines (row labels wrap) is a row group of the table above.
+    A column header opens a table only after other rows on this page, so a repeated header atop a
+    continuation page keeps the unit it continues.
+    """
+    def titled(line: str, compact: str) -> bool:
+        return (len(compact) <= 30 and bool(TABLE_HEADING.search(compact))
+                and not ROW_LABEL.search(line) and not AMOUNT_CELL.search(line))
+
+    lines = list(re.finditer(r"[^\n]*\S[^\n]*", text))
+    headings, rows_above = [], False
+    for i, match in enumerate(lines):
+        line = match[0]
+        compact = re.sub(r"\s+", "", line)
+        if DECLARED_UNIT.search(line):
+            rows_above = False
+        numbered = titled(line, compact) and not any(
+            AMOUNT_CELL.search(below[0]) for below in lines[i + 1:i + 1 + ROW_LOOKAHEAD_LINES])
+        columns = rows_above and bool(COLUMN_HEADER.search(compact)) and not AMOUNT_CELL.search(line)
+        if (numbered or columns or PERSONNEL_HEADING.search(compact)) and not CONTINUATION_MARK.search(compact):
+            headings.append(match.start())
+            rows_above = False
+        elif AMOUNT_CELL.search(line):
+            rows_above = True
+    return headings
+
+
+def unit_scope(pages: dict[int, str], page: int, end: int) -> dict:
+    """The unit declaration in force at character `end` of `page`.
+
+    Walks upwards through consecutive read pages and stops at the nearest declaration, a new table
+    title, an unread page or the lookback limit. `units` is empty unless a declaration was reached;
+    `page` is where the walk ended and `region` the text it passed.
+    """
+    region, first = [], max(page - UNIT_LOOKBACK_PAGES, 1)
+    for number in range(page, first - 1, -1):
+        if number != page and number not in pages:
+            return {"units": [], "page": number, "stop": "unread", "region": "\n".join(reversed(region))}
+        text = pages[number]
+        headings = _table_headings(text)
+        if number == page:
+            # The quoted line itself is a table row, so only lines above it can open a table.
+            headings = [h for h in headings if h < text.rfind("\n", 0, end) + 1]
+            text = text[:end]
+        heading = max(headings, default=None)
+        declared = list(DECLARED_UNIT.finditer(text))
+        if declared and (heading is None or declared[-1].end() > heading):
+            line_start = text.rfind("\n", 0, declared[-1].start()) + 1
+            return {"units": [m[1] for m in declared if m.start() >= line_start], "page": number,
+                    "stop": "declared", "region": "\n".join([text[line_start:], *reversed(region)])}
+        if heading is not None:
+            return {"units": [], "page": number, "stop": "heading", "region": "\n".join([text[heading:], *reversed(region)])}
+        region.append(text)
+    return {"units": [], "page": first, "stop": "limit", "region": "\n".join(reversed(region))}
+
+
+def unit_hints(pages: dict[int, str], selected: list[int]) -> dict:
+    """Per returned page: its own declarations and the one carried to its top from earlier read pages."""
+    hints = {}
+    for number in selected:
+        entry = {}
+        if declared := list(dict.fromkeys(DECLARED_UNIT.findall(pages[number]))):
+            entry["declared"] = declared
+        carried = unit_scope(pages, number, 0)
+        if carried["units"]:
+            entry |= {"carried": carried["units"], "from_page": carried["page"]}
+        if entry:
+            hints[str(number)] = entry
+    return hints
+
+
+def _column_unit(region: str, rest_of_line: str) -> str | None:
+    """Use the row label or its matching column in a header with the same cell count."""
+    header, _, prefix = region.rpartition("\n")
+    cells = list(re.finditer(r"\S+", prefix + rest_of_line))
+    column = next((i for i, cell in enumerate(cells) if cell.start() <= len(prefix) < cell.end()), None)
+    if column is None:
+        return None
+
+    def declared(cell):
+        match = HEADER_UNIT.search(cell)
+        return match[1] if match else None
+
+    if column and (unit := declared(cells[0][0])):
+        return unit
+    for line in reversed(header.splitlines()):
+        fields = line.split()
+        if any(HEADER_UNIT.search(field) for field in fields) and not AMOUNT_CELL.search(line):
+            return declared(fields[column]) if len(fields) == len(cells) and len(cells) > 1 else None
+    return None
+
+
+def _check_unit(unit: str, cite: dict, registry: dict, value: Decimal) -> None:
+    """A unit not written beside the number must come from the table the selected figure sits in."""
+    source_id = str(cite.get("source") or "D0")
+    source = registry[source_id]
+    located = evidence.figure_positions(cite | {"source": source_id}, registry, value)
+    if not located or not located[1]:
+        raise ValueError("无法在引文中定位该数值，请在引文中完整摘录原数")
+    layer, positions = located
+    # Every quoted occurrence must carry the unit: an excerpt joining two tables cannot lend one to the other.
+    for page, index, rest in positions:
+        if trailing := TRAILING_UNIT.match(rest):
+            if trailing[1].replace("％", "%") != unit:
+                raise ValueError(f"引文中该数值后紧邻单位为 {trailing[1]}，不能按 {unit} 输入")
+            continue
+        text = source[layer][page]
+        scope = unit_scope(source["pages"] | {page: text}, page, index)
+        column = _column_unit(scope["region"], text[index:].partition("\n")[0])
+        if column:
+            if column.replace("％", "%") != unit:
+                raise ValueError(f"所引页面中未见单位 {unit}：该数值所在行或列声明单位为 {column}（遇新表标题即停止）")
+            continue
+        declared = {u.replace("％", "%") for u in scope["units"]}
+        if len(declared) > 1:
+            raise ValueError(f"{source_id}第{scope['page']}页同一行声明多个单位，无法确认该数值所属列；请改引列头或紧邻单位清晰的原数")
+        if declared:
+            if unit not in declared:
+                raise ValueError(f"页面声明单位为 {scope['units'][-1]}（{source_id}第{scope['page']}页，"
+                                 f"第{page}页引文上方最近的单位声明），不能按 {unit} 输入")
+            continue
+        if scope["stop"] == "unread":
+            first = max(page - UNIT_LOOKBACK_PAGES, 1)
+            raise ValueError(f"{source_id}第{page}页引文上方未见单位声明，第{scope['page']}页尚未读取，无法确认能否按 {unit} 输入；"
+                             f"请先调用 read_disclosure(source={source_id}, page={first}, count={scope['page'] - first + 1}) "
+                             "读取前序连续表头页，使单位声明进入已读页面后再计算")
+        raise ValueError(f"所引页面中未见单位 {unit}：{source_id}第{page}页该数值上方及承接的已读页没有“单位：{unit}”声明"
+                         f"或（{unit}）、人民币{unit}表头（遇新表标题或回溯超过{UNIT_LOOKBACK_PAGES}页即停止）；"
+                         "请核对原表单位，改引写明单位的披露位置或 financials 表行")
+
+
 def _operand(side: dict, rows: dict, material) -> dict:
     if not isinstance(side, dict):
         raise ValueError("计算输入须为对象")
@@ -216,22 +377,8 @@ def _operand(side: dict, rows: dict, material) -> dict:
         unit = str(side["unit"]).strip()
         if not unit:
             raise ValueError("计算输入须注明单位")
-        doc = material.source_registry().get(source, {})
-        pages = doc.get("pages", {})
-        page_text = "\n".join(pages.get(p) or pages.get(str(p), "") for p in (page - 1, page, page + 1))
-        quote_text = str(side["quote"])
-        quote_no_comma = re.sub(r"(?<=\d),(?=\d{3}\b)", "", quote_text)
-        inline = (re.search(re.escape(str(side["value"]).strip()) + r"\s*(亿元|百万元|万元|千元|元|%)", quote_text)
-                  or re.search(re.escape(raw) + r"\s*(亿元|百万元|万元|千元|元|%)", quote_no_comma))
-        if inline and inline[1] != unit:
-            raise ValueError(f"计算输入单位与原文紧邻单位（{inline[1]}）不一致")
-        if not inline:
-            if unit not in quote_text:
-                declared = DECLARED_UNIT.findall(page_text)
-                if declared and unit in CURRENCY_UNITS and unit not in declared:
-                    raise ValueError(f"页面声明单位为 {declared[0]}，不能按 {unit} 输入")
-            if unit != "元" and unit not in page_text and unit not in quote_text:
-                raise ValueError(f"所引页面中未见单位 {unit}")
+        unit = unit.replace("％", "%")
+        _check_unit(unit, side, material.source_registry(), num)
         loc = f"{source}第{page}页"
         return {"source": source, "page": page, "quote": side["quote"],
                 "period": str(side.get("period") or loc), "label": str(side.get("label") or loc),
@@ -269,7 +416,10 @@ def calculate(table: list[dict], label: str, operation: str, left: dict, right: 
         a = a * CURRENCY_UNITS[u0] / CURRENCY_UNITS[unit]
         b = b * CURRENCY_UNITS[u1] / CURRENCY_UNITS[unit]
     else:
-        raise ValueError("计算输入单位不同，不能直接比较")
+        refs = [item.get("ref", "") for item in inputs]  # peer rows keep the M.* suffix
+        guides = [render_prompt("market_ratio_guidance.j2", ratio=key) for key in MARKET_RATIOS
+                  if any(ref.endswith(key) for ref in refs)]
+        raise ValueError("；".join([f"计算输入单位不同（{u0}、{u1}），不能直接比较", *guides]))
     normalized_inputs = [{"value": str(value), "unit": original if scaling else unit}
                          for value, original in zip((a, b), (u0, u1))]
     if operation == "difference":
@@ -539,7 +689,8 @@ class ResearchTools:
         else:
             self.material.extra["sources"][source] = candidate[source]
         return {"source": source, "document": doc.info(), "total_pages": len(doc.pages),
-                "matched_pages": hits[:60], "pages": pages}
+                "matched_pages": hits[:60], "pages": pages,
+                "unit_hints": unit_hints(self.material.source_registry()[source]["pages"], selected)}
 
     def financials(self, code: str):
         code = self.code(code)

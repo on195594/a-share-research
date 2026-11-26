@@ -209,12 +209,13 @@ def screen(as_of: str | None = None, workers: int = 4, rule: dict = RULE) -> dic
 def reusable_report(conn, code: str, since: str):
     """The latest formal report of `code` since `since` that a batch may reuse.
 
-    Corrections are excluded by FORMAL_REPORT: they may omit valuation and stance.
+    Corrections are excluded: they may omit valuation and stance. Holdings-aware reports are excluded so
+    selection and ranking compare blind judgments only; a blind follow-up cannot descend from one (409).
     """
     code = stock_codes.normalize_key(code)
     return conn.execute(
         "SELECT r.id, r.run_id FROM reports r JOIN runs u ON u.id = r.run_id"
-        f" WHERE r.company_key = ? AND r.created_at >= ? AND {db.FORMAL_REPORT}"
+        f" WHERE r.company_key = ? AND r.created_at >= ? AND {db.BLIND_FORMAL_REPORT}"
         # A continuation's answer is about its earlier report, not the batch question.
         " AND json_type(r.body, '$.prior') IS NOT 'object' ORDER BY r.id DESC LIMIT 1",
         (code, since),

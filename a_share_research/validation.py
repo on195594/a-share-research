@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from a_share_research import market, agenda, forecasts, report as report_body, screening, stance as stances
-from a_share_research.db import RESEARCH_ORIGINAL, SHANGHAI
+from a_share_research.db import RESEARCH_ORIGINAL, SHANGHAI, input_mode
 
 log = logging.getLogger(__name__)
 
@@ -35,14 +35,40 @@ def scoring_identity(body: dict) -> dict:
     return {"contract": judgment.get("contract"), "profile_sha256": judgment.get("profile_sha256") or "未记录"}
 
 
+def row_mode(row: dict) -> str:
+    """Forecast items carry input_mode; report rows name holdings-aware research as their source."""
+    return row.get("input_mode") or ("holdings_context" if row.get("source") == "holdings_context" else "blind")
+
+
+def split_modes(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(blind, holdings-aware): totals, cut points and maturity gates never pool the two."""
+    return ([r for r in rows if row_mode(r) == "blind"], [r for r in rows if row_mode(r) != "blind"])
+
+
+def _mode_key(mode: str) -> dict:
+    """Blind groups keep their earlier shape; only holdings-aware ones are labelled."""
+    return {} if mode == "blind" else {"input_mode": mode}
+
+
+def _mode_suffix(group: dict) -> str:
+    return "" if group.get("input_mode", "blind") == "blind" else "·知仓"
+
+
+def scoring_cohorts(rows: list[dict]) -> dict:
+    groups = {}
+    for row in rows:
+        groups.setdefault((row.get("contract"), row_mode(row)), []).append(row)
+    return groups
+
+
 def profile_groups(rows: list[dict]):
     """Partition already selected samples, preserving all first-report and maturity rules."""
     groups = {}
     for row in rows:
-        key = (row.get("contract"), row.get("profile_sha256") or "未记录")
+        key = (row.get("contract"), row.get("profile_sha256") or "未记录", row_mode(row))
         groups.setdefault(key, []).append(row)
-    for (contract, profile), group in groups.items():
-        yield {"contract": contract, "profile_sha256": profile}, group
+    for (contract, profile, mode), group in groups.items():
+        yield {"contract": contract, "profile_sha256": profile} | _mode_key(mode), group
 
 
 def filter_contract(rows: list[dict], contract: int | None) -> list[dict]:
@@ -54,11 +80,12 @@ def contract_counts(rows: list[dict]) -> list[dict]:
     """Count distinct input reports (not checkpoint/observation rows), or batches."""
     groups = {}
     for row in rows:
-        key = row.get("contract")
+        key = (row_mode(row), row.get("contract"))
         identity = ("batch", row["batch"]) if "batch" in row else ("report", row.get("report", row.get("id")))
         groups.setdefault(key, set()).add(identity)
-    return [{"contract": key, "label": "未记录" if key is None else str(key), "count": len(groups[key])}
-            for key in sorted(groups, key=lambda k: -1 if k is None else k)]
+    return [{"contract": contract, "label": ("未记录" if contract is None else str(contract)) + _mode_suffix(_mode_key(mode)),
+             "count": len(groups[mode, contract])} | _mode_key(mode)
+            for mode, contract in sorted(groups, key=lambda k: (k[0] != "blind", -1 if k[1] is None else k[1]))]
 
 
 def contract_line(rows: list[dict]) -> str:
@@ -66,9 +93,16 @@ def contract_line(rows: list[dict]) -> str:
 
 
 def source(request: dict) -> str | None:
-    """'batch' for screening deep dives, 'active' for owner/agent research, None for feedback checks."""
+    """'batch' for screening deep dives, 'active' for owner/agent blind research, 'holdings_context' for
+    research that saw a frozen position snapshot, None for feedback checks.
+
+    Holdings-aware research is its own source, so first-report dedup and every summary keyed by source
+    never let it take or share a blind sample's slot.
+    """
     if request.get("feedback"):
         return None
+    if input_mode(request) == "holdings_context":
+        return "holdings_context"
     return "batch" if request.get("question") == screening.QUESTION else "active"
 
 
@@ -234,11 +268,11 @@ def forecast_review(scored: list[dict]) -> dict:
     groups = {}
     shadowed = {}
     for item in items:
-        key = (item.get("contract"), item.get("profile_sha256") or "未记录")
+        key = (item.get("contract"), item.get("profile_sha256") or "未记录", item.get("input_mode", "blind"))
         (groups if item["first"] else shadowed).setdefault(key, []).append(item)
     cohorts = []
     # Stable identity order, not a model performance ranking.
-    for (contract, profile), group in sorted(groups.items(), key=lambda pair: str(pair[0])):
+    for (contract, profile, mode), group in sorted(groups.items(), key=lambda pair: str(pair[0])):
         strata = {}
         for item in group:
             key = (item["forecast"]["confidence"], item["forecast"]["metric"], item["diagnostics"]["unit"])
@@ -258,42 +292,49 @@ def forecast_review(scored: list[dict]) -> dict:
                                  "clean_width_compared": len(clean_widths),
                                  "clean_median_width_to_baseline": statistics.median(clean_widths) if clean_widths else None})
         summary = summarize_forecasts(group)
-        cohorts.append({"contract": contract, "profile_sha256": profile, **_role_labels(group),
+        cohorts.append({"contract": contract, "profile_sha256": profile, **_mode_key(mode), **_role_labels(group),
                         "reports": len({i["report"] for i in group}), **summary,
                         "width_groups": width_groups})
     shadowed_cohorts = []
-    for (contract, profile), rows in sorted(shadowed.items(), key=lambda pair: str(pair[0])):
-        if (contract, profile) in groups:
+    for (contract, profile, mode), rows in sorted(shadowed.items(), key=lambda pair: str(pair[0])):
+        if (contract, profile, mode) in groups:
             continue
-        shadowed_cohorts.append({"contract": contract, "profile_sha256": profile, **_role_labels(rows),
+        shadowed_cohorts.append({"contract": contract, "profile_sha256": profile, **_mode_key(mode),
+                                 **_role_labels(rows),
                                  "reports": len({i["report"] for i in rows}),
                                  "companies": len({i["code"] for i in rows}),
                                  "updates": len(rows)})
-    first_by_contract = {}
-    for i in items:
-        if i["first"] and i.get("contract") is not None:
-            first_by_contract[i["contract"]] = first_by_contract.get(i["contract"], 0) + 1
     contract_independent_first = []
-    for c in sorted({i.get("contract") for i in items if i.get("contract") is not None}):
-        indep_rows = mark_first([dict(i) for i in items if i.get("contract") == c])
-        indep_summary = summarize_forecasts(indep_rows)
-        if indep_summary["total"] > first_by_contract.get(c, 0):
-            contract_independent_first.append({"contract": c, **indep_summary})
-    first_items = [i for i in items if i["first"]]
-    confidence_coverage = [
-        {"confidence": level,
-         "total": sum(1 for i in first_items if i["forecast"]["confidence"] == level),
-         "scored": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "scored"),
-         "pending": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "pending"),
-         "unchecked": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "unchecked"),
-         "unavailable": sum(1 for i in first_items if i["forecast"]["confidence"] == level and i["result"]["status"] == "unavailable")}
-        for level in forecasts.CONFIDENCE
-    ]
-    return {"items": items, "summary": summarize_forecasts(items), "model_groups": cohorts,
+    for mode, c in sorted({(row_mode(i), i["contract"]) for i in items if i.get("contract") is not None}):
+        rows = [i for i in items if i.get("contract") == c and row_mode(i) == mode]
+        indep_summary = summarize_forecasts(mark_first([dict(i) for i in rows]))
+        if indep_summary["total"] > sum(i["first"] for i in rows):
+            contract_independent_first.append({"contract": c} | _mode_key(mode) | indep_summary)
+    partitions = scoring_cohorts(items)
+    contract_summaries = [
+        {"contract": contract, **_mode_key(mode), "summary": summarize_forecasts(group),
+         "confidence_coverage": confidence_coverage(group)}
+        for (contract, mode), group in partitions.items()
+    ] if len({c for c, _ in partitions}) > 1 else []
+    blind, aware = split_modes(items)
+    holdings = {"holdings_context": {"summary": summarize_forecasts(aware),
+                                     "confidence_coverage": confidence_coverage(aware)}} if aware else {}
+    return {"items": items, "summary": summarize_forecasts(blind), "model_groups": cohorts,
             "shadowed_model_groups": shadowed_cohorts, "contract_independent_first": contract_independent_first,
-            "confidence_coverage": confidence_coverage,
+            "confidence_coverage": confidence_coverage(blind), **holdings,
+            **({"contract_summaries": contract_summaries} if contract_summaries else {}),
             "generated_at": datetime.now(SHANGHAI).isoformat(),
             "scope": "研究预测；非模拟组合收益，非真实账户表现。模型分组仅描述冻结配置，不排名、不作因果归因。"}
+
+
+def confidence_coverage(items: list[dict]) -> list[dict]:
+    """First forecasts per stated confidence level and their result status."""
+    out = []
+    for level in forecasts.CONFIDENCE:
+        group = [i["result"]["status"] for i in items if i["first"] and i["forecast"]["confidence"] == level]
+        out.append({"confidence": level, "total": len(group)}
+                   | {status: group.count(status) for status in ("scored", "pending", "unchecked", "unavailable")})
+    return out
 
 
 def frozen_forecasts(items: list[dict], today: date | None = None) -> list[dict]:
@@ -311,10 +352,10 @@ def write_forecast_html(review: dict, path: str) -> None:
 
 
 def mark_first(items: list[dict]) -> list[dict]:
-    """A forecast's identity is company × metric × target period; the earliest report holds the first one."""
+    """A forecast's identity is input mode × company × metric × target period; the earliest report holds the first one."""
     seen = set()
     for item in sorted(items, key=lambda i: (i["created"], i["report"], i["index"])):
-        key = (item["code"], item["forecast"]["metric"], item["forecast"]["period"])
+        key = (item.get("input_mode", "blind"), item["code"], item["forecast"]["metric"], item["forecast"]["period"])
         item["first"] = key not in seen
         seen.add(key)
     return items
@@ -387,12 +428,14 @@ def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
             original = "u.kind = 'research' AND u.replay_of IS NULL"
             if "request" in columns:
                 original += " AND json_extract(u.request, '$.feedback') IS NULL"
+        request = "u.request" if "request" in columns else "NULL"
         rows = conn.execute(
-            "SELECT r.id, r.code, r.name, r.created_at, r.body FROM reports r JOIN runs u ON u.id = r.run_id "
+            f"SELECT r.id, r.code, r.name, r.created_at, r.body, {request} FROM reports r JOIN runs u ON u.id = r.run_id "
             f"WHERE r.passed = 1 AND {original} "
             "AND r.body LIKE '%\"forecast\"%'").fetchall()
     out = []
-    for report_id, code, name, created, body in rows:
+    for report_id, code, name, created, body, request in rows:
+        mode = input_mode(json.loads(request or "null"))
         body = report_body.load(body)
         table = body.get("table") or []
         base = forecasts.base_period(table)
@@ -401,7 +444,7 @@ def load_forecasts(database: str, contract: int | None = None) -> list[dict]:
             forecast = item.get("forecast") if isinstance(item, dict) else None
             if base and forecast and not forecasts.problems(forecast, table):
                 out.append({"report": report_id, "code": code, "name": name, "created": created, "index": i,
-                            **scoring_identity(body), "models": model_roles(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
+                            **_mode_key(mode), **scoring_identity(body), "models": model_roles(body), "base": base, "forecast": forecast, "written": written[forecast["metric"]]})
     return mark_first(filter_contract(out, contract))
 
 
@@ -483,25 +526,37 @@ def score_agenda(reports: list[dict], pro=None, today: date | None = None) -> di
     rows = split["picked"]
     if rows:
         rows = score(pro or market.client(), rows, today or datetime.now(SHANGHAI).date())
-    counts = {name: {"reports": 0, "scored": 0, "pending_entry": 0, "no_market_data": 0} for name in agenda.GROUPS}
-    for row in rows:
-        group = counts[row["group"]]
-        group["reports"] += 1
-        key = "scored" if row["returns"] else "no_market_data" if row["entry"] else "pending_entry"
-        group[key] += 1
-    return {"rows": rows, "contracts": contract_counts(rows), "unrecorded": len(split["unrecorded"]), "reruns": len(split["reruns"]),
-            "tally": agenda.tally(rows), "profile_groups": [identity | {"tally": agenda.tally(group)}
-                      for identity, group in profile_groups(rows)], "groups": counts, "returns": summarize(rows, "group")}
+    def block(mode_rows, unrecorded, reruns) -> dict:
+        counts = {name: {"reports": 0, "scored": 0, "pending_entry": 0, "no_market_data": 0} for name in agenda.GROUPS}
+        for row in mode_rows:
+            group = counts[row["group"]]
+            group["reports"] += 1
+            key = "scored" if row["returns"] else "no_market_data" if row["entry"] else "pending_entry"
+            group[key] += 1
+        return {"unrecorded": len(unrecorded), "reruns": len(reruns), "tally": agenda.tally(mode_rows), "groups": counts}
+
+    (blind, aware), unrecorded, reruns = (split_modes(rows), split_modes(split["unrecorded"]),
+                                          split_modes(split["reruns"]))
+    holdings = ({"holdings_context": block(aware, unrecorded[1], reruns[1])}
+                if aware or unrecorded[1] or reruns[1] else {})
+    return {"rows": rows, "contracts": contract_counts(rows), **block(blind, unrecorded[0], reruns[0]), **holdings,
+            "profile_groups": [identity | {"tally": agenda.tally(group)} for identity, group in profile_groups(rows)],
+            "returns": summarize(rows, "group")}
 
 
 def agenda_lines(result: dict) -> list[str]:
     tally = result["tally"]
     share = lambda v: f"{v:.0%}" if v is not None else "—"
-    lines = [f"V5 议程状态：入样 {len(result['rows'])} 份，历史未记录 {result['unrecorded']} 份，"
+    lines = [f"V5 议程状态：入样 {len(split_modes(result['rows'])[0])} 份，历史未记录 {result['unrecorded']} 份，"
              f"同期重跑 {result['reruns']} 份（不入比率）"]
     lines.append(contract_line(result["rows"]))
+    if aware := result.get("holdings_context"):
+        lines.append(f"知仓研究单列（不入下方总计）：入样 {len(split_modes(result['rows'])[1])} 份，"
+                     f"历史未记录 {aware['unrecorded']} 份，同期重跑 {aware['reruns']} 份，"
+                     f"旧风险已发生 {share(aware['tally']['occurred'])}，检查点已触发 {share(aware['tally']['triggered'])}")
     for group in result["profile_groups"]:
-        lines.append(f"配置档 {group['profile_sha256']} 契约 {group['contract']}：旧风险已发生 {share(group['tally']['occurred'])}，"
+        lines.append(f"配置档 {group['profile_sha256']} 契约 {group['contract']}{_mode_suffix(group)}："
+                     f"旧风险已发生 {share(group['tally']['occurred'])}，"
                      f"检查点已触发 {share(group['tally']['triggered'])}")
     for section, label in (("risks", "旧风险"), ("checkpoints", "旧检查点")):
         lines.append(f"{label}：" + "，".join(f"{status} {n}" for status, n in tally["counts"][section].items()))
@@ -553,41 +608,48 @@ def score(pro, reports: list[dict], today: date) -> list[dict]:
                 if result := excess(stock, bench, entry, day):
                     row["returns"][horizon] = result | {"date": day}
         rows.append(row)
-    sizes = sorted(r["mv"] for r in rows if r["mv"] is not None)
-    cuts = (sizes[len(sizes) // 3], sizes[2 * len(sizes) // 3]) if len(sizes) >= 3 else (float("inf"), float("inf"))
-    for row in rows:
-        row["size"] = size_bucket(row["mv"], cuts)
+    assign_size_buckets(rows)
     return rows
+
+
+def assign_size_buckets(rows: list[dict]) -> None:
+    """Cut the observed market values within each contract and research input mode."""
+    for cohort in scoring_cohorts(rows).values():
+        sizes = sorted(r["mv"] for r in cohort if r["mv"] is not None)
+        cuts = (sizes[len(sizes) // 3], sizes[2 * len(sizes) // 3]) if len(sizes) >= 3 else (float("inf"), float("inf"))
+        for row in cohort:
+            row["size"] = size_bucket(row["mv"], cuts)
 
 
 def score_stances(pro, rows: list[dict], today: date) -> list[dict]:
     """Attach V4 wait outcomes to V0-scored rows; prices from TuShare daily lows, evidence from financials."""
     from a_share_research import material, sources  # provider imports only when scoring
-    last = max((d for r in rows for d in [v["date"] for v in r["returns"].values()]), default=None)
     tables = {}
-    for row in rows:
-        calc = row["stance_calc"]
-        if row["stance"] == "等价格" and calc and calc.get("price") is not None and row["entry"]:
-            if last is None:
-                row["stance_outcome"] = {"status": "pending"}
-                continue
-            bars = screening._query(pro, "daily", ts_code=row["code"], start_date=row["entry"], end_date=last,
-                                    fields="trade_date,low")
-            lows = dict(zip(bars["trade_date"].astype(str), bars["low"].astype(float)))
-            row["stance_outcome"] = price_wait(lows, calc["price"], row["entry"], calc["valid_until"], last)
-        elif (row["stance"] == "等证据" and row.get("trigger")) or (row["stance"] == "现在分批" and calc and calc.get("add_trigger")):
-            trigger = calc["add_trigger"] if row["stance"] == "现在分批" else row["trigger"]
-            if not period_ended(trigger["period"], today):
-                row["stance_outcome"] = checkpoint_outcome(row, {}, today)
-                continue
-            if row["code"] not in tables:
-                tables[row["code"]] = {r["id"]: r for r in material.financial_table(sources.financials(row["code"]), {})}
-            row["stance_outcome"] = checkpoint_outcome(row, tables[row["code"]], today)
+    for cohort in scoring_cohorts(rows).values():
+        last = max((result["date"] for r in cohort for result in r["returns"].values()), default=None)
+        for row in cohort:
+            calc = row["stance_calc"]
+            if row["stance"] == "等价格" and calc and calc.get("price") is not None and row["entry"]:
+                if last is None:
+                    row["stance_outcome"] = {"status": "pending"}
+                    continue
+                bars = screening._query(pro, "daily", ts_code=row["code"], start_date=row["entry"], end_date=last,
+                                        fields="trade_date,low")
+                lows = dict(zip(bars["trade_date"].astype(str), bars["low"].astype(float)))
+                row["stance_outcome"] = price_wait(lows, calc["price"], row["entry"], calc["valid_until"], last)
+            elif (row["stance"] == "等证据" and row.get("trigger")) or (row["stance"] == "现在分批" and calc and calc.get("add_trigger")):
+                trigger = calc["add_trigger"] if row["stance"] == "现在分批" else row["trigger"]
+                if not period_ended(trigger["period"], today):
+                    row["stance_outcome"] = checkpoint_outcome(row, {}, today)
+                    continue
+                if row["code"] not in tables:
+                    tables[row["code"]] = {r["id"]: r for r in material.financial_table(sources.financials(row["code"]), {})}
+                row["stance_outcome"] = checkpoint_outcome(row, tables[row["code"]], today)
     return rows
 
 
-def _pct(v: float) -> str:
-    return f"{v * 100:+.1f}%"
+def _pct(v: float | None) -> str:
+    return f"{v * 100:+.1f}%" if v is not None else "—"
 
 
 def main() -> None:
@@ -614,12 +676,33 @@ def main() -> None:
         items = load_forecasts(args.database, args.contract)
         scored = frozen_forecasts(items) if args.frozen else score_forecasts(items)
         review = forecast_review(scored)
-        summary = summarize_forecasts(scored)
-        lines = [f"V1 预测记分：首份 {summary['total']} 条（{summary['companies']} 家公司、{summary['periods']} 个目标期，"
-                 f"另有更新 {summary['updates']} 条不重复记分），已兑现 {summary['scored']}，待披露 {summary['pending']}，"
-                 f"缺失/不可比 {summary['unavailable']}，未查询兑现 {summary['unchecked']}，基期数据已更正 {summary['restated']}"]
-        lines.append(review["scope"])
-        lines.append(contract_line([s for s in scored if s["first"]]))
+        summary = review["summary"]
+        blocks = review.get("contract_summaries") or [review]
+        if "contract_summaries" not in review and "holdings_context" in review:
+            blocks = [review, {"input_mode": "holdings_context", **review["holdings_context"]}]
+        lines = ["V1 预测记分", review["scope"], contract_line([s for s in scored if s["first"]])]
+        for block in blocks:
+            summary_block = block["summary"]
+            contract = block.get("contract")
+            label = f"契约 {contract if contract is not None else '未记录'} · " if "contract" in block else ""
+            label += "知仓研究" if row_mode(block) == "holdings_context" else "盲研究"
+            lines.append(f"{label}：首份 {summary_block['total']} 条（{summary_block['companies']} 家公司、"
+                         f"{summary_block['periods']} 个目标期，更新 {summary_block['updates']} 条），已兑现 "
+                         f"{summary_block['scored']}，待披露 {summary_block['pending']}，缺失/不可比 "
+                         f"{summary_block['unavailable']}，未查询兑现 {summary_block['unchecked']}，"
+                         f"基期数据已更正 {summary_block['restated']}")
+            cov_parts = [f"{c['confidence']}% {c['total']} 条" for c in block["confidence_coverage"]]
+            missing_levels = [f"{c['confidence']}%" for c in block["confidence_coverage"] if c["total"] == 0]
+            if summary_block["total"]:
+                lines.append("主观把握入样分布（首份）：" + " · ".join(cov_parts)
+                             + (f"（缺 {'/'.join(missing_levels)} 样本，校准度暂不完整）" if missing_levels else ""))
+            for level, g in summary_block["by_confidence"].items():
+                lines.append(f"把握 {level}%：n={g['n']} 命中 {g['hit']:.0%}")
+            if summary_block["beat_baseline"] is not None:
+                lines.append(f"区间中点胜过朴素预测：{summary_block['beat_baseline']:.0%}（n={summary_block['compared']}）")
+                if summary_block["distorted_compared"]:
+                    lines.append(f"  剔除 {summary_block['distorted_compared']} 条外推失真基线后胜过朴素预测："
+                                 f"{_pct(summary_block['clean_beat_baseline'])}（n={summary_block['clean_compared']}）")
         for s in review["items"]:
             r = s["result"]
             lines.append(f"#{s['report']}[{s['index']}]{'' if s['first'] else '（更新）'} {s['code']} {s['name']} "
@@ -630,24 +713,13 @@ def main() -> None:
             d = s["diagnostics"]
             baseline_err = f"{d['baseline_absolute_error']}{d['difference_unit']}" if d['baseline_absolute_error'] is not None else "缺失"
             lines.append(f"  区间宽度 {d['width']:g}{d['difference_unit']}，宽度/冻结朴素值绝对值 "
-                         f"{_pct(d['width_to_baseline']) if d['width_to_baseline'] is not None else '—'}"
+                         f"{_pct(d['width_to_baseline'])}"
                          + (f"（{d['baseline_note']}）" if d.get("baseline_note") else "")
                          + (f"；中点绝对误差 {d['midpoint_absolute_error']:g}{d['difference_unit']}，"
                             f"朴素绝对误差 {baseline_err}" if r["status"] == "scored" else ""))
-        cov_parts = [f"{c['confidence']}% {c['total']} 条" for c in review["confidence_coverage"]]
-        missing_levels = [f"{c['confidence']}%" for c in review["confidence_coverage"] if c["total"] == 0]
-        if summary["total"]:
-            lines.append("主观把握入样分布（首份）：" + " · ".join(cov_parts)
-                         + (f"（缺 {'/'.join(missing_levels)} 样本，校准度暂不完整）" if missing_levels else ""))
-        for level, g in summary["by_confidence"].items():
-            lines.append(f"把握 {level}%：n={g['n']} 命中 {g['hit']:.0%}")
-        if summary["beat_baseline"] is not None:
-            lines.append(f"区间中点胜过朴素预测：{summary['beat_baseline']:.0%}（n={summary['compared']}）")
-            if summary["distorted_compared"]:
-                lines.append(f"  剔除 {summary['distorted_compared']} 条外推失真基线后胜过朴素预测："
-                             f"{_pct(summary['clean_beat_baseline'])}（n={summary['clean_compared']}）")
         for group in review["model_groups"]:
-            lines.append(f"契约 {group['contract']} 配置档 {group['profile_sha256']} 作者 {group['author']} × 复核 {group['reviewer']}："
+            lines.append(f"契约 {group['contract']}{_mode_suffix(group)} 配置档 {group['profile_sha256']} "
+                         f"作者 {group['author']} × 复核 {group['reviewer']}："
                          f"{group['reports']} 份报告，{group['companies']} 家公司，{group['periods']} 个目标期，"
                          f"首份 {group['total']} 条，已兑现 {group['scored']}，朴素可比 {group['compared']}（仅描述，不作排名）")
             for width in group["width_groups"]:
@@ -656,18 +728,19 @@ def main() -> None:
                                   if width["distorted_baselines"] else "")
                 lines.append(f"  {width['metric']}（{width['unit']}）把握 {width['confidence']}%："
                              f"首份 {width['total']}，已兑现 {width['scored']}，朴素可比 {width['compared']}；"
-                             f"相对宽度中位 {_pct(width['median_width_to_baseline']) if width['median_width_to_baseline'] is not None else '—'}"
+                             f"相对宽度中位 {_pct(width['median_width_to_baseline'])}"
                              f"（非零基线 n={width['width_compared']}，含未兑现样本{distorted_note}）")
         if review["shadowed_model_groups"]:
             lines.append("以下契约/模型配置因早期报告已占首份名额，在当前未筛选口径下仅作更新、未计入上方首份分组：")
             for sg in review["shadowed_model_groups"]:
                 hint = f"（单独观测请加 --contract {sg['contract']}）" if sg["contract"] is not None else ""
-                lines.append(f"  契约 {sg['contract']} 配置档 {sg['profile_sha256']} 作者 {sg['author']} × 复核 {sg['reviewer']}："
+                lines.append(f"  契约 {sg['contract']}{_mode_suffix(sg)} 配置档 {sg['profile_sha256']} "
+                             f"作者 {sg['author']} × 复核 {sg['reviewer']}："
                              f"{sg['reports']} 份报告，{sg['companies']} 家公司，更新 {sg['updates']} 条{hint}")
         if review["contract_independent_first"]:
             lines.append("按契约独立去重（不受早期契约占槽影响）：")
             for cs in review["contract_independent_first"]:
-                lines.append(f"  契约 {cs['contract']}：首份 {cs['total']} 条（{cs['companies']} 家公司、"
+                lines.append(f"  契约 {cs['contract']}{_mode_suffix(cs)}：首份 {cs['total']} 条（{cs['companies']} 家公司、"
                              f"{cs['periods']} 个目标期、已兑现 {cs['scored']}）；完整详情加 --contract {cs['contract']}")
         log.info("\n%s", "\n".join(lines))
         if args.html:
@@ -678,6 +751,7 @@ def main() -> None:
                            "shadowed_model_groups": review["shadowed_model_groups"],
                            "contract_independent_first": review["contract_independent_first"],
                            "confidence_coverage": review["confidence_coverage"],
+                           **{k: review[k] for k in ("holdings_context", "contract_summaries") if k in review},
                            "generated_at": review["generated_at"], "scope": review["scope"],
                            "contracts": contract_counts([s for s in scored if s["first"]])}, fh, ensure_ascii=False, indent=1, default=str)
         return
@@ -693,9 +767,12 @@ def main() -> None:
     stance_reports = _first_stance_per_month(eligible)
     if args.stances:
         rows = score_stances(pro, score(pro, stance_reports, today), today)
-        summary = summarize_stances(rows)
+        blind, aware = split_modes(rows)
+        summary = summarize_stances(blind)
+        holdings = {"holdings_context": {"summary": summarize_stances(aware)}} if aware else {}
         profiles = [identity | {"summary": summarize_stances(group)} for identity, group in profile_groups(rows)]
-        lines = [f"V4 研究立场记分（{len(rows)} 份带立场报告；超额为入场至今相对 {BENCHMARK}）"]
+        lines = [f"V4 研究立场记分（{len(blind)} 份带立场报告{f'，知仓 {len(aware)} 份单列' if aware else ''}；"
+                 f"超额为入场至今相对 {BENCHMARK}）"]
         lines.append(contract_line(rows))
         for row in rows:
             outcome = row.get("stance_outcome") or {}
@@ -711,11 +788,14 @@ def main() -> None:
                          f"{' ' + outcome['date'] if outcome.get('date') else ''} 至今超额 {_pct(latest['excess']) if latest else '—'}")
         for profile in profiles:
             for key, g in profile["summary"].items():
-                lines.append(f"配置档 {profile['profile_sha256']} 契约 {profile['contract']} {key} n={g['n']} 已入场 {g['scored']} 平均超额 {_pct(g['mean_excess']) if g['mean_excess'] is not None else '—'}")
+                lines.append(f"配置档 {profile['profile_sha256']} 契约 {profile['contract']}{_mode_suffix(profile)} {key} "
+                             f"n={g['n']} 已入场 {g['scored']} 平均超额 "
+                             f"{_pct(g['mean_excess'])}")
         log.info("\n%s", "\n".join(lines))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump({"rows": rows, "summary": summary, "profile_groups": profiles, "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
+                json.dump({"rows": rows, "summary": summary, **holdings, "profile_groups": profiles,
+                           "contracts": contract_counts(rows)}, fh, ensure_ascii=False, indent=1, default=str)
         return
     rows = score(pro, first_per_month(eligible), today)
     by_id = {row["id"]: row for row in rows}
@@ -730,7 +810,8 @@ def main() -> None:
                      f"市值 {row['mv'] and round(row['mv'])}亿 至今超额 {_pct(latest['excess']) if latest else '—'}")
     for key in ("verdict", "size", "stance"):
         groups = summary[key]
-        heading = (f"按研究立场汇总（同月首份有效立场 n={len(stance_rows)}，未记录不占名额；{contract_line(stance_rows)}）"
+        heading = (f"按研究立场汇总（同月首份有效立场 n={len(split_modes(stance_rows)[0])}，未记录不占名额；"
+                   f"{contract_line(stance_rows)}）"
                    if key == "stance" else f"按{ {'verdict': '结论', 'size': '市值三分位'}[key] }汇总")
         lines += ["", heading]
         for g in groups:

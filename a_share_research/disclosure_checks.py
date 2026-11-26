@@ -93,7 +93,10 @@ def _unique(observations: list[dict]) -> list[dict]:
             bounds = [o["values"].get(metric) for o in group]
             values[metric] = bounds[0] if all(b == bounds[0] for b in bounds) else {
                 "low": None, "high": None, "reason": IDENTITY_CONFLICT_REASON}
-        result.append(group[0] | {"values": values, "variants": variants})
+        merged = variants[0] | {"values": values, "variants": variants}
+        if len({o.get("type") for o in variants}) > 1:
+            merged.update(type=None, type_conflict=True)
+        result.append(merged)
     return result
 
 
@@ -126,19 +129,34 @@ def normalize_express(rows: list[dict], code: str, *, revenue_basis_matches: boo
     return _unique(observations)
 
 
-def revenue_basis_matches(income_rows: list[dict]) -> bool | None:
-    """Compare the latest consolidated income basis; conflicting versions are unknown."""
+def revenue_basis(income_rows: list[dict], *, code: str | None = None,
+                  period: str | None = None) -> tuple[bool | None, str | None]:
+    """(Whether operating revenue equals total revenue, the consolidated income period that says so).
+
+    `period` is used when its statement exists, otherwise the latest one; the returned period tells the
+    caller which it was. Conflicting versions are unknown. `code` rejects another company's rows.
+    """
+    if code is not None and any(str(r.get("ts_code", ""))[:6] != code for r in income_rows):
+        raise companies.SourceError("披露数据返回其他公司")
     rows = [r for r in income_rows if r.get("report_type") == "1"]
     if not rows:
-        return None
-    period = max(_day(r["end_date"]) for r in rows)
+        return None, None
+    periods = {_day(r["end_date"]) for r in rows}
+    reference = period if period in periods else max(periods)
     results = set()
     for row in rows:
-        if _day(row["end_date"]) != period:
+        if _day(row["end_date"]) != reference:
             continue
         total, revenue = _number(row.get("total_revenue")), _number(row.get("revenue"))
         results.add(total == revenue if total is not None and revenue is not None else None)
-    return results.pop() if len(results) == 1 else None
+    return results.pop() if len(results) == 1 else None, reference
+
+
+def revenue_basis_matches(income_rows: list[dict], *, code: str | None = None,
+                          period: str | None = None) -> bool | None:
+    """The basis verdict; with `period`, another period's statement never verifies it."""
+    matches, reference = revenue_basis(income_rows, code=code, period=period)
+    return matches if period is None or reference == period else None
 
 
 def _shape(value: object, kind: str) -> bool:

@@ -1,0 +1,16 @@
+{# 样本: Codex 审查 W2，目标期无利润表时较晚期间的合并利润表被当作本期快报的营业收入口径结论 #}
+{%- set notes = [] -%}
+{%- if tolerance %}{% set _ = notes.append("数据源取整，精度约 ±" ~ tolerance ~ " 亿元") %}{% endif -%}
+{%- if revenue -%}
+{%- if reference == period and matched is sameas true -%}
+{%- set _ = notes.append("口径：与营业总收入一致（按 " ~ period ~ " 合并利润表核对）") -%}
+{%- elif reference == period and matched is sameas false -%}
+{%- set _ = notes.append("口径不符：快报营业收入不等于营业总收入，不能与营业总收入直接比较") -%}
+{%- elif reference and reference != period -%}
+{%- set verdict = "等于" if matched is sameas true else "不等于" if matched is sameas false else "无法确认是否等于" -%}
+{%- set _ = notes.append("口径未能核实：目标期 " ~ period ~ " 尚无合并利润表，目标期尚未核实；仅供参照的 " ~ reference ~ " 合并利润表营业收入" ~ verdict ~ "营业总收入，不能据此认定本期同口径，比较前须读原文核对") -%}
+{%- else -%}
+{%- set _ = notes.append("口径未能核实：无法确认快报营业收入等于营业总收入，比较前须读原文核对") -%}
+{%- endif -%}
+{%- endif -%}
+{{- notes | join("；") -}}

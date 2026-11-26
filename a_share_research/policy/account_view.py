@@ -25,14 +25,15 @@ def bound_account_id(conn: sqlite3.Connection) -> str:
     return account_id
 
 
-def verified_current(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True) -> dict:
+def verified_current(conn: sqlite3.Connection, directory: Path, *, verify_evidence: bool = True,
+                     gap_code: str | None = None) -> dict:
     """Read codes and provenance within the caller's snapshot of the shared database.
 
     Economic positions stay readable while a new cycle awaits v0 context or its analysis
-    branch; policy_gaps names what is pending.
+    branch; policy_gaps names what is pending, limited to gap_code's company when given.
     """
     source, policy_gaps = monitor._source(conn, directory, verify_evidence=verify_evidence,
-                                          require_v0_projection=False)
+                                          require_v0_projection=False, gap_code=gap_code)
     if source['mode'] == 'mirror':
         codes = [row[0] for row in conn.execute('SELECT code FROM holdings WHERE exit_date IS NULL')]
     else:

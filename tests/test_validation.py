@@ -251,6 +251,28 @@ def test_price_wait_hits_on_first_touching_low_and_misses_only_after_expiry():
     assert validation.price_wait(LOWS, 27.55, "20260808", "2027-01-20", "20261020")["status"] == "pending"
 
 
+@pytest.mark.parametrize(("source", "contract"), [("holdings_context", 12), ("active", 11)])
+def test_price_wait_cutoff_is_independent_per_mode_and_contract(monkeypatch, source, contract):
+    import pandas as pd
+
+    def daily(pro, api, *, ts_code, start_date, end_date, fields):
+        assert (api, ts_code, fields) == ("daily", "600900.SH", "trade_date,low")
+        return pd.DataFrame([(day, low) for day, low in LOWS.items() if start_date <= day <= end_date],
+                            columns=["trade_date", "low"])
+
+    monkeypatch.setattr(validation.screening, "_query", daily)
+    # Replay the same price wait with observations ending either side of its first touch.
+    today = datetime(2026, 8, 7).date()
+    blind = {"code": "600900.SH", "source": "active", "contract": 12, "stance": "等价格",
+             "stance_calc": {"price": 27.55, "valid_until": "2027-01-20"}, "entry": "20260720",
+             "returns": {"latest": {"date": "20260806"}}}
+    other = blind | {"source": source, "contract": contract, "returns": {"latest": {"date": "20260807"}}}
+    baseline, = validation.score_stances(None, [dict(blind)], today)
+    pending, hit = validation.score_stances(None, [blind, other], today)
+    assert pending["stance_outcome"] == baseline["stance_outcome"] == {"status": "pending"}
+    assert hit["stance_outcome"] == {"status": "hit", "date": "20260807"}
+
+
 def test_evidence_wait_reads_disclosed_table_text():
     row = next(r for r in DATA["forecast_table"] if r["id"] == "T.revenue")  # 2026-09-30 = '101.00'
     trigger = {"metric": "T.revenue", "period": "2026-09-30", "op": ">=", "value": 100}

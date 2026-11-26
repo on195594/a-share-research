@@ -11,13 +11,14 @@ from datetime import date
 
 from a_share_research import eval_report
 from a_share_research import report as report_body
-from a_share_research import db, evidence, market, model_profile, runner_process, sources, stance as stances, stock_codes, valuation
+from a_share_research import db, disclosure_checks, evidence, market, model_profile, runner_process, sources, stance as stances, stock_codes, valuation
 from a_share_research.core.providers.tushare_common import TushareHTTPError
 from a_share_research.prompts import prompts_sha256, render_prompt
 from a_share_research.research_mcp import ResearchSession
 from a_share_research.service import research_call_limit
 from a_share_research.reviewing import ReviewLedger, digest
-from a_share_research.material import Material, ResearchError, ScopeError, gather, replay_material
+from a_share_research.material import (Material, ResearchError, ScopeError, estimate_rows, estimate_source, gather,
+                                        replay_material)
 from a_share_research.drafts import _verified_facts, open_questions, published
 from a_share_research.checking import SECTIONS
 from a_share_research.research_tools import active_methods_digest, run_method_catalog
@@ -27,12 +28,18 @@ log = logging.getLogger(__name__)
 EVAL_SET = ["600519", "000858", "600900", "601088", "000333", "002236", "603606", "600276", "002594", "600309", "600036"]
 
 
-def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
+def _mode(holdings: bool) -> str:
+    """Automatic inputs (prior, feedback context) come from the run's own input mode."""
+    return db.HOLDINGS_AWARE if holdings else f"NOT ({db.HOLDINGS_AWARE})"
+
+
+def _research_context(conn, code: str, parent_id: int | None, *, holdings: bool = False) -> list[dict]:
     code = stock_codes.normalize_key(code)
+    # The explicit parent passed submit's mode check; recent corrections follow this run's mode.
     parents = conn.execute(
         "SELECT r.id, r.body, r.passed, r.coverage, r.company_key, u.request FROM reports r JOIN runs u ON u.id = r.run_id"
         " WHERE r.company_key = ? AND u.kind = 'research' AND (r.id = ? OR (r.passed = 1 AND u.status = 'done'"
-        " AND json_type(u.request, '$.feedback') = 'object')) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
+        f" AND json_type(u.request, '$.feedback') = 'object' AND {_mode(holdings)})) ORDER BY (r.id = ?) DESC, r.id DESC LIMIT 3",
         (code, parent_id, parent_id),
     ).fetchall()
     context = []
@@ -43,7 +50,10 @@ def _research_context(conn, code: str, parent_id: int | None) -> list[dict]:
         # Retired methods must not return through automatic same-company context.
         if parent["id"] != parent_id:
             claims["methods"] = None
-        entry = {"report_id": parent["id"], "request": json.loads(parent["request"] or "{}"),
+        # Public intent only: a holdings-aware parent's snapshot never travels as context.
+        request = {k: v for k, v in (json.loads(parent["request"] or "{}") or {}).items()
+                   if k not in ("holdings_context", "holdings_snapshot")}
+        entry = {"report_id": parent["id"], "request": request,
                  "basis": "report" if parent["passed"] else "facts",
                  "claims_to_recheck": claims}
         if parent["id"] == parent_id:
@@ -78,16 +88,17 @@ def _agenda(row) -> dict:
             "checkpoints": [item["text"] for item in body.get("checkpoints", [])]}
 
 
-def _prior_report(conn, code: str, run_id: int) -> dict | None:
-    """The company's latest reviewed, non-replay, non-feedback report before this run, as an agenda to recheck.
+def _prior_report(conn, code: str, run_id: int, *, holdings: bool = False) -> dict | None:
+    """The company's latest reviewed, non-replay, non-feedback report of the same input mode before this run,
+    as an agenda to recheck.
 
     Carry its risks, checkpoints and coverage so the new judgment starts from evidence.
     """
     code = stock_codes.normalize_key(code)
     row = conn.execute(
         "SELECT r.id, r.body, r.created_at, r.coverage, r.company_key FROM reports r JOIN runs u ON u.id = r.run_id"
-        f" WHERE r.company_key = ? AND r.run_id < ? AND {db.FORMAL_REPORT}"
-        " ORDER BY r.id DESC LIMIT 1", (code, run_id),
+        f" WHERE r.company_key = ? AND r.run_id < ? AND {db.RESEARCH_ORIGINAL} AND r.passed = 1 AND u.status = 'done'"
+        f" AND {_mode(holdings)} ORDER BY r.id DESC LIMIT 1", (code, run_id),
     ).fetchone()
     return _agenda(row) if row else None
 
@@ -108,10 +119,46 @@ def financial_checks(table: list[dict], period: str) -> dict:
         for metric in FINANCIAL_CHECKS]}
 
 
+def _fetch_estimates(code: str, period: str) -> tuple[list[dict], tuple[bool | None, str | None], str] | None:
+    """Normalized forecast/express observations of one period; None when they cannot be obtained."""
+    try:
+        raw = sources.earnings_estimates(code, period)
+        basis = disclosure_checks.revenue_basis(raw["income"], code=code, period=period)
+        matched = basis[0] if basis[1] == period else None
+        observations = (disclosure_checks.normalize_forecast(raw["forecast"], code)
+                        + disclosure_checks.normalize_express(raw["express"], code, revenue_basis_matches=matched))
+    except Exception as exc:  # Optional anchors: an upstream or data fault never fails the research.
+        log.warning("forecast/express %s %s unavailable: %s", code, period, market.redact_error(exc))
+        return None
+    return observations, basis, db.now()
+
+
+def _disclosure_facts(material: Material, period: str, announced: str, title: str, fetched) -> dict:
+    """Register the announced estimate as table rows, or say why the original text must be read instead."""
+    code = stock_codes.normalize_key(material.code)
+    if fetched is None:
+        reason = "未能取得结构化预告/快报数据，请调用 read_disclosure 核对原文"
+        gaps = material.extra.setdefault("gaps", [])
+        if (gap := f"{code} {period}：{reason}") not in gaps:
+            gaps.append(gap)
+        return {"period": period, "rows": [], "reason": reason}
+    observations, basis, retrieved_at = fetched
+    rows, reason = estimate_rows(observations, code=code, period=period, announced=announced,
+                                 revenue_basis=basis, retrieved_at=retrieved_at,
+                                 expected_source=estimate_source(title))
+    if reason:
+        return {"period": period, "rows": [], "reason": f"{reason}；请调用 read_disclosure 读公告原文核对"}
+    held = {r["id"] for r in material.table}
+    material.table.extend(r for r in rows if r["id"] not in held)
+    return {"period": period, "rows": [
+        {"ref": r["id"], "period": period, "label": r["label"], "value": r["exact_values"][period], "unit": r["unit"],
+         **({"note": r["note"]} if "note" in r else {})} for r in rows]}
+
+
 def scan_events(conn, material: Material, frozen: list[dict]) -> list[dict]:
     """Request-frozen events plus the company's still-open ones, listed in the evidence catalog.
 
-    Only public announcement identities travel: no scan judgment, holdings or account data.
+    Only public announcement identities and disclosed figures travel: no scan judgment, holdings or account data.
     """
     from a_share_research import scans
     merged = {e["id"]: e for e in frozen}
@@ -121,6 +168,7 @@ def scan_events(conn, material: Material, frozen: list[dict]) -> list[dict]:
         return []
     catalog = material.extra["catalog"]
     result = []
+    estimates = {}
     for event in sorted(merged.values(), key=lambda e: (e["announced"], e["id"])):
         key = next((k for k, v in catalog.items() if v.get("url") == event["url"]), None)
         if key is None:
@@ -129,8 +177,18 @@ def scan_events(conn, material: Material, frozen: list[dict]) -> list[dict]:
                 code=material.code, name=material.name, title=event["title"], period=sources.title_period(event["title"]),
                 announced=event["announced"], url=event["url"]).info()
         item = dict(event, source=key)
-        if event["kind"] in ("periodic", "forecast") and (period := scans.period_of(event["title"])):
+        period = scans.period_of(event["title"]) if event["kind"] in ("periodic", "forecast") else None
+        if period:
             item["financial_checks"] = financial_checks(material.table, period)
+        if event["kind"] == "forecast":
+            if period is None:
+                item["disclosure_facts"] = {"period": None, "rows": [], "reason": (
+                    f"无法从标题识别财务期间，未生成结构化锚点；请调用 read_disclosure(source={key}) 读公告原文核对")}
+            else:
+                if period not in estimates:
+                    estimates[period] = _fetch_estimates(stock_codes.normalize_key(material.code), period)
+                item["disclosure_facts"] = _disclosure_facts(material, period, event["announced"], event["title"],
+                                                             estimates[period])
         result.append(item)
     return result
 
@@ -224,21 +282,36 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
         db.update_run(conn, run_id, status="running", step="gather", started_at=run["started_at"] or db.now(),
                       identity=json.dumps(identity))
         with runner_process.time_left(deadline):
-            material = replay_material(conn, replay_of) if replay_of is not None else gather(code)
+            loaded = replay_material(conn, replay_of) if replay_of is not None else gather(code)
+        if replay_of is not None:
+            # Checked before the run keeps the material: a blind run must never hold a position snapshot.
+            source_mode, run_mode = db.input_mode(loaded.extra), db.input_mode(request)
+            if source_mode != run_mode:
+                raise ResearchError(f"重放任务的输入模式（{run_mode}）与来源任务 {replay_of} 的材料快照"
+                                    f"（{source_mode}）不一致；请按来源模式创建任务")
+        material = loaded
         if stock_codes.normalize_key(material.code) != run["company_key"] or material.doc.code != material.code:
             raise ResearchError("重放材料与目标公司不一致")
         if replay_of is None:
+            holdings = request.get("holdings_context") is True
+            if holdings:
+                # The frozen acceptance snapshot joins the hashed material; replays restore it from there.
+                material.extra["holdings_context"] = True
+                material.extra["holdings_snapshot"] = request["holdings_snapshot"]
             material.extra["question"] = request.get("question", "")
             material.extra["feedback"] = request.get("feedback")
-            material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"))
+            material.extra["context"] = _research_context(conn, material.code, request.get("parent_report_id"),
+                                                          holdings=holdings)
             # Batch deep dives stay independent so cross-company comparison inputs keep their meaning.
             if not (request.get("parent_report_id") or request.get("feedback")
                     or run["batch_id"] is not None):
-                if prior := _prior_report(conn, material.code, run_id):
+                if prior := _prior_report(conn, material.code, run_id, holdings=holdings):
                     material.extra["prior"] = prior
                     if not material.extra["question"]:
                         material.extra["question"] = prior_question(prior)
-                if events := scan_events(conn, material, request.get("events") or []):
+                with runner_process.time_left(deadline):
+                    events = scan_events(conn, material, request.get("events") or [])
+                if events:
                     material.extra["events"] = events
                     if not material.extra["question"]:
                         material.extra["question"] = EVENT_QUESTION
@@ -358,6 +431,14 @@ def execute(conn, run_id: int, *, replay_of: int | None = None) -> None:
                 db.save_material(conn, run_id, material.snapshot())
 
 
+def _replay_target(conn, source_run: int) -> tuple[str, int, dict | None]:
+    """The company and input mode one replay needs; the page texts are released until execute reloads them."""
+    material = replay_material(conn, source_run)
+    # A replay keeps the source's input mode so readers, gates and scoring classify it the same way.
+    mode = {key: material.extra[key] for key in ("holdings_context", "holdings_snapshot") if key in material.extra}
+    return material.code, source_run, mode or None
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Research one or more companies and store the reports.")
@@ -371,18 +452,19 @@ def main() -> None:
     conn = db.connect()
     if args.replay:
         try:
-            targets = [(replay_material(conn, run).code, run) for run in args.replay]
+            # Every source is validated before the first run is created.
+            targets = [_replay_target(conn, run) for run in args.replay]
         except (ResearchError, KeyError, TypeError, ValueError) as exc:
             parser.error(str(exc))
     else:
-        targets = [(code, None) for code in args.codes or EVAL_SET]
+        request = {"question": args.question} if args.question else None
+        targets = [(code, None, request) for code in args.codes or EVAL_SET]
     run_ids = []
-    for code, replay_of in targets:
+    for code, replay_of, request in targets:
         started = time.monotonic()
-        run_id = db.create_run(conn, code, status="running")  # never 'queued', so a worker cannot also pick it up
+        # Never 'queued', so a worker cannot also pick it up.
+        run_id = db.create_run(conn, code, status="running", request=request)
         run_ids.append(run_id)
-        if args.question:
-            db.update_run(conn, run_id, request=json.dumps({"question": args.question}, ensure_ascii=False))
         execute(conn, run_id, replay_of=replay_of)
         run = conn.execute("SELECT status, error FROM runs WHERE id = ?", (run_id,)).fetchone()
         report = conn.execute("SELECT verdict, body FROM reports WHERE run_id = ?", (run_id,)).fetchone()

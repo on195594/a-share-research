@@ -234,14 +234,31 @@ def _request_scan(ctx: Context, args: ScanRequest) -> Payload:
     return Payload(data=receipt | {'request_id': args.request_id, 'scan_id': scan_id})
 
 
+def _holdings_access(ctx: Context, mode: str | None) -> None:
+    """Holdings-aware runs and reports are account data: only an account-enabled assistant reaches them."""
+    if mode == 'holdings_context' and not (ctx.account_shadow_enabled and ctx.principal.role == 'assistant'):
+        raise ToolError('forbidden', '知仓研究仅限启用账户工具的助手凭据', 403)
+
+
 def _research_status(ctx: Context, args: ResearchStatus) -> Payload:
     requester = service.requester(ctx.connection, ctx.principal) if args.request_id is not None else None
-    view = service.research_status(ctx.connection, requester=requester, **args.model_dump())
+    view = service.research_status(ctx.connection, requester=requester, **args.model_dump(),
+                                   blind_only=not (ctx.account_shadow_enabled and ctx.principal.role == 'assistant'))
     return Payload(data=view | service.run_link(view['id']))
 
 
+def _research_report(ctx: Context, args: Report) -> Payload:
+    _holdings_access(ctx, service.report_input_mode(ctx.connection, args.report_id))
+    return Payload(data=service.report_view(ctx.connection, args.report_id, compact=args.compact))
+
+
 def _queue_research(ctx: Context, args: service.ResearchRequest | ReportFeedback) -> Payload:
-    submit = service.request_feedback if isinstance(args, ReportFeedback) else service.request_research
+    if isinstance(args, ReportFeedback):
+        submit = service.request_feedback
+        _holdings_access(ctx, service.report_input_mode(ctx.connection, args.report_id))
+    else:
+        submit = service.request_research
+        _holdings_access(ctx, db.input_mode(args.model_dump()))
     receipt = submit(ctx.connection, service.requester(ctx.connection, ctx.principal), **args.model_dump())
     summary = service.run_summary(ctx.connection, receipt['run_id'], include_gaps=True)
     return Payload(data=summary | receipt | {'request_id': args.request_id})
@@ -460,7 +477,7 @@ _TOOLS = (
          lambda c, a: Payload(data=service.research_search(c.connection, **a.model_dump(), library=True))),
     Tool('research_cards', '读取论点卡', _READERS, Arguments, Payload,
          lambda c, a: Payload(data=service.company_cards(c.connection))),
-    Tool('research_request', '提交单股研究，立即返回任务编号、状态和进度页', _READERS,
+    Tool('research_request', '提交单股研究，立即返回任务编号、状态和进度页；holdings_context=true 时受理即冻结目标公司持仓快照（仅限启用账户工具的助手）', _READERS,
          service.ResearchRequest, Payload, _queue_research, access='write', collects=True),
     Tool('research_status', '按任务编号或原凭据的请求编号查询研究状态，compact=false 展开诊断与预算', _READERS,
          ResearchStatus, Payload, _research_status),
@@ -470,8 +487,7 @@ _TOOLS = (
          lambda c, a: Payload(data=service.company_card(c.connection, a.code))),
     Tool('research_methods', '按空格分隔的关键词检索最多五张已审核方法卡，返回标题、含适用条件的正文、来源链接与目录哈希',
          _READERS, MethodQuery, Payload, _research_methods),
-    Tool('research_report', '读取报告及证据', _READERS, Report, Payload,
-         lambda c, a: Payload(data=service.report_view(c.connection, a.report_id, compact=a.compact))),
+    Tool('research_report', '读取报告及证据', _READERS, Report, Payload, _research_report),
     Tool('research_scan_request', '按原凭据与请求编号提交或找回扫描，采集由 worker 执行', frozenset({'assistant'}),
          ScanRequest, Payload, _request_scan, access='write', account=True),
     Tool('research_scan_read', '读取扫描状态、事件数和缺口，compact=false 展开事件及通知', frozenset({'assistant'}),

@@ -798,6 +798,28 @@ def start_research(request: Request, q: str = Form(""), request_id: str = Form("
     return home_page(request, session, request_id=request_id, question=question, **result)
 
 
+def _holdings_actions() -> bool:
+    """Holdings-aware runs are created only where account access is enabled: tools proxy plus a bound ledger."""
+    if not (settings.tools_url and settings.tools_token):
+        return False
+    principal = api_keys.authenticate(conn, settings.tools_token)
+    if principal is None or principal.role != "assistant" or not api_keys.is_active(conn, principal.key_id, principal.role):
+        return False
+    from a_share_research.policy import account_view, registry as policies
+    try:
+        account_view.bound_account_id(conn)
+    except policies.PolicyError:
+        return False
+    return True
+
+
+def _holdings_refusal(request: Request, session: str, mode: str | None):
+    if mode != "holdings_context" or _holdings_actions():
+        return None
+    return message(request, session, "无法提交知仓任务",
+                   "本页面未启用账户工具或未绑定账本；知仓研究的追问、核查与重试须通过启用账户权限的助手入口发起。", 403)
+
+
 @app.get("/runs/{run_id}")
 def run_page(request: Request, run_id: int):
     if not (session := current_session(request)):
@@ -818,6 +840,7 @@ def run_page(request: Request, run_id: int):
                   if run["kind"] in ("research", "diagnostic") and run["status"] == "failed" else None,
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   retry=service.retry_view(run),
+                  mode=service.mode_view(run["request"]), holdings_actions=_holdings_actions(),
                   request_id=uuid.uuid4().hex)
 
 
@@ -827,6 +850,8 @@ def retry_run(request: Request, run_id: int, csrf: str = Form('')):
         return login_required()
     if not csrf_ok(session, csrf):
         return message(request, session, '页面已过期', '请返回任务页面重新提交。', 403)
+    if refused := _holdings_refusal(request, session, service.run_input_mode(conn, run_id)):
+        return refused
     try:
         next_run = service.retry_run(conn, run_id)
     except service.RequestError as exc:
@@ -840,6 +865,8 @@ def retry_feedback(request: Request, run_id: int, request_id: str = Form(''), cs
         return login_required()
     if not csrf_ok(session, csrf):
         return message(request, session, '页面已过期', '请返回核查任务重新提交。', 403)
+    if refused := _holdings_refusal(request, session, service.run_input_mode(conn, run_id)):
+        return refused
     try:
         next_run = service.retry_feedback(conn, run_id, request_id, requester='web-owner')
     except service.RequestError as exc:
@@ -887,7 +914,8 @@ def report_page(request: Request, report_id: int):
                   feedback_retry=service.feedback_retry_payload(run) is not None,
                   retry=service.retry_view(run),
                   feedback=feedback, feedback_label=feedback_label, comparison=comparison,
-                  replay_of=body.get("replay_of") or run["replay_of"],
+                  replay_of=body.get("replay_of") or run["replay_of"], mode=service.mode_view(run["request"]),
+                  holdings_actions=_holdings_actions(),
                   rows=rows, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=fin, price=reading.latest_price(conn, row["code"]),
@@ -902,6 +930,8 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
         return login_required()
     if not csrf_ok(session, csrf):
         return message(request, session, "页面已过期", "请返回报告重新提交。", 403)
+    if refused := _holdings_refusal(request, session, service.report_input_mode(conn, report_id)):
+        return refused
     try:
         result = service.request_feedback(conn, "web-owner", report_id, request_id, location, text)
     except service.RequestError as exc:
@@ -938,15 +968,24 @@ async def api_error(request: Request, exc: service.RequestError):
     return JSONResponse({"version": service.VERSION, "error": str(exc)}, status_code=exc.status)
 
 
+def _blind_only(mode: str | None) -> None:
+    """Legacy research keys never reach holdings-aware runs; only account-enabled assistant tools do."""
+    if mode == "holdings_context":
+        raise HTTPException(403, "知仓研究仅限启用账户工具的助手凭据")
+
+
 @app.post("/api/research", status_code=202)
 def api_research(request: Request, body: ResearchRequest):
-    result = service.request_research(conn, api_session(request), **body.model_dump())
+    requester = api_session(request)
+    _blind_only(db.input_mode(body.model_dump()))
+    result = service.request_research(conn, requester, **body.model_dump())
     return {"version": service.VERSION, "run_id": result["run_id"]}
 
 
 @app.get("/api/request")
 def api_request(request: Request, request_id: str):
-    return service.research_status(conn, requester=api_session(request), request_id=request_id, compact=False)
+    requester = api_session(request)
+    return service.research_status(conn, requester=requester, request_id=request_id, compact=False, blind_only=True)
 
 
 @app.get("/api/research/budget")
@@ -958,6 +997,7 @@ def api_research_budget(request: Request):
 @app.get("/api/runs/{run_id}")
 def api_run(request: Request, run_id: int):
     api_session(request)
+    _blind_only(service.run_input_mode(conn, run_id))
     return service.run_summary(conn, run_id)
 
 
@@ -1085,12 +1125,15 @@ def scan_detail(request: Request, scan_id: int):
 @app.get("/api/reports/{report_id}")
 def api_report(request: Request, report_id: int, compact: bool = False):
     api_session(request)
+    _blind_only(service.report_input_mode(conn, report_id))
     return service.report_view(conn, report_id, compact=compact)
 
 
 @app.post("/api/reports/{report_id}/feedback", status_code=202)
 def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
-    result = service.request_feedback(conn, api_session(request), report_id, **body.model_dump())
+    requester = api_session(request)
+    _blind_only(service.report_input_mode(conn, report_id))
+    result = service.request_feedback(conn, requester, report_id, **body.model_dump())
     return {"version": service.VERSION, "run_id": result["run_id"]}
 
 
@@ -1120,10 +1163,12 @@ def stock_page(request: Request, code: str, report: int | None = None):
         overview = _overview().company_overview(conn, code, history=scan_history)
         if reports:
             # Formal research heads the page; a feedback check or replay leads only when nothing else exists.
-            ordered = sorted(reports, key=lambda r: (bool(r["replay_of"]), bool(r["feedback_text"])))
-            head = ordered[0]
+            # Holdings-aware research is listed, but never heads the page or lends it a card or vitals.
+            ordered = sorted((r for r in reports if r["input_mode"] == "blind"),
+                             key=lambda r: (bool(r["replay_of"]), bool(r["feedback_text"])))
+            head = ordered[0] if ordered else None
             selected = next((r for r in reports if r['id'] == report), None) if report is not None else head
-            if selected is not None:
+            if report is None or selected is not None:
                 # The newest non-replay report with an operating series lends its vitals to the company page,
                 # falling back to the newest non-replay report's saved T.* financial table when no series exists.
                 loaded = {}
@@ -1144,24 +1189,28 @@ def stock_page(request: Request, code: str, report: int | None = None):
                             latest = (r, v)
                             break
                 latest = latest or (None, None)
-                before = next((r for r in ordered if r["passed"] and not r["replay_of"]), None) if not head["passed"] else None
-                card = reading.card(head, full(head)[1], before, checks=service.card_checks(conn, head["id"])) | {
-                    "check_failure": scan_history.checks.get((code, head["id"])),
-                    "coverage": head["coverage"],
-                    "created_at": head["created_at"]}
+                card = None
+                if head is not None:
+                    before = (next((r for r in ordered if r["passed"] and not r["replay_of"]), None)
+                              if not head["passed"] else None)
+                    card = reading.card(head, full(head)[1], before, checks=service.card_checks(conn, head["id"])) | {
+                        "check_failure": scan_history.checks.get((code, head["id"])),
+                        "coverage": head["coverage"],
+                        "created_at": head["created_at"]}
                 price = reading.latest_price(conn, code)
-                comp = reading.comparison(conn, full(selected)[0])
+                comp = reading.comparison(conn, full(selected)[0]) if selected is not None else None
     if not reports:
         return render(request, "message.html", session, 404, title="还没有研究过这家公司", text=code,
                       company_overview=overview)
-    if selected is None:
+    if report is not None and selected is None:
         return not_found(request, session, "这份报告不属于当前公司。")
     return render(request, "stock.html", session, reports=reports, code=code, request_id=uuid.uuid4().hex, card=card,
                   company_overview=overview,
                   due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   vitals=latest[1], vitals_report=latest[0],
                   price=price, comparison=comp,
-                  selected=selected, track=charts.verdict_track(reports))
+                  selected=selected,
+                  track=charts.verdict_track([r for r in reports if r["input_mode"] == "blind"]))
 
 
 @app.post("/price")

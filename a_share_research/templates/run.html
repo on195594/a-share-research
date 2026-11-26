@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import research_form, feedback_retry_form %}
+{% from "_macros.html" import holdings_summary, feedback_retry_form %}
 {% set refresh = 4 if run.status in ("queued", "running") else none %}
 {% set refresh_key = [run.status, run.step, ahead] | join("|") %}
 {% block title %}{{ run.name or run.code }} · {{ {'queued':'排队中','failed':'未完成'}.get(run.status, '计算价格参考' if run.kind == 'price' else '研究中') }}{% endblock %}
@@ -7,6 +7,7 @@
 <section class="narrow">
   <h1>{{ run.name or run.code }}</h1>
   <p class="code">{{ run.code }}</p>
+  {% if run.kind == 'research' and mode is defined %}<p class="muted">输入模式 · {{ '知仓研究' if mode.input_mode == 'holdings_context' else '盲研究' }}{% if mode.holdings_snapshot %} · 受理时冻结持仓快照（{{ holdings_summary(mode.holdings_snapshot) }}）{% endif %}</p>{% endif %}
   {% if run.kind == 'diagnostic' %}<p class="notice" role="status">研究诊断 · 正式研究、扫描与候选批次空闲后执行。</p>{% endif %}
   {% if run.status == "queued" %}
     <p class="notice" role="status">排队中{% if ahead %}，前面还有 {{ ahead }} 家{% endif %}。页面会自动刷新。</p>
@@ -43,10 +44,12 @@
     {% if diagnostics.problems %}<details><summary>中断前仍未解决的核查意见</summary><ul>{% for issue in diagnostics.problems %}<li>{{ issue.problem }}</li>{% endfor %}</ul></details>{% endif %}
     <p>先核对已保存材料与阶段日志，确认失败原因后再决定是否重试。</p>
     {% endif %}
-    {% if feedback_retry %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{% endif %}
-    {% if retry.note %}<p class="hint">{{ retry.note }}</p>{% endif %}
+    {% set holdings_blocked = mode is defined and mode.input_mode == 'holdings_context' and not holdings_actions %}
+    {% if feedback_retry and not holdings_blocked %}<p>重试会沿用原报告和原核查问题，创建新的核查任务。</p>{% endif %}
+    {% if retry.note and not holdings_blocked %}<p class="hint">{{ retry.note }}</p>{% endif %}
+    {% if holdings_blocked %}<p class="hint">知仓任务的重试须通过启用账户权限的助手入口发起。</p>{% endif %}
     <div class="actions">
-      {% if feedback_retry %}{{ feedback_retry_form(run.id, csrf, request_id) }}
+      {% if holdings_blocked %}{% elif feedback_retry %}{{ feedback_retry_form(run.id, csrf, request_id) }}
       {% elif run.kind in ('research', 'price') and not run.replay_of %}
       <form method="post" action="/runs/{{ run.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" type="submit">{{ retry.label }}</button></form>{% endif %}
       <a class="link" href="/">返回首页</a>

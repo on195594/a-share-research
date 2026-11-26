@@ -23,11 +23,13 @@ ASHARE_PUBLIC_MCP_URL=http://127.0.0.1:8610/mcp DATA_DIR=/absolute/private/copy 
 |---|---|
 | `research_search`、`research_methods` | 前者用 `q` 搜公司或报告，可选 `code`、`section`、`history`、`page`。后者用 `query` 搜已审核方法卡，返回适用条件、来源和目录哈希。 |
 | `research_cards`、`research_card`、`research_report` | 读取卡片列表、单公司卡片或按 `report_id` 取报告。报告默认为精简视图，`compact=false` 展开证据。 |
-| `research_request`、`research_feedback` | 研究提交六位 `code`、`request_id`，可附 `question`、`parent_report_id`。反馈提交 `report_id`、`location`、`text` 和 `request_id`。 |
+| `research_request`、`research_feedback` | 研究提交六位 `code`、`request_id`，可附 `question`、`parent_report_id`、`holdings_context`。反馈提交 `report_id`、`location`、`text` 和 `request_id`。 |
 | `research_status` | 按 `run_id` 或原凭据的 `request_id` 二选一找回任务；`compact=false` 展开诊断与预算。 |
 | `research_batch_monthly_request`、`research_batch_monthly_status` | 以 `month`（YYYY-MM）提交上海当月批次或查询指定月状态；查询可用 `compact=false` 展开名单与缺口。 |
 | `research_subscriptions`、`research_subscriptions_replace` | 读取订阅及来源；传 `codes` 完整替换外部订阅，空列表清空外部订阅。 |
 | `research_scan_request`、`research_scan_read`、`research_scan_weekly` | 按原凭据与 `request_id` 提交或找回扫描；按 `scan_id` 读结果或取近七日汇总，可用 `compact=false` 展开。 |
+
+`holdings_context=true` 提交知仓研究：受理时冻结目标公司持仓快照，规则见[知仓研究](../../docs/research.md#知仓研究)。仅启用账户工具实例的 `assistant` 可提交、查询、读取或纠错知仓任务与报告，其他调用返回 `forbidden`（403）；纠错沿用原报告的输入模式。卡片、检索与月批只读盲研究。
 
 提交研究或反馈后，立即给用户任务编号与进度页（Web 站点加回执的 `path`）。任务由 worker 执行，用户再次询问时查询进度。响应丢失先以原身份和原编号找回；同号改内容会冲突。
 

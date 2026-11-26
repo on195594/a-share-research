@@ -48,7 +48,18 @@ class ResearchNotConfigured(ValueError):
     """There is no application database to read research from."""
 
 
+def _require_blind(mode: str | None) -> None:
+    if mode == "holdings_context":
+        raise service.RequestError("知仓研究仅限启用账户工具的助手凭据", 403)
+
+
+def _report(conn, report_id: int, compact: bool) -> dict:
+    _require_blind(service.report_input_mode(conn, report_id))
+    return service.report_view(conn, report_id, compact=compact)
+
+
 def _run(conn, run_id: int) -> dict:
+    _require_blind(service.run_input_mode(conn, run_id))
     row = reading.api_run(conn, run_id)
     if row is None:
         raise service.RequestError("任务不存在", 404)
@@ -93,7 +104,7 @@ def cmd_research(argv: list[str]) -> int:
                 "card": lambda conn: service.company_card(conn, args.code),
                 "reports": lambda conn: {"version": service.VERSION,
                                          "reports": [dict(row) for row in reading.api_reports(conn, args.code)]},
-                "report": lambda conn: service.report_view(conn, args.id, compact=args.compact),
+                "report": lambda conn: _report(conn, args.id, args.compact),
                 "budget": lambda conn: {"version": service.VERSION, "budget": service.run_budget(conn)},
                 "status": lambda conn: _run(conn, args.id),
             }[args.action])

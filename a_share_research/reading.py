@@ -290,12 +290,12 @@ def evidence_context(body: dict, coverage: str | None) -> dict:
 def latest_reports(conn, *, query: str = "", codes: list[str] | None = None,
                    passed: bool = False, since: str | None = None, code_prefix: str | None = None,
                    limit: int = -1, offset: int = 0, include_checkpoint: bool = True) -> list:
-    """Newest non-replay report per company among eligible reports, with bounded summaries.
+    """Newest non-replay blind report per company among eligible reports, with bounded summaries.
 
     Search matches any historical name/code literally; source counts exclude replays.
     Filters apply before selecting the newest report, including passed/date constraints.
     """
-    where, params = [db.RESEARCH_ORIGINAL], []
+    where, params = [db.RESEARCH_BLIND], []
     if codes is not None:
         if not codes:
             return []
@@ -377,7 +377,7 @@ def search_items(conn, query: str, *, code: str | None = None, section: str | No
         " SELECT r.id, r.code, r.name, r.created_at, r.coverage, ROW_NUMBER() OVER ("
         "  PARTITION BY r.company_key ORDER BY r.created_at DESC, r.id DESC) AS position"
         " FROM reports r JOIN runs u ON u.id = r.run_id"
-        f" WHERE {db.FORMAL_REPORT}"
+        f" WHERE {db.BLIND_FORMAL_REPORT}"
         " AND (? IS NULL OR r.company_key = ?)) c"
         " WHERE (? OR c.position = 1) ORDER BY c.created_at DESC, c.id DESC",
         (code, code, int(history)),
@@ -881,7 +881,7 @@ def api_reports(conn, code: str):
         return []
     return conn.execute("SELECT r.id, r.run_id, r.code, r.name, r.created_at, r.period, r.passed, u.status"
         " FROM reports r JOIN runs u ON u.id = r.run_id WHERE r.company_key = ? AND u.kind = 'research'"
-        " ORDER BY r.id DESC LIMIT 100", (key,)).fetchall()
+        f" AND NOT ({db.HOLDINGS_AWARE}) ORDER BY r.id DESC LIMIT 100", (key,)).fetchall()
 
 
 def stock_reports(conn, code: str, *, summaries: bool = False):
@@ -895,7 +895,7 @@ def stock_reports(conn, code: str, *, summaries: bool = False):
                "r.id,r.run_id,r.code,r.name,r.period,r.passed,r.verdict,r.created_at,"
                "r.body_sha256,r.coverage,r.body")
     return conn.execute(
-        f"SELECT {columns}, u.replay_of AS replay_of,"
+        f"SELECT {columns}, u.replay_of AS replay_of, {db.INPUT_MODE} AS input_mode,"
         " COALESCE(NULLIF(json_extract(u.request, '$.question'), ''), json_extract(r.body, '$.question')) AS question,"
         " COALESCE(u.parent_report_id, json_extract(r.body, '$.parent_report_id')) AS parent_report_id,"
         " json_extract(u.request, '$.feedback.text') AS feedback_text,"

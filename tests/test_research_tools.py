@@ -98,8 +98,16 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     pdf_2025 = {"source": "D0", "page": 9, "quote": "销售费用 7,253,499,600.68 5,639,300,059.49 28.62",
                 "value": "7,253,499,600.68", "unit": "元", "period": "2025-12-31", "label": "销售费用"}
     pdf_2024 = pdf_2025 | {"value": "5,639,300,059.49", "period": "2024-12-31"}
-    share = calculate(MATERIAL.table, "销售费用占营收比", "ratio_pct",
-                      pdf_2025, {"ref": "T.revenue", "period": "2025-12-31"}, material=MATERIAL)
+    # The shared excerpt starts at the row itself: with page 8 unread its unit is unknown.
+    with pytest.raises(ValueError, match=r"第9页引文上方未见单位声明，第8页尚未读取.*read_disclosure"):
+        calculate(MATERIAL.table, "表头未读", "ratio_pct",
+                  pdf_2025, {"ref": "T.revenue", "period": "2025-12-31"}, material=MATERIAL)
+    # The same captured page 9 with the table header lines the excerpt left out.
+    headed = deepcopy(MATERIAL)
+    headed.pages[9] = ("1、 利润表及现金流量表相关科目变动分析表\n单位：元 币种：人民币\n"
+                       "科目 本期数 上年同期数 变动比例（%）\n" + headed.pages[9])
+    share = calculate(headed.table, "销售费用占营收比", "ratio_pct",
+                      pdf_2025, {"ref": "T.revenue", "period": "2025-12-31"}, material=headed)
     assert share["values"] == {"result": "4.22"}
     assert share["calculation"]["normalized_inputs"] == [
         {"value": "72.5349960068", "unit": "亿元"}, {"value": "1720.54", "unit": "亿元"}]
@@ -120,19 +128,19 @@ def test_same_period_growth_and_calculation_inputs_are_preserved():
     html = show_calculation(share)
     assert "故不展示代入算式" in html
     assert "7253499600.68 / 1720.54" not in html
-    yoy = calculate(MATERIAL.table, "销售费用同比", "growth_pct", pdf_2025, pdf_2024, material=MATERIAL)
+    yoy = calculate(headed.table, "销售费用同比", "growth_pct", pdf_2025, pdf_2024, material=headed)
     assert yoy["values"] == {"result": "28.62"}
     yoy["calculation"].pop("normalized_inputs")
     assert "(7253499600.68 / 5639300059.49 - 1) * 100" in show_calculation(yoy)
     with pytest.raises(ValueError, match="原数"):
-        calculate(MATERIAL.table, "缩放或符号不符", "ratio_pct",
-                  pdf_2025 | {"value": "72.53"}, {"ref": "T.revenue", "period": "2025-12-31"}, material=MATERIAL)
-    with pytest.raises(ValueError, match="未见单位"):
-        calculate(MATERIAL.table, "伪造单位", "ratio_pct",
-                  pdf_2025 | {"unit": "亿元"}, {"ref": "T.revenue", "period": "2025-12-31"}, material=MATERIAL)
+        calculate(headed.table, "缩放或符号不符", "ratio_pct",
+                  pdf_2025 | {"value": "72.53"}, {"ref": "T.revenue", "period": "2025-12-31"}, material=headed)
+    with pytest.raises(ValueError, match="声明单位为 元"):
+        calculate(headed.table, "伪造单位", "ratio_pct",
+                  pdf_2025 | {"unit": "亿元"}, {"ref": "T.revenue", "period": "2025-12-31"}, material=headed)
     with pytest.raises(ValueError, match="同一指标"):
-        calculate(MATERIAL.table, "不同科目同比", "growth_pct",
-                  pdf_2025, pdf_2024 | {"label": "管理费用"}, material=MATERIAL)
+        calculate(headed.table, "不同科目同比", "growth_pct",
+                  pdf_2025, pdf_2024 | {"label": "管理费用"}, material=headed)
 
 
 def test_huadong_calculations_keep_source_precision_and_legacy_material_limits():

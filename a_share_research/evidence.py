@@ -150,27 +150,29 @@ def _compact_page(text: str) -> str:
 
 
 def _find(window, quote):
-    """(start, end) of the verbatim quote, else of its elided segments found in order."""
+    """(end, [(excerpt, start)]) of the verbatim quote, else of its elided segments found in order."""
     whole = WHITESPACE.sub("", quote)
     start = window.find(whole)
     if start >= 0:
-        return start, start + len(whole)
+        return start + len(whole), [(quote, start)]
     # Excerpts joined with an ellipsis are ordinary citation. Each segment must be real text, in
     # order; short segments are refused so a number or a word can't be picked from elsewhere.
-    segments = [s for s in (WHITESPACE.sub("", part) for part in ELISION.split(quote)) if s]
+    excerpts = [part for part in ELISION.split(quote) if WHITESPACE.sub("", part)]
+    segments = [WHITESPACE.sub("", part) for part in excerpts]
     if len(segments) < 2 or any(len(s) < MIN_SEGMENT for s in segments):
         return None
-    first = position = window.find(segments[0])
-    for segment in segments:
+    position, found = window.find(segments[0]), []
+    for excerpt, segment in zip(excerpts, segments):
         position = window.find(segment, position)
         if position < 0:
             return None
+        found.append((excerpt, position))
         position += len(segment)
-    return first, position
+    return position, found
 
 
-def quote_match(cite, registry):
-    """Return actual matching pages, including a genuine page-spanning match; never guess a PDF anchor."""
+def _locate(cite, registry):
+    """(text layer, matching pages, page spans, excerpts) in the non-space character window around the page."""
     quote = str(cite.get("quote", ""))
     page = cite.get("page")
     source_id = cite.get("source", "D0")
@@ -186,11 +188,58 @@ def quote_match(cite, registry):
                 spans.append((n, offset, offset + len(text)))
             offset += len(text)
         if found := _find("".join(parts), quote):
-            start, end = found
-            matched = [n for n, lo, hi in spans if lo < end and hi > start]
+            end, excerpts = found
+            matched = [n for n, lo, hi in spans if lo < end and hi > excerpts[0][1]]
             if matched == list(range(matched[0], matched[-1] + 1)):
-                return matched
+                return field, matched, spans, excerpts
     return None
+
+
+def quote_match(cite, registry):
+    """Return actual matching pages, including a genuine page-spanning match; never guess a PDF anchor."""
+    found = _locate(cite, registry)
+    return found[1] if found else None
+
+
+FIGURE = re.compile(r"(?<![\d.,])\d[\d,]*(?:\.\d*)?")
+
+
+def figure_positions(cite, registry, number: Decimal):
+    """(text layer, [(page, character index in that page's text, source text after the figure)]) per quoted occurrence.
+
+    A figure split across lines resolves to the quoted head of the rejoined amount.
+    """
+    found = _locate(cite, registry)
+    if not found:
+        return None
+    layer, _, spans, excerpts = found
+    target = f"{abs(number):f}"
+    tokens = [(excerpt, start, m, m[0].replace(",", "")) for excerpt, start in excerpts for m in FIGURE.finditer(excerpt)]
+    chosen = [t for t in tokens if t[3].rstrip(".") == target]
+    split = not chosen
+    if split:
+        heads = {head.replace(",", "").lstrip("-−") for amount, head in _rejoined_parts(cite, registry)
+                 if amount.as_tuple() == number.as_tuple()}
+        chosen = [t for t in tokens if t[3] in heads or t[3].rstrip(".") in heads]
+    positions = []
+    for excerpt, start, token, _ in chosen:
+        at = start + len(WHITESPACE.sub("", excerpt[:token.start()]))
+        page, lo, hi = next(span for span in spans if span[1] <= at < span[2])
+        offset = at - lo
+        text = registry[cite.get("source", "D0")][layer][page]
+        indices = [m.start() for m in re.finditer(r"\S", text)]
+        end = at + len(token[0])
+        begin = indices[offset]
+        tail = text[indices[end - lo - 1] + 1:] if end <= hi else ""
+        before = text[:begin].rstrip(" \t")
+        parenthesized = ((before.endswith("(") and tail.lstrip().startswith(")"))
+                         or (before.endswith("（") and tail.lstrip().startswith("）")))
+        # A hyphen joining range endpoints does not negate the second endpoint.
+        minus = re.search(r"[-−]$", before)
+        negative = bool(minus and not re.search(r"\d[-−]$", before)) or parenthesized
+        if negative == (number < 0):
+            positions.append((page, begin, "" if split else tail))
+    return layer, positions
 
 
 # pdftotext breaks table amounts across lines. At the decimal point the fraction length is free
@@ -208,7 +257,7 @@ def _signed_amount(sign: str, digits: str) -> Decimal:
     return Decimal(("-" if sign else "") + digits.replace(",", ""))
 
 
-def rejoined_numbers(cite: dict, registry: dict) -> list[Decimal]:
+def _rejoined_parts(cite: dict, registry: dict) -> list[tuple[Decimal, str]]:
     """Exact amounts split across lines on the matched pages, only when the quote holds both halves."""
     pages = quote_match(cite, registry)
     if not pages:
@@ -221,7 +270,7 @@ def rejoined_numbers(cite: dict, registry: dict) -> list[Decimal]:
                 whole, fraction = m[2], m[3] or m[4]
                 if (re.search(rf"(?<![\d,]){re.escape(whole)}(?![\d,])", quote)
                         and re.search(rf"(?<![\d,]){fraction}(?!\d)", quote)):
-                    values.append(_signed_amount(m[1], f"{whole}.{fraction}"))
+                    values.append((_signed_amount(m[1], f"{whole}.{fraction}"), whole))
         lines = [line.strip() for line in source["raw_pages"].get(page, "").splitlines()]
         for above, below in zip(lines, lines[1:]):
             head, tail = SPLIT_HEAD.search(above), SPLIT_TAIL.match(below)
@@ -229,8 +278,12 @@ def rejoined_numbers(cite: dict, registry: dict) -> list[Decimal]:
                 continue
             if all(re.search(rf"(?<![\d.,+−-]){re.escape(half)}(?![\d.,])", quote)
                    for half in (head[1] + head[2], tail[0])):
-                values.append(_signed_amount(head[1], head[2] + tail[0]))
+                values.append((_signed_amount(head[1], head[2] + tail[0]), head[2]))
     return values
+
+
+def rejoined_numbers(cite: dict, registry: dict) -> list[Decimal]:
+    return [amount for amount, _ in _rejoined_parts(cite, registry)]
 
 
 def _quote_error(cite, source):

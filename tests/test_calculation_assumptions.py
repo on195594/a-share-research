@@ -214,9 +214,16 @@ def test_split_calculation_survives_storage_citations_and_chaining():
     assert Decimal(chained['exact_values']['result']) == 0
 
 
+def captured_pages(key):
+    capture = json.loads((Path(__file__).parent / "data/unit-scope-pages.json").read_text())["documents"]
+    return next(d for d in capture if d["key"] == key)["pages"]
+
+
 def test_calculate_all_captured_split_shapes():
     from support.split_numbers import DATA, material
     m = material()
+    # The page-111 sample continues an equity statement whose 元 is declared on page 110 of the same report.
+    m.extra["sources"]["D3"]["pages"] = m.extra["sources"]["D3"]["pages"] | captured_pages("zhuye_annual")
     for sample in DATA['samples']:
         operand = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail'],
                    'value': (sample['head'] + sample['tail']).replace(',', ''), 'unit': '元'}
@@ -234,8 +241,12 @@ def test_calculate_split_mutations_are_rejected():
 
 
 def test_calculate_keeps_the_sign_of_a_split_amount():
-    from support.split_numbers import DATA, material
-    m = material()
+    from support.split_numbers import DATA
+    # The negative samples sit on page 112 of one report; its equity statement declares 元 on page 110.
+    pages = captured_pages("autel_half")
+    assert pages["112"] == DATA["pages"]["layout"]["112"]
+    m = material("000651")
+    m.extra["sources"]["D3"] = {"pages": pages, "raw_pages": {"112": DATA["pages"]["raw"]["112"]}}
     for sample in DATA['negative']:
         operand = {'source': 'D3', 'page': sample['page'], 'quote': sample['head'] + '\n' + sample['tail'], 'unit': '元'}
         row = calculate(m.table, '原数复算', 'difference', operand | {'value': sample['value']},

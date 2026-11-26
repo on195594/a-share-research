@@ -2,22 +2,26 @@
 """Same-material stability of research stances and hurdle prices. Read-only, no model calls.
 
 Natural observation (default): consecutive passed reports of one company on the same financial
-period (no new periodic report in between) are treated as reruns on the same material; this
-prints each company's stance sequence, flips and hurdle-price range. Nothing about them was
-controlled, so they describe production noise, not one configuration.
+period (no new periodic report in between), frozen profile, judgment contract and input mode are
+treated as reruns on the same material; this prints each group's stance sequence, flips and
+hurdle-price range. Nothing about them was controlled, so they describe production noise, not one
+configuration.
 
 Active experiment (--runs): exactly the listed runs form one repeated trial, whatever else the
 database holds. Every listed run gets an outcome (priced, not_priced, no_stance, unpassed, failed,
 unfinished, excluded, missing), so failures count against a configuration instead of vanishing.
-Runs from different frozen profiles can be listed together; each profile has its own summary. Controls are read back
-from each run's request, material snapshot and report and reported per company, never assumed:
+Runs from different frozen profiles, contracts or input modes can be listed together; each combination has its
+own summary and compares one company per financial period. Controls are read back from each run's request,
+material snapshot and report and reported per group, never assumed:
 
 - market: the material's market date and the report's close. Run every repeat on one trading day
   after the close, so the price and that day's data are identical.
-- material: the start document (url and sha256) and the gathered T.* financial rows. No new
-  periodic report may land between repeats.
+- material: the start document (url and sha256), the gathered T.* financial rows and any
+  X.forecast / X.express anchors. No new periodic report or estimate may land between repeats.
 - question: the stored request (question, feedback, parent report, events) and the question
   research actually answered. Submit every repeat with the same request.
+- holdings: the fields of holdings-aware research's frozen position snapshot that research sees (its
+  acceptance time left out); blind runs record 无快照.
 - prior: the report research carried as its agenda, or the explicit parent report. Research picks
   the latest formal report before the run, so repeats in one database chain onto each other; give
   each repeat its own copy of the same production backup (PATH:RUN_ID), where all of them see the
@@ -45,13 +49,14 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from a_share_research import report as report_body  # noqa: E402
+from a_share_research.material import holdings_projection  # noqa: E402
 from a_share_research import stock_codes  # noqa: E402
 
 DATABASE = Path('/home/lin/a-share-research-data/app.db')
 NATURAL_SINCE = '2026-11-01'
 OUTCOMES = ('priced', 'not_priced', 'no_stance', 'unpassed', 'failed', 'unfinished', 'excluded', 'missing')
 CONTROLS = ('market.date', 'market.close', 'material.document', 'material.financials',
-            'question.request', 'question.answered', 'prior.report')
+            'question.request', 'question.answered', 'holdings.snapshot', 'prior.report')
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -98,9 +103,12 @@ def _explore_model(conn, run_id: int) -> str | None:
 def observed(conn, since: str, code: str | None) -> dict:
     rows = conn.execute(
         "SELECT r.id, r.code, r.created_at, r.body, c.identity, json_extract(u.identity, '$.profile_sha256') AS profile, "
-        "json_extract(u.identity, '$.code_commit') AS code_commit FROM reports r JOIN runs u ON u.id = r.run_id "
+        "json_extract(u.identity, '$.code_commit') AS code_commit, "
+        "json_extract(u.identity, '$.contract') AS contract, "
+        "COALESCE(json_extract(u.request, '$.holdings_context'), 0) = 1 AS holdings "
+        "FROM reports r JOIN runs u ON u.id = r.run_id "
         "LEFT JOIN calls c ON c.id = (SELECT max(id) FROM calls WHERE run_id = r.run_id AND step = 'explore') "
-        "WHERE r.passed = 1 AND r.created_at >= ? AND (? IS NULL OR r.code LIKE ? || '%') "
+        "WHERE r.passed = 1 AND u.replay_of IS NULL AND r.created_at >= ? AND (? IS NULL OR r.code LIKE ? || '%') "
         "ORDER BY substr(r.code, 1, 6), r.id", (since, code, company_key(code) or code)).fetchall()
     groups: dict[tuple, list[dict]] = {}
     for row in rows:
@@ -108,24 +116,38 @@ def observed(conn, since: str, code: str | None) -> dict:
         if not body.get('stance') or body.get('replay_of') is not None:
             continue
         # 600900 and 600900.SH are one company; grouping on the raw code would split it.
-        groups.setdefault((company_key(row['code']) or row['code'], body.get('period'), row['profile'] or '未记录'), []).append(dict(
+        mode = 'holdings_context' if row['holdings'] else 'blind'
+        contract = (body.get('judgment') or {}).get('contract', row['contract'])
+        groups.setdefault((company_key(row['code']) or row['code'], body.get('period'), row['profile'] or '未记录',
+                           contract, mode), []).append(dict(
             report=row['id'], date=row['created_at'][:10], code_commit=row['code_commit'], model=((_object(row['identity']) or {}).get('actual') or {}).get('model'),
             close=(body.get('valuation_calc') or {}).get('close'), action=body['stance'].get('action'),
             hurdle=hurdle_of(body)))
     result = []
-    for (company, period, profile), items in groups.items():
+    for (company, period, profile, contract, mode), items in groups.items():
         if len(items) < 2:
             continue
         actions = [item['action'] for item in items]
-        result.append(dict(code=company, period=period, profile_sha256=profile, reports=items,
+        result.append(dict(code=company, period=period, profile_sha256=profile, contract=contract, input_mode=mode,
+                           reports=items,
                            flips=sum(a != b for a, b in zip(actions, actions[1:])),
                            hurdle=spread([item['hurdle'] for item in items])))
-    ranges = [group['hurdle']['range_pct'] for group in result if group['hurdle'].get('n', 0) >= 2]
-    # A company with reruns on two periods is two groups but one independent company.
-    return dict(since=since, groups=result,
-                summary=dict(companies=len({group['code'] for group in result}), groups=len(result),
-                             with_flip=len({group['code'] for group in result if group['flips'] > 0}),
-                             median_range_pct=statistics.median(ranges) if ranges else None))
+    partitions = {}
+    for group in result:
+        key = (group['profile_sha256'], group['contract'], group['input_mode'])
+        partitions.setdefault(key, []).append(group)
+    summaries = []
+    for (profile, contract, mode), groups in partitions.items():
+        ranges = [g['hurdle']['range_pct'] for g in groups if g['hurdle'].get('n', 0) >= 2]
+        summaries.append(dict(profile_sha256=profile, contract=contract, input_mode=mode,
+                              companies=len({g['code'] for g in groups}), groups=len(groups),
+                              with_flip=len({g['code'] for g in groups if g['flips']}),
+                              median_range_pct=statistics.median(ranges) if ranges else None))
+    summary = dict(companies=len({g['code'] for g in result}), groups=len(result))
+    if len(summaries) <= 1:
+        summary.update(with_flip=summaries[0]['with_flip'] if summaries else 0,
+                       median_range_pct=summaries[0]['median_range_pct'] if summaries else None)
+    return dict(since=since, groups=result, summary=summary) | ({'profiles': summaries} if len(summaries) > 1 else {})
 
 
 # ---------- active experiment ----------
@@ -153,10 +175,19 @@ def _digest(value) -> str:
 
 
 def _financials(table) -> str | None:
-    """Digest of the gathered T.* rows (id, unit, values); provenance timestamps are left out."""
-    rows = sorted(([r.get('id'), r.get('unit'), r.get('values'), r.get('exact_values')] for r in table or []
-                   if isinstance(r, dict) and str(r.get('id', '')).startswith('T.')), key=lambda r: str(r[0]))
-    return _digest(rows) if rows else None
+    """Digest of the gathered T.* rows and announced estimate anchors; provenance timestamps are left out."""
+    rows = []
+    for row in table or []:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get('id', ''))
+        values = [row.get('id'), row.get('unit'), row.get('values'), row.get('exact_values')]
+        if key.startswith('T.'):
+            rows.append(values)
+        elif key.startswith(('X.forecast.', 'X.express.')):
+            # Their label and note carry the announcement date and basis research reads.
+            rows.append(values + [row.get('label'), row.get('note')])
+    return _digest(sorted(rows, key=lambda r: str(r[0]))) if rows else None
 
 
 def _controls(request: dict | None, data: dict, body: dict, calc: dict) -> dict:
@@ -172,6 +203,15 @@ def _controls(request: dict | None, data: dict, body: dict, calc: dict) -> dict:
     else:
         prior = None
     answered = extra.get('question') if 'question' in extra else body.get('question')
+    snapshot = extra.get('holdings_snapshot')
+    if request is None:
+        holdings = None
+    elif snapshot:
+        holdings = _digest(json.loads(holdings_projection(snapshot)['facts']))
+    else:
+        holdings = None if request.get('holdings_context') else '无快照'
+    if request is not None:
+        request = {k: v for k, v in request.items() if k != 'holdings_snapshot'}
     return {
         'market.date': data.get('market_date') or body.get('market_date'),
         'market.close': _price(calc.get('close')),
@@ -179,6 +219,7 @@ def _controls(request: dict | None, data: dict, body: dict, calc: dict) -> dict:
         'material.financials': _financials(data.get('table') or body.get('table')),
         'question.request': json.dumps(request, ensure_ascii=False, sort_keys=True) if request is not None else None,
         'question.answered': answered,
+        'holdings.snapshot': holdings,
         'prior.report': prior,
     }
 
@@ -200,10 +241,11 @@ def trial(conn, run_id: int) -> dict:
     judgment = body.get('judgment') or {}
     replay = run['replay_of'] if 'replay_of' in columns else identity.get('replay_of')
     kind = run['kind'] if 'kind' in columns else 'research'
-    record = dict(run=run_id, code=company_key(run['code']), status=run['status'],
+    record = dict(run=run_id, code=company_key(run['code']), status=run['status'], period=body.get('period'),
                   report=report['id'] if report else None, outcome=None, action=None, hurdle=None,
                   config=dict(application_sha256=identity.get('application_sha256'), code_commit=identity.get('code_commit'),
                               profile_sha256=identity.get('profile_sha256') or '未记录',
+                              **({'input_mode': 'holdings_context'} if (request or {}).get('holdings_context') else {}),
                               contract=identity.get('contract', judgment.get('contract')),
                               author=identity.get('author', judgment.get('author')),
                               reviewer=identity.get('reviewer', judgment.get('reviewer')),
@@ -251,16 +293,16 @@ def experiment(targets: list[tuple[Path, int]], label: str | None = None) -> dic
     finally:
         for conn in connections.values():
             conn.close()
-    cohorts = {}
-    for record in records:
-        if record['code'] is not None:
-            cohorts.setdefault(record['config']['profile_sha256'], []).append(record)
+    cohorts = _grouped([r for r in records if r['code'] is not None],
+                       lambda r: (r['config']['profile_sha256'], r['config'].get('input_mode', 'blind')),
+                       lambda r: r['config']['contract'])
     profiles, groups = [], []
-    for profile, items in cohorts.items():
+    for ((profile, mode), contract), items in cohorts.items():
         summary, companies = _profile_summary(items)
-        profiles.append(dict(profile_sha256=profile, **summary))
-        groups.extend(companies)
-    # Across different profiles only sample counts can be combined.
+        key = dict(profile_sha256=profile, contract=contract, input_mode=mode)
+        profiles.append(key | summary)
+        groups.extend(key | company for company in companies)
+    # Across different configurations only sample counts can be combined.
     summary = profiles[0].copy() if len(profiles) == 1 else dict(
         mixed_config=len(profiles) > 1, configs=[c for p in profiles for c in p['configs']])
     summary.update(label=label, requested=len(records), companies=len({g['code'] for g in groups}),
@@ -269,12 +311,27 @@ def experiment(targets: list[tuple[Path, int]], label: str | None = None) -> dic
     return dict(label=label, runs=records, companies=groups, profiles=profiles, summary=summary)
 
 
-def _profile_summary(records: list[dict]) -> tuple[dict, list[dict]]:
-    companies = {}
+def _grouped(records: list[dict], base, extra) -> dict:
+    """Group by (base, extra); a run that never recorded `extra` joins the only recorded value of its base.
+
+    Failed or unfinished runs lack audit fields, which does not establish a different configuration.
+    """
+    known: dict = {}
     for record in records:
-        companies.setdefault(record['code'], []).append(record)
+        if extra(record) is not None:
+            known.setdefault(base(record), set()).add(extra(record))
+    groups: dict = {}
+    for record in records:
+        value = extra(record)
+        if value is None and len(known.get(base(record), ())) == 1:
+            value = next(iter(known[base(record)]))
+        groups.setdefault((base(record), value), []).append(record)
+    return groups
+
+
+def _profile_summary(records: list[dict]) -> tuple[dict, list[dict]]:
     groups = []
-    for code, items in companies.items():
+    for (code, period), items in _grouped(records, lambda r: r['code'], lambda r: r['period']).items():
         judged = [item for item in items if item['action']]
         actions = [item['action'] for item in judged]
         counts = Counter(actions)
@@ -282,7 +339,7 @@ def _profile_summary(records: list[dict]) -> tuple[dict, list[dict]]:
         pairs = len(actions) * (len(actions) - 1) // 2
         agreeing = sum(n * (n - 1) // 2 for n in counts.values())
         groups.append(dict(
-            code=code, profile_sha256=items[0]['config']['profile_sha256'], runs=[item['run'] for item in items],
+            code=code, period=period, runs=[item['run'] for item in items],
             outcomes={o: n for o in OUTCOMES if (n := sum(item['outcome'] == o for item in items))},
             actions=dict(counts), agreement=round(agreeing / pairs, 3) if pairs else None,
             flips=sum(a != b for a, b in zip(actions, actions[1:])),
@@ -290,7 +347,7 @@ def _profile_summary(records: list[dict]) -> tuple[dict, list[dict]]:
             controls=controls, controlled=all(c['same'] for c in controls.values())))
     configs = sorted({json.dumps(r['config'], ensure_ascii=False, sort_keys=True) for r in records})
     profiles = [json.loads(config) for config in configs]
-    keys = ['contract', 'author', 'reviewer', 'explore_model']
+    keys = ['author', 'reviewer', 'explore_model']
     if profiles[0]['profile_sha256'] == '未记录':
         keys.append('application_sha256')
     # Missing audit fields on a failed run do not establish a different configuration.
@@ -298,14 +355,16 @@ def _profile_summary(records: list[dict]) -> tuple[dict, list[dict]]:
     comparable = [g for g in groups if g['controlled'] and not mixed]
     ranges = [g['hurdle']['range_pct'] for g in comparable if g['hurdle'].get('n', 0) >= 2]
     agreements = [g['agreement'] for g in comparable if g['agreement'] is not None]
+    split = Counter(g['code'] for g in groups)
     return dict(
         requested=len(records),
         outcomes={o: n for o in OUTCOMES if (n := sum(r['outcome'] == o for r in records))},
-        companies=len(groups),
+        companies=len(split),
         with_disagreement=sum(1 for a in agreements if a < 1),
         median_agreement=statistics.median(agreements) if agreements else None,
         compared=len(ranges), median_range_pct=statistics.median(ranges) if ranges else None,
-        uncontrolled={g['code']: [n for n, c in g['controls'].items() if not c['same']]
+        uncontrolled={(g['code'] if split[g['code']] == 1 else f"{g['code']}@{g['period']}"):
+                      [n for n, c in g['controls'].items() if not c['same']]
                       for g in groups if not g['controlled']},
         configs=profiles, mixed_config=mixed), groups
 

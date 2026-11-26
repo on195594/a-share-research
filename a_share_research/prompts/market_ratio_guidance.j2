@@ -1,0 +1,5 @@
+{%- if ratio == "M.pb" -%}
+M.pb 是市净率（倍），不是金额或百分比；估值比较只与同为倍数的值做 difference，推算金额用 ratio（市值金额 ÷ M.pb）或 multiply（金额 × M.pb）
+{%- elif ratio == "M.dv_ttm" -%}
+M.dv_ttm 是近 12 个月滚动股息率（%），不是金额或倍数；先用 ratio_pct（分红金额 ÷ 市值）得到百分比，再用 difference 与它比较
+{%- endif -%}

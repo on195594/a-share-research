@@ -5,7 +5,7 @@ from html import unescape
 
 import pytest
 
-from a_share_research import integrity, overview, reading, scans, service, template_filters
+from a_share_research import db, integrity, overview, reading, scans, service, template_filters
 from a_share_research.account import cycle_analysis
 from a_share_research.policy import account_input, registry as policies
 from a_share_research.tools.registry import Context, invoke
@@ -177,6 +177,8 @@ def test_reopening_without_v0_framework_keeps_positions_readable_until_void_and_
     assert current['codes'] == ['600001']
     gap, = current['policy_gaps']
     assert 'v0 政策框架待补' in gap and '600001' in gap and cycle['cycle_id'] in gap
+    assert overview.holdings_snapshot(conn, '600001', frozen_at=db.now())['policy_gaps'] == [gap]
+    assert overview.holdings_snapshot(conn, '603606', frozen_at=db.now())['policy_gaps'] == []
     portfolio = overview.portfolio_overview(conn)
     holding, = portfolio['holdings']
     assert holding['position']['cycle_id'] == cycle['cycle_id'] and holding['position']['shares'] == 100

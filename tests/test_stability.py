@@ -235,3 +235,56 @@ def test_profiles_separate_same_company_trials_including_failed_runs(tmp_path):
     assert older['profile_sha256'] == '未记录' and older['median_agreement'] is None
     assert newer['profile_sha256'] == PROFILE_SHA256 and newer['outcomes'] == {'priced': 2, 'failed': 1}
     assert newer['median_agreement'] == 1
+
+
+def test_stability_uses_visible_snapshot_and_forecast_express_anchors():
+    from a_share_research import disclosure_checks, material
+
+    stability = _load()
+    capture = json.loads((Path(__file__).parent / 'data' / 'disclosure-checks.json').read_text())['tushare']
+    snapshot = {'status': 'unheld', 'frozen_at': '2026-11-19', 'account': {'version': 1}}
+    request = {'holdings_context': True, 'holdings_snapshot': snapshot}
+
+    def controls(snap, table):
+        return stability._controls(request, {'extra': {'holdings_snapshot': snap}, 'table': table}, {}, {})
+
+    original = controls(snapshot, [])
+    assert original == controls(snapshot | {'frozen_at': '2026-11-20', 'account': {'version': 2}}, [])
+    assert original['holdings.snapshot'] != controls(snapshot | {'status': 'unverified'}, [])['holdings.snapshot']
+    assert controls(None, [])['holdings.snapshot'] is None
+    for api, code in (('forecast', '603960.SH'), ('express', '605016.SH')):
+        rows = capture[api][code]
+        normalized = (disclosure_checks.normalize_forecast(rows, code[:6]) if api == 'forecast' else
+                      disclosure_checks.normalize_express(rows, code[:6], revenue_basis_matches=None))
+        observation = normalized[0]
+        anchors, reason = material.estimate_rows([observation], code=code, period=observation['period'],
+                                                 announced=observation['announced'], revenue_basis=(None, None),
+                                                 retrieved_at='2026-11-16')
+        assert not reason and anchors
+        assert controls(snapshot, anchors)['material.financials'] != original['material.financials']
+
+
+def test_stability_partitions_contract_mode_and_period_for_the_same_profile(tmp_path):
+    path = tmp_path / 'trials.db'
+    conn = db.connect(path)
+    # Marked variants of the same real repeat. Only grouping identities differ.
+    groups = ((11, 'blind', '2026-09-30'), (12, 'blind', '2026-09-30'),
+              (12, 'holdings_context', '2026-09-30'), (12, 'blind', '2026-06-30'))
+    targets = []
+    for index, (contract, mode, period) in enumerate(groups):
+        for i in range(2):
+            run = 100 + index * 2 + i
+            _trial(conn, run, SAMPLES[116])
+            conn.execute("UPDATE runs SET identity=json_set(identity,'$.contract',?), request=? WHERE id=?",
+                         (contract, json.dumps(REQUEST | ({'holdings_context': True} if mode != 'blind' else {})), run))
+            conn.execute("UPDATE reports SET body=json_set(body,'$.period',?) WHERE id=?", (period, run))
+            targets.append((path, run))
+    conn.commit()
+    stability = _load()
+    observed = stability.observed(conn, '2026-11-01', None)
+    conn.close()
+    active = stability.experiment(targets)
+    for rows in (observed['groups'], active['companies']):
+        assert {(g['contract'], g['input_mode'], g['period']) for g in rows} == set(groups)
+    assert len(active['profiles']) == len(observed['profiles']) == 3
+    assert 'median_range_pct' not in observed['summary']

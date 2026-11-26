@@ -149,7 +149,7 @@ def event_reviews(conn, code: str, *, company_events=None, include_no_card=False
     reports = [dict(r) for r in conn.execute(
         'SELECT r.id, r.run_id, COALESCE(u.finished_at, r.created_at) AS completed_at, '
         f'json_extract(r.body,{paths}) AS sections FROM reports r '
-        f'JOIN runs u ON u.id=r.run_id WHERE r.company_key=? AND {db.FORMAL_REPORT} '
+        f'JOIN runs u ON u.id=r.run_id WHERE r.company_key=? AND {db.BLIND_FORMAL_REPORT} '
         'AND completed_at >= ? ORDER BY r.id DESC', (code, (first - timedelta(days=2)).isoformat()))]
 
     def evidence(report, event):
@@ -328,7 +328,7 @@ def _extend_scope(conn, items, holdings):
         for code in json.loads(batch['l5'])['codes']:
             _add_origin(items, code, 'l5')
     for row in conn.execute(f"SELECT DISTINCT r.company_key FROM reports r JOIN runs u ON u.id = r.run_id "
-                            f"WHERE {db.FORMAL_REPORT} ORDER BY r.company_key"):
+                            f"WHERE {db.BLIND_FORMAL_REPORT} ORDER BY r.company_key"):
         _add_origin(items, row['company_key'], 'card')
     for code in holdings:
         _add_origin(items, code, 'holding')
@@ -608,8 +608,7 @@ class MarketSources:
         result = {name: [row for period in periods for row in market.query(
             pro, name, ts_code=to_tushare_stock_code(code), period=period.replace('-', '')
         ).to_dict(orient='records')] for name in ('forecast', 'express')}
-        # The target period may not have an income statement yet: compare the
-        # latest disclosed consolidated basis, not only the forecast's period.
+        # Fetch statements for all observed periods. Each express needs its own consolidated basis.
         result['income'] = market.query(pro, 'income', ts_code=to_tushare_stock_code(code),
                                         report_type='1').to_dict(orient='records')
         fin = sources.financials(code)
@@ -675,7 +674,7 @@ def completed_reviews(conn, since: str | None, at: str) -> list[dict]:
                 continue
             previous = conn.execute(
                 "SELECT r.body FROM reports r JOIN runs u ON u.id=r.run_id WHERE r.company_key=? "
-                f"AND r.id<? AND {db.FORMAL_REPORT} ORDER BY r.id DESC LIMIT 1",
+                f"AND r.id<? AND {db.BLIND_FORMAL_REPORT} ORDER BY r.id DESC LIMIT 1",
                 (stock_codes.normalize_key(row['code']), current['id'])).fetchone()
             if previous:
                 def judgment(body):
@@ -718,10 +717,14 @@ def _check_disclosures(conn, source, code: str, card: dict | None, scan_id: int,
     if not items:
         return None
     raw = source.disclosures(code, sorted({i['period'] for i in items}))
-    observations = (disclosure_checks.normalize_forecast(raw['forecast'], code)
-                    + disclosure_checks.normalize_express(raw['express'], code,
-                        revenue_basis_matches=disclosure_checks.revenue_basis_matches(raw['income']))
-                    + disclosure_checks.normalize_periodic(raw['periodic'], code))
+    observations = disclosure_checks.normalize_forecast(raw['forecast'], code)
+    express_by_period = defaultdict(list)
+    for row in raw['express']:
+        express_by_period[date.fromisoformat(str(row['end_date'])).isoformat()].append(row)
+    for period, rows in express_by_period.items():
+        matches = disclosure_checks.revenue_basis_matches(raw['income'], code=code, period=period)
+        observations.extend(disclosure_checks.normalize_express(rows, code, revenue_basis_matches=matches))
+    observations.extend(disclosure_checks.normalize_periodic(raw['periodic'], code))
     event = max(pending, key=lambda e: (e['announced'], e['id']))
     inserted = []
     with db.transaction(conn):
@@ -782,8 +785,9 @@ def _dispatch(conn, scan_id: int, at: str, scope: set[str], *, history: list[dic
                 else:
                     unresolved.append(event)
             if not unresolved or conn.execute(
+                # A holdings-aware run cannot cover public events for the blind card, so it does not defer them.
                 "SELECT 1 FROM runs WHERE company_key=? AND kind='research' AND batch_id IS NULL "
-                "AND status IN ('queued','running')", (code,)
+                f"AND status IN ('queued','running') AND NOT ({db.holdings_aware('runs')})", (code,)
             ).fetchone():
                 continue
             eligible.extend(unresolved)

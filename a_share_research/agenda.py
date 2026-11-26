@@ -65,7 +65,8 @@ def sample(reports: list[dict]) -> dict:
             unrecorded.append(report)
         elif report["period"] <= report["prior_period"]:
             reruns.append(report)
-        elif (key := (report["code"], report["period"])) not in seen:
+        # Holdings-aware continuations keep their own slot; batch and active blind reports still share one.
+        elif (key := (report.get("source") == "holdings_context", report["code"], report["period"])) not in seen:
             seen.add(key)
             picked.append(report | {"group": group(report["prior_status"])})
     return {"picked": picked, "unrecorded": unrecorded, "reruns": reruns}

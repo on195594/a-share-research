@@ -1,5 +1,6 @@
 """Read-only review diagnostics on captured report 103; boundary variants are tests, not performance evidence."""
 import copy
+import hashlib
 import json
 import sqlite3
 from datetime import date
@@ -32,6 +33,10 @@ def test_captured_forecasts_keep_width_units_and_pending_outcomes(tmp_path):
     before = path.read_bytes()
     review = validation.forecast_review(items)
     assert path.read_bytes() == before
+    # Frozen complete blind output from HEAD e0e45dc on report 103, excluding the rendering clock.
+    historical = {k: v for k, v in review.items() if k != 'generated_at'}
+    assert hashlib.sha256(json.dumps(historical, sort_keys=True, ensure_ascii=False).encode()).hexdigest() == (
+        '269b1d8f0e72da466946baf49d3071799afeac67a49d067a0b77aeaf9236dc31')
     assert review['summary']['scored'] == 0
     assert review['summary']['pending'] == 2
     assert [i['diagnostics']['width'] for i in review['items']] == [30, 60]
@@ -136,6 +141,40 @@ def test_cli_frozen_has_no_provider_calls_and_emits_additive_json(tmp_path, monk
     assert Path(path).read_bytes() == before and page.exists()
 
 
+def test_cli_all_compared_baselines_distorted(tmp_path, monkeypatch, caplog):
+    import sys
+    from a_share_research import material, sources
+    from support.financials import CAPTURES, frames
+
+    # Retrospective test on 卫星化学. Its captured 2021 operating cash flow
+    # changed sign year over year, distorting the Q1 proportional baseline.
+    captured = CAPTURES["002648"]
+    financials = frames(captured)
+
+    def through(period):
+        return {k: frame[frame["end_date"] <= period] for k, frame in financials.items()}
+
+    written = material.financial_table(through("2021-12-31"), {})
+    forecast = {"metric": "T.op_cash", "period": "2022-03-31", "low": 10, "high": 15, "confidence": 75}
+    body = {"table": written, "checkpoints": [{"forecast": forecast}]}
+    path = database(tmp_path / "capture.db")
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE reports SET code=?, name=?, body=?",
+                     (captured["code"], "卫星化学", json.dumps(body)))
+    monkeypatch.setattr(sources, "financials", lambda code: through(forecast["period"]))
+    output, page = tmp_path / "review.json", tmp_path / "review.html"
+    monkeypatch.setattr(sys, "argv", ["validation", "--database", path, "--forecasts",
+                                     "--json", str(output), "--html", str(page)])
+    with caplog.at_level("INFO", logger=validation.__name__):
+        validation.main()
+
+    summary = json.loads(output.read_text())["summary"]
+    assert summary["scored"] == summary["compared"] == summary["distorted_compared"] == 1
+    assert summary["clean_compared"] == 0 and summary["clean_beat_baseline"] is None
+    assert "外推失真基线后胜过朴素预测：—（n=0）" in caplog.text
+    assert "外推失真基线后 —，0 条" in page.read_text()
+
+
 def test_percentage_differences_render_as_points_in_html(tmp_path):
     item = frozen(tmp_path / 'capture.db')[0]
     # Explicit percentage-unit boundary variant; not investment performance evidence.
@@ -194,6 +233,10 @@ def test_distorted_baseline_shadowed_models_and_confidence_coverage(tmp_path):
     assert stratum['clean_median_width_to_baseline'] == pytest.approx(20 / 132)
     sg, = review['shadowed_model_groups']
     assert (sg['contract'], sg['reports'], sg['companies'], sg['updates']) == (2, 1, 1, 1)
+    partitions = review['contract_summaries']
+    assert {g['contract']: g['summary']['total'] for g in partitions} == {None: 3, 2: 0}
+    assert [sum(level['total'] for level in g['confidence_coverage']) for g in partitions] == [
+        g['summary']['total'] for g in partitions]
     cs, = review['contract_independent_first']
     assert (cs['contract'], cs['total'], cs['companies']) == (2, 1, 1)
     assert {c['confidence']: c['total'] for c in review['confidence_coverage']} == {60: 3, 75: 0, 90: 0}
