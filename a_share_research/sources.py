@@ -378,7 +378,10 @@ def report_rc_window(as_of: str, *, days: int = 90, code: str | None = None,
                     continue
                 calls += 1
                 frame = market.query(pro, "report_rc", **params)
-            result["rows"].extend(market.validate_report_rc_day(frame, day, code, include_rows=include_rows))
+            if include_rows:
+                result["rows"].extend(market.report_rc_rows(frame, day, code))
+            else:
+                market.validate_report_rc_day(frame, day)
             result["covered_days"] += 1
             if frame.empty:
                 result["empty_days"].append(day)

@@ -38,7 +38,6 @@ from a_share_research.tools_client import ToolCallError, ToolsClient
 from a_share_research.evidence import report_source_view, citation_link
 
 HERE = Path(__file__).parent
-_UNSET = object()
 SESSION_COOKIE = "session"
 STATE_COOKIE = "oauth_state"
 PENDING_COOKIE = "mcp_authorization"
@@ -193,20 +192,18 @@ def _hash(token: str) -> str:
 
 
 def current_session(request: Request) -> str | None:
-    row = getattr(request.state, "current_session", _UNSET)
-    if row is _UNSET:
-        token = getattr(request.state, "session_token", None) or request.cookies.get(SESSION_COOKIE)
-        row = conn.execute(
-            "SELECT s.token_hash, CASE WHEN ds.session_hash IS NULL THEN s.expires_at"
-            " ELSE min(s.expires_at, d.expires_at) END AS expires_at FROM sessions s"
-            " LEFT JOIN device_sessions ds ON ds.session_hash = s.token_hash"
-            " LEFT JOIN remembered_devices d ON d.token_hash = ds.device_hash"
-            " WHERE s.token_hash = ? AND (ds.session_hash IS NULL OR d.owner_id = ?)",
-            (_hash(token), settings.github_user_id),
-        ).fetchone() if token else None
-        request.state.current_session = row
+    token = getattr(request.state, "session_token", None) or request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    row = conn.execute(
+        "SELECT s.token_hash, CASE WHEN ds.session_hash IS NULL THEN s.expires_at"
+        " ELSE min(s.expires_at, d.expires_at) END AS expires_at FROM sessions s"
+        " LEFT JOIN device_sessions ds ON ds.session_hash = s.token_hash"
+        " LEFT JOIN remembered_devices d ON d.token_hash = ds.device_hash"
+        " WHERE s.token_hash = ? AND (ds.session_hash IS NULL OR d.owner_id = ?)",
+        (_hash(token), settings.github_user_id),
+    ).fetchone()
     if row is None or row["expires_at"] <= time.time():
-        request.state.current_session = None
         return None
     return row["token_hash"]
 
@@ -235,7 +232,6 @@ def restore_device(request: Request):
         conn.execute("INSERT INTO sessions VALUES (?, ?)", (_hash(token), expires))
         conn.execute("INSERT INTO device_sessions VALUES (?, ?)", (_hash(token), device["token_hash"]))
     request.state.session_token = token
-    request.state.current_session = _UNSET
     return token, max(1, int(expires - time.time()))
 
 
@@ -290,7 +286,6 @@ def start_session(request: Request | None = None, state: str = "") -> RedirectRe
     set_cookie(response, SESSION_COOKIE, token, SESSION_SECONDS)
     if request is not None:
         request.state.session_token = token
-        request.state.current_session = _UNSET
     return response
 
 
@@ -390,7 +385,6 @@ def remember_device(request: Request, csrf: str = Form(""), return_path: str = F
         return message(request, session, "需要安全连接", "请通过 HTTPS 登记此设备。", 403)
     with db.transaction(conn):
         # A concurrent logout may have revoked the session before this write acquired its lock.
-        request.state.current_session = _UNSET
         if not current_session(request):
             return login_required()
         if active_device(request):
@@ -406,7 +400,6 @@ def remember_device(request: Request, csrf: str = Form(""), return_path: str = F
         conn.execute("INSERT INTO remembered_devices VALUES (?, ?, ?)",
                      (_hash(token), settings.github_user_id, time.time() + DEVICE_SECONDS))
         conn.execute("INSERT OR REPLACE INTO device_sessions VALUES (?, ?)", (session, _hash(token)))
-    request.state.current_session = _UNSET
     response = RedirectResponse(destination, status_code=303)
     set_cookie(response, DEVICE_COOKIE, token, DEVICE_SECONDS)
     return response
@@ -427,7 +420,6 @@ def logout(request: Request, csrf: str = Form("")):
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (session,))
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/")
-    request.state.current_session = None
     response.delete_cookie(DEVICE_COOKIE, path="/")
     response.delete_cookie(LEDGER_RETURN_COOKIE, path="/")
     response.delete_cookie(PENDING_COOKIE, path="/")
@@ -901,7 +893,7 @@ def report_page(request: Request, report_id: int):
         if index:
             feedback_label += f"第 {int(index[:-1]) + 1} 条"
     evidence = reading.evidence_context(body, row['coverage'])
-    comparison, previous = reading.comparison_with_prior(conn, row, body, run)
+    comparison = reading.compare_with_parent(conn, row, body, run)
     rows = {r["id"]: r for r in body["table"]}
     fin = [r for r in body["table"] if r["id"].startswith("T.")]
     return render(request, "report.html", session, report=row, body=body, evidence=evidence, purpose=run["kind"], newer_report=newer_report,
@@ -916,7 +908,7 @@ def report_page(request: Request, report_id: int):
                   rows=rows, request_id=uuid.uuid4().hex,
                   market=[r for r in body["table"] if r["id"].startswith("M.")],
                   fin=fin, price=reading.latest_price(conn, row["code"]),
-                  prior_agenda=reading.prior_agenda(conn, body, previous) if row['passed'] else [],
+                  prior_agenda=reading.prior_agenda(conn, body) if row['passed'] else [],
                   followups=reading.followups(conn, row['code'], report_id))
 
 

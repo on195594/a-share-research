@@ -100,9 +100,9 @@ def tushare_connect():
     """Return an owned connection; callers may safely use contextlib.closing."""
     path = (db.DATA / "tushare_cache.db").resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=5, isolation_level=None)
+    conn = sqlite3.connect(path, timeout=30, isolation_level=None)
     try:
-        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA temp_store=MEMORY")
         try:
             db._enable_wal(conn, 5)  # concurrent first openers get BUSY without waiting
@@ -119,26 +119,16 @@ def tushare_connect():
 
 
 def _cache_connection():
-    """Keep one internal connection per thread, reopening when DATA or the file itself changes."""
+    """Keep one internal connection per thread, reopening when DATA points elsewhere."""
     path = (db.DATA / "tushare_cache.db").resolve()
-    identity = _file_identity(path)
-    if identity is None or identity != getattr(_connections, "identity", None):
+    if getattr(_connections, "path", None) != path:
         previous = getattr(_connections, "conn", None)
-        _connections.conn = _connections.identity = None
+        _connections.conn = _connections.path = None
         if previous is not None:
             previous.close()
         _connections.conn = tushare_connect()
-        _connections.identity = _file_identity(path)
+        _connections.path = path
     return _connections.conn
-
-
-def _file_identity(path):
-    """A deleted, replaced or re-permissioned cache file must not be served by an old handle."""
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return None
-    return path, stat.st_dev, stat.st_ino, stat.st_mode
 
 
 def _report_rc_expired(day, created_at):
@@ -257,7 +247,7 @@ def query(pro, api: str, **params) -> pd.DataFrame:
             frame = pro.query(api, **params)
             if api == "report_rc":
                 day = params.get("end_date") if params.get("start_date") == params.get("end_date") else None
-                validate_report_rc_day(frame, day, include_rows=False)
+                validate_report_rc_day(frame, day)
         except Exception as exc:
             if api == "report_rc":
                 _defer_report_rc(exc)
@@ -267,26 +257,30 @@ def query(pro, api: str, **params) -> pd.DataFrame:
     return cached_query(api, params, fetcher)
 
 
-def validate_report_rc_day(frame: pd.DataFrame, day: str | None = None, code: str | None = None, *,
-                           include_rows: bool = True) -> list[dict]:
-    """Validate a report_rc response before handing sell-side data to the pure consensus calculator.
+def validate_report_rc_day(frame: pd.DataFrame, day: str | None = None) -> pd.DataFrame:
+    """Validate a report_rc response and return its required columns with dates and np normalized.
 
     With day, a daily query must never silently lend coverage to a different date.
     """
     if not isinstance(frame, pd.DataFrame):
         raise SourceError("TuShare report_rc 返回的不是数据表")
     if frame.empty:
-        return []
+        return frame
     required = {"ts_code", "report_date", "org_name", "quarter", "np"}
     if not required <= set(frame.columns):
         raise SourceError("TuShare report_rc 缺少 ts_code、report_date、org_name、quarter 或 np")
     dates = pd.to_datetime(frame["report_date"], errors="raise")
     if day is not None and not dates.dt.date.eq(date.fromisoformat(str(day))).all():
         raise SourceError(f"report_rc {day} 返回了其他日期的预测")
-    np_values = pd.to_numeric(frame["np"], errors="raise")
-    if not include_rows:
+    return frame[sorted(required)].assign(report_date=dates.dt.strftime("%Y-%m-%d"),
+                                          np=pd.to_numeric(frame["np"], errors="raise"))
+
+
+def report_rc_rows(frame: pd.DataFrame, day: str | None = None, code: str | None = None) -> list[dict]:
+    """Validated sell-side rows for the pure consensus calculator."""
+    selected = validate_report_rc_day(frame, day)
+    if selected.empty:
         return []
-    selected = frame[sorted(required)].assign(report_date=dates.dt.strftime("%Y-%m-%d"), np=np_values)
     if code is not None:
         selected = selected.loc[selected["ts_code"].eq(to_tushare_stock_code(code))]
     # TuShare np is 万元, not 元. The captured 603606 response has 2028Q4 np=217800

@@ -3,13 +3,31 @@
 import json
 from copy import deepcopy
 
-from a_share_research import batches, drafts, model_profile, research, screening, valuation
+from a_share_research import batches, drafts, model_profile, research, research_mcp, screening, valuation
 from a_share_research.prompts import output_schema
-from a_share_research.research_mcp import compose_prompt, explore_prompt, repair_prompt, review_prompt
 from a_share_research.research_tools import method_cards
 from a_share_research.reviewing import ReviewLedger
 from support.continuation import BODY
 from support.valuation import DATA, assumptions, material
+
+
+# The session computes these inputs once per receipt and passes them to every stage prompt.
+def explore_prompt(mat):
+    return research_mcp.explore_prompt(mat, material_block=mat.prompt_block())
+
+
+def compose_prompt(mat):
+    return research_mcp.compose_prompt(mat, material_block=mat.prompt_block())
+
+
+def review_prompt(mat, draft, binding):
+    return research_mcp.review_prompt(mat, draft, binding, material_block=mat.prompt_block(),
+                                      valuation=drafts.program_valuation(draft, mat))
+
+
+def repair_prompt(mat, draft, problems, *, acquire):
+    return research_mcp.repair_prompt(mat, draft, problems, acquire=acquire, material_block=mat.prompt_block(),
+                                      valuation=drafts.program_valuation(draft, mat))
 
 
 def test_render_prompts_from_captured_material():

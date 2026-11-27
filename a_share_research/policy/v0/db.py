@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,8 +11,6 @@ from pathlib import Path
 from a_share_research import db as app_db
 from a_share_research.policy.v0 import paths
 
-_SCHEMA_LOCK = threading.Lock()
-_SCHEMA_INITIALIZED: tuple[str, int, int] | None = None
 _READ_ONLY_REQUEST = False
 
 
@@ -57,37 +54,27 @@ def _read_only_connection(timeout: float) -> sqlite3.Connection:
 
 
 def _ensure_schema(database_path: Path) -> None:
-    """Create the application database and recheck its schema when the file is replaced."""
-    global _SCHEMA_INITIALIZED
+    """Create the application database, refusing an old a-stock-agent account database."""
     database_path = database_path.resolve()
-    with _SCHEMA_LOCK:
+    try:
+        paths.ensure_db_parent(database_path)
+    except PermissionError as exc:
+        raise sqlite3.OperationalError(str(exc)) from exc
+    if database_path.exists() and database_path.stat().st_size:
+        probe = sqlite3.connect(database_path.as_uri() + "?mode=ro", uri=True)
         try:
-            key, nonempty = app_db.database_file_state(database_path)
-        except FileNotFoundError:
-            key, nonempty = None, False
-        if nonempty and key == _SCHEMA_INITIALIZED:
-            return
-        _SCHEMA_INITIALIZED = None
-        try:
-            paths.ensure_db_parent(database_path)
-        except PermissionError as exc:
-            raise sqlite3.OperationalError(str(exc)) from exc
-        if nonempty:
-            probe = sqlite3.connect(database_path.as_uri() + "?mode=ro", uri=True)
-            try:
-                legacy = probe.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-                ).fetchone()
-            finally:
-                probe.close()
-            if legacy:
-                # Migrating it would add the research tables to the old runtime's live database.
-                raise sqlite3.OperationalError(
-                    f"{database_path} is an old a-stock-agent account database; "
-                    "policy v0 here only opens the application database"
-                )
-        app_db.connect(database_path).close()
-        _SCHEMA_INITIALIZED = app_db.database_file_state(database_path)[0]
+            legacy = probe.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+            ).fetchone()
+        finally:
+            probe.close()
+        if legacy:
+            # Migrating it would add the research tables to the old runtime's live database.
+            raise sqlite3.OperationalError(
+                f"{database_path} is an old a-stock-agent account database; "
+                "policy v0 here only opens the application database"
+            )
+    app_db.connect(database_path).close()
 
 
 def get_db(timeout: float = 30.0) -> sqlite3.Connection:

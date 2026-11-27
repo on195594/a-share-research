@@ -1,17 +1,14 @@
 """Reproducible SW constituent aggregates, using cached whole-market snapshots."""
 
 import hashlib
-import json
 import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from functools import lru_cache
 from statistics import median
 
 import pandas as pd
 
 from a_share_research import conditions, db, sources, stock_codes
-from a_share_research.gate import canonical
 
 BASIS = ("当前申万成分回看，存在幸存者偏差，不是历史申万指数；收益用收盘价×复权因子，"
          "只纳入两端均有有效价格和因子的股票，停牌/未上市缺失不填零；等权口径为个股收益中位数，"
@@ -159,13 +156,6 @@ def industry_rows(data):
     return rows
 
 
-@lru_cache(maxsize=8)
-def _expected_rows(dataset_json):
-    # Decode an owned copy: industry_rows embeds its input in the anchor row.
-    # Caller mutations must neither change cached expectations nor reuse a stale key.
-    return {r['id']: r for r in industry_rows(json.loads(dataset_json))}
-
-
 def validate_rows(rows, table):
     """Recompute cited aggregates from the saved input bundle, including membership and dates."""
     incomplete = '行业出处输入不完整或成员/期间错配；请重新调用 industry_trend'
@@ -174,12 +164,12 @@ def validate_rows(rows, table):
         registry = {r['id']: r for r in table}
         anchors = {r['source']['dataset_ref'] for r in rows
                    if r.get('source', {}).get('api') == 'industry_constituents'}
-        datasets = {anchor: canonical(registry[anchor]['source']['dataset']) for anchor in anchors}
+        datasets = {anchor: registry[anchor]['source']['dataset'] for anchor in anchors}
     except malformed as exc:
         raise ValueError(incomplete) from exc
     for anchor, dataset in datasets.items():
         try:
-            expected = _expected_rows(dataset)
+            expected = {r['id']: r for r in industry_rows(dataset)}
         except malformed as exc:
             raise ValueError(incomplete) from exc
         for row in rows:

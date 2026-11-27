@@ -60,9 +60,8 @@ def _add_versioned_holding(code: str) -> int:
     return holding_id
 
 
-def test_schema_migration_is_idempotent_for_empty_fixture(monkeypatch) -> None:
+def test_schema_migration_is_idempotent_for_empty_fixture() -> None:
     for _ in range(2):
-        monkeypatch.setattr(db, "_SCHEMA_INITIALIZED", False)
         with db.db_session() as conn:
             assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
             assert conn.execute(

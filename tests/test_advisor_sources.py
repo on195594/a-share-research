@@ -19,7 +19,7 @@ MARKET = json.loads((DATA / "600519-financials.json").read_text())["market"]
 
 
 def test_report_rc_boundary_preserves_verified_np_unit_and_dates():
-    rows = market.validate_report_rc_day(pd.DataFrame(ROWS), code="603606")
+    rows = market.report_rc_rows(pd.DataFrame(ROWS), code="603606")
     assert len(rows) == 69
     huatai = next(r for r in rows if r["org_name"] == "华泰证券" and r["quarter"] == "2028Q4"
                  and r["report_date"] == "2026-10-30")
@@ -29,9 +29,9 @@ def test_report_rc_boundary_preserves_verified_np_unit_and_dates():
 
 
 def test_report_rc_boundary_filters_company_and_rejects_schema():
-    assert market.validate_report_rc_day(pd.DataFrame(ROWS), code="600519") == []
+    assert market.report_rc_rows(pd.DataFrame(ROWS), code="600519") == []
     with pytest.raises(sources.SourceError, match="缺少"):
-        market.validate_report_rc_day(pd.DataFrame(ROWS).drop(columns="np"), code="603606")
+        market.report_rc_rows(pd.DataFrame(ROWS).drop(columns="np"), code="603606")
 
 
 class CapturedReportRC:
@@ -105,7 +105,7 @@ def test_window_budget_accumulates_across_calls_and_recent_days_first(daily_repo
     assert budget_calls() == 8 and len(daily_reports.calls) == 8
     assert third["covered_days"] == 8  # Empty days no longer starve older missing days.
     captured = pd.DataFrame(ROWS)
-    expected_rows = market.validate_report_rc_day(captured.loc[captured["report_date"].isin(expected[:8])], code="603606")
+    expected_rows = market.report_rc_rows(captured.loc[captured["report_date"].isin(expected[:8])], code="603606")
     assert third["rows"] == sorted(expected_rows, key=lambda row: row["report_date"], reverse=True)
 
 
@@ -467,35 +467,14 @@ def test_metadata_only_window_matches_full_window_without_rows(daily_reports):
     assert metadata == full | {"rows": []}
 
 
-def test_cache_connections_follow_data_path_and_external_close_is_independent(monkeypatch, tmp_path):
+def test_cache_follows_data_path(monkeypatch, tmp_path):
     monkeypatch.setenv("TUSHARE_CACHE", "1")
     params = {"end_date": MARKET["trade_date"]}
     market.cached_query("daily_basic", params, lambda: pd.DataFrame([MARKET]))
-    first = market._cache_connection()
-    assert market._cache_connection() is first
     with closing(market.tushare_connect()) as owned:
-        assert owned is not first
         assert owned.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        assert owned.execute("PRAGMA synchronous").fetchone()[0] == 1
-        assert owned.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
-    assert first.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 1
     original = db.DATA
     monkeypatch.setattr(db, "DATA", tmp_path / "other-data")
     assert market.cached_response("daily_basic", params) is None
-    second = market._cache_connection()
-    assert second is not first
-    assert second.execute("SELECT count(*) FROM tushare_cache").fetchone()[0] == 0
     monkeypatch.setattr(db, "DATA", original)
     pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), pd.DataFrame([MARKET]))
-
-
-def test_deleted_cache_file_is_recreated_instead_of_written_through_a_stale_handle(monkeypatch):
-    monkeypatch.setenv("TUSHARE_CACHE", "1")
-    params = {"end_date": MARKET["trade_date"]}
-    fetch = lambda: pd.DataFrame([MARKET])
-    market.cached_query("daily_basic", params, fetch)
-    for path in db.DATA.glob("tushare_cache.db*"):
-        path.unlink()
-    market.cached_query("daily_basic", params, fetch)
-    with closing(market.tushare_connect()) as connection:
-        assert connection.execute("SELECT count(*) FROM tushare_cache").fetchone() == (1,)

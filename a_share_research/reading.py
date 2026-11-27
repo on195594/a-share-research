@@ -462,20 +462,19 @@ def library_results(conn, query: str, *, history: bool = False, whole_library: b
     return results | {"more": more or hits_more}
 
 
-def prior_agenda(conn, body: dict, previous: dict | None = None) -> list[dict]:
+def prior_agenda(conn, body: dict) -> list[dict]:
     """prior_status with each old item's wording, resolved against the immutable prior report."""
     entries = body.get('prior_status') or []
     if not entries:
         return []
     report_id = (body.get('prior') or {}).get('report_id')
-    if previous is None:
-        row = conn.execute("SELECT json_extract(body, '$.risks') AS risks, json_extract(body, '$.checkpoints') AS checkpoints"
-                           " FROM reports WHERE id = ?", (report_id,)).fetchone()
-        previous = {name: json.loads(row[name] or '[]') if row else [] for name in ('risks', 'checkpoints')}
+    row = conn.execute("SELECT json_extract(body, '$.risks') AS risks, json_extract(body, '$.checkpoints') AS checkpoints"
+                       " FROM reports WHERE id = ?", (report_id,)).fetchone()
+    previous = {name: json.loads(row[name] or '[]') if row else [] for name in ('risks', 'checkpoints')}
     resolved = []
     for entry in entries:
         name, index = entry['ref'][:-1].split('[')
-        items = previous.get(name) or []
+        items = previous[name]
         found = items[int(index)] if int(index) < len(items) else None
         resolved.append(entry | {'previous': found['text'] if found else None,
                                  'previous_label': f"{'旧风险' if name == 'risks' else '旧检查点'}第 {int(index) + 1} 条",
@@ -527,28 +526,27 @@ def report_cards(conn, reports: list, passed_before: dict) -> list[dict]:
 def comparison(conn, report) -> dict:
     body = report_body.load(report['body'])
     run = conn.execute('SELECT request, status FROM runs WHERE id = ?', (report['run_id'],)).fetchone()
-    return comparison_with_prior(conn, report, body, run)[0]
+    return compare_with_parent(conn, report, body, run)
 
 
-def comparison_with_prior(conn, report, body: dict, run) -> tuple[dict, dict | None]:
-    """Compare the saved parent and retain its decoded body if it also supplies the prior agenda."""
+def compare_with_parent(conn, report, body: dict, run) -> dict:
+    """Resolve only saved parent/prior identities, never chronological neighbours."""
     request = (json.loads(run['request'] or '{}') or {}) if run else {}
     parents = {x for x in (request.get('parent_report_id'), body.get('parent_report_id')) if isinstance(x, int)}
     if len(parents) > 1:
         return {'parent_report_id': None, 'baseline_status': 'conflict',
-                'reason': '关联原报告记录不一致，无法可靠对照。'}, None
-    prior_id = (body.get('prior') or {}).get('report_id')
-    parent = next(iter(parents), None) or prior_id
+                'reason': '关联原报告记录不一致，无法可靠对照。'}
+    parent = next(iter(parents), None) or (body.get('prior') or {}).get('report_id')
     if not isinstance(parent, int) or parent == report['id']:
         return {'parent_report_id': None, 'baseline_status': 'not_linked',
-                'reason': '未记录明确关联的原报告，不能按研究时间自动配对。'}, None
+                'reason': '未记录明确关联的原报告，不能按研究时间自动配对。'}
     old = conn.execute('SELECT r.id, r.run_id, r.code, r.name, r.period, r.passed, r.verdict, r.created_at,'
                        ' r.body_sha256, r.coverage, r.body, u.request, u.status'
                        ' FROM reports r JOIN runs u ON u.id = r.run_id'
                        ' WHERE r.id = ?', (parent,)).fetchone()
     if old is None or old['code'] != report['code']:
         return {'parent_report_id': parent, 'baseline_status': 'missing' if old is None else 'not_same_code',
-                'reason': '关联原报告不存在或不属于同一家公司，无法对照。'}, None
+                'reason': '关联原报告不存在或不属于同一家公司，无法对照。'}
     before = report_body.load(old['body'])
     previous_request = json.loads(old['request'] or '{}') or {}
     baseline_status = ('ready' if old['status'] == 'done' and old['passed']
@@ -567,7 +565,7 @@ def comparison_with_prior(conn, report, body: dict, run) -> tuple[dict, dict | N
         result['reason'] = '至少一份报告未记录财务表，无法计算指标变化。'
     else:
         result.update(table_comparison(old_rows, new_rows))
-    return result, before if parent == prior_id else None
+    return result
 
 
 def table_comparison(old_rows: list, new_rows: list) -> dict:

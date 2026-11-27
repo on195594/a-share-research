@@ -18,33 +18,24 @@ ROOT = Path(__file__).resolve().parents[1]
 MACROS = ENV.get_template('_macros.html').module
 
 
-def test_current_session_is_cached_per_request_across_login_and_logout(web):
+def test_current_session_follows_login_and_logout_within_a_request(web):
     request = page_request('/', cookie='session=unknown')
-    statements = []
-    web.conn.set_trace_callback(statements.append)
-    try:
-        assert web.current_session(request) is None
-        assert web.current_session(request) is None
-        assert len(statements) == 1
+    assert web.current_session(request) is None
 
-        logged_in = web.start_session(request)
-        token = SimpleCookie(logged_in.headers['set-cookie'])['session'].value
-        session = web.current_session(request)
-        assert session == web._hash(token)
-        assert web.current_session(page_request('/', cookie='session=unknown')) is None
+    logged_in = web.start_session(request)
+    token = SimpleCookie(logged_in.headers['set-cookie'])['session'].value
+    session = web.current_session(request)
+    assert session == web._hash(token)
+    assert web.current_session(page_request('/', cookie='session=unknown')) is None
 
-        next_request = page_request('/', cookie=f'session={token}')
-        statements.clear()
-        assert web.current_session(next_request) == web.current_session(next_request) == session
-        assert len(statements) == 1
-        assert web.logout(next_request, csrf=web.csrf_token(session)).status_code == 303
-        assert web.current_session(next_request) is None
-        assert web.current_session(page_request('/', cookie=f'session={token}')) is None
-    finally:
-        web.conn.set_trace_callback(None)
+    next_request = page_request('/', cookie=f'session={token}')
+    assert web.current_session(next_request) == session
+    assert web.logout(next_request, csrf=web.csrf_token(session)).status_code == 303
+    assert web.current_session(next_request) is None
+    assert web.current_session(page_request('/', cookie=f'session={token}')) is None
 
 
-def test_cached_session_expires_with_its_device(web, monkeypatch):
+def test_session_expires_with_its_device(web, monkeypatch):
     from types import SimpleNamespace
 
     # Move the clock over the device deadline within this same request.

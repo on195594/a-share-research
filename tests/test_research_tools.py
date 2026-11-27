@@ -21,52 +21,23 @@ from support.reports import MATERIAL, report
 from support.financials import FINANCIAL_DATA as DATA
 
 
-def test_industry_validation_cache_keeps_captured_inputs_and_mutations_separate():
+def test_malformed_industry_inputs_stay_actionable_errors():
     captured = json.loads((Path(__file__).parent / "data/industry-20261104.json").read_text())
     rows = industry.industry_rows(captured)
-    industry._expected_rows.cache_clear()
-    try:
-        industry.validate_rows(rows, rows)
-        industry.validate_rows(deepcopy(rows), deepcopy(rows))
-        assert industry._expected_rows.cache_info().misses == 1
-        assert industry._expected_rows.cache_info().hits == 1
-
-        # Mutate the caller-owned calculated value in place after the cache was filled.
-        period = next(iter(rows[0]["values"]))
-        value = rows[0]["values"][period]
-        rows[0]["values"][period] = "987654.32"
-        with pytest.raises(ValueError, match="行业数值"):
-            industry.validate_rows(rows, rows)
-        rows[0]["values"][period] = value
-        industry.validate_rows(rows, rows)
-        assert industry._expected_rows.cache_info().misses == 1
-
-        # Mutating the same raw bundle must invalidate the key and recheck identities.
-        day = next(iter(captured["daily"]))
-        original = captured["daily"][day]["params"]["trade_date"]
-        captured["daily"][day]["params"]["trade_date"] = "19000101"
-        with pytest.raises(ValueError, match="行业出处"):
-            industry.validate_rows(rows, rows)
-        assert industry._expected_rows.cache_info().misses == 2
-        captured["daily"][day]["params"]["trade_date"] = original
-        industry.validate_rows(rows, rows)
-        assert industry._expected_rows.cache_info().misses == 2
-
-        # Minimal malformed variants of the real rows stay actionable ValueErrors.
-        anchor = next(r for r in rows if "dataset" in r["source"])
-        source = anchor["source"]
-        without = lambda key: {k: v for k, v in source.items() if k != key}
-        broken = [without("dataset"), without("dataset_ref"),
-                  *(source | {"dataset": value} for value in (None, [], "x", {}, captured | {"daily": []}))]
-        for variant in broken:
-            bad = [r | {"source": variant} if r is anchor else r for r in rows]
-            with pytest.raises(ValueError, match="行业"):
-                industry.validate_rows(bad, bad)
-        for bad in ([{k: v for k, v in anchor.items() if k != "id"}], [anchor | {"source": None}]):
-            with pytest.raises(ValueError, match="行业"):
-                industry.validate_rows(bad, rows)
-    finally:
-        industry._expected_rows.cache_clear()
+    industry.validate_rows(rows, rows)
+    # Minimal malformed variants of the real rows.
+    anchor = next(r for r in rows if "dataset" in r["source"])
+    source = anchor["source"]
+    without = lambda key: {k: v for k, v in source.items() if k != key}
+    broken = [without("dataset"), without("dataset_ref"),
+              *(source | {"dataset": value} for value in (None, [], "x", {}, captured | {"daily": []}))]
+    for variant in broken:
+        bad = [r | {"source": variant} if r is anchor else r for r in rows]
+        with pytest.raises(ValueError, match="行业"):
+            industry.validate_rows(bad, bad)
+    for bad in ([{k: v for k, v in anchor.items() if k != "id"}], [anchor | {"source": None}]):
+        with pytest.raises(ValueError, match="行业"):
+            industry.validate_rows(bad, rows)
 
 
 def test_same_period_growth_and_calculation_inputs_are_preserved():
@@ -374,7 +345,7 @@ def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_
         session = research_mcp.ResearchSession(conn, run_id, material, ReviewLedger())
         initial = session._context()
         prompt_fields = ('system_prompt', 'prompt')
-        assert {k: initial[k] for k in prompt_fields} == research_mcp.explore_prompt(material)
+        assert {k: initial[k] for k in prompt_fields} == research_mcp.explore_prompt(material, material_block=material.prompt_block())
         session._call('calculate', {'label': '经营现金流差额', 'operation': 'difference',
                                    'left': {'ref': 'T.op_cash', 'period': '2025-12-31'},
                                    'right': {'ref': 'T.op_cash', 'period': '2024-12-31'}})
@@ -383,7 +354,9 @@ def test_research_context_cache_preserves_prompts_and_refreshes_after_tools(tmp_
         receipt = session._call('submit_draft', {'draft': draft}).structured_content
         assert receipt['status'] == 'review' and receipt['material_block'] == material.prompt_block()
         assert receipt['program_valuation'] == program_valuation(draft, material)
-        assert {k: receipt[k] for k in prompt_fields} == research_mcp.review_prompt(material, draft, receipt['binding'])
+        assert {k: receipt[k] for k in prompt_fields} == research_mcp.review_prompt(
+            material, draft, receipt['binding'], material_block=material.prompt_block(),
+            valuation=program_valuation(draft, material))
         # Submitting moved to a new stage, which persisted the tool evidence.
         assert replay_material(conn, run_id).extra['tools'] == session.evidence.traces
         session.evidence.stop('tool_limit', 'explore')

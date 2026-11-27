@@ -74,35 +74,35 @@ def _prompts(stage: str, **facts) -> dict[str, str]:
     return {"system_prompt": render_prompt(f"{stage}_system.j2"), "prompt": render_prompt(f"{stage}.j2", **facts)}
 
 
-def explore_prompt(material: Material, *, material_block: str | None = None) -> dict[str, str]:
+def explore_prompt(material: Material, *, material_block: str) -> dict[str, str]:
     latest = max(material.extra["catalog"].items(), key=lambda item: item[1].get("period", ""), default=None)
     cards = [m["title"] for m in material.extra.get("method_catalog", []) if "card" in m]
     return _prompts("explore", latest=latest if latest and latest[1].get("period", "") > material.doc.period else None,
-                    cards=cards, material_block=material.prompt_block() if material_block is None else material_block,
+                    cards=cards, material_block=material_block,
                     **schema_facts(material))
 
 
-def compose_prompt(material: Material, *, material_block: str | None = None) -> dict[str, str]:
-    return _prompts("compose", material_block=material.prompt_block() if material_block is None else material_block,
+def compose_prompt(material: Material, *, material_block: str) -> dict[str, str]:
+    return _prompts("compose", material_block=material_block,
                     **schema_facts(material))
 
 
 def review_prompt(material: Material, report: dict, binding: dict, *,
-                  material_block: str | None = None, valuation: str | None = None) -> dict[str, str]:
+                  material_block: str, valuation: str) -> dict[str, str]:
     return _prompts("review", binding=json.dumps(binding, ensure_ascii=False),
                     report=json.dumps(report, ensure_ascii=False, indent=1),
-                    program_valuation=program_valuation(report, material) if valuation is None else valuation,
-                    material_block=material.prompt_block() if material_block is None else material_block,
+                    program_valuation=valuation,
+                    material_block=material_block,
                     # Only the reviewer judges absence claims; the author already saw each tool result.
                     searches=material.extra.get("announcement_searches") or [])
 
 
 def repair_prompt(material: Material, report: dict, problems: list[dict], *, acquire: bool,
-                  material_block: str | None = None, valuation: str | None = None) -> dict[str, str]:
+                  material_block: str, valuation: str) -> dict[str, str]:
     return _prompts("repair", acquire=acquire, problems=json.dumps(problems, ensure_ascii=False, indent=1),
                     indexed_report=json.dumps(indexed_draft(report), ensure_ascii=False, indent=1),
-                    program_valuation=program_valuation(report, material) if valuation is None else valuation,
-                    material_block=material.prompt_block() if material_block is None else material_block)
+                    program_valuation=valuation,
+                    material_block=material_block)
 
 
 class ResearchSession:
