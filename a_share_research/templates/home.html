@@ -122,6 +122,6 @@
   <h2 id="companies" tabindex="-1">值得继续研究 · {{ worth | length }} 家</h2>
   {% if worth %}<div class="cards">{% for c in worth %}{{ summary_card(c, from_batch=c.from_batch) }}{% endfor %}</div>
   {% elif not companies %}<p class="muted">还没有研究过公司。在上面输入一家开始。</p>{% endif %}
-  {% if companies %}<p class="actions"><a class="link" href="/research-library">全部 {{ companies | length }} 家公司的研究与判断</a></p>{% endif %}
+  {% if companies %}<p class="actions"><a class="link" href="/research-library">在研究库查看全部公司与历史判断</a></p>{% endif %}
 </section>
 {% endblock %}

@@ -222,7 +222,7 @@ def test_home_cards_only_the_shortlist_and_states_stale_coverage_once(tmp_path):
     assert stale
     html = render('home.html', companies=cards, stale=stale, due=due, pending=[], pending_more=False, active=[], batch=None)
     assert re.findall(r'id="card-([^"]+)"', html) == [cards[0]['code']]
-    assert f'href="/research-library">全部 {len(cards)} 家公司的研究与判断' in html
+    assert 'href="/research-library">在研究库查看全部公司与历史判断' in html
     assert html.count('未覆盖 2026 年三季报') == 1 and f'{len(stale)} 家公司的研究资料未覆盖' in html
     assert 'id="attention"' in html
 
@@ -256,7 +256,8 @@ def test_home_batch_projection_and_last_passed_scope(web, monkeypatch):
     response = web.home_page(page_request('/'), 'owner')
     assert response.context['batch']['q20'] == reading.latest_batch(web.conn)['q20']
     failed = next(c for c in response.context['companies'] if c['id'] == 39)
-    assert failed['last_passed']['id'] == 37 and passed_queries == [[failed['code']]]
+    # A failed review is never carded on home, so its last passed report is not looked up there.
+    assert f'id="card-{failed["code"]}"' not in response.body.decode() and not passed_queries
     web.conn.execute("DELETE FROM reports")
     passed_queries.clear()
     assert web.home_page(page_request('/'), 'owner').context['companies'] == []

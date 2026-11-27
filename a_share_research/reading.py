@@ -621,7 +621,6 @@ CARD_DIMENSIONS = (
 # Saved closing-day valuation, never refreshed.
 CARD_MARKET = (('M.pe_ttm', '市盈率'), ('M.pb', '市净率'), ('M.dv_ttm', '股息率'))
 CARD_KEYS = ('T.revenue_yoy', 'T.core_profit_yoy', 'M.pe_ttm', 'M.dv_ttm')
-CARD_ORDER = {'值得继续研究': 0, '需要谨慎': 1, '暂不值得': 2}
 
 
 def without_verdict(summary: str, verdict: str | None) -> str:
@@ -678,7 +677,7 @@ def card(report, body: dict, last_passed=None, *, checks: list[dict] | None = No
             for label, group in CARD_DIMENSIONS]
     dims.append({'label': '估值', 'metrics': [metrics[k] for k, _ in CARD_MARKET if k in metrics]})
     dims = [d for d in dims if any(m['value'] is not None or m['unavailable'] for m in d['metrics'])]
-    bucket = verdict or '复核未通过'  # the same buckets as the home verdict strip
+    bucket = verdict or '复核未通过'
     created_at = report.get('created_at') or ''
     coverage = report.get('coverage') or (latest or report.get('period'))
     continued = body.get('prior')
@@ -686,7 +685,7 @@ def card(report, body: dict, last_passed=None, *, checks: list[dict] | None = No
     period_label = (f"{latest[2:4]}年{charts.CUMULATIVE.get(latest[5:], latest[5:])}"
                     if latest and len(latest) >= 7 and latest[:4].isdigit() else (latest or None))
     return {'id': report['id'], 'code': report['code'], 'name': report['name'], 'passed': passed,
-            'verdict': verdict, 'bucket': bucket, 'rank': CARD_ORDER.get(bucket, 3), 'summary': summary,
+            'verdict': verdict, 'bucket': bucket, 'summary': summary,
             'consensus': (body.get('valuation_calc') or {}).get('consensus') if passed else None,
             'risks': texts('risks'), 'checkpoints': texts('checkpoints'), 'dims': dims,
             'checks': check_views,

@@ -23,7 +23,9 @@
       {{ verdict_scale(body.verdict) }}
       {% set summary_text = (body.summary | without_verdict(body.verdict)) if body.summary and body.verdict in ["暂不值得", "需要谨慎", "值得继续研究"] else body.summary %}
       <p class="conclusion" id="claim-summary-0" tabindex="-1">{% if body.verdict not in ["暂不值得", "需要谨慎", "值得继续研究"] %}研究判断：{% endif %}{{ summary_text or body.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
-      {% if comparison and comparison.old %}<p class="small prior-line">对照 <a href="/reports/{{ comparison.old.id }}">{{ comparison.old.created_at|shanghai_minute }} 的报告</a>：{{ (comparison.old.verdict or '未记录结论') if comparison.old_ready and comparison.old.passed else '上次未通过完整核查' }} → 本次{{ body.verdict or '未记录结论' }} · <a href="#comparison">前后变化</a></p>{% endif %}
+      {% if comparison and comparison.old %}{% set o = comparison.old %}{% set when = o.created_at|shanghai_minute ~ ' 的报告' %}
+      {# Only a finished parent is linked; an unfinished one answers 409. #}
+      <p class="small prior-line">对照 {% if comparison.old_ready %}<a href="/reports/{{ o.id }}">{{ when }}</a>{% else %}{{ when }}{% endif %}：{{ {'ready': o.verdict or '未记录结论', 'failed': '未通过完整核查'}.get(comparison.baseline_status, '尚未就绪') }} → 本次{{ body.verdict or '未记录结论' }} · <a href="#comparison">前后变化</a></p>{% endif %}
       {% if body.relative is mapping and body.relative.call %}<p class="relative-call">6 个月相对判断：{{ body.relative.call }}中证800全收益，把握 {{ body.relative.confidence }}%</p>{% endif %}
       {% if body.stance is mapping and body.stance.action %}{% set sc = body.stance_calc or {} %}{% set vc = body.valuation_calc or {} %}
       {% set sd = stance_decision(body.stance, sc, vc) if stance_decision is defined else None %}

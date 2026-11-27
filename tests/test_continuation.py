@@ -4,6 +4,7 @@ Records come from the production database and the isolated K2 validation copies 
 """
 
 import importlib
+import re
 import json
 import sys
 from pathlib import Path
@@ -239,3 +240,17 @@ def test_continuation_answer_is_never_folded_and_company_card_links_to_it(tmp_pa
     stock = render("stock.html", reports=[meta], code=record["code"], vitals=None, vitals_report=None,
                    comparison=comparison, price=None, track=None, due=None, card=card)
     assert f'href="/reports/39#answer">相对上次（资料至 {body["prior"]["period"]}）的风险与检查点复核' in stock
+
+
+def test_report_header_compares_with_the_parent_and_links_it_only_when_finished(web, owner_request):
+    for report_id in (9, 11, 39):
+        report = web.conn.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()
+        old = reading.comparison(web.conn, report)["old"]
+        page = web.report_page(owner_request(f"/reports/{report_id}"), report_id).body.decode()
+        assert f'对照 <a href="/reports/{old["id"]}">' in page and '<a href="#comparison">前后变化</a>' in page
+    # Marked variant: the parent's run still running, so its page would answer 409.
+    web.conn.execute("UPDATE runs SET status='running' WHERE id=(SELECT run_id FROM reports WHERE id=?)", (old["id"],))
+    page = web.report_page(owner_request("/reports/39"), 39).body.decode()
+    line = re.search(r'<p class="small prior-line">.*?</p>', page, re.S).group(0)
+    assert '尚未就绪 → 本次' in line and '/reports/' not in line
+

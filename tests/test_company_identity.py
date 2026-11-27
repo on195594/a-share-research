@@ -141,18 +141,19 @@ def test_historical_report_links_to_latest_formal_report(client, mixed_codes):
     assert "最新正式研究（复核通过）" in response.text
 
 
-def test_home_failed_latest_report_links_to_last_passed(client, conn, mixed_codes):
+def test_failed_latest_report_leaves_home_and_links_to_last_passed_on_the_company_page(client, conn, mixed_codes):
     # Status-only variant: preserve the captured report content and historical passed report.
     conn.execute("UPDATE reports SET passed = 0 WHERE id = 39")
     conn.execute("UPDATE runs SET status = 'failed' WHERE id = (SELECT run_id FROM reports WHERE id = 39)")
-    response = client.get("/")
+    home = client.get("/")
+    assert home.status_code == 200
+    cards = [c for c in home.context["companies"] if c["code"][:6] == "603606"]
+    assert len(cards) == 1 and cards[0]["id"] == 39 and not cards[0]["passed"]
+    assert f'id="card-{cards[0]["code"]}"' not in home.text  # only the shortlist is carded on home
+    response = client.get(f"/stock/{cards[0]['code']}")
     assert response.status_code == 200
-    cards = [c for c in response.context["companies"] if c["code"][:6] == "603606"]
-    assert len(cards) == 1
-    card = cards[0]
-    assert card["id"] == 39 and not card["passed"]
-    assert card["last_passed"]["id"] == 37
-    assert card["last_passed"]["passed"] == 1
+    card = response.context["card"]
+    assert card["id"] == 39 and card["last_passed"]["id"] == 37 and card["last_passed"]["passed"] == 1
     assert card["summary"] == "" and card["verdict"] is None
     assert "上次通过的判断：" in response.text
     assert 'href="/reports/37"' in response.text

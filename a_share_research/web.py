@@ -746,7 +746,7 @@ def _holdings_attention() -> dict | None:
     except policies.PolicyError as exc:
         logging.getLogger(__name__).exception("Home holdings read failed")
         return {"policy": None, "general": [f"持仓状态暂时无法读取：{exc}"], "companies": []}
-    policy = view["policy"]
+    policy, account = view["policy"], view["account"]
     companies = []
     for c in view["holdings"] or []:
         notes = [text for _, text in template_filters.monitor_lines(c["policy"], c["code"])] if c["policy"] else []
@@ -754,6 +754,9 @@ def _holdings_attention() -> dict | None:
         if notes:
             companies.append({"code": c["code"], "name": c["name"] or c["code"], "notes": notes})
     general = view["gaps"] + ([text for _, text in template_filters.monitor_lines(policy)] if policy else [])
+    # Same staleness test as the portfolio page: escalations from an older ledger version may be moot.
+    if policy and account and account.get("mode") == "ledger" and account.get("version") != policy["account_version"]:
+        general.insert(0, f"监控评估基于账户版本 {policy['account_version']}，账本已更新到版本 {account['version']}，以下提醒可能已过时")
     if not (companies or general or (policy and policy["action_status"] != "no_action")):
         return None
     return {"policy": policy, "general": general, "companies": companies}
@@ -769,10 +772,8 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
     latest = reading.latest_reports(conn, include_checkpoint=False)
     companies = [r for r in latest if r["own"]]
     pending, pending_more = reading.pending_reviews(conn)
-    failed_codes = [r["code"] for r in companies if not r["passed"]]
-    passed_before = {stock_codes.normalize_key(r["code"]): r for r in reading.latest_reports(
-        conn, codes=failed_codes, passed=True, include_checkpoint=False)} if failed_codes else {}
-    cards = reading.report_cards(conn, companies, passed_before)
+    # Failed reviews never reach the home shortlist, so their last passed report is not looked up here.
+    cards = reading.report_cards(conn, companies, {})
     listed = {r['id'] for r in pending}
     due = company_data.due_report(datetime.now(db.SHANGHAI).date())
     return render(request, "home.html", session, status, companies=cards, holdings=_holdings_attention(),

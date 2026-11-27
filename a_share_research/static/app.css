@@ -598,6 +598,7 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .active-runs h3, .attention-group h3 { margin-top: 8px; }
 .attention-group + .attention-group, .attention-group + .list, details.attention-group { margin-top: 16px; }
 .list > li > .facts { margin: 4px 0 0; }
+.attention-group .list > li > a { display: inline-flex; align-items: center; min-height: 44px; }
 @media (max-width: 420px) {
   .card-keys { padding: 8px 0; }
   .card-keys div { padding: 0 4px; }

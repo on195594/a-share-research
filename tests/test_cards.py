@@ -19,7 +19,7 @@ def test_card_carries_saved_verdict_risks_checkpoints_and_closing_values():
     report = RECORDS[39]
     body = report['body']
     card = reading.card(report, body)
-    assert card['verdict'] == '需要谨慎' and card['bucket'] == '需要谨慎' and card['rank'] == 1
+    assert card['verdict'] == '需要谨慎' and card['bucket'] == '需要谨慎'
     # The verdict prefix is dropped only because the scale beside it already says it.
     assert body['summary'].startswith('需要谨慎：') and body['summary'].endswith(card['summary'])
     assert not card['summary'].startswith('需要谨慎')

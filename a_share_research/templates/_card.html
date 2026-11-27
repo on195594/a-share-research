@@ -56,7 +56,7 @@
 {% macro summary_card(c, from_batch=false) %}
 <article class="card" id="card-{{ c.code }}" data-order="{{ c.id }}">
   <header class="card-head">
-    <h4 class="card-name"><a href="/stock/{{ c.code }}">{{ c.name }}</a> <span class="code">{{ c.code }}</span></h4>
+    <h3 class="card-name"><a href="/stock/{{ c.code }}">{{ c.name }}</a> <span class="code">{{ c.code }}</span></h3>
     {% if c.verdict %}{{ badge(c.verdict) }}{% elif not c.passed %}<span class="badge-verdict flag">复核未通过</span>{% endif %}
   </header>
   {# Stale coverage is one home-page line, not a flag repeated on every card. #}

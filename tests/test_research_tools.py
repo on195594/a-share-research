@@ -282,7 +282,7 @@ def test_review_targets_are_canonical_and_empty_facts_are_not_endorsed():
     assert facts == {}
     # Render the actual failure-notice fragment without inventing report metadata.
     template = (Path(__file__).parents[1] / "a_share_research/templates/report.html").read_text()
-    notice = template[template.index("{% if report.passed %}"):template.index("{% if market %}")]
+    notice = template[template.index("{% if report.passed %}"):template.index('{% if body.question %}<p class="small">研究问题')]
     html = Environment(autoescape=True).from_string(notice).render(
         report={"passed": False}, body={"facts": facts, "facts_reviewed": True})
     assert "也未保留可单独展示的事实条目" in html

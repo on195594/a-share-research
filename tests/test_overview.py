@@ -114,7 +114,7 @@ def test_monitor_lines_render_saved_english_details_and_collapse_repeated_gaps()
     ]
 
 
-def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_monitor):
+def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_monitor, web, owner_request):
     configured = ledger_monitor
     (path, conn, principal, directory, sha), _, active, _ = configured
     book = (conn, principal, directory, sha)
@@ -149,6 +149,8 @@ def test_reopening_detaches_thesis_and_monitor_from_the_closed_cycle(ledger_moni
     assert current['held'] and current['position']['shares'] == 100
     assert portfolio['policy']['id'] == receipt['id'] and portfolio['policy']['account_version'] == 0
     assert portfolio['account']['version'] == 2
+    # The home to-do list carries the same staleness warning as the portfolio page.
+    assert '监控评估基于账户版本 0，账本已更新到版本 2' in html(web.home(owner_request('/')))
     assert not any('NAV' in gap for gap in portfolio['gaps'])
     assert overview.monitor_detail(conn, receipt['id']) == receipt
     assert overview.receipt_detail(conn, portfolio['account']['last_receipt']['id']) == posted
