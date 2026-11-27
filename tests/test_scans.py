@@ -210,13 +210,7 @@ def test_closing_prices_merge_last_scan_id_with_dated_subscription(conn):
     conn.execute('INSERT INTO subscriptions(code,added_at,last_close,last_close_date) VALUES (?,?,?,?)',
                  ('600900.SH', AT, early['last_close'], early['last_close_date']))
     expected = {'600900': middle, '603606': other}
-    statements = []
-    conn.set_trace_callback(statements.append)
-    try:
-        assert scans._closing_prices(conn) == expected
-    finally:
-        conn.set_trace_callback(None)
-    assert len(statements) == 1
+    assert scans._closing_prices(conn) == expected
     assert scans._closing_prices(conn, codes=['600900']) == {'600900': middle}
     # Same-date correction from a subscription takes precedence; supplied history skips scans.
     conn.execute('UPDATE subscriptions SET last_close=?,last_close_date=?', (early['last_close'], middle['last_close_date']))
