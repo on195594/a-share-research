@@ -5,8 +5,8 @@ Hermes 以 `no_agent` 模式运行下列脚本，时间均为上海时间。入�
 | 任务 | Hermes 任务 ID | 脚本入口 | 调度 |
 |---|---|---|---|
 | 止损提醒 | `ca568f56d9ef` | `a-stock-stop-alert.sh` | 周一至周五 09–15 点每 5 分钟，服务判断交易时段 |
-| 持仓日报 | `7ab0ded3121c` | `a-stock-daily-brief.sh` | 周一至周五 15:35 |
-| 账本月度对比 | `93c4f5a4d0fc` | `a-stock-benchmark-monthly.sh` | 每月 1 日 09:00 |
+| 持仓日报 | `7ab0ded3121c` | `a-stock-daily-brief.sh` | 周一至周五 15:37 |
+| 账本月度对比 | `93c4f5a4d0fc` | `a-stock-benchmark-monthly.sh` | 每月 1 日 09:02 |
 | 披露扫描 | `fbb0cbf6ee60` | `a-share-advisor.sh` | 周一至周五 16:37 |
 | 顾问周报 | `7845e96f4184` | `a-share-advisor-weekly.sh` | 周日 18:07 |
 | 月批发起 | `3d8b860808e4` | `a-share-monthly-submit.sh` | 每月 1 日 20:00 |
@@ -14,6 +14,8 @@ Hermes 以 `no_agent` 模式运行下列脚本，时间均为上海时间。入�
 | 判断记分 | `2c0e2f798501` | `a-share-scoring.sh` | 周日 19:07 |
 | 里程碑进度 | `6b6ecd1783ea` | `a-share-milestones.sh` | 周一 09:03 |
 | 12 月双组月批核验提醒 | `1f1ead8a8a62` | `a-share-remind-monthly.sh` | 2026-12-04 10:00 一次，允许离线后补发 |
+
+日报与月度对比错开止损的 5 分钟整点：同时启动的两个采集子进程在 2 核宿主上互抢 CPU，日报采集曾从约 10 秒拉长到 22 秒，逼近 25 秒采集超时。新增采集类任务也避开 09–15 点的 5 分钟整点。
 
 核验提醒只输出固定文字，操作以[12 月首跑清单](../../docs/implementation-plan.md#待真实事件的验收)为准，验收完成后清理提醒。里程碑脚本读取仓库 HEAD 的[固定里程碑](../../docs/implementation-plan.md#固定里程碑)、生产 web 镜像标签和只读业务库，核对交付提交并汇总近期到期项。
 
