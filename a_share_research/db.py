@@ -700,7 +700,8 @@ def _enable_wal(conn: sqlite3.Connection, timeout: float) -> None:
             sleep(0.05)
 
 
-# Paths this process has initialized; the user_version header still catches a file replaced underneath.
+# Paths this process has initialized. A file replaced underneath is re-migrated only when its user_version is
+# older; restoring a same-version backup happens with services stopped, so a new process initializes it.
 _INITIALIZED: set[Path] = set()
 
 

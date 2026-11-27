@@ -130,7 +130,7 @@ async def test_replay_repair_and_review_bound_to_frozen_material(conn, defect):
         submission = await client.call_tool("submit_draft", {"draft": good | {"verdict": ""}})
         assert submission.structured_content["status"] == "repair"
         bad = good | {"verdict": ""}
-        assert repair_prompt(run.material, bad, submission.structured_content["problems"], acquire=False,
+        assert repair_prompt(bad, submission.structured_content["problems"], acquire=False,
                              material_block=run.material.prompt_block(), valuation=program_valuation(bad, run.material)) \
             == {k: submission.structured_content[k] for k in ("system_prompt", "prompt")}
         assert submission.structured_content["program_valuation"] == prices

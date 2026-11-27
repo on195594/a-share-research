@@ -97,7 +97,7 @@ def review_prompt(material: Material, report: dict, binding: dict, *,
                     searches=material.extra.get("announcement_searches") or [])
 
 
-def repair_prompt(material: Material, report: dict, problems: list[dict], *, acquire: bool,
+def repair_prompt(report: dict, problems: list[dict], *, acquire: bool,
                   material_block: str, valuation: str) -> dict[str, str]:
     return _prompts("repair", acquire=acquire, problems=json.dumps(problems, ensure_ascii=False, indent=1),
                     indexed_report=json.dumps(indexed_draft(report), ensure_ascii=False, indent=1),
@@ -165,7 +165,7 @@ class ResearchSession:
         self._chains.pop("repair", None)
         context = self._draft_context()
         return {"status": "repair", "problems": self.problems, "indexed_draft": indexed_draft(self.draft),
-                **repair_prompt(self.material, self.draft, self.problems, acquire=self.evidence is not None,
+                **repair_prompt(self.draft, self.problems, acquire=self.evidence is not None,
                                 material_block=context["material_block"], valuation=context["program_valuation"]),
                 **context}
 

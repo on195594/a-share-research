@@ -447,21 +447,17 @@ def card_or_none(conn, code: str, *, scan_id: int | None = None, history=None, r
 
 
 def _closing_prices(conn, closes=None, *, codes=None):
-    """Latest scan close per company key, replaced by a subscription close of the same or a later date."""
+    """Scan closes (supplied by ScanHistory, or looked up for codes), replaced by a subscription close
+    of the same or a later date."""
     if closes is None:
         closes = {}
-        if codes is None:
-            for row in conn.execute("SELECT json_extract(summary, '$.closes') FROM scans ORDER BY id"):
-                if row[0]:
-                    closes.update(json.loads(row[0]))
-        else:
-            # Only the newest scan recording each code, instead of decoding every scan.
-            for code in codes:
-                path = f'$.closes.{code}'
-                row = conn.execute('SELECT summary -> ? FROM scans WHERE summary -> ? IS NOT NULL'
-                                   ' ORDER BY id DESC LIMIT 1', (path, path)).fetchone()
-                if row:
-                    closes[code] = json.loads(row[0])
+        # Only the newest scan recording each code, instead of decoding every scan.
+        for code in codes:
+            path = f'$.closes.{code}'
+            row = conn.execute('SELECT summary -> ? FROM scans WHERE summary -> ? IS NOT NULL'
+                               ' ORDER BY id DESC LIMIT 1', (path, path)).fetchone()
+            if row:
+                closes[code] = json.loads(row[0])
     query = 'SELECT company_key, last_close, last_close_date FROM subscriptions WHERE last_close IS NOT NULL'
     params = ()
     if codes is not None:

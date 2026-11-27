@@ -26,7 +26,7 @@ def review_prompt(mat, draft, binding):
 
 
 def repair_prompt(mat, draft, problems, *, acquire):
-    return research_mcp.repair_prompt(mat, draft, problems, acquire=acquire, material_block=mat.prompt_block(),
+    return research_mcp.repair_prompt(draft, problems, acquire=acquire, material_block=mat.prompt_block(),
                                       valuation=drafts.program_valuation(draft, mat))
 
 

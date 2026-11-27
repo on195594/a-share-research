@@ -476,5 +476,8 @@ def test_cache_follows_data_path(monkeypatch, tmp_path):
     original = db.DATA
     monkeypatch.setattr(db, "DATA", tmp_path / "other-data")
     assert market.cached_response("daily_basic", params) is None
+    other = pd.DataFrame([MARKET | {"close": MARKET["close"] + 1}])
+    market.cached_query("daily_basic", params, lambda: other)
+    pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), other)
     monkeypatch.setattr(db, "DATA", original)
     pd.testing.assert_frame_equal(market.cached_response("daily_basic", params), pd.DataFrame([MARKET]))
