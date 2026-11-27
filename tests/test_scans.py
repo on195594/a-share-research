@@ -569,29 +569,57 @@ def test_scan_failure_recovery_and_unknown_scan(conn):
     assert scans.view(conn, scan_id)['error']
 
 
-def test_api_auth_single_active_and_weekly_route(server):
-    _conn, client, url, *_ = server
-    for path in ('/api/subscriptions', '/api/scans/weekly', '/api/scans/1'):
-        assert client.get(url + path, headers={'Authorization': 'Bearer invalid'}, timeout=3).status_code == 401
-    assert client.put(url + '/api/subscriptions', json={'codes': ['bad']}, timeout=3).status_code == 422
-    assert client.put(url + '/api/subscriptions', json={'codes': []}, timeout=3).status_code == 200
-    first = client.post(url + '/api/scans', timeout=3)
-    second = client.post(url + '/api/scans', timeout=3)
-    assert first.status_code == 202 and first.json() == second.json()
-    assert client.get(url + '/api/scans/weekly', timeout=3).json()['subscriptions'] == []
-    assert client.get(url + f"/api/scans/{first.json()['scan_id']}", timeout=3).json()['status'] == 'queued'
-    assert client.get(url + '/api/scans/999', timeout=3).status_code == 404
+def _assistant_mcp(conn, path, monkeypatch):
+    from support.mcp import ORIGIN, RESOURCE
+    from a_share_research.tools.server import create_app
+
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
+    token = api_keys.create(conn, 'hermes-scans', role='assistant')
+    return TestClient(create_app(path, account_shadow_enabled=True), base_url=ORIGIN), token
+
+
+def test_mcp_auth_single_active_and_weekly_tool(tmp_path, monkeypatch):
+    from support.mcp import rpc, tool_data, tool_error
+
+    path = tmp_path / 'app.db'
+    conn = db.connect(path)
+    client, token = _assistant_mcp(conn, path, monkeypatch)
+    with client:
+        for name, args in (('research_subscriptions', {}), ('research_scan_weekly', {}), ('research_scan_read', {'scan_id': 1})):
+            assert rpc(client, 'invalid', 'tools/call', {'name': name, 'arguments': args}).status_code == 401
+        assert tool_error(client, token, 'research_subscriptions_replace', {'codes': ['bad']})['code'] == 'invalid_arguments'
+        tool_data(client, token, 'research_subscriptions_replace', {'codes': []})
+        first = tool_data(client, token, 'research_scan_request', {'request_id': 'first'})['data']
+        second = tool_data(client, token, 'research_scan_request', {'request_id': 'second'})['data']
+        assert first['scan_id'] == second['scan_id'] and first['status'] == 'queued'
+        assert tool_data(client, token, 'research_scan_weekly', {'compact': False})['data']['subscriptions'] == []
+        assert tool_data(client, token, 'research_scan_read', {'scan_id': first['scan_id']})['data']['status'] == 'queued'
+        assert tool_error(client, token, 'research_scan_read', {'scan_id': 999})['code'] == 'not_found'
+        conn.execute("UPDATE scans SET status='done', summary=? WHERE id=?",
+                     (json.dumps({'notify': [{'code': '600519', 'path': '/stock/600519',
+                                              'card_path': '/api/companies/600519/card'}]}), first['scan_id']))
+        historical = tool_data(client, token, 'research_scan_read', {'scan_id': first['scan_id'], 'compact': False})['data']
+        assert historical['notify'] == [{'code': '600519', 'path': '/stock/600519'}]
+        assert historical['summary']['notify'] == [{'code': '600519', 'path': '/stock/600519'}]
+        assert 'card_path' in conn.execute('SELECT summary FROM scans WHERE id=?', (first['scan_id'],)).fetchone()[0]
+    conn.close()
 
 
 @pytest.mark.wide_scan_scope
-def test_owner_weekly_reads_holdings_and_legacy_research_key_keeps_its_scope(web, bound_book):  # noqa: F811
-    token = api_keys.create(web.conn, 'legacy-hermes')
+def test_owner_and_assistant_weekly_read_holdings_and_blind_scope_excludes_them(web, bound_book, tmp_path,  # noqa: F811
+                                                                                monkeypatch):
+    from support.mcp import tool_data
+
+    blind = scans.weekly(web.conn, account_sources=False)
     with TestClient(web.app, base_url=web.settings.base_url) as client:
-        legacy = client.get('/api/scans/weekly', headers={'Authorization': f'Bearer {token}'}).json()
         assert client.post('/auth/dev', headers={'Origin': web.settings.base_url}, follow_redirects=False).status_code == 303
         owner = client.get('/scans/weekly').json()
-    assert all('holding' not in item['origins'] for item in legacy['scan_scope'])
-    assert {item['code'] for item in owner['scan_scope'] if 'holding' in item['origins']} == {'600001'}
+    tools, token = _assistant_mcp(web.conn, tmp_path / 'app.db', monkeypatch)
+    with tools:
+        assistant = tool_data(tools, token, 'research_scan_weekly', {'compact': False})['data']
+    assert all('holding' not in item['origins'] for item in blind['scan_scope'])
+    for view in (owner, assistant):
+        assert {item['code'] for item in view['scan_scope'] if 'holding' in item['origins']} == {'600001'}
 
 
 def test_judgment_change_is_notified_once_and_weekly_counts_current_agenda(conn):

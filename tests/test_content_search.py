@@ -245,12 +245,16 @@ def test_library_page_explains_a_scope():
     assert "改搜全库" not in _library_page(q="现金流", companies=[], hits=[])
 
 
-def test_search_requires_an_api_session_and_returns_the_envelope(server):
-    _, client, url, *_ = server
-    assert client.get(url + "/api/search", params={"q": "现金流"}, headers={"Authorization": "Bearer invalid"}, timeout=3).status_code == 401
-    found = client.get(url + "/api/search", params={"q": "现金流"}, timeout=3)
-    assert found.status_code == 200 and set(found.json()) == {"version", "items", "page", "more"}
-    assert client.get(url + "/api/search", params={"q": " "}, timeout=3).status_code == 422
+def test_search_requires_a_credential_and_returns_the_envelope(server, mcp_tools):
+    from support.mcp import rpc, tool_data, tool_error
+
+    _, client, *_ = server
+    token = client.headers["Authorization"].removeprefix("Bearer ")
+    search = {"name": "research_search", "arguments": {"q": "现金流"}}
+    assert rpc(mcp_tools, "invalid", "tools/call", search).status_code == 401
+    found = tool_data(mcp_tools, token, "research_search", {"q": "现金流"})["data"]
+    assert set(found) == {"version", "page", "more", "items", "companies", "queried_at", "status", "gaps", "path"}
+    assert tool_error(mcp_tools, token, "research_search", {"q": "一 二 三 四 五 六"})["code"] == "invalid_arguments"
 
 
 def test_latest_company_summary_excludes_feedback_report(conn):

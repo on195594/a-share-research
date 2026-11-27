@@ -12,6 +12,7 @@ from a_share_research.policy import holdings_check, holdings_check_evaluation, m
 from a_share_research.tools.server import create_app
 from support.policy import policy_input_book as ledger_book
 from support.policy import scoped_parameters
+from support.mcp import ORIGIN, RESOURCE, tool_data, tool_error
 
 
 @pytest.fixture
@@ -58,16 +59,15 @@ def test_saved_receipt_hashes_replay_retry_and_no_account_write(configured):
         monitor.run(conn, principals['assistant'], path, saved['request_id'], active['id'])
 
 
-def test_http_validates_holdings_check_arguments(configured):
+def test_mcp_validates_holdings_check_arguments(configured, monkeypatch):
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
     path, conn, _, _, active, _, _ = configured[0]
     token = api_keys.create(conn, 'holdings_check-http', role='assistant')
     args = dict(request_id='holdings-check-http', expected_activation_id=active['id'])
-    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
-        headers = {'Authorization': 'Bearer ' + token}
-        endpoint = '/tools/policy_holdings_check'
-        assert client.post(endpoint, headers=headers, json=args | {'expected_activation_id': True}).status_code == 422
-        response = client.post(endpoint, headers=headers, json=args)
-        assert response.status_code == 200, response.text
+    with TestClient(create_app(path, account_shadow_enabled=True), base_url=ORIGIN) as client:
+        name = 'policy_holdings_check'
+        assert tool_error(client, token, name, args | {'expected_activation_id': True})['code'] == 'invalid_arguments'
+        tool_data(client, token, name, args)
 
 
 def test_tampered_holdings_check_action_is_rejected(configured):

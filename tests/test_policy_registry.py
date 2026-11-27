@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from a_share_research import api_keys, db, gate
 from a_share_research.policy import identity, registry
 from a_share_research.policy.v0 import risk_budget
+from a_share_research.tools.registry import Context, invoke
 from a_share_research.tools.server import create_app
+from support.mcp import ORIGIN, RESOURCE, list_tools, protocol_error, rpc, tool_data, tool_error
 
 
 @pytest.fixture
@@ -96,22 +98,25 @@ def test_owner_gate_and_revocation(setup):
     assert conn.execute('SELECT COUNT(*) FROM policy_activations').fetchone()[0] == 0
 
 
-def test_no_remote_activation_and_read_tools_require_explicit_shadow_enable(setup):
+def test_no_remote_activation_and_read_tools_require_explicit_shadow_enable(setup,monkeypatch):
     path,conn,tokens,principals,_ = setup
     activate(setup)
-    with TestClient(create_app(path,account_shadow_enabled=True)) as client:
-        for role in tokens:
-            headers={'Authorization':'Bearer '+tokens[role]}
-            listed=client.get('/tools',headers=headers).json()['tools']
-            names={t['name'] for t in listed}
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL',RESOURCE)
+    # The owner reads policy only through local commands; /mcp refuses its credential outright.
+    owner=Context(conn,path,principals['owner'],account_shadow_enabled=True)
+    assert invoke(owner,'policy_current',{})['data']['installed'] is True
+    with TestClient(create_app(path,account_shadow_enabled=True),base_url=ORIGIN) as client:
+        assert rpc(client,tokens['owner'],'tools/list').status_code==401
+        for role in ('assistant','research'):
+            names=set(list_tools(client,tokens[role]))
             assert 'policy_activate' not in names and 'policy_register' not in names
-            response=client.post('/tools/policy_current',headers=headers,json={})
-            assert response.status_code==(403 if role=='research' else 200)
-            if role!='research':
-                assert response.json()['result']['data']['installed'] is True
-            assert client.post('/tools/policy_activate',headers=headers,json={}).status_code==404
-    with TestClient(create_app(path)) as client:
-        assert client.post('/tools/policy_current',headers={'Authorization':'Bearer '+tokens['owner']},json={}).status_code==404
+            if role=='research':
+                assert tool_error(client,tokens[role],'policy_current')['code']=='forbidden'
+            else:
+                assert tool_data(client,tokens[role],'policy_current')['data']['installed'] is True
+            assert protocol_error(client,tokens[role],'policy_activate')['code']==-32602
+    with TestClient(create_app(path),base_url=ORIGIN) as client:
+        assert protocol_error(client,tokens['assistant'],'policy_current')['code']==-32602
 
 
 def test_migration_preserves_legacy_pointer_and_is_reentrant(tmp_path):

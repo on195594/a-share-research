@@ -1,17 +1,14 @@
 """Invariants of the v9 data foundation: rebuilt tables, generated identity columns and their checks."""
 
-import importlib
 import json
 import sqlite3
-import sys
 import threading
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-import a_share_research
-from a_share_research import api_keys, companies, db, integrity, reading, research, research_tools, scans, screening, service, stock_codes
+from a_share_research import companies, db, integrity, reading, research, research_tools, scans, screening, service, stock_codes
 from support.continuation import BODY, load
 from support.valuation import BODY as VALUATION_BODY, RECORD
 
@@ -319,43 +316,21 @@ def test_subscriptions_and_closing_prices_normalize_suffixed_code(conn):
     assert conn.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0] == 0
 
 
-@pytest.fixture
-def api_boundary(conn, tmp_path, monkeypatch):
-    monkeypatch.setattr(db, 'DATA', tmp_path)
-    monkeypatch.setenv('DEV_LOGIN', '1')
-    monkeypatch.setenv('PUBLIC_BASE_URL', 'http://127.0.0.1:8627')
-    monkeypatch.setenv('SESSION_SECRET', 'foundation-test-session-' * 2)
-    monkeypatch.setattr(a_share_research, 'web', None, raising=False)
-    monkeypatch.delitem(sys.modules, 'a_share_research.web', raising=False)
-    web = importlib.import_module('a_share_research.web')
-    monkeypatch.setattr(web, 'conn', conn)
-    token = api_keys.create(conn, 'foundation-boundary-test')
-    try:
-        request = web.Request({'type': 'http', 'headers': [(b'authorization', f'Bearer {token}'.encode())]})
-        yield web, request
-    finally:
-        sys.modules.pop('a_share_research.web', None)
-
-
 @pytest.mark.parametrize('code', ['603606.SH', '60360', '603606 ', '６０３６０６'])
-@pytest.mark.parametrize('endpoint', ['reports', 'search', 'card'])
-def test_http_company_boundaries_keep_status_and_error_text(api_boundary, code, endpoint):
-    web, request = api_boundary
+@pytest.mark.parametrize('read', [
+    lambda conn, code: service.research_search(conn, BODY[39]['risks'][0]['text'][:12], code=code, page=1),
+    lambda conn, code: service.company_card(conn, code),
+], ids=['search', 'card'])
+def test_service_company_boundaries_keep_status_and_error_text(conn, read, code):
     with pytest.raises(service.RequestError) as error:
-        if endpoint == 'search':
-            web.api_search(request, BODY[39]['risks'][0]['text'][:12], code=code, page=1)
-        elif endpoint == 'reports':
-            web.api_reports(request, code)
-        else:
-            web.api_company_card(request, code)
+        read(conn, code)
     assert error.value.status == 422
     assert str(error.value) == '公司代码必须为六位数字'
 
 
-def test_http_full_width_submission_is_rejected_by_the_request_model(api_boundary):
-    web, _ = api_boundary
+def test_full_width_submission_is_rejected_by_the_request_model():
     with pytest.raises(ValidationError):
-        web.ResearchRequest(code='６０３６０６', request_id='full-width')
+        service.ResearchRequest(code='６０３６０６', request_id='full-width')
 
 
 def test_full_width_input_gets_each_boundary_error():

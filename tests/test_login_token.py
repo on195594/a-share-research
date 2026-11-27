@@ -4,7 +4,6 @@ import sys
 import time
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -42,21 +41,14 @@ def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, caps
     from a_share_research import web
 
     try:
-        agent = mint(web.conn, 1, agent=True)
         cookie = lambda value: Request({"type": "http", "headers": [(b"cookie", f"session={value}".encode())]})
-        bearer = lambda value: Request({"type": "http", "headers": [(b"authorization", f"Bearer {value}".encode())]})
-
         assert web.current_session(cookie(token)) == web._hash(token)
-        assert web.current_session(cookie(agent)) is None
-        assert web.api_session(bearer(agent)) == "agent:" + web._hash(agent)
-        for denied in (cookie(token), bearer(token)):
-            with pytest.raises(HTTPException) as exc:
-                web.api_session(denied)
-            assert exc.value.status_code == 401
-
-        web.api_revoke(bearer(agent))
-        with pytest.raises(HTTPException):
-            web.api_session(bearer(agent))
+        assert web.conn.execute("SELECT token_hash FROM sessions").fetchone()[0] == hashlib.sha256(token.encode()).hexdigest()
+        minted = mint(web.conn, 1)
+        assert web.current_session(cookie(minted)) == web._hash(minted)
+        web.conn.execute("INSERT INTO sessions VALUES (?, ?)",
+                         ("agent:" + web._hash("legacy-agent"), time.time() + 60))
+        assert web.current_session(cookie("legacy-agent")) is None
 
         web.conn.execute("UPDATE sessions SET expires_at = ?", (time.time() - 1,))
         assert web.current_session(cookie(token)) is None
@@ -66,25 +58,16 @@ def test_minted_session_is_accepted_until_it_expires(tmp_path, monkeypatch, caps
         assert persistent != replacement
         for value in (persistent, replacement):
             assert web.current_session(cookie(value)) is None
-            assert web.api_session(bearer(value)) == "key:" + web._hash(value)
         # Browser login clears expired sessions but must not clear persistent credentials.
         web.start_session()
         web.conn.close()
         web.conn = db.connect()
-        assert web.api_session(bearer(persistent)) == "key:" + web._hash(persistent)
-        request = bearer(persistent)
-        request.scope["headers"].append((b"x-research-version", b"unsupported"))
-        with pytest.raises(HTTPException) as exc:
-            web.api_session(request)
-        assert exc.value.status_code == 400
-
+        assert web.conn.execute("SELECT COUNT(*) FROM sessions WHERE expires_at < ?", (time.time(),)).fetchone()[0] == 0
         key_id = api_keys.authenticate(web.conn, persistent).key_id
-        assert web.api_revoke(bearer(persistent))["revoked"]
+        assert api_keys.revoke(web.conn, key_id)
         assert web.conn.execute("SELECT revoked_at FROM api_keys WHERE id=?", (key_id,)).fetchone()[0]
-        with pytest.raises(HTTPException) as exc:
-            web.api_session(bearer(persistent))
-        assert exc.value.status_code == 401
-        assert web.api_session(bearer(replacement)) == "key:" + web._hash(replacement)
+        assert api_keys.authenticate(web.conn, persistent) is None
+        assert api_keys.authenticate(web.conn, replacement) is not None
     finally:
         web.conn.close()
 
@@ -128,3 +111,12 @@ def test_invalid_storage_state_request_creates_no_session_or_file(tmp_path, monk
         login_token.main()
     assert error.value.code == 2
     assert not destination.exists() and not (tmp_path / "app.db").exists()
+
+
+def test_agent_flag_is_retired_without_creating_database(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DATA", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["login_token", "--agent"])
+    with pytest.raises(SystemExit) as error:
+        login_token.main()
+    assert error.value.code == 2
+    assert not (tmp_path / "app.db").exists()

@@ -8,21 +8,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from a_share_research import api_keys, db
-from a_share_research.tools import server
+from a_share_research.tools import remote_mcp, server
+from support.mcp import ORIGIN, RESOURCE, call_tool, list_tools, rpc, tool_data, tool_error
 
 
 @pytest.fixture
-def database(tmp_path):
+def database(tmp_path, monkeypatch):
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
     path = tmp_path / 'app.db'
     conn = db.connect(path)
     tokens = {role: api_keys.create(conn, 'structural-lifecycle-' + role, role=role)
               for role in ('research', 'assistant')}
     conn.close()
     return path, tokens
-
-
-def header(token):
-    return {'Authorization': 'Bearer ' + token}
 
 
 @pytest.mark.parametrize('options,mode', [({}, 'read-only'),
@@ -65,30 +63,28 @@ def test_errors_release_gate_and_capacity_slots(database, monkeypatch):
     app = server.create_app(path)
     def fail(ctx, name, arguments):
         raise sqlite3.OperationalError('Injected structural failure')
-    monkeypatch.setattr(server, 'invoke', fail)
-    with TestClient(app) as client:
+    monkeypatch.setattr(remote_mcp, 'invoke', fail)
+    with TestClient(app, base_url=ORIGIN) as client:
         for _ in range(4):
-            response = client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
-            assert response.status_code == 503
-            assert response.json()['error']['code'] == 'unavailable'
+            assert tool_error(client, tokens['research'], 'research_cards')['code'] == 'unavailable'
             assert client.get('/ready').json()['in_flight'] == 0
-            assert client.get('/tools', headers=header(tokens['research'])).status_code == 200
-        assert client.get('/tools', headers=header('invalid')).status_code == 401
+            assert list_tools(client, tokens['research'])
+        assert rpc(client, 'invalid', 'tools/list').status_code == 401
         assert client.get('/ready').json()['in_flight'] == 0
 
 
 def test_research_key_has_no_http_lifecycle_control_routes(database):
     path, tokens = database
-    with TestClient(server.create_app(path)) as client:
+    with TestClient(server.create_app(path), base_url=ORIGIN) as client:
         for endpoint in ('/pause', '/resume', '/drain', '/control', '/control/pause', '/control/resume'):
-            assert client.post(endpoint, json={}, headers=header(tokens['research'])).status_code == 404
+            assert client.post(endpoint, json={}, headers={'Authorization': 'Bearer ' + tokens['research']}).status_code == 404
         assert client.get('/ready').status_code == 200
 
 
 def test_full_gate_admits_reads_and_discovery_but_rejects_writes_and_collectors(database, monkeypatch):
     path, tokens = database
     app = server.create_app(path, account_shadow_enabled=True)
-    headers = header(tokens['assistant'])
+    token = tokens['assistant']
     writing, release = threading.Barrier(3), threading.Event()
     evidence = server.TOOLS['account_evidence']
 
@@ -98,33 +94,31 @@ def test_full_gate_admits_reads_and_discovery_but_rejects_writes_and_collectors(
         return evidence.handler(ctx, args)
 
     monkeypatch.setitem(server.TOOLS, evidence.name, replace(evidence, handler=slow_write))
-    with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
-        writes = [pool.submit(client.post, '/tools/account_evidence', headers=headers,
-                              json={'content_base64': content}) for content in ('YQ==', 'Yg==')]
+    with TestClient(app, base_url=ORIGIN) as client, ThreadPoolExecutor(max_workers=2) as pool:
+        writes = [pool.submit(call_tool, client, token, evidence.name, {'content_base64': content})
+                  for content in ('YQ==', 'Yg==')]
         try:
             writing.wait(timeout=5)
             assert app.state.gate.status()['in_flight'] == 2
-            for token, status in (('invalid', 401), (tokens['research'], 403)):
-                rejected = client.post('/tools/account_evidence', headers=header(token),
-                                       json={'content_base64': 'Yw=='})
-                assert rejected.status_code == status
-            assert client.get('/tools', headers=headers).status_code == 200
-            assert client.post('/tools/research_cards', json={}, headers=headers).status_code == 200
+            arguments = {'content_base64': 'Yw=='}
+            assert rpc(client, 'invalid', 'tools/call', {'name': evidence.name, 'arguments': arguments}).status_code == 401
+            assert tool_error(client, tokens['research'], evidence.name, arguments)['code'] == 'forbidden'
+            assert list_tools(client, token)
+            tool_data(client, token, 'research_cards')
             collecting = replace(server.TOOLS['research_cards'], collects=True)
             monkeypatch.setitem(server.TOOLS, collecting.name, collecting)
             for name in (evidence.name, collecting.name):
-                response = client.post('/tools/' + name, json={}, headers=headers)
-                assert response.status_code == 503
-                assert response.json()['error']['code'] == 'busy'
+                assert tool_error(client, token, name)['code'] == 'busy'
         finally:
             release.set()
-        assert all(write.result().status_code == 200 for write in writes)
+        assert all(not write.result()['result'].get('isError') for write in writes)
 
 
 @pytest.mark.parametrize('request_kind', ['discovery', 'call'])
 def test_pause_rejects_new_work_and_drain_waits_for_inflight_completion(database, monkeypatch, request_kind):
     from a_share_research.tools.control import Gate, ControlError
     path, tokens = database
+    token = tokens['research']
     gate = Gate()
     app = server.create_app(path, gate=gate)
     assert app.state.gate is gate
@@ -133,12 +127,12 @@ def test_pause_rejects_new_work_and_drain_waits_for_inflight_completion(database
         entered.set()
         assert release.wait(5), 'Structural blocked request did not receive release'
         return [] if request_kind == 'discovery' else {'structural': 'finished'}
-    monkeypatch.setattr(server, 'discover' if request_kind == 'discovery' else 'invoke', blocking)
-    with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as pool:
+    monkeypatch.setattr(remote_mcp, 'visible_tools' if request_kind == 'discovery' else 'invoke', blocking)
+    with TestClient(app, base_url=ORIGIN) as client, ThreadPoolExecutor(max_workers=2) as pool:
         def request():
             if request_kind == 'discovery':
-                return client.get('/tools', headers=header(tokens['research']))
-            return client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
+                return rpc(client, token, 'tools/list')
+            return rpc(client, token, 'tools/call', {'name': 'research_cards', 'arguments': {}})
         pending = pool.submit(request)
         try:
             assert entered.wait(3)
@@ -148,36 +142,37 @@ def test_pause_rejects_new_work_and_drain_waits_for_inflight_completion(database
             assert gate.status() == dict(paused=True, in_flight=1)
             draining = pool.submit(gate.pause, timeout=4)
             assert not draining.done()
-            for method, endpoint in (('get', '/tools'), ('post', '/tools/research_cards')):
-                kwargs = dict(headers=header(tokens['research']))
-                if method == 'post':
-                    kwargs['json'] = {}
-                response = getattr(client, method)(endpoint, **kwargs)
-                assert response.status_code == 503
-                assert response.json()['error']['code'] == 'paused'
+            listing = rpc(client, token, 'tools/list')
+            assert listing.status_code == 503 and listing.json()['error']['data']['code'] == 'paused'
+            assert tool_error(client, token, 'research_cards')['code'] == 'paused'
             readiness = client.get('/ready')
             assert readiness.status_code == 503 and readiness.json()['status'] == 'not-ready'
             assert readiness.json()['paused'] is True
             assert client.get('/health').status_code == 200
         finally:
             release.set()
-        assert pending.result(timeout=3).status_code == 200
+        finished = pending.result(timeout=3)
+        assert finished.status_code == 200 and 'result' in finished.json()
+        assert not finished.json()['result'].get('isError')
         assert draining.result(timeout=3) == dict(paused=True, in_flight=0)
         assert gate.resume() == dict(paused=False, in_flight=0)
         assert client.get('/ready').status_code == 200
-        assert request().status_code == 200
+        resumed = request()
+        body = resumed.json()['result']
+        assert resumed.status_code == 200 and ('tools' in body if request_kind == 'discovery' else not body.get('isError'))
         assert gate.status()['in_flight'] == 0
 
 
-def test_unhandled_tool_failure_also_releases_gate(database, monkeypatch):
+def test_unhandled_tool_failure_also_releases_gate(database, monkeypatch, caplog):
     path, tokens = database
     app = server.create_app(path)
     def fail(*args, **kwargs):
         raise RuntimeError('Injected structural unexpected failure')
-    monkeypatch.setattr(server, 'invoke', fail)
-    with TestClient(app) as client:
-        with pytest.raises(RuntimeError, match='structural'):
-            client.post('/tools/research_cards', json={}, headers=header(tokens['research']))
+    monkeypatch.setattr(remote_mcp, 'invoke', fail)
+    with TestClient(app, base_url=ORIGIN) as client:
+        error = tool_error(client, tokens['research'], 'research_cards')
+        assert error['code'] == 'service_failure' and 'structural' not in error['message']
+        assert any(r.name == remote_mcp.__name__ and r.exc_info for r in caplog.records)
         assert app.state.gate.status()['in_flight'] == 0
         assert client.get('/ready').status_code == 200
 

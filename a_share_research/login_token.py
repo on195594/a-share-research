@@ -18,25 +18,24 @@ from urllib.parse import urlparse
 from a_share_research import db
 
 
-def mint(conn, minutes: int, *, agent: bool = False) -> str:
+def mint(conn, minutes: int) -> str:
     if not 1 <= minutes <= 480:
         raise ValueError("会话有效期须在 1–480 分钟之间")
     token = secrets.token_urlsafe(32)
     conn.execute("INSERT INTO sessions VALUES (?, ?)",
-                 (("agent:" if agent else "") + hashlib.sha256(token.encode()).hexdigest(), time.time() + minutes * 60))
+                 (hashlib.sha256(token.encode()).hexdigest(), time.time() + minutes * 60))
     return token
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--minutes", type=int, default=60, choices=range(1, 481), metavar="1-480")
-    parser.add_argument("--agent", action="store_true", help="mint a bearer token for the research API only")
     parser.add_argument("--storage-state", type=Path, help="write private Playwright browser state instead of printing a token")
     args = parser.parse_args()
     origin = urlparse(os.environ.get("PUBLIC_BASE_URL", ""))
-    if args.storage_state and (args.agent or origin.scheme not in ("http", "https") or not origin.hostname
+    if args.storage_state and (origin.scheme not in ("http", "https") or not origin.hostname
                                or origin.username or origin.password):
-        parser.error("--storage-state requires a browser session and a valid PUBLIC_BASE_URL")
+        parser.error("--storage-state requires a valid PUBLIC_BASE_URL")
     conn = db.connect()
     try:
         if args.storage_state:
@@ -55,7 +54,7 @@ def main() -> None:
                 raise
             logging.getLogger(__name__).info("Browser state saved to %s; log out and remove it after use", args.storage_state)
         else:
-            print(mint(conn, args.minutes, agent=args.agent))
+            print(mint(conn, args.minutes))
     finally:
         conn.close()
 

@@ -280,31 +280,29 @@ def test_combined_seed_without_scoped_baseline_uses_legacy_analysis(policy_book,
         assert projected.execute('SELECT tier3_status FROM holding_tier_state WHERE holding_id=1').fetchone()[0] == 'completed'
 
 
-def test_http_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(policy_book, tmp_path, bind_account):
+def test_mcp_scope_opt_in_permissions_and_idempotent_analysis_lifecycle(policy_book, tmp_path, bind_account, monkeypatch):
     book = policy_book
     from fastapi.testclient import TestClient
     from a_share_research.tools.server import create_app
+    from support.mcp import ORIGIN, RESOURCE, protocol_error, tool_data, tool_error
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
     cycle = reopened(book)
     bind_account(book[0], 'a')
     token = api_keys.create(book[0], 'structural-http-assistant', role='assistant')
     research = api_keys.create(book[0], 'structural-http-research', role='research')
-    headers = {'Authorization': 'Bearer ' + token}
-    research_headers = {'Authorization': 'Bearer ' + research}
     sha = evidence.store(tmp_path / 'account-evidence', b'Invented HTTP cycle analysis evidence only')
     scope = dict(account_id='a', cycle_id=cycle)
     initial = scope | dict(initialize=dict(expected_account_version=2, evidence_hashes=[sha]))
-    endpoint = '/tools/account_cycle_analysis_'
-    with TestClient(create_app(tmp_path / 'app.db')) as client:
-        assert client.post(endpoint + 'initialize', headers=headers, json=initial).status_code == 404
-        assert client.post(endpoint + 'current', headers=headers, json=scope).status_code == 404
-    with TestClient(create_app(tmp_path / 'app.db', account_shadow_enabled=True)) as client:
+    prefix = 'account_cycle_analysis_'
+    with TestClient(create_app(tmp_path / 'app.db'), base_url=ORIGIN) as client:
+        assert protocol_error(client, token, prefix + 'initialize', initial)['code'] == -32602
+        assert protocol_error(client, token, prefix + 'current', scope)['code'] == -32602
+    with TestClient(create_app(tmp_path / 'app.db', account_shadow_enabled=True), base_url=ORIGIN) as client:
         for name, payload in [('initialize', initial), ('current', scope), ('history', scope),
             ('update', scope | dict(update=request(book, [open_alert()]).model_dump(mode='json')))]:
-            assert client.post(endpoint + name, headers=research_headers, json=payload).status_code == 403
+            assert tool_error(client, research, prefix + name, payload)['code'] == 'forbidden'
         def call(name, payload):
-            response = client.post(endpoint + name, headers=headers, json=payload)
-            assert response.status_code == 200, response.text
-            return response.json()['result']['data']
+            return tool_data(client, token, prefix + name, payload)['data']
         base = call('initialize', initial)
         assert call('initialize', initial) == base
         value = request(book, [rewrite(retire_l3_ids=[]), open_alert()], evidence_hashes=[sha])

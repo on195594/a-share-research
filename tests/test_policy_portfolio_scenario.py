@@ -11,6 +11,7 @@ from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, monitor, portfolio_scenario, position_sizing, registry
 from a_share_research.policy.v0.portfolio_scenario import compare
 from a_share_research.tools.server import create_app
+from support.mcp import ORIGIN, RESOURCE, tool_data, tool_error
 from support.policy import historical_replay
 
 PROPOSAL = dict(sales={'600000': 100}, fees=5.0)
@@ -127,13 +128,13 @@ def test_sql_failure_rolls_back_without_partial_receipt(policy_setup, parent):
     assert run(setup, parent)['mode'] == 'derived_portfolio_scenario'
 
 
-def test_http_validates_portfolio_scenario_arguments(policy_setup, parent):
+def test_mcp_validates_portfolio_scenario_arguments(policy_setup, parent, monkeypatch):
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
     path, conn, _, _, active, _, _ = policy_setup
     token = api_keys.create(conn, 'portfolio_scenario-http', role='assistant')
     args = dict(request_id='scenario-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
-    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
-        headers = {'Authorization': 'Bearer ' + token}
-        endpoint = '/tools/policy_portfolio_scenario'
-        assert client.post(endpoint, headers=headers, json=args | {'proposal': PROPOSAL | {'sales': {'600000': True}}}).status_code == 422
-        response = client.post(endpoint, headers=headers, json=args)
-        assert response.status_code == 200, response.text
+    with TestClient(create_app(path, account_shadow_enabled=True), base_url=ORIGIN) as client:
+        name = 'policy_portfolio_scenario'
+        invalid = args | {'proposal': PROPOSAL | {'sales': {'600000': True}}}
+        assert tool_error(client, token, name, invalid)['code'] == 'invalid_arguments'
+        tool_data(client, token, name, args)

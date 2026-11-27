@@ -7,6 +7,7 @@ import pytest
 
 from a_share_research import db, scans, service, stance, valuation
 from support.continuation import load
+from support.mcp import rpc, tool_data, tool_error
 from support.valuation import BODY, RECORD, ROWS, STORED, assumptions
 from support.market_replay import CALENDAR
 from support.scans import (
@@ -239,33 +240,29 @@ def test_announcement_failure_pauses_card_until_same_code_recovers(tmp_path, val
     conn.close()
 
 
-def test_card_http_authentication_read_only_and_404(reading_server):
-    server = reading_server
-    conn, client, url, _run, report, _failed, _queued = server
-    before = conn.total_changes
-    route = url + '/api/companies/600519/card'
-    assert client.get(route, headers={'Authorization': 'Bearer invalid'}).status_code == 401
-    assert client.get(url + '/api/companies/603606/card').status_code == 404
-    assert client.get(url + '/api/companies/bad/card').status_code == 422
-    response = client.get(route)
-    assert response.status_code == 200
-    assert response.json()['checks'] == []
-    assert response.json()['report_id'] == report and response.json()['version'] == 'research-v1'
-    assert conn.total_changes == before
-
-
-def test_cards_http_authentication_version_and_payload(reading_server):
-    server = reading_server
-    conn, client, url, *_ = server
-    scans.replace_subscriptions(conn, ['600519', '603606'], catalog=CATALOG)
-    route = url + '/api/cards'
-    assert client.get(route, headers={'Authorization': 'Bearer invalid'}).status_code == 401
-    assert client.get(route, headers={'X-Research-Version': 'unsupported'}).status_code == 400
+def test_card_mcp_authentication_read_only_and_404(reading_server, mcp_tools):
+    conn, client, _url, _run, report, _failed, _queued = reading_server
+    token = client.headers['Authorization'].removeprefix('Bearer ')
     before = list(conn.iterdump())
-    response = client.get(route)
-    assert response.status_code == 200
-    assert response.json() == service.company_cards(conn)
-    assert response.json()['missing'] == [{'code': '603606', 'origin': 'external'}]
+    args = {'name': 'research_card', 'arguments': {'code': '600519'}}
+    assert rpc(mcp_tools, 'invalid', 'tools/call', args).status_code == 401
+    assert tool_error(mcp_tools, token, 'research_card', {'code': '603606'})['code'] == 'not_found'
+    assert tool_error(mcp_tools, token, 'research_card', {'code': 'bad'})['code'] == 'invalid_arguments'
+    card = tool_data(mcp_tools, token, 'research_card', {'code': '600519'})['data']
+    assert card['checks'] == []
+    assert card['report_id'] == report and card['version'] == 'research-v1'
+    assert list(conn.iterdump()) == before
+
+
+def test_cards_mcp_authentication_and_payload(reading_server, mcp_tools):
+    conn, client, *_ = reading_server
+    token = client.headers['Authorization'].removeprefix('Bearer ')
+    scans.replace_subscriptions(conn, ['600519', '603606'], catalog=CATALOG)
+    assert rpc(mcp_tools, 'invalid', 'tools/call', {'name': 'research_cards', 'arguments': {}}).status_code == 401
+    before = list(conn.iterdump())
+    cards = tool_data(mcp_tools, token, 'research_cards')['data']
+    assert cards == service.company_cards(conn)
+    assert cards['missing'] == [{'code': '603606', 'origin': 'external'}]
     assert list(conn.iterdump()) == before
 
 
@@ -343,13 +340,13 @@ def test_unpriced_or_missing_frozen_basis_is_unknown_not_false(tmp_path, calc):
     conn.close()
 
 
-def test_card_endpoints_return_only_effective_public_checks(reading_server):
-    server = reading_server
+def test_card_endpoints_return_only_effective_public_checks(reading_server, mcp_tools):
     from support.scans import replay_disclosure as disclosure_replay
 
     from a_share_research import disclosure_checks
 
-    conn, client, url, *_ = server
+    conn, client, *_ = reading_server
+    token = client.headers['Authorization'].removeprefix('Bearer ')
     # Reuse T2's documented cross-company/period variants and real persistence path.
     code, _, source = disclosure_replay(conn)
     run_scan(conn, source)
@@ -369,8 +366,8 @@ def test_card_endpoints_return_only_effective_public_checks(reading_server):
               'observed', 'outcome', 'direction', 'reason'}
     expected = [{k: c[k] for k in fields} for c in disclosure_checks.latest(stored)]
     assert len(expected) == 2 and all(c['announced'] == '2026-01-24' for c in expected)
-    single = client.get(url + f'/api/companies/{code}/card').json()
-    multiple = client.get(url + '/api/cards').json()
+    single = tool_data(mcp_tools, token, 'research_card', {'code': code})['data']
+    multiple = tool_data(mcp_tools, token, 'research_cards')['data']
     assert single['checks'] == expected
     assert next(c for c in multiple['cards'] if c['code'] == code)['checks'] == expected
     assert scans.weekly(conn)['subscriptions'][0]['card']['checks'] == expected

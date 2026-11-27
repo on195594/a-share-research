@@ -1,4 +1,4 @@
-"""Bounded JSON object inputs shared by the tools HTTP transports."""
+"""Bounded JSON object inputs for the tools MCP HTTP transport."""
 from starlette.requests import Request
 
 from a_share_research import gate

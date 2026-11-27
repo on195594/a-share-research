@@ -951,7 +951,7 @@ def execute(conn, scan_id: int, *, source=None, at: str | None = None) -> None:
                 if code in entering and reason['reason'] == 'pending_review':
                     continue
                 candidates.append({'code': code, 'name': (card or {}).get('name') or summary['names'].get(code), **reason,
-                                   'card': card, 'path': f'/stock/{code}', 'card_path': f'/api/companies/{code}/card',
+                                   'card': card, 'path': f'/stock/{code}',
                                    'latencies': [latency(e, at) for e in related], 'notified_at': at})
             zone = ((card or {}).get('current') or {}).get('current_zone')
             old_zone = ((before or {}).get('current') or {}).get('current_zone')
@@ -1002,6 +1002,11 @@ def view(conn, scan_id: int, *, compact: bool = False) -> dict:
             gaps.append({'reason': row['error']})
         return {'version': service.VERSION, **data, 'gaps': gaps, 'path': f'/scans/{scan_id}'}
     summary = json.loads(row['summary'] or '{}')
+    if isinstance(summary.get('notify'), list):
+        summary['notify'] = [
+            {k: v for k, v in item.items() if k != 'card_path'} if isinstance(item, dict) else item
+            for item in summary['notify']
+        ]
     return {'version': service.VERSION, **dict(row), 'summary': summary,
             'events': [dict(e, **latency(e, db.now())) for e in events(conn, scan_id=scan_id)],
             'notify': summary.get('notify', [])}

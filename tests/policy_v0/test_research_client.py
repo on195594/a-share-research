@@ -4,7 +4,6 @@ import hashlib
 import json
 
 import pytest
-from fastapi import Request
 
 from a_share_research import api_keys, db as app_db, reading, service
 from a_share_research.account import cycle_analysis, ledger, mirror, position_store
@@ -105,10 +104,6 @@ def test_ledger_holding_card_is_only_visible_to_monitor(book, web, bind_account,
     principal = api_keys.authenticate(conn, token)
     public = invoke(Context(conn, database, principal), "research_cards", {})["data"]
     assert public == {"version": service.VERSION, "cards": [], "missing": []}
-    request = Request({"type": "http", "method": "GET", "path": "/api/cards",
-                       "headers": [(b"authorization", f"Bearer {token}".encode())]})
-    route = next(r for r in web.app.routes if r.path == request.scope["path"] and "GET" in r.methods)
-    assert route.endpoint(request) == public
 
 
 def test_missing_database_is_reported_and_not_created(isolated_cache_database, capsys):

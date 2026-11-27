@@ -9,6 +9,7 @@ import pytest
 from a_share_research import api_keys, gate
 from a_share_research.policy import evaluation, monitor, position_evaluation, position_sizing, registry
 from a_share_research.tools.server import create_app
+from support.mcp import ORIGIN, RESOURCE, tool_data, tool_error
 
 PROPOSAL = dict(code='600900', price=29.5, framework='A')
 
@@ -80,16 +81,15 @@ def test_corrupt_parent_hash_prevents_derive_and_breaks_existing_reference(polic
     assert conn.execute('SELECT count(*) FROM policy_evaluations').fetchone()[0] == 2
 
 
-def test_http_validates_position_size_arguments(policy_setup, parent):
+def test_mcp_validates_position_size_arguments(policy_setup, parent, monkeypatch):
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
     path, conn, _, _, active, _, _ = policy_setup
     token = api_keys.create(conn, 'position_size-http', role='assistant')
     args = dict(request_id='sizing-http', expected_activation_id=active['id'], monitor_evaluation_id=parent['id'], proposal=PROPOSAL)
-    with TestClient(create_app(path, account_shadow_enabled=True)) as client:
-        headers = {'Authorization': 'Bearer ' + token}
-        endpoint = '/tools/policy_position_size'
-        assert client.post(endpoint, headers=headers, json=args | {'proposal': PROPOSAL | {'price': 0}}).status_code == 422
-        response = client.post(endpoint, headers=headers, json=args)
-        assert response.status_code == 200, response.text
+    with TestClient(create_app(path, account_shadow_enabled=True), base_url=ORIGIN) as client:
+        name = 'policy_position_size'
+        assert tool_error(client, token, name, args | {'proposal': PROPOSAL | {'price': 0}})['code'] == 'invalid_arguments'
+        tool_data(client, token, name, args)
 
 
 def test_source_mutation_during_calculation_rolls_back(policy_setup, parent, monkeypatch):

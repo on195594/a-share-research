@@ -79,21 +79,29 @@ def test_only_an_account_enabled_assistant_reaches_holdings_research(conn, monke
     assert feedback['holdings_context'] is True and feedback['holdings_snapshot']['status'] == 'unverified'
 
 
-def test_legacy_http_request_refuses_the_same_assistant_pat_before_reading_the_view(reading_server, monkeypatch):
-    conn, client, *_ = reading_server
+def test_account_disabled_mcp_refuses_the_same_assistant_pat_before_reading_the_view(conn, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from a_share_research.tools.server import create_app
+    from support.mcp import ORIGIN, RESOURCE, tool_data, tool_error
+
     token = api_keys.create(conn, 'holdings-http', role='assistant')
     principal = api_keys.authenticate(conn, token)
     ctx = Context(conn, Path('unused'), principal, account_shadow_enabled=True)
     monkeypatch.setattr(service.companies, 'company', lambda code: {'code': code, 'zwjc': '东方电缆'})
-    headers = {'Authorization': 'Bearer ' + token}
     run = invoke(ctx, 'research_request', {'code': '603606', 'request_id': 'aware',
                                            'holdings_context': True})['data']['run_id']
     invoke(ctx, 'research_request', {'code': '603606', 'request_id': 'blind'})
-    assert client.get('/api/request?request_id=blind', headers=headers).status_code == 200
-    monkeypatch.setattr(service, 'run_view', lambda *a, **kw: pytest.fail('知仓门禁前不能构造视图'))
-    for path in ('/api/request?request_id=aware', f'/api/runs/{run}'):
-        assert client.get(path, headers=headers).status_code == 403
-    assert client.get('/api/request?request_id=missing', headers=headers).status_code == 404
+    monkeypatch.setenv('ASHARE_PUBLIC_MCP_URL', RESOURCE)
+    with TestClient(create_app(tmp_path / 'scans.db', account_shadow_enabled=False), base_url=ORIGIN) as client:
+        assert tool_data(client, token, 'research_status', {'request_id': 'blind', 'compact': False})['data']['input_mode'] == 'blind'
+        for name in ('run_view', 'run_summary'):
+            monkeypatch.setattr(service, name, lambda *a, **kw: pytest.fail('知仓门禁前不能构造视图'))
+        for selector in ({'request_id': 'aware'}, {'run_id': run}):
+            for compact in (False, True):
+                refused = tool_error(client, token, 'research_status', selector | {'compact': compact})
+                assert refused['code'] == 'forbidden'
+        assert tool_error(client, token, 'research_status', {'request_id': 'missing'})['code'] == 'not_found'
 
 
 def test_web_holdings_actions_and_forms_follow_account_capability(web, owner_request, bound_book, monkeypatch):

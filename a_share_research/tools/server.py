@@ -7,13 +7,11 @@ from contextlib import ExitStack, closing, contextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 
 from a_share_research import api_keys, db
-from a_share_research.tools.http_json import BodyTooLarge, parse_object, read_body
-from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, check_scope, check_tool_scope, discover, invoke, validation_message
+from a_share_research.tools.registry import Context, ToolError, TOOLS, authorize_tool, check_scope, check_tool_scope
 from a_share_research.tools import control
 
 logger = logging.getLogger(__name__)
@@ -25,19 +23,6 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
     gate = gate or control.Gate()
     app.state.gate = gate
     mode = 'account-shadow' if account_shadow_enabled else 'read-only'
-
-    @app.exception_handler(control.ControlError)
-    async def control_error(request, exc):
-        return JSONResponse({'ok':False,'error':{'code':exc.code,'message':str(exc)}},status_code=exc.status)
-
-    @app.exception_handler(ToolError)
-    async def tool_error(request, exc):
-        return JSONResponse({'ok': False, 'error': {'code': exc.code, 'message': str(exc)}}, status_code=exc.status)
-
-    @app.exception_handler(RequestValidationError)
-    async def invalid_request(request, exc):
-        return JSONResponse({'ok': False, 'error': {'code': 'invalid_arguments',
-                             'message': validation_message(exc.errors())}}, status_code=422)
 
     @contextmanager
     def connection(mode):
@@ -120,24 +105,6 @@ def create_app(database: Path, *, account_shadow_enabled: bool = False,
         if result['paused']:
             return JSONResponse(result,status_code=503)
         return result | {'status':'ready'}
-
-    @app.get('/tools')
-    def tools(request: Request):
-        with context(request) as ctx:
-            return {'tools': discover(ctx.principal, account_shadow_enabled=account_shadow_enabled)}
-
-    async def arguments_json(request: Request):
-        try:
-            return parse_object(await read_body(request))
-        except BodyTooLarge as exc:
-            raise ToolError('invalid_arguments', str(exc), 413) from None
-        except ValueError as exc:
-            raise RequestValidationError([{'loc': ('body',), 'msg': str(exc)}]) from None
-
-    @app.post('/tools/{name}')
-    def call(name: str, request: Request, arguments: dict = Depends(arguments_json)):
-        with context(request, name) as ctx:
-            return {'ok': True, 'result': invoke(ctx, name, arguments)}
 
     if resource := os.environ.get('ASHARE_PUBLIC_MCP_URL'):
         from a_share_research.tools.remote_mcp import mcp_router

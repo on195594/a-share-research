@@ -101,7 +101,7 @@ def server(tmp_path):
         while time.monotonic() < deadline:
             assert process.poll() is None, f"isolated web process exited; log: {log_path}"
             try:
-                if client.get(url + "/api/research/budget", timeout=1).status_code == 200:
+                if client.get(url + "/login", timeout=1).status_code == 200:
                     break
             except (requests.ConnectionError, requests.Timeout):
                 pass
@@ -119,6 +119,19 @@ def server(tmp_path):
             process.wait(timeout=5)
         conn.close()
         log.close()
+
+
+@pytest.fixture
+def mcp_tools(tmp_path, monkeypatch):
+    """The tools /mcp endpoint over tmp_path/app.db, the database of `server` and `reading_server`."""
+    from fastapi.testclient import TestClient
+
+    from a_share_research.tools.server import create_app
+    from support.mcp import ORIGIN, RESOURCE
+
+    monkeypatch.setenv("ASHARE_PUBLIC_MCP_URL", RESOURCE)
+    with TestClient(create_app(tmp_path / "app.db"), base_url=ORIGIN) as client:
+        yield client
 
 
 @pytest.fixture

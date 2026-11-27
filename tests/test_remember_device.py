@@ -76,7 +76,11 @@ def test_csrf_cross_site_and_api_are_not_bypassed(server):
     conn.execute('UPDATE sessions SET expires_at=0')
     other = peer(client)
     assert other.post(url + '/auth/remember-device', headers={'Origin': url}, allow_redirects=False).headers['location'] == '/login'
-    assert other.get(url + '/api/research/budget').status_code == 401
+    # The device cookie restores page reads only: machine endpoints and writes never mint a session from it.
+    for path in ('/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource/mcp'):
+        assert 'session' not in other.get(url + path, allow_redirects=False).cookies
+    write = other.post(url + '/connections/clients', headers={'Origin': url}, allow_redirects=False)
+    assert write.headers['location'] == '/login' and 'session' not in write.cookies
     assert other.post(url + '/logout', headers={'Origin': url}).status_code == 403
 
 

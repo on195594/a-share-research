@@ -19,7 +19,7 @@ from a_share_research.account import evidence, ledger
 from a_share_research.account.reconciliation import Opening
 from a_share_research.tools import http_json, remote_mcp
 from a_share_research.tools.control import ControlError, Gate
-from a_share_research.tools.registry import TOOLS
+from a_share_research.tools.registry import TOOLS, discover
 from a_share_research.tools.server import create_app
 from support.continuation import load
 from support.mcp import MODERN, ORIGIN, RESOURCE, rpc
@@ -99,16 +99,18 @@ def test_public_auth_rechecks_each_credential_and_its_audience(remote, database)
 
 
 @pytest.mark.parametrize('account_enabled', [False, True])
-def test_catalog_matches_rest_visibility_schemas_and_operation_semantics(remote, account_enabled):
+def test_catalog_matches_registry_visibility_schemas_and_operation_semantics(remote, database, account_enabled):
     client, tokens = remote
     for role in ('research', 'assistant'):
         token = tokens[role]
-        rest = client.get('/tools', headers={'Authorization': 'Bearer ' + token}).json()['tools']
+        with closing(db.connect(database[0])) as conn:
+            principal = api_keys.authenticate(conn, token)
+        registered = discover(principal, account_shadow_enabled=account_enabled)
         response = rpc(client, token, 'tools/list')
         assert response.status_code == 200
         catalog = {tool['name']: tool for tool in response.json()['result']['tools']}
-        assert set(catalog) == {tool['name'] for tool in rest}
-        for tool in rest:
+        assert set(catalog) == {tool['name'] for tool in registered}
+        for tool in registered:
             actual = catalog[tool['name']]
             assert actual['description'] == tool['description']
             assert actual['inputSchema'] == tool['input_schema'] and actual['outputSchema'] == tool['output_schema']
@@ -225,13 +227,14 @@ def test_gate_preserves_reads_and_replays_original_write_after_resume(remote, da
     assert call(client, token, 'research_feedback', args)['structuredContent']['data']['run_id'] == receipt['run_id']
 
 
-def test_chunked_json_over_limit_is_rejected_by_both_transports(remote, monkeypatch):
+def test_chunked_json_over_limit_is_rejected_and_rest_transport_is_retired(remote, monkeypatch):
     client, tokens = remote
     monkeypatch.setattr(http_json, 'MAX_BODY_SIZE', 256)
     headers = {'Authorization': 'Bearer ' + tokens['research'], 'Content-Type': 'application/json'}
-    for path in ['/mcp', '/tools/research_cards']:
-        response = client.post(path, headers=headers, content=iter([b'{}', b' ' * 255]))
-        assert response.status_code == 413
+    response = client.post('/mcp', headers=headers, content=iter([b'{}', b' ' * 255]))
+    assert response.status_code == 413 and response.json()['error']['code'] == -32700
+    assert client.get('/tools', headers=headers).status_code == 404
+    assert client.post('/tools/research_cards', headers=headers, content=b'{}').status_code == 404
 
 
 def test_pause_cannot_finish_while_authentication_is_reading(remote, monkeypatch):
@@ -253,8 +256,6 @@ def test_pause_cannot_finish_while_authentication_is_reading(remote, monkeypatch
 def test_tool_errors_keep_field_paths_and_hide_upstream_exceptions(remote, monkeypatch):
     client, tokens = remote
     token = tokens['research']
-    legacy = client.post('/tools/research.cards', headers={'Authorization': 'Bearer ' + token}, json={})
-    assert legacy.status_code == 404 and legacy.json()['error']['code'] == 'not_found'
     for name in ['missing', 'research.cards']:
         error = rpc(client, token, 'tools/call', {'name': name, 'arguments': {}}).json()['error']
         assert error['code'] == -32602
@@ -326,7 +327,6 @@ def test_endpoint_disabled_without_public_url(database, monkeypatch):
     monkeypatch.delenv('ASHARE_PUBLIC_MCP_URL')
     with TestClient(create_app(path), base_url=ORIGIN) as client:
         assert rpc(client, tokens['research'], 'tools/list').status_code == 404
-        assert client.get('/tools', headers={'Authorization': 'Bearer ' + tokens['research']}).status_code == 200
         assert client.get('/ready').status_code == 200
 
 

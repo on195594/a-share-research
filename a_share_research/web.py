@@ -22,11 +22,10 @@ from typing import Self
 from urllib.parse import urlencode, urlparse
 
 import requests
-from fastapi import FastAPI, Form, Request, HTTPException, Query
+from fastapi import FastAPI, Form, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import QueryParams
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -36,9 +35,7 @@ from a_share_research import charts, db, batches, companies as company_data, ser
 from a_share_research import stock_codes, api_keys, oauth, oauth_store, skill_bundle, template_filters
 from a_share_research import web_evidence, web_ledger
 from a_share_research.tools_client import ToolCallError, ToolsClient
-from a_share_research.contract import JUDGMENT_CONTRACT
 from a_share_research.evidence import report_source_view, citation_link
-from a_share_research.service import FeedbackRequest, ResearchRequest
 
 HERE = Path(__file__).parent
 _UNSET = object()
@@ -158,7 +155,7 @@ async def guard(request: Request, call_next):
     if request.headers.get("host", "").lower() != urlparse(settings.base_url).netloc.lower():
         return Response("Invalid Host header", status_code=403, media_type="text/plain")
     path = request.url.path
-    machine = path.startswith(("/api/", "/.well-known/")) or path == "/oauth/token"
+    machine = path.startswith("/.well-known/") or path == "/oauth/token"
     if request.method not in ("GET", "HEAD") and not machine and not same_origin(request):
         return Response("Cross-origin request refused", status_code=403, media_type="text/plain")
     # Restore only safe page reads, never use a device cookie as API/write authorization.
@@ -939,171 +936,6 @@ def submit_feedback(request: Request, report_id: int, location: str = Form(""), 
     return RedirectResponse(result["path"], status_code=303)
 
 
-# JSON clients accept persistent API keys and legacy agent sessions, never cookies.
-def _api_credential(request: Request) -> tuple[str, api_keys.Principal | None]:
-    header = request.headers.get("authorization", "")
-    if not header.startswith("Bearer "):
-        raise HTTPException(401, "需要研究 API bearer token")
-    if principal := api_keys.authenticate(conn, header[7:]):
-        if principal.role == "owner":
-            raise HTTPException(403, "所有者管理凭据不能调用研究 API")
-        key = service.requester(conn, principal)
-    else:
-        key = "agent:" + _hash(header[7:])
-        row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (key,)).fetchone()
-        if row is None or row["expires_at"] <= time.time():
-            raise HTTPException(401, "研究凭据无效、已撤销或临时令牌已过期")
-    if request.headers.get("x-research-version", service.VERSION) != service.VERSION:
-        raise HTTPException(400, "不支持的研究合同版本")
-    return key, principal
-
-
-def api_session(request: Request) -> str:
-    requester, _ = _api_credential(request)
-    return requester
-
-
-@app.exception_handler(service.RequestError)
-async def api_error(request: Request, exc: service.RequestError):
-    return JSONResponse({"version": service.VERSION, "error": str(exc)}, status_code=exc.status)
-
-
-def _blind_only(mode: str | None) -> None:
-    """Legacy research keys never reach holdings-aware runs; only account-enabled assistant tools do."""
-    if mode == "holdings_context":
-        raise HTTPException(403, "知仓研究仅限启用账户工具的助手凭据")
-
-
-@app.post("/api/research", status_code=202)
-def api_research(request: Request, body: ResearchRequest):
-    requester = api_session(request)
-    _blind_only(db.input_mode(body.model_dump()))
-    result = service.request_research(conn, requester, **body.model_dump())
-    return {"version": service.VERSION, "run_id": result["run_id"]}
-
-
-@app.get("/api/request")
-def api_request(request: Request, request_id: str):
-    requester = api_session(request)
-    return service.research_status(conn, requester=requester, request_id=request_id, compact=False, blind_only=True)
-
-
-@app.get("/api/research/budget")
-def api_research_budget(request: Request):
-    api_session(request)
-    return {"version": service.VERSION, "budget": service.run_budget(conn)}
-
-
-@app.get("/api/runs/{run_id}")
-def api_run(request: Request, run_id: int):
-    api_session(request)
-    _blind_only(service.run_input_mode(conn, run_id))
-    return service.run_summary(conn, run_id)
-
-
-@app.get("/api/schema")
-def api_schema(request: Request):
-    api_session(request)
-    return {"version": service.VERSION, "schema_version": report_body.SCHEMA_VERSION,
-            "judgment_contract": JUDGMENT_CONTRACT, "report": report_body.json_schema(),
-            "views": {"compact": report_body.COMPACT_FIELDS, "card": report_body.CARD_FIELDS,
-                      "failed": report_body.FAILED_FIELDS}}
-
-
-@app.get("/api/reports")
-def api_reports(request: Request, code: str):
-    api_session(request)
-    if not stock_codes.KEY_RE.fullmatch(code):
-        raise service.RequestError("公司代码必须为六位数字")
-    rows = reading.api_reports(conn, code)
-    return {"version": service.VERSION, "reports": [dict(row) for row in rows]}
-
-
-@app.get("/api/search")
-def api_search(request: Request, q: str, code: str | None = None, section: str | None = None, history: bool = False,
-               page: int = Query(1, ge=1, le=10000)):
-    api_session(request)
-    return service.research_search(conn, q, code=code, section=section, history=history, page=page)
-
-
-class MonthlyBatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    month: str
-
-
-@app.post('/api/batches/monthly')
-def api_monthly_batch(request: Request, body: MonthlyBatchRequest):
-    api_session(request)
-    with batch_writes:
-        return service.monthly_batch(conn, body.month, submit=True)
-
-
-@app.get('/api/batches/monthly/{month}')
-def api_monthly_status(request: Request, month: str):
-    api_session(request)
-    return service.monthly_batch(conn, month)
-
-
-@app.get("/api/companies/{code}/card")
-def api_company_card(request: Request, code: str):
-    api_session(request)
-    return service.company_card(conn, code)
-
-
-@app.get('/api/cards')
-def api_cards(request: Request):
-    api_session(request)
-    return service.company_cards(conn)
-
-
-class SubscriptionsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    codes: list[str]
-
-
-@app.put('/api/subscriptions')
-def api_replace_subscriptions(request: Request, body: SubscriptionsRequest):
-    api_session(request)
-    from a_share_research import scans
-    return {'version': service.VERSION, 'subscriptions': scans.replace_subscriptions(conn, body.codes)}
-
-
-@app.get('/api/subscriptions')
-def api_subscriptions(request: Request):
-    api_session(request)
-    from a_share_research import scans
-    return {'version': service.VERSION, 'subscriptions': scans.subscriptions(conn)}
-
-
-@app.post('/api/scans', status_code=202)
-def api_submit_scan(request: Request):
-    api_session(request)
-    from a_share_research import scans
-    return {'version': service.VERSION, 'scan_id': scans.submit(conn)}
-
-
-@app.put('/api/scan-requests/{request_id}', status_code=202)
-def api_submit_scan_request(request: Request, request_id: str):
-    requester = api_session(request)
-    from a_share_research import scans
-    return {'version': service.VERSION, 'request_id': request_id,
-            'scan_id': scans.submit_request(conn, requester, request_id)}
-
-
-@app.get('/api/scans/weekly')
-def api_weekly_scan(request: Request):
-    api_session(request)
-    from a_share_research import scans
-    return scans.weekly(conn, account_sources=False)
-
-
-@app.get('/api/scans/{scan_id}')
-def api_scan(request: Request, scan_id: int):
-    api_session(request)
-    from a_share_research import scans
-    return scans.view(conn, scan_id)
-
-
 @app.get('/subscriptions')
 def subscription_detail(request: Request):
     from a_share_research import scans
@@ -1120,31 +952,6 @@ def weekly_scan_detail(request: Request):
 def scan_detail(request: Request, scan_id: int):
     from a_share_research import scans
     return _owner_read(request, None, scans.view, scan_id)
-
-
-@app.get("/api/reports/{report_id}")
-def api_report(request: Request, report_id: int, compact: bool = False):
-    api_session(request)
-    _blind_only(service.report_input_mode(conn, report_id))
-    return service.report_view(conn, report_id, compact=compact)
-
-
-@app.post("/api/reports/{report_id}/feedback", status_code=202)
-def api_feedback(request: Request, report_id: int, body: FeedbackRequest):
-    requester = api_session(request)
-    _blind_only(service.report_input_mode(conn, report_id))
-    result = service.request_feedback(conn, requester, report_id, **body.model_dump())
-    return {"version": service.VERSION, "run_id": result["run_id"]}
-
-
-@app.post("/api/session/revoke")
-def api_revoke(request: Request):
-    key, principal = _api_credential(request)
-    if principal:
-        api_keys.revoke(conn, principal.key_id)
-    else:
-        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (key,))
-    return {"version": service.VERSION, "revoked": True}
 
 
 @app.get("/stock/{code}")

@@ -22,7 +22,7 @@ Web、tools 和 worker 共用一个 SQLite 账本。worker 负责材料与发布
 ## 进程、双入口与鉴权
 
 - **web**：提供 HTML 页面、GitHub 所有者会话（8 小时到期；可在 `/connections` 启用“记住此设备 30 天”恢复登录，设备截止日固定不顺延，过期会话上的表单写请求须先刷新重提，退出撤销当前设备及派生会话）、OAuth 发现与 PKCE S256 授权管理。账户表单校验会话、同源与 CSRF 后，以专属 `web-owner-proxy` grant 经内网调用 tools 的 `/mcp`；页面读取共用只读视图。
-- **tools**：接收 nginx `location = /mcp` 转发的 Streamable HTTP MCP 请求，按公网地址校验 Host、Origin（若提供）与非 owner PAT 或绑定本资源的 OAuth access token（`owner` 凭据仅限本机策略工具）。成功回执同时返回文本和结构化数据，参数错误给出字段路径。写入与采集共享 2 个并发名额；读取只登记在途。发布暂停标记（`DATA_DIR/.tools-paused`）跨重启保留，暂停时拒收新请求并等待在途结束。旧 `/tools` REST、`/api` Agent JSON 与 `agent:` 会话热备到段 4a 退役为止，见[实施计划](docs/implementation-plan.md#web-与-mcp-双入口实施)。
+- **tools**：接收 nginx `location = /mcp` 转发的 Streamable HTTP MCP 请求，按公网地址校验 Host、Origin（若提供）与非 owner PAT 或绑定本资源的 OAuth access token（`owner` 凭据仅限本机策略工具）。成功回执同时返回文本和结构化数据，参数错误给出字段路径。写入与采集共享 2 个并发名额；读取只登记在途。发布暂停标记（`DATA_DIR/.tools-paused`）跨重启保留，暂停时拒收新请求并等待在途结束。
 - **worker**：领取任务前调用 runner `--check` 离线解析作者与复核员模型和凭据。一次执行一个单股任务，单股和扫描队列空闲时推进批次及 `report_rc` 补取。worker 持有研究行情凭据与宿主 `~/.pi`；tools 行情凭据来自独立 `.env.tools`；web 不持模型与行情凭据。
 
 ## 研究与模型调用

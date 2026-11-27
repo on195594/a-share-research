@@ -1,51 +1,60 @@
 """Real localhost HTTP, isolated database and disposable web process; no worker or provider calls."""
+import pytest
 import requests
 
-from a_share_research import db
+from a_share_research import db, service
+from support.mcp import rpc, tool_data, tool_error
 
 
-def test_get_endpoints_auth_recovery_compaction_and_no_restart(server):
-    conn, client, url, run, report, failed, queued = server
+@pytest.fixture
+def mcp(server, mcp_tools):
+    """The tools /mcp endpoint on the same database, with the web server's research PAT."""
+    return mcp_tools, server[1].headers['Authorization'].removeprefix('Bearer ')
+
+
+def test_request_recovery_and_report_compaction_without_writes(server, mcp):
+    conn, *_, run, report, failed, queued = server
+    client, token = mcp
     counts = [conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("runs", "calls", "reports")]
-    for path in ("/api/research/budget", "/api/request?request_id=lost-http-response",
-                 f"/api/reports/{report}?compact=true"):
-        assert client.get(url + path, headers={"Authorization": "Bearer invalid"}, timeout=3).status_code == 401
-    recovered = client.get(url + "/api/request", params={"request_id": "lost-http-response"}, timeout=3)
-    assert recovered.status_code == 200 and recovered.json()["id"] == queued
-    assert client.get(url + "/api/request", params={"request_id": "unknown"}, timeout=3).status_code == 404
-    full = client.get(url + f"/api/reports/{report}", timeout=3).json()
-    small = client.get(url + f"/api/reports/{report}", params={"compact": "true"}, timeout=3).json()
+    for name, args in (("research_status", {"request_id": "lost-http-response"}),
+                       ("research_report", {"report_id": report})):
+        assert rpc(client, "invalid", "tools/call", {"name": name, "arguments": args}).status_code == 401
+    recovered = tool_data(client, token, "research_status", {"request_id": "lost-http-response", "compact": False})
+    assert recovered["data"]["id"] == queued
+    assert tool_error(client, token, "research_status", {"request_id": "unknown"})["code"] == "not_found"
+    full = tool_data(client, token, "research_report", {"report_id": report, "compact": False})["data"]
+    small = tool_data(client, token, "research_report", {"report_id": report, "compact": True})["data"]
     assert small["run_id"] == run and small["view"] == "compact"
     assert "pages" in full["evidence"]["sources"]["D0"]
     assert "pages" not in small["evidence"]["sources"]["D0"]
-    rejected = client.get(url + f"/api/reports/{failed}", params={"compact": "true"}, timeout=3).json()
+    rejected = tool_data(client, token, "research_report", {"report_id": failed, "compact": True})["data"]
     assert not rejected["passed"] and "summary" not in rejected["report"]
     assert rejected["diagnostics"]["problems"]
     assert counts == [conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("runs", "calls", "reports")]
 
 
-def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server):
+def test_monthly_admission_and_polling_are_authenticated_and_idempotent(server, mcp):
     from datetime import datetime
-    conn, client, url, *_ = server
+    conn, *_ = server
+    client, token = mcp
     month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
-    unauth = requests.Session()
-    unauth.trust_env = False
-    assert unauth.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).status_code == 401
-    result = client.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).json()
-    assert result['created'] and result['batch']['status'] == 'queued'
-    assert not client.post(url + '/api/batches/monthly', json={'month': month}, timeout=2).json()['created']
-    assert client.post(url + '/api/batches/monthly', json={'month': '2020-01'}, timeout=2).status_code == 409
-    ident = result['batch']['id']
-    conn.execute("UPDATE batches SET status='frozen' WHERE id=?", (ident,))
-    status = client.get(f'{url}/api/batches/monthly/{month}', timeout=2).json()
-    assert status['batch']['status'] == 'frozen' and status['batch']['id'] == ident
+    request = {'name': 'research_batch_monthly_request', 'arguments': {'month': month}}
+    assert rpc(client, None, 'tools/call', request).status_code == 401
+    result = tool_data(client, token, 'research_batch_monthly_request', {'month': month})['data']
+    assert result['created'] and result['status'] == 'queued'
+    replay = tool_data(client, token, 'research_batch_monthly_request', {'month': month})['data']
+    assert not replay['created'] and replay['batch_id'] == result['batch_id']
+    assert tool_error(client, token, 'research_batch_monthly_request', {'month': '2020-01'})['code'] == 'conflict'
+    conn.execute("UPDATE batches SET status='frozen' WHERE id=?", (result['batch_id'],))
+    status = tool_data(client, token, 'research_batch_monthly_status', {'month': month, 'compact': False})['data']
+    assert status['batch']['status'] == 'frozen' and status['batch']['id'] == result['batch_id']
     assert conn.execute('SELECT COUNT(*) FROM batches').fetchone()[0] == 1
 
 
 def test_historical_diagnostics_remain_read_only_and_labeled(server):
     import json
     from pathlib import Path
-    conn, client, url, run, report, *_ = server
+    conn, _, url, run, report, *_ = server
     # Captured diagnostic row; controller metadata is an explicit compatibility variant.
     captured = json.loads((Path(__file__).parent / 'data/evolution-note-plan-20261106.json').read_text())
     original = captured['diagnostic_runs'][0]
@@ -63,41 +72,59 @@ def test_historical_diagnostics_remain_read_only_and_labeled(server):
     assert browser.post(url + '/auth/dev', headers={'Origin': url}, timeout=3).status_code == 200
     before = conn.total_changes
     for run_id in (root, run):
-        response = client.get(url + f'/api/runs/{run_id}', timeout=3)
-        assert response.status_code == 200 and response.json()['kind'] == 'diagnostic'
+        assert service.run_summary(conn, run_id)['kind'] == 'diagnostic'
         page = browser.get(url + f'/runs/{run_id}', timeout=3)
         assert page.status_code == 200 and '研究诊断' in page.text
-    response = client.get(url + f'/api/reports/{report}', timeout=3)
-    assert response.status_code == 200 and response.json()['purpose'] == 'diagnostic'
+    assert service.report_view(conn, report)['purpose'] == 'diagnostic'
     page = browser.get(url + f'/reports/{report}', timeout=3)
     assert page.status_code == 200 and '研究诊断' in page.text
     assert conn.total_changes == before
     browser.close()
 
 
-def test_report_schema_is_authenticated_and_describes_public_views(server):
+def test_report_schema_describes_public_views():
     from a_share_research import report
     from a_share_research.contract import JUDGMENT_CONTRACT
-    _, client, url, *_ = server
-    assert client.get(url + "/api/schema", headers={"Authorization": "Bearer invalid"}, timeout=3).status_code == 401
-    response = client.get(url + "/api/schema", timeout=3)
-    assert response.status_code == 200
-    schema = response.json()
-    assert schema == {"version": "research-v1", "schema_version": 2,
-                      "judgment_contract": JUDGMENT_CONTRACT, "report": report.json_schema(),
-                      "views": {"compact": list(report.COMPACT_FIELDS), "card": list(report.CARD_FIELDS),
-                                "failed": list(report.FAILED_FIELDS)}}
+    assert report.SCHEMA_VERSION == 2 and JUDGMENT_CONTRACT == 12
+    properties = set(report.json_schema()['properties'])
+    assert {'summary', 'risks', 'checkpoints'} <= properties and set(report.FAILED_FIELDS) <= properties
+    assert set(report.CARD_FIELDS) <= set(report.COMPACT_FIELDS)
+    for view in (report.COMPACT_FIELDS, report.CARD_FIELDS, report.FAILED_FIELDS):
+        assert view and len(set(view)) == len(view)
 
 
-def test_persistent_roles_cannot_use_owner_token_for_research(server):
+def test_persistent_roles_cannot_use_owner_token_for_research(server, mcp):
     from a_share_research import api_keys
-    conn, client, url, *_ = server
+    conn, *_ = server
+    client, _ = mcp
     for role in api_keys.ROLES:
         token = api_keys.create(conn, 'role-' + role, role=role)
-        response = client.get(url + '/api/research/budget',
-                              headers={'Authorization': 'Bearer ' + token}, timeout=3)
-        assert response.status_code == (403 if role == 'owner' else 200)
+        assert rpc(client, token, 'tools/list').status_code == (401 if role == 'owner' else 200)
         key = api_keys.authenticate(conn, token)
         conn.execute('DELETE FROM api_keys WHERE id=?', (key.key_id,))
-        assert client.get(url + '/api/research/budget',
-                          headers={'Authorization': 'Bearer ' + token}, timeout=3).status_code == 401
+        assert rpc(client, token, 'tools/list').status_code == 401
+
+
+def test_retired_json_entries_are_gone(server, mcp):
+    _, client, url, *_ = server
+    for path in ('/api/research/budget', '/api/request?request_id=lost-http-response', '/api/schema',
+                 '/api/reports?code=600519', '/api/search?q=cash', '/api/batches/monthly/2026-11',
+                 '/api/companies/600519/card', '/api/cards', '/api/subscriptions', '/api/scans/weekly',
+                 '/api/scans/1', '/api/runs/1', '/api/reports/1'):
+        assert client.get(url + path, timeout=3).status_code == 404
+    same_origin = {'Origin': url}
+    for path in ('/api/research', '/api/reports/1/feedback', '/api/batches/monthly', '/api/scans', '/api/session/revoke'):
+        assert client.post(url + path, json={}, headers=same_origin, timeout=3).status_code == 404
+    assert client.put(url + '/api/subscriptions', json={}, headers=same_origin, timeout=3).status_code == 404
+    assert client.put(url + '/api/scan-requests/x', headers=same_origin, timeout=3).status_code == 404
+    # Without the retired machine exemption, cross-origin writes stop at the same-origin guard.
+    assert client.post(url + '/api/research', json={}, timeout=3).status_code == 403
+    tools, token = mcp
+    headers = {'Authorization': 'Bearer ' + token}
+    assert tools.get('/tools', headers=headers).status_code == 404
+    assert tools.post('/tools/research_cards', headers=headers, json={}).status_code == 404
+    assert not any(getattr(r, 'path', '').startswith('/tools') for r in tools.app.routes)
+
+
+def test_web_app_declares_no_legacy_api_routes(web):
+    assert not any(getattr(r, 'path', '').startswith('/api/') for r in web.app.routes)
