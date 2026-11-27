@@ -1,0 +1,33 @@
+{#- Basis of a source-defined market ratio; material.pb_basis and material.dividend_status compute the facts. -#}
+{#- 样本: 002594 报告 187、169（收盘价 ÷ BPS 与总市值 ÷ 归母权益相差 7%）；600519 报告 183、601918 报告 152（同一除权日重复实施记录）；002050 报告 186、184（数据源按分红所属期统计） -#}
+{%- set b = row.basis_meta -%}
+{#- Peer rows are prefixed (P002594.M.pb); name the sibling rows with the same prefix. -#}
+{%- set p = row.id.rsplit("M.", 1)[0] -%}
+{%- if b.ratio == "pb" -%}
+{%- set book = p ~ "T.bps" if b.matched_by == "bps" else p ~ "T.equity_parent" -%}
+{%- set formula = p ~ "M.close ÷ " ~ p ~ "T.bps" if b.matched_by == "bps" else p ~ "M.total_mv ÷ " ~ p ~ "T.equity_parent" -%}
+（口径：数据源按某一财报期的净资产计算；
+{%- if b.matched_period == b.latest_period -%}
+程序用本表最新财报期 {{ b.latest_period }} 的 {{ formula }} 复算一致
+{%- elif b.matched_period -%}
+程序按 {{ formula }} 复算其分母为 {{ b.matched_period }} 期 {{ book }}，尚未纳入本表最新财报期 {{ b.latest_period }}；同期比较用 {{ formula }}（{{ b.latest_period }}）计算
+{%- else -%}
+程序用本表近四期 {{ p }}M.close ÷ {{ p }}T.bps 与 {{ p }}M.total_mv ÷ {{ p }}T.equity_parent 均不能复算该值，分母所属期间未能核实，须读最新财报核对
+{%- endif -%}
+{%- if b.aggregate_differs -%}
+。{{ p }}M.close ÷ {{ p }}T.bps 与 {{ p }}M.total_mv ÷ {{ p }}T.equity_parent 相差超过 1%（两种算法的股本口径不同），净资产金额直接引用 {{ p }}T.equity_parent，不用市值 ÷ M.pb 推算
+{%- endif -%}
+）
+{%- elif b.ratio == "dv_ttm" -%}
+（口径：近 12 个月滚动股息率，不等于单个年报期的静态股息率；
+{%- if b.dividends == "same" -%}
+程序用 {{ p }}M.dps_ttm ÷ {{ p }}M.close 复算一致
+{%- elif b.dividends == "differs" -%}
+程序用 {{ p }}M.dps_ttm ÷ {{ p }}M.close 复算与之相差超过 1%，数据源可能按分红所属报告期或其他股本口径统计；近 12 个月实际已实施的分红以 {{ p }}M.dps_ttm 及其所列除权日为准
+{%- elif b.dividends.startswith("conflict:") -%}
+分红记录在除权日 {{ b.dividends[9:] }} 有多条金额不同的实施记录，程序未汇总，金额与实施日须读分红实施公告核对
+{%- else -%}
+分红记录未取得，金额与实施日须读分红实施公告核对
+{%- endif -%}
+）
+{%- endif -%}

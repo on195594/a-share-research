@@ -41,7 +41,7 @@ def test_q3_and_q4_match_real_single_quarter_statements_without_rounding_inputs(
                     else:
                         assert Decimal(value["value"]) == Decimal(str(row[field]))
         assert {r["id"] for r in series["balance"]["rows"]} == {
-            "cash", "interest_debt", "receivables", "inventory", "contract_liab", "goodwill"}
+            "cash", "interest_debt", "receivables", "inventory", "contract_liab", "goodwill", "equity_parent"}
     assert cell(build(), "quarterly", "revenue", "2026-09-30")["display"] == "44.42"
     assert cell(build(), "quarterly", "net_profit", "2026-09-30")["display"] == "9.58"
 

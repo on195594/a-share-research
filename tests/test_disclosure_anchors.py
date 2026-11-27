@@ -13,10 +13,12 @@ import pandas as pd
 import pytest
 
 from a_share_research import checking, db, disclosure_checks, evidence, market, research
-from a_share_research.material import Material, financial_table
+from a_share_research.material import Material, dividend_status, dividend_ttm, financial_table
 from a_share_research.research_tools import calculate
 from a_share_research.sources import Document
-from support.financials import FINANCIAL_DATA
+from support.financials import FINANCIAL_DATA, frames
+
+BASIS = json.loads((Path(__file__).parent / "data" / "market-ratio-basis.json").read_text())
 
 ROWS = json.loads((Path(__file__).parent / "data/disclosure-checks.json").read_text())["tushare"]
 FORECAST, EXPRESS = "603960.SH", "605016.SH"
@@ -200,12 +202,15 @@ def test_market_ratio_rows_state_their_basis_and_stay_citable():
     day = FINANCIAL_DATA["market"]["trade_date"]
     latest = max(p for r in table if r["id"] == "T.revenue" for p in r["values"])
     assert {r["id"] for r in table if "basis_meta" in r} == {"M.pb", "M.dv_ttm"}
-    assert rows["M.pb"]["basis_meta"] == {"ratio": "pb", "latest_period": latest}
+    # This capture has no BPS column and no dividend records: the note says what could not be checked.
+    assert rows["M.pb"]["basis_meta"] == {"ratio": "pb", "latest_period": latest, "matched_period": None,
+                                          "matched_by": None, "aggregate_differs": False}
+    assert "M.dps_ttm" not in rows
     held = material("600519.SH")
     held.table = table
     block = held.prompt_block()
-    assert f"本表最新财报期 {latest}" in block and "BPS" in block
-    assert "不等于单个年报期的静态股息率" in block and "逐笔实施分红" in block
+    assert "近四期 M.close ÷ T.bps 与 M.total_mv ÷ T.equity_parent 均不能复算该值" in block
+    assert "不等于单个年报期的静态股息率" in block and "分红记录未取得" in block
     for key in ("M.pb", "M.dv_ttm"):  # Quoting the market fact alone stays valid.
         cites = [{"ref": key, "period": day}]
         value = rows[key]["values"][day]
@@ -225,7 +230,99 @@ def test_market_ratios_cannot_mix_with_amounts(ratio, operation):
             calculate(rows, "混用", operation, {"ref": ref, "period": day}, {"ref": "M.total_mv", "period": day})
 
 
+def basis_table(code, **market):
+    """Real 2026-11-27 capture; keyword overrides are marked variants of the market row."""
+    captured = BASIS["companies"][code]
+    return financial_table(frames(captured), captured["market"] | market, dividend_frame(code))
+
+
+def dividend_frame(code, extra=()):
+    return pd.DataFrame(BASIS["companies"][code]["dividends"] + list(extra))
+
+
+def basis_block(table):
+    held = material("603606.SH")
+    held.table = table
+    return held.prompt_block()
+
+
+def test_pb_basis_names_the_source_period_and_share_base():
+    rows = {r["id"]: r for r in basis_table("603606")}
+    assert rows["M.pb"]["basis_meta"] == {"ratio": "pb", "latest_period": "2026-09-30", "matched_period": "2026-09-30",
+                                          "matched_by": "bps", "aggregate_differs": False}
+    assert rows["T.bps"]["exact_values"]["2026-09-30"] == "10.9867"
+    assert rows["T.equity_parent"]["values"]["2026-09-30"] == "90.62"
+    assert "最新财报期 2026-09-30 的 M.close ÷ T.bps 复算一致）" in basis_block(list(rows.values()))
+    # BYD: close / BPS gives 2.7878 but total_mv / parent equity gives 2.61, so market cap / PB misstates equity.
+    byd = {r["id"]: r for r in basis_table("002594")}
+    assert byd["M.pb"]["basis_meta"]["matched_period"] == "2026-09-30" and byd["M.pb"]["basis_meta"]["matched_by"] == "bps"
+    assert byd["M.pb"]["basis_meta"]["aggregate_differs"] is True
+    assert "净资产金额直接引用 T.equity_parent" in basis_block(list(byd.values()))
+    # Marked variant: the source PB still uses the half-year BPS although the Q3 report is in the table.
+    stale = {r["id"]: r for r in basis_table("603606", pb=round(36.5 / 10.2527, 4))}
+    assert stale["M.pb"]["basis_meta"]["matched_period"] == "2026-06-30"
+    assert "按 M.close ÷ T.bps 复算其分母为 2026-06-30 期 T.bps，尚未纳入本表最新财报期 2026-09-30" in basis_block(list(stale.values()))
+    # Marked variant: the source PB is BYD's market cap / Q3 parent equity (300475's basis on 2026-11-27).
+    captured = BASIS["companies"]["002594"]["market"]
+    equity = next(r for r in BASIS["companies"]["002594"]["financials"]["balance"]
+                  if r["end_date"] == "2026-09-30")["total_hldr_eqy_exc_min_int"]
+    aggregate = {r["id"]: r for r in basis_table("002594", pb=round(captured["total_mv"] * 1e4 / equity, 4))}
+    assert aggregate["M.pb"]["basis_meta"]["matched_by"] == "equity"
+    assert "最新财报期 2026-09-30 的 M.total_mv ÷ T.equity_parent 复算一致。" in basis_block(list(aggregate.values()))
+    # Marked variant: a PB no recent book value reproduces.
+    assert {r["id"]: r for r in basis_table("603606", pb=3.5)}["M.pb"]["basis_meta"]["matched_period"] is None
+
+
+@pytest.mark.parametrize(("code", "dps", "status"), [
+    ("600519", Decimal("51.98123"), "same"),  # duplicate 实施 rows under two announcements count once
+    ("601918", Decimal("0.17"), "same"),  # one ex-date filed under two report periods counts once
+    ("603606", Decimal("0.56") / Decimal("1.2"), "same"),  # 10 转 2 on the same ex-date
+    ("002594", Decimal("0.358"), "same"),
+    ("002050", Decimal("0.52"), "differs"),  # source yield leaves out the 2026-01-15 interim payment
+    ("600989", Decimal("0.9121"), "differs"),  # its 2024-07-24 rows conflict (0.265, 0.3158) outside the window
+])
+def test_dividend_anchor_counts_each_ex_date_once_on_the_current_share_base(code, dps, status):
+    market = BASIS["companies"][code]["market"]
+    ttm = dividend_ttm(dividend_frame(code), market["trade_date"])
+    assert ttm["value"] == dps
+    assert len({e["ex_date"] for e in ttm["events"]}) == len(ttm["events"])
+    assert dividend_status(ttm, market) == status
+
+
+def test_dividend_row_lists_ex_dates_and_flags_conflicts():
+    rows = {r["id"]: r for r in basis_table("603606")}
+    assert rows["M.dps_ttm"]["values"] == {"2026-11-27": "0.47"}
+    assert rows["M.dps_ttm"]["note"] == "除权日 2026-05-26 每股 0.56 元（2025-12-31 期，其后送转折算为 0.4667 元）"
+    assert rows["M.dv_ttm"]["basis_meta"]["dividends"] == "same"
+    block = basis_block(list(rows.values()))
+    assert "[M.dps_ttm]" in block and "M.dps_ttm ÷ M.close 复算一致）" in block
+    differs = {r["id"]: r for r in financial_table(frames(BASIS["companies"]["603606"]), BASIS["companies"]["002050"]["market"], dividend_frame("002050"))}
+    assert "数据源可能按分红所属报告期" in basis_block(list(differs.values()))
+    # Marked variant: a second implementation row on the same ex-date with another amount is not summed.
+    captured = BASIS["companies"]["600519"]["dividends"]
+    forged = next(r for r in captured if r["div_proc"] == "实施" and r["ex_date"] == "2026-06-26") | {"cash_div_tax": 27.993}
+    conflict = financial_table(frames(BASIS["companies"]["603606"]), BASIS["companies"]["600519"]["market"],
+                               dividend_frame("600519", [forged]))
+    assert "M.dps_ttm" not in {r["id"] for r in conflict}
+    assert "除权日 2026-06-26 有多条金额不同的实施记录" in basis_block(conflict)
+
+
+def test_peer_basis_names_prefixed_rows():
+    table = basis_table("002594")
+    peer = [{**r, "id": f"P002594.{r['id']}"} for r in table]
+    block = basis_block(peer)
+    assert "P002594.T.equity_parent" in block and "P002594.M.dps_ttm ÷ P002594.M.close" in block
+
+
 def test_compatible_market_ratio_arithmetic_is_kept():
+    rows = basis_table("002594")
+    day = "2026-11-27"
+    yield_pct = calculate(rows, "每股分红除以股价", "ratio_pct", {"ref": "M.dps_ttm", "period": day}, {"ref": "M.close", "period": day})
+    assert yield_pct["unit"] == "%"
+    book = calculate(rows, "市值除以归母权益", "ratio", {"ref": "M.total_mv", "period": day},
+                     {"ref": "T.equity_parent", "period": "2026-09-30"})
+    assert book["unit"] == "倍"
+
     table = market_table()
     day = FINANCIAL_DATA["market"]["trade_date"]
     book = calculate(table, "市值除以市净率", "ratio", {"ref": "M.total_mv", "period": day}, {"ref": "M.pb", "period": day})

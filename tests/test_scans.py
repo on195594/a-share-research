@@ -899,6 +899,9 @@ def test_disclosures_network_boundary_and_periodic_versions(monkeypatch):
             row = next(r for r in table if r['id'] == metric)
             if reason := row.get('unavailable', {}).get(observation['period']):
                 assert bounds == {'low': None, 'high': None, 'reason': reason}
+            elif observation['period'] not in row['exact_values']:
+                # The capture predates a column the table now reads (e.g. parent equity).
+                assert bounds == {'low': None, 'high': None, 'reason': '已取得该期报表，但目标字段缺失'}
             else:
                 assert str(bounds['low']) == row['exact_values'][observation['period']]
     with pytest.raises(companies.SourceError, match='其他公司'):

@@ -699,7 +699,13 @@ class ResearchTools:
         fin = sources.financials(code)
         if str(fin["income"].sort_values("end_date")["comp_type"].iloc[-1]) != "1":
             raise ValueError("金融公司不适用当前财务口径")
-        table = financial_table(fin, sources.valuation(code))
+        try:
+            dividends = sources.dividends(code)
+        except sources.SourceError:
+            # The peer table still carries M.dv_ttm; its basis note names the missing dividend records.
+            log.warning("peer %s dividends unavailable", code, exc_info=True)
+            dividends = None
+        table = financial_table(fin, sources.valuation(code), dividends)
         name = sources.company(code)["zwjc"]
         for row in table:
             row["id"] = f"P{code}." + row["id"]

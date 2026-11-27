@@ -11,7 +11,8 @@ CONFIDENCE = (60, 75, 90)
 MIN_FORECASTS = 2
 QUARTER_ENDS = ("03-31", "06-30", "09-30", "12-31")
 # Rows whose values are point-in-time balances; every other 亿元 row is a cumulative flow within the year.
-BALANCES = {"T.cash", "T.interest_debt", "T.receivables", "T.inventory", "T.contract_liab", "T.goodwill"}
+BALANCES = {"T.cash", "T.interest_debt", "T.receivables", "T.inventory", "T.contract_liab", "T.goodwill",
+            "T.equity_parent"}
 
 
 def next_period(period: str) -> str:

@@ -12,7 +12,7 @@ from functools import cache
 from pathlib import Path
 
 import pandas as pd
-from a_share_research.core.providers.tushare_financials import TushareFinancialProvider
+from a_share_research.core.providers.tushare_financials import TushareDividendProvider, TushareFinancialProvider
 from a_share_research.core.providers.tushare_quotes import to_tushare_stock_code
 from a_share_research.core.providers.tushare_valuation import TushareValuationProvider
 
@@ -266,6 +266,18 @@ def financials(code: str, years: int = 7) -> dict[str, pd.DataFrame]:
         "deducted": indicator[["ts_code", "ann_date", "end_date", "update_flag", "profit_dedt"]].copy(),
         "indicator": indicator,
     }
+
+
+DIVIDEND_COLUMNS = {"div_proc", "end_date", "ex_date", "cash_div_tax", "stk_div"}
+
+
+def dividends(code: str) -> pd.DataFrame:
+    """All TuShare dividend records (plans and implementations); an empty frame means none recorded."""
+    provider = TushareDividendProvider()
+    frame = _frame(provider, provider.fetch_dividend_history, code)
+    if not frame.empty and (missing := DIVIDEND_COLUMNS - set(frame.columns)):
+        raise SourceError(f"TuShare dividend: 返回数据缺少必要列 {'、'.join(sorted(missing))}")
+    return frame
 
 
 def earnings_estimates(code: str, period: str) -> dict[str, list[dict]]:

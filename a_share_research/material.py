@@ -34,6 +34,8 @@ METRICS = [
     ("inventory", "存货", "亿元", "balance", "inventories", 1e8),
     ("contract_liab", "合同负债", "亿元", "balance", "contract_liab", 1e8),
     ("goodwill", "商誉", "亿元", "balance", "goodwill", 1e8),
+    ("equity_parent", "归属于母公司股东权益", "亿元", "balance", "total_hldr_eqy_exc_min_int", 1e8),
+    ("bps", "每股净资产（各期期末股本口径，送转前后不可直接比较）", "元", "indicator", "bps", 1),
 ]
 MARKET = [
     ("close", "收盘价", "元", 1),
@@ -42,8 +44,15 @@ MARKET = [
     ("dv_ttm", "股息率TTM", "%", 1),
     ("total_mv", "总市值", "亿元", 1e4),  # TuShare reports 万元
 ]
-# Ratios whose source definition this table cannot recompute; material_block.j2 words the caveat.
-SOURCE_DEFINED_RATIOS = ("pb", "dv_ttm")
+# M.pb and M.dv_ttm carry a basis_meta the program recomputes from table rows; material_block.j2 words it.
+# TuShare PB equals close / fina_indicator BPS or market cap / parent equity of one period at 4 decimals
+# (42 of 42 companies on 2026-11-27; 34 match both, 7 only per share, 300475 only in aggregate).
+PB_MATCH = Decimal("0.001")
+# Relative gap beyond which market cap / parent equity is not the same ratio as close / BPS (share bases differ).
+PB_AGGREGATE_GAP = Decimal("0.01")
+# Same-definition recomputations of dv_ttm stayed within 0.8% (38 of 42 companies, 2026-11-27); the
+# rest count dividends by report period or another share base, which the basis note names.
+DIVIDEND_MATCH = Decimal("0.01")
 # disclosure_checks metric -> (label, TuShare column per estimate source)
 ESTIMATE_METRICS = {
     "T.net_profit": ("归母净利润", {"forecast": ("net_profit_min", "net_profit_max"), "express": ("n_income",)}),
@@ -185,7 +194,78 @@ def _financial_metric(row, key: str, column: str) -> tuple[Decimal | None, list[
     return value, columns
 
 
-def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
+def pb_basis(market: dict, statements: dict[str, pd.DataFrame], latest: str) -> dict:
+    """Which period's book value reproduces the source PB, and whether the two share bases disagree."""
+    basis = {"ratio": "pb", "latest_period": latest, "matched_period": None, "matched_by": None,
+             "aggregate_differs": False}
+    pb = Decimal(str(market["pb"]))
+    candidates = {"bps": Decimal(str(market["close"]))}
+    if pd.notna(market.get("total_mv")):
+        candidates["equity"] = Decimal(str(market["total_mv"])) * 10000  # 万元
+    columns = {"bps": ("indicator", "bps"), "equity": ("balance", "total_hldr_eqy_exc_min_int")}
+
+    def ratio(by: str, period: str) -> Decimal | None:
+        frame = statements.get(columns[by][0], pd.DataFrame())
+        book = _financial_value(frame.loc[period], columns[by][1]) if period in frame.index else None
+        return candidates[by] / book if by in candidates and book and book > 0 else None
+
+    periods = sorted({p for name in ("indicator", "balance") for p in statements.get(name, pd.DataFrame()).index
+                      if p <= latest}, reverse=True)[:4]
+    for period in periods:
+        if by := next((b for b in ("bps", "equity") if (r := ratio(b, period)) is not None
+                       and abs(r - pb) <= pb * PB_MATCH), None):
+            basis.update(matched_period=period, matched_by=by)
+            break
+    if basis["matched_period"] == latest and None not in (per_share := ratio("bps", latest), aggregate := ratio("equity", latest)):
+        basis["aggregate_differs"] = abs(aggregate - per_share) > per_share * PB_AGGREGATE_GAP
+    return basis
+
+
+def dividend_ttm(dividends: pd.DataFrame, trade_date: str) -> dict:
+    """Implemented cash dividends per share with ex-dates in the 12 months to `trade_date`.
+
+    Amounts are restated to the current share base: a bonus or transfer issue on or after an ex-date
+    divides that dividend. TuShare repeats one implementation under several announcements or report
+    periods, so one ex-date counts once; conflicting amounts on one ex-date are reported, not summed.
+    """
+    end = pd.Timestamp(trade_date)
+    start, last = (end - pd.DateOffset(years=1)).date().isoformat(), end.date().isoformat()
+    implemented = dividends[(dividends["div_proc"] == "实施") & dividends["ex_date"].notna()] if not dividends.empty else dividends
+    events = {}
+    for row in implemented.itertuples():
+        ex = pd.Timestamp(row.ex_date).date().isoformat()
+        if not start < ex <= last:
+            continue  # Older conflicts (600989 in 2024) do not touch this window.
+        cash = Decimal("0") if pd.isna(row.cash_div_tax) else Decimal(str(row.cash_div_tax))
+        shares = Decimal("0") if pd.isna(row.stk_div) else Decimal(str(row.stk_div))
+        event = {"ex_date": ex, "period": pd.Timestamp(row.end_date).date().isoformat(), "cash": cash, "shares": shares}
+        if ex in events and (events[ex]["cash"], events[ex]["shares"]) != (cash, shares):
+            return {"conflict": ex}
+        events.setdefault(ex, event)
+    window = [e for e in sorted(events.values(), key=lambda e: e["ex_date"]) if e["cash"] > 0]
+    total = Decimal("0")
+    for event in window:
+        factor = Decimal("1")
+        for later in events.values():
+            if later["ex_date"] >= event["ex_date"]:
+                factor *= 1 + later["shares"]
+        event["restated"] = event["cash"] / factor
+        total += event["restated"]
+    return {"value": total, "events": window}
+
+
+def dividend_row(ttm: dict, trade_date: str) -> dict:
+    """Citable M.dps_ttm row; the note lists each counted ex-date so the model can match announcements."""
+    parts = [f"除权日 {e['ex_date']} 每股 {e['cash'].normalize():f} 元（{e['period']} 期"
+             + (f"，其后送转折算为 {e['restated'].quantize(Decimal('0.0001')).normalize():f} 元" if e["restated"] != e["cash"] else "")
+             + "）" for e in ttm["events"]]
+    return {"id": "M.dps_ttm", "label": "近 12 个月已实施每股现金分红（税前，按除权日计，折算到当前股本）", "unit": "元",
+            "values": {trade_date: f"{ttm['value']:.2f}"}, "exact_values": {trade_date: str(ttm["value"])},
+            "note": "；".join(parts) or "近 12 个月没有已实施的现金分红记录"}
+
+
+def financial_table(fin: dict[str, pd.DataFrame], market: dict, dividends: pd.DataFrame | None = None) -> list[dict]:
+    """Statement rows, then market rows when `market` is given; `dividends` adds the dividend anchor."""
     # Indicators have no report_type; the provider keeps that common column null.
     statements = {k: _latest_rows(v, consolidated=k in ("income", "cashflow", "balance")) for k, v in fin.items()}
     ends = sorted(statements["income"].index)
@@ -210,16 +290,32 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict) -> list[dict]:
                            for p in periods if p in uncertain}:
             row["unavailable"] = unavailable
         table.append(row)
+    ttm = dividend_ttm(dividends, str(market["trade_date"])) if market and dividends is not None else None
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
             value = Decimal(str(market[key])) / Decimal(str(divisor))
             row = {"id": f"M.{key}", "label": label, "unit": unit,
                    "values": {market["trade_date"]: f"{value:.2f}"},
                    "exact_values": {market["trade_date"]: str(value)}}
-            if key in SOURCE_DEFINED_RATIOS:
-                row["basis_meta"] = {"ratio": key, "latest_period": latest}
+            if key == "pb":
+                row["basis_meta"] = pb_basis(market, statements, latest)
+            elif key == "dv_ttm":
+                row["basis_meta"] = {"ratio": key, "latest_period": latest, "dividends": dividend_status(ttm, market)}
             table.append(row)
+    if ttm and "value" in ttm:
+        table.append(dividend_row(ttm, str(market["trade_date"])))
     return table
+
+
+def dividend_status(ttm: dict | None, market: dict) -> str:
+    """unavailable / conflict / same / differs: how M.dps_ttm ÷ M.close compares with the source yield."""
+    if ttm is None:
+        return "unavailable"
+    if "conflict" in ttm:
+        return f"conflict:{ttm['conflict']}"
+    recomputed = ttm["value"] / Decimal(str(market["close"])) * 100
+    source = Decimal(str(market["dv_ttm"]))
+    return "same" if abs(recomputed - source) <= source * DIVIDEND_MATCH else "differs"
 
 
 def estimate_source(title: str) -> str | None:
@@ -483,10 +579,16 @@ def gather(code: str) -> Material:
         raise ResearchError("近 18 个月没有年报")
     sources.fetch(annual)
     market, valuation_history = sources.valuation_with_history(code)
-    table = financial_table(fin, market)
+    gaps = set()
+    try:
+        dividends = sources.dividends(code)
+    except sources.SourceError as exc:
+        dividends = None
+        gaps.add(f"分红记录未取得：{exc}")
+    table = financial_table(fin, market, dividends)
     for row in table:
         row["source"] = {"provider": "TuShare", "code": annual.code, "retrieved_at": retrieved_at}
-    gaps = {f"{p}：{reason}" for row in table for p, reason in row.get("unavailable", {}).items()}
+    gaps |= {f"{p}：{reason}" for row in table for p, reason in row.get("unavailable", {}).items()}
     market_date = str(market["trade_date"])
     try:
         reference = sources.pe_quantiles(valuation_history, code, market_date)
