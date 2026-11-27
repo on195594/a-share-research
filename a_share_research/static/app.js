@@ -94,27 +94,6 @@ function reveal() {
 window.addEventListener("hashchange", reveal);
 if (location.hash) reveal();
 
-// Home page verdict filter: each pill links to its group, so without a script it jumps there;
-// with one it shows only that group in place.
-document.addEventListener("click", (event) => {
-  const pill = event.target.closest?.("[data-verdict-filter]");
-  if (!pill) return;
-  event.preventDefault();
-  const target = pill.dataset.verdictFilter;
-  pill.parentElement.querySelectorAll("[data-verdict-filter]").forEach((el) => {
-    el.classList.toggle("active", el === pill);
-    if (el === pill) el.setAttribute("aria-current", "true"); else el.removeAttribute("aria-current");
-  });
-  let shown = 0;
-  document.querySelectorAll(".companies > [data-verdict]").forEach((group) => {
-    const match = target === "all" || group.dataset.verdict === target;
-    group.hidden = !match;
-    if (match) shown += group.querySelectorAll(".card, .card-row").length;
-  });
-  const status = document.querySelector("[data-filter-status]");
-  if (status) status.textContent = `当前显示 ${shown} 家公司`;
-});
-
 // Section-level citation expand/collapse toggle for report chapters with multiple citations.
 for (const section of document.querySelectorAll("article > section[id]")) {
   const heading = section.querySelector(":scope > h2");

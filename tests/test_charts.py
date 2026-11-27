@@ -418,7 +418,7 @@ def test_vitals_falls_back_to_financial_table_and_stock_template_labels_source()
     assert "保存的财务数据表" in stock_html and "保存的经营序列" not in stock_html
 
 
-def test_batch_overview_sparks_market_strip_and_verdict_summary_on_captured_data():
+def test_batch_overview_sparks_and_market_strip_on_captured_data():
     matrix = json.loads((ROOT / "tests/data/batch-candidate-matrix.json").read_text())
     labels = json.loads((ROOT / "tests/data/batch-factor-labels.json").read_text())
     batch = {"q20": matrix["rows"], "l5": {"codes": matrix["l5"]},
@@ -433,16 +433,3 @@ def test_batch_overview_sparks_market_strip_and_verdict_summary_on_captured_data
     strip = charts.market_strip(batch)
     assert strip["total"] == sum(matrix["markets"].values())
     assert abs(sum(s["w"] for s in strip["segments"]) - 100.0) < 0.05
-    # Verdict summary on real captured reports from RECORDS, using sqlite3.Row as web.latest_reports() does.
-    import sqlite3
-    mem = sqlite3.connect(":memory:")
-    mem.row_factory = sqlite3.Row
-    mem.execute("CREATE TABLE t (code TEXT, name TEXT, id INT, verdict TEXT, passed INT, coverage TEXT, created_at TEXT, from_batch INT, checkpoint INT)")
-    for r in RECORDS[:5]:
-        rep = r["report"]
-        mem.execute("INSERT INTO t VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)",
-                    (rep["code"], rep["name"], rep["id"], rep["verdict"], rep["passed"], rep["period"], rep["created_at"]))
-    companies = mem.execute("SELECT * FROM t").fetchall()
-    summary = charts.verdict_summary(companies)
-    assert summary["total"] == len(companies)
-    assert all(summary["buckets"][c["code"]] in ("值得继续研究", "需要谨慎", "暂不值得", "复核未通过") for c in companies)

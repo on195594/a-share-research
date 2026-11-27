@@ -861,18 +861,3 @@ def market_strip(batch: dict) -> dict | None:
                          "cls": f"b{i % 4}", "tip": f"{k}：{v} 家（占粗筛池 {pct:.1f}%）"})
         cursor += w
     return {"segments": segments, "total": total}
-
-
-def verdict_summary(companies: list) -> dict | None:
-    """Latest-verdict counts behind the home page filter pills, and each company's group."""
-    if not companies:
-        return None
-    buckets = ("值得继续研究", "需要谨慎", "暂不值得", "复核未通过")
-    counts = {label: 0 for label in buckets}
-    by_code = {}
-    for c in companies:
-        key = c["verdict"] if c["passed"] and c["verdict"] in VERDICTS else "复核未通过"
-        by_code[c["code"]] = key
-        counts[key] += 1
-    items = [{"label": label, "count": counts[label]} for label in buckets if counts[label] > 0]
-    return {"items": items, "total": len(companies), "buckets": by_code}

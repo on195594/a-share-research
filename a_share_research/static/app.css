@@ -528,35 +528,11 @@ details.block[open] { padding-bottom: 12px; }
 .strip-bar .seg.b3, .seg-dot.b3 { fill: var(--muted); background: var(--muted); }
 .seg-key { display: inline-flex; align-items: center; gap: 4px; }
 .seg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.filter-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  font: inherit; font-size: 13px; padding: 4px 12px; min-height: 40px;
-  border: 1px solid var(--line); border-radius: 999px;
-  background: var(--surface); color: var(--ink); cursor: pointer; text-decoration: none;
-}
-.pill:hover { border-color: var(--accent); background: var(--band); color: var(--ink); text-decoration: none; }
-.pill.active { border-color: var(--accent); background: var(--band); color: var(--accent-strong); font-weight: 600; }
-.pill .num { color: var(--muted); font-size: 12px; font-weight: 400; }
-
 /* ---------- investment cards ---------- */
 /* One company per card on a white surface: identity and verdict, the thesis, saved figures,
    then the lists. Hierarchy comes from type size, weight and spacing; colour only marks the
    counter-evidence rule and links. Flat: a hairline border, no shadow. */
-.companies { margin-top: 8px; }
-.card-group { margin: 24px 0 0; }
-.group-title { display: flex; align-items: baseline; gap: 8px; font-size: 15px; font-weight: 650; color: var(--muted);
-  margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.group-title .num { font-size: 13px; font-weight: 400; }
 .cards { display: grid; gap: 12px; }
-.cards.rows { gap: 0 24px; }
-.card-row { padding: 4px 0 10px; border-bottom: 1px solid var(--line); }
-.card-row .card-head { align-items: center; }
-.card-row .card-name { font-size: 16px; }
-.card-row .card-name a { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 0; }
-.card-row-thesis { font-size: 15px; line-height: 1.6; margin: 2px 0 0; }
-.card-row .card-meta { margin-top: 4px; }
-.card-row .card-note a { display: inline-block; padding: 6px 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 0; }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
 .card-name { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 700; }
@@ -619,7 +595,9 @@ a.plain:hover { text-decoration-color: var(--accent); }
 .checkup-value small { display: inline-block; white-space: nowrap; }
 .checkup-prior { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .card-actions { margin-top: 0; }
-.active-runs h3 { margin-top: 8px; }
+.active-runs h3, .attention-group h3 { margin-top: 8px; }
+.attention-group + .attention-group, .attention-group + .list, details.attention-group { margin-top: 16px; }
+.list > li > .facts { margin: 4px 0 0; }
 @media (max-width: 420px) {
   .card-keys { padding: 8px 0; }
   .card-keys div { padding: 0 4px; }

@@ -81,7 +81,7 @@ def test_evidence_dates_keep_all_recorded_disclosures_and_missing_distinct():
 def test_home_and_legacy_report_distinguish_unknown_from_no_saved_request():
     html = render('home.html', pending=[], pending_more=False, companies=[], active=[], batch=None)
     assert 'id="attention"' not in html  # nothing to handle: the block is hidden, not an empty sentence
-    assert '主动研究过的公司 · 0 家' in html
+    assert '还没有研究过公司' in html and '/research-library">全部' not in html
     for shown in ({'pending': [{'id': 18, 'parent_id': 11, 'question': 'q', 'anchor': '', 'label': '待核查'}], 'active': []},
                   {'pending': [], 'active': [{'id': 19, 'name': '新乳业', 'status': 'queued', 'step': None}]}):
         html = render('home.html', pending_more=False, companies=[], batch=None, **shown)

@@ -132,7 +132,7 @@ def test_web_holdings_actions_and_forms_follow_account_capability(web, owner_req
     assert 'name="parent_report_id"' not in html and f'action="/reports/{aware}/feedback"' not in html
     html = web.run_page(request, run).body.decode()
     assert '受理时冻结持仓快照（未持有）' in html
-    assert '输入模式 · 盲研究' in web.report_page(request, blind).body.decode()
+    assert '受理时冻结持仓快照' not in web.report_page(request, blind).body.decode()  # blind is the unstated default
     assert '输入模式 · 知仓研究' in html and f'action="/runs/{run}/retry"' not in html
     assert not web._holdings_actions()  # A bound ledger alone cannot enable the proxy.
     monkeypatch.setattr(web, 'settings', enabled)

@@ -327,7 +327,8 @@ def test_public_research_and_open_disclosures_survive_an_unavailable_account(web
                   announcement['title'], announcement['source_url'], *company['account_gaps']):
         assert value in page
     assert f'href="{path}"' in html(web.stock_page(owner_request(f'/stock/{code}'), code))
-    assert 'href="/portfolio/overview"' in html(web.home(owner_request('/')))
+    home = html(web.home(owner_request('/')))
+    assert 'href="/portfolio/overview"' in home and company['account_gaps'][0] in home
 
 
 def test_account_gaps_do_not_flag_an_unheld_company_or_its_missing_report(bound_book, web, owner_request):
@@ -390,6 +391,10 @@ def test_held_company_without_research_links_to_saved_records_and_evidence(ledge
             assert value in page
     assert evaluation['result']['as_of'][:10] in portfolio and evaluation['identity'] not in portfolio  # identity lives on the evaluation page
     assert '前收盘价 · 补充有效的前收盘价' in company
+    # The home page lifts the same holding lines into its to-do list, linked to the company overview.
+    home = html(web.home(owner_request('/')))
+    assert f'href="{company_path}"' in home and '前收盘价 · 补充有效的前收盘价' in home
+    assert all(gap in home for gap in holding['gaps'])
     stock = html(web.stock_page(owner_request(f'/stock/{code}'), code), 404)
     assert f'href="{company_path}"' in stock
     monitor = html(web.monitor_detail(owner_request(evaluation_path), evaluation['id']))

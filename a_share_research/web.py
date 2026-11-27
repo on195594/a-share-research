@@ -738,6 +738,27 @@ def research_library(request: Request, q: str = "", content: str = "", history: 
                   next_url="/research-library?" + urlencode(current | {"page": page + 1}))
 
 
+def _holdings_attention() -> dict | None:
+    """The portfolio overview reduced to holdings that ask the owner to look; None when all are quiet."""
+    from a_share_research.policy import registry as policies
+    try:
+        view = _overview().portfolio_overview(conn)
+    except policies.PolicyError as exc:
+        logging.getLogger(__name__).exception("Home holdings read failed")
+        return {"policy": None, "general": [f"持仓状态暂时无法读取：{exc}"], "companies": []}
+    policy = view["policy"]
+    companies = []
+    for c in view["holdings"] or []:
+        notes = [text for _, text in template_filters.monitor_lines(c["policy"], c["code"])] if c["policy"] else []
+        notes += c["gaps"] + [f"公告待复核：{a['title']}" for a in c["announcements"] if a["unresolved"]]
+        if notes:
+            companies.append({"code": c["code"], "name": c["name"] or c["code"], "notes": notes})
+    general = view["gaps"] + ([text for _, text in template_filters.monitor_lines(policy)] if policy else [])
+    if not (companies or general or (policy and policy["action_status"] != "no_action")):
+        return None
+    return {"policy": policy, "general": general, "companies": companies}
+
+
 def home_page(request: Request, session: str, status: int = 200, **context) -> HTMLResponse:
     batch = reading.latest_batch(conn, summary=True)
     performance = None
@@ -753,10 +774,10 @@ def home_page(request: Request, session: str, status: int = 200, **context) -> H
         conn, codes=failed_codes, passed=True, include_checkpoint=False)} if failed_codes else {}
     cards = reading.report_cards(conn, companies, passed_before)
     listed = {r['id'] for r in pending}
-    return render(request, "home.html", session, status, companies=cards,
-                  verdict_summary=charts.verdict_summary(companies),
+    due = company_data.due_report(datetime.now(db.SHANGHAI).date())
+    return render(request, "home.html", session, status, companies=cards, holdings=_holdings_attention(),
+                  stale=[c for c in cards if c["coverage"] and c["coverage"] < due[0]], due=due,
                   pending=pending, pending_more=pending_more,
-                  due=company_data.due_report(datetime.now(db.SHANGHAI).date()),
                   active=[r for r in reading.active_runs(conn) if r['id'] not in listed], batch=batch,
                   proposed=reading.proposed_batches(conn), performance=performance, **context)
 

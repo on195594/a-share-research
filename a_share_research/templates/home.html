@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import research_form %}
-{% from "_card.html" import summary_card, compact_card %}
+{% from "_card.html" import summary_card %}
+{% from "_overview.html" import monitor_status %}
 {% macro review_items(rows) %}
 <ul class="list">
 {% for r in rows %}
@@ -51,9 +52,22 @@
   {% endif %}
 </section>
 
-{% if proposed or active or pending %}
+{% set attention = holdings or proposed or active or pending or stale %}
+{% if attention %}
 <section aria-labelledby="attention">
   <h2 id="attention" tabindex="-1">待处理事项</h2>
+{% if holdings %}
+<div class="attention-group">
+  <h3><a href="/portfolio/overview">持仓</a>{% if holdings.policy %} <span class="muted">· {{ monitor_status(holdings.policy) }}</span>{% endif %}</h3>
+  {% if holdings.general %}<ul class="facts">{% for text in holdings.general %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
+  {% if holdings.companies %}<ul class="list">
+  {% for c in holdings.companies %}
+    <li><a href="/stock/{{ c.code }}/overview">{{ c.name }}</a>
+      <ul class="facts">{% for note in c.notes %}<li>{{ note }}</li>{% endfor %}</ul></li>
+  {% endfor %}
+  </ul>{% endif %}
+</div>
+{% endif %}
 {% if proposed %}
 <ul class="list">
   {% for p in proposed %}
@@ -77,6 +91,13 @@
     {% if pending|length > 3 %}<details><summary>展开本页其余 {{ pending|length - 3 }} 项核查</summary>{{ review_items(pending[3:]) }}</details>{% endif %}
     {% if pending_more %}<p class="hint">这里只显示最近 20 项，仍有更早事项。请从研究库进入公司档案查看历史核查。</p>{% endif %}
   {% endif %}
+{% if stale %}
+{# One line for a calendar-wide state instead of the same flag on every company. #}
+<details class="attention-group">
+  <summary>{{ stale | length }} 家公司的研究资料未覆盖 {{ due[1] }}（法定披露截止日已过）</summary>
+  <ul class="list">{% for c in stale %}<li><a href="/stock/{{ c.code }}">{{ c.name }}</a> <span class="muted date">资料至 {{ c.coverage }}</span></li>{% endfor %}</ul>
+</details>
+{% endif %}
 </section>
 {% endif %}
 </div>
@@ -95,33 +116,12 @@
 {% endif %}
 </div>
 
+{% set worth = companies | selectattr("bucket", "equalto", "值得继续研究") | list %}
 <section aria-labelledby="companies">
-  <h2 id="companies" tabindex="-1">主动研究过的公司 · {{ companies|length }} 家</h2>
-  {% if companies %}
-  {% if verdict_summary is defined and verdict_summary %}
-  <nav class="filter-pills" aria-label="按最新研究判断查看">
-    <a class="pill active" href="#companies" data-verdict-filter="all" aria-current="true">全部 <span class="num">{{ verdict_summary.total }}</span></a>
-    {% for item in verdict_summary["items"] %}
-    <a class="pill" href="#group-{{ item.label }}" data-verdict-filter="{{ item.label }}">{{ item.label }} <span class="num">{{ item.count }}</span></a>
-    {% endfor %}
-  </nav>
-  <span class="visually-hidden" role="status" aria-live="polite" data-filter-status></span>
-  {% endif %}
-  <div class="companies">
-  {% for label in ["值得继续研究", "需要谨慎", "暂不值得", "复核未通过"] %}
-  {% set group = companies | selectattr("bucket", "equalto", label) | list %}
-  {% if group %}
-  <section class="card-group" data-verdict="{{ label }}" aria-labelledby="group-{{ label }}">
-    <h3 class="group-title" id="group-{{ label }}" tabindex="-1">{{ label }} <span class="num">{{ group | length }}</span></h3>
-    {# Full cards only where the next step is more research; the rest index into company pages. #}
-    {% if label == "值得继续研究" %}<div class="cards">{% for c in group %}{{ summary_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>
-    {% else %}<div class="cards rows">{% for c in group %}{{ compact_card(c, due, from_batch=c.from_batch) }}{% endfor %}</div>{% endif %}
-  </section>
-  {% endif %}
-  {% endfor %}
-  </div>
-  {% else %}
-  <p class="muted">还没有研究过公司。在上面输入一家开始。</p>
-  {% endif %}
+  {# Only the shortlist gets cards here; every company and verdict stays one search away in the library. #}
+  <h2 id="companies" tabindex="-1">值得继续研究 · {{ worth | length }} 家</h2>
+  {% if worth %}<div class="cards">{% for c in worth %}{{ summary_card(c, from_batch=c.from_batch) }}{% endfor %}</div>
+  {% elif not companies %}<p class="muted">还没有研究过公司。在上面输入一家开始。</p>{% endif %}
+  {% if companies %}<p class="actions"><a class="link" href="/research-library">全部 {{ companies | length }} 家公司的研究与判断</a></p>{% endif %}
 </section>
 {% endblock %}

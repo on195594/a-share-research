@@ -203,8 +203,8 @@ def test_candidate_matrix_links_flags_to_details():
     assert f'href="#cand-{flagged["code"]}"' in html and '60日跌超30%' in html
 
 
-def test_home_verdict_filter_binds_each_card_group_bucket(tmp_path):
-    from a_share_research import charts, db, reading
+def test_home_cards_only_the_shortlist_and_states_stale_coverage_once(tmp_path):
+    from a_share_research import db, reading
     from support.continuation import load
     from support.templates import render
     conn = db.connect(tmp_path / 'home.db')
@@ -215,14 +215,16 @@ def test_home_verdict_filter_binds_each_card_group_bucket(tmp_path):
     finally:
         conn.close()
     assert len(cards) > 1
-    cards[-1] = cards[-1] | {'bucket': '暂不值得'}  # marked variant: the captured set shares one bucket
-    html = render('home.html', companies=cards, verdict_summary=charts.verdict_summary(reports),
-                  pending=[], pending_more=False, active=[], batch=None)
-    # The verdict filter hides whole groups; each group holds exactly its bucket's cards.
-    groups = re.findall(r'<section class="card-group" data-verdict="([^"]+)"(.*?)</section>', html, re.S)
-    shown = {label: re.findall(r'id="card-([^"]+)"', body) for label, body in groups}
-    assert shown == {c['bucket']: [d['code'] for d in cards if d['bucket'] == c['bucket']] for c in cards}
-    assert 'role="status" aria-live="polite" data-filter-status' in html
+    # Marked variants: the captured set shares one bucket, so give the home page one of each kind.
+    cards = [cards[0] | {'bucket': '值得继续研究'}] + [c | {'bucket': '需要谨慎'} for c in cards[1:]]
+    due = ('2026-09-30', '2026 年三季报')
+    stale = [c for c in cards if c['coverage'] < due[0]]
+    assert stale
+    html = render('home.html', companies=cards, stale=stale, due=due, pending=[], pending_more=False, active=[], batch=None)
+    assert re.findall(r'id="card-([^"]+)"', html) == [cards[0]['code']]
+    assert f'href="/research-library">全部 {len(cards)} 家公司的研究与判断' in html
+    assert html.count('未覆盖 2026 年三季报') == 1 and f'{len(stale)} 家公司的研究资料未覆盖' in html
+    assert 'id="attention"' in html
 
 
 def test_home_batch_projection_and_last_passed_scope(web, monkeypatch):

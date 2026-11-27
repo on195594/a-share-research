@@ -53,13 +53,14 @@
 {% endmacro %}
 
 {# Home: scannable summary. Four saved key figures, then the lists behind one disclosure. #}
-{% macro summary_card(c, due=none, from_batch=false) %}
+{% macro summary_card(c, from_batch=false) %}
 <article class="card" id="card-{{ c.code }}" data-order="{{ c.id }}">
   <header class="card-head">
     <h4 class="card-name"><a href="/stock/{{ c.code }}">{{ c.name }}</a> <span class="code">{{ c.code }}</span></h4>
     {% if c.verdict %}{{ badge(c.verdict) }}{% elif not c.passed %}<span class="badge-verdict flag">复核未通过</span>{% endif %}
   </header>
-  {{ dates(c, due, from_batch) }}
+  {# Stale coverage is one home-page line, not a flag repeated on every card. #}
+  {{ dates(c, none, from_batch) }}
   {% if c.passed %}
   {{ coverage_note(c.consensus) }}
   <p class="card-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
@@ -80,25 +81,6 @@
   {% endif %}
   {% else %}{{ failed(c) }}{% endif %}
   <footer class="card-foot"><a href="/reports/{{ c.id }}">阅读报告</a><a href="/stock/{{ c.code }}">公司档案</a></footer>
-</article>
-{% endmacro %}
-
-{# Home, groups after 值得继续研究: one row per company. Counter-evidence, figures and lists live on
-   the company page; limits that change how the thesis reads stay as one-line flags. #}
-{% macro compact_card(c, due=none, from_batch=false) %}
-<article class="card-row" id="card-{{ c.code }}" data-order="{{ c.id }}">
-  <header class="card-head">
-    <h4 class="card-name"><a href="/stock/{{ c.code }}">{{ c.name }}</a> <span class="code">{{ c.code }}</span></h4>
-    {% if c.verdict %}{{ badge(c.verdict) }}{% elif not c.passed %}<span class="badge-verdict flag">复核未通过</span>{% endif %}
-  </header>
-  {% if c.passed %}
-  <p class="card-row-thesis">{% if not c.verdict %}研究判断：{% endif %}{{ c.summary or '本报告未记录一句话结论，请阅读正文与反证。' }}</p>
-  {% if c.check_failure or c.boundary or c.open_questions %}<p class="card-note">
-    {%- if c.check_failure %}<strong class="flag">披露机械核对未完成</strong>{% endif %}
-    {%- if c.boundary %}{{ ' · ' if c.check_failure }}<strong class="flag">边界立场</strong>{% endif %}
-    {%- if c.open_questions %}{{ ' · ' if c.check_failure or c.boundary }}<strong class="flag">复核认为尚未答完 {{ c.open_questions | length }} 项</strong>{% endif %}</p>{% endif %}
-  {% else %}{{ failed(c) }}{% endif %}
-  {{ dates(c, due, from_batch) }}
 </article>
 {% endmacro %}
 

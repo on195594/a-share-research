@@ -7,7 +7,7 @@ import pytest
 
 from support.continuation import BODY, load
 from support.templates import ENV
-from a_share_research import charts, db, reading
+from a_share_research import db, reading
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDS = {r['report']['id']: r['report'] for r in
@@ -59,20 +59,15 @@ def test_failed_card_shows_no_judgement_only_the_dated_last_pass():
 def test_card_text_is_never_truncated():
     report = RECORDS[39]
     card = reading.card(report, report['body']) | {'coverage': '2026-06-30', 'created_at': report['created_at']}
-    compact = str(CARD.summary_card(card, ('2026-09-30', '2026 年三季报')))
-    full = str(CARD.full_card(card))
+    compact = str(CARD.summary_card(card))
+    full = str(CARD.full_card(card, ('2026-09-30', '2026 年三季报')))
     escaped = lambda t: str(ENV.from_string('{{ t }}').render(t=t))  # noqa: E731
     # The summary card folds the lists but keeps every item whole; the full card shows them open.
     for html in (compact, full):
         assert all(escaped(t) in html for t in card['risks'] + card['checkpoints'])
     assert 'claim=risks:1#claim-risks-1' in compact
-    assert '资料未覆盖 2026 年三季报' in compact
-
-
-def test_card_buckets_match_the_home_filter_counts():
-    rows = [RECORDS[39], dict(RECORDS[25], passed=0)]
-    groups = charts.verdict_summary(rows)['buckets']
-    assert {r['code']: reading.card(r, r['body'])['bucket'] for r in rows} == groups
+    # The home page states stale coverage once; only the single-company card repeats it.
+    assert '资料未覆盖 2026 年三季报' in full and '资料未覆盖' not in compact
 
 
 def test_card_renders_standalone_with_report_dates():
@@ -129,17 +124,7 @@ def test_both_web_cards_preserve_boundary_and_full_open_questions_before_the_fol
     assert report['body'] == original  # Neither projection nor render changes the saved report.
 
 
-def test_compact_card_keeps_boundary_open_question_count_and_check_failure():
-    report = warning_report()
-    card = reading.card(report, report['body']) | {'check_failure': {'reason': '取数超时', 'report_id': 9, 'scan_id': 2}}
-    html = str(CARD.compact_card(card))
-    assert '披露机械核对未完成' in html and '边界立场' in html
-    assert f"复核认为尚未答完 {len(report['body']['open_questions'])} 项" in html
-    # Compact rows omit full question bodies and figures, leaving them on the company page.
-    assert 'card-keys' not in html and report['body']['open_questions'][0]['problem'] not in html
-
-
-@pytest.mark.parametrize('macro', ['summary_card', 'full_card', 'compact_card'])
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
 @pytest.mark.parametrize('priced', [True, False])
 def test_ordinary_and_legacy_web_cards_do_not_invent_cautions(macro, priced):
     record = deepcopy(json.loads((ROOT / 'tests/data/valuation-warning-reports-20261105.json').read_text())['reports'][5])
@@ -152,7 +137,7 @@ def test_ordinary_and_legacy_web_cards_do_not_invent_cautions(macro, priced):
     assert '边界立场' not in html and '复核认为尚未答完' not in html
 
 
-@pytest.mark.parametrize('macro', ['summary_card', 'full_card', 'compact_card'])
+@pytest.mark.parametrize('macro', ['summary_card', 'full_card'])
 def test_failed_web_card_does_not_present_cautions_as_a_passed_judgment(macro):
     report = warning_report() | {'passed': 0}
     card = reading.card(report, report['body'])
