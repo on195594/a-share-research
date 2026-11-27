@@ -50,7 +50,7 @@
 
 ## 当前部署
 
-生产数据库为 **v26**（11-23 由 `51b1c61` 发布，新增 `scheduled_runs`），判断契约 **13**（11-27 由 `dccf858` 发布，PB 分母期间与股息率的程序复算、归母权益、每股净资产与近 12 个月已实施每股分红锚点；前驱契约 12 为 `7d7ea53`，段 4b 知仓研究隔离、预告/快报事实锚点与续表单位；`0de930c` 为段 4a 旧入口退役，不改库与契约）。模型只经 `agent-runner/` 调用，配置在[模型配置档](../a_share_research/model_profile.json)：作者 `openai-codex / gpt-6.2-sol / medium`，复核 `openai-codex / gpt-6.1-sol / high`。12-01 月批沿用此配置档，以契约 13 发起；只复用 7 天内同公司最新一份非接续（无 `prior`）的盲正式报告（`screening.reusable_report`）；窗口内的契约 9–12 盲正式报告均为接续报告，实际只会复用契约 13 首次研究，不改写旧报告。11-18 主模型切换前后的报告分开记分。
+生产数据库为 **v26**（11-23 由 `51b1c61` 发布，新增 `scheduled_runs`），判断契约 **13**（11-27 由 `dccf858` 发布，PB 分母期间与股息率的程序复算、归母权益、每股净资产与近 12 个月已实施每股分红锚点；前驱契约 12 为 `7d7ea53`，段 4b 知仓研究隔离、预告/快报事实锚点与续表单位；`0de930c` 为段 4a 旧入口退役，不改库与契约）。模型只经 `agent-runner/` 调用，配置在[模型配置档](../a_share_research/model_profile.json)：作者 `openai-codex / gpt-6.2-sol / medium`，复核 `openai-codex / gpt-6.1-sol / high`。12-01 月批沿用此配置档，以契约 13 发起；只复用 7 天内同公司最新一份非接续（无 `prior`）的盲正式报告（`screening.reusable_report`）；12-01 窗口内现有盲正式报告均为契约 13 接续报告，实际只会复用契约 13 首次研究，不改写旧报告。11-18 主模型切换前后的报告分开记分。
 
 生效政策以生产服务的只读查询 [`policy_current`](../a_share_research/tools/README.md#政策登记与切换) 为准。用[本宿主的客户端配置](../ops/clients/README.md#cli-与本机-cron)运行 `ashare --config <client.json> call policy_current`，读取 `activation.id`（当前编号）和 `installed`（实装身份是否一致）。核对某次发布时的状态则看该次 `release-state.json`。
 
