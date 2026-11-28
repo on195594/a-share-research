@@ -143,7 +143,7 @@ DATA_DIR="$score_dir" uv run --env-file .env python -m a_share_research.zones --
 
 ## 部署
 
-Web、worker 与 tools 共用 `DATA_DIR`（默认 `/home/lin/a-share-research-data`），并将 `METHOD_CARDS_SOURCE`（默认 `/home/lin/wiki/concepts/company-analysis`）只读挂载到 `/method-cards`。生产基线和可用回退范围见[当前部署](docs/implementation-plan.md#当前部署)。
+Web、worker 与 tools 共用 `DATA_DIR`（默认 `/home/lin/a-share-research-data`），并将 `METHOD_CARDS_SOURCE`（默认仓库内 `method-cards/`）只读挂载到 `/method-cards`。生产基线和可用回退范围见[当前部署](docs/implementation-plan.md#当前部署)。
 
 - Web 监听宿主 `127.0.0.1:8620`，从 `.env.web` 读取配置。worker 从 `.env` 读取配置，挂载 `~/.pi`。留空 `PI_RUNTIME` 时使用 pi 托管安装的 `current-version`。
 - tools 复用 worker 镜像，使用 Compose 的 `tools` profile，宿主映射 `127.0.0.1:8621`。行情凭据来自独立的 `.env.tools`（0600，模板为 `.env.tools.example`）。账户工具开关见[工具手册](a_share_research/tools/README.md)。发布自动纳入现有 tools 容器。

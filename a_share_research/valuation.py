@@ -110,6 +110,14 @@ def _json_numbers(value):
     return value
 
 
+def _annual(table: list[dict], ref: str) -> dict[int, Decimal]:
+    """Fiscal-year values of one table row, skipping blanks."""
+    row = next((r for r in table if r["id"] == ref), {})
+    cells = row.get("exact_values", {}) | {k: v for k, v in row.get("values", {}).items() if k not in row.get("exact_values", {})}
+    return {int(p[:4]): v for p, raw in cells.items()
+            if re.fullmatch(r"\d{4}-12-31", p) and (v := finite_number(raw)) is not None}
+
+
 def _cell(table: list[dict], ref: str, period: str) -> Decimal:
     row = next((r for r in table if r["id"] == ref), {})
     raw = row.get("exact_values", {}).get(period, row.get("values", {}).get(period))
@@ -255,6 +263,8 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
     stretched = price(scenarios["中性"]["exit_cap"] + dividends, r_low)
     inverted = support >= stretched
     implied = (cap * (1 + r) ** horizon - dividends) / pe
+    history = _annual(table, f'T.{value["basis"]}')
+    peak_year = max(history, key=history.get) if history else None
     # A negative required profit has no real CAGR against a positive base either.
     cagr = (implied / base) ** (Decimal(1) / (target_years[-1] - base_year)) - 1 if base > 0 and implied >= 0 else None
     factors = [Decimal(n) / 10 for n in (8, 9, 10, 11, 12)]
@@ -277,7 +287,9 @@ def _compute(value, table, market_date, r, r_low, pe_reference, consensus):
             "exit_date": exit_date.isoformat(), "horizon": horizon, "scenarios": scenarios,
             "zones": {"support_below": support, "stretched_above": stretched, "inverted": inverted},
             "zone": price_zone(close, support, stretched), "v2": v2,
-            "implied": {"profit": implied, "cagr": cagr},
+            "implied": {"profit": implied, "cagr": cagr, "year": target_years[-1],
+                        "history_peak": history[peak_year] if history else None, "history_peak_year": peak_year,
+                        "vs_peak": implied / history[peak_year] if peak_year and history[peak_year] > 0 else None},
             "sensitivity": {"profit_factors": factors, "exit_pe": multiples,
                             "returns": [[annual_return(p3 * factor * multiple + dividends, cap, horizon) for multiple in multiples] for factor in factors]},
             # Multiples of a non-positive base have no meaning; leave them empty as with cagr.
@@ -380,6 +392,20 @@ def program_rows(value, table: list[dict], market_date: str) -> list[dict]:
             result.append({"id": f"C.{n + len(result) + 1}", "label": f"{name}情景{label}（{RULE_V2}）", "unit": "%",
                            "values": {"result": str(value.quantize(Decimal("0.01")))}, "exact_values": {"result": str(value)},
                            "calculation": common | {"scenario": name, "metric": metric, "formula": f"({formula}) × 100"}})
+    implied = calc["implied"]
+    profit = Decimal(str(implied["profit"]))
+    result.append({"id": f"C.{n + len(result) + 1}", "unit": "亿元",
+                   "label": f"现价隐含{implied['year']}年利润（中性退出倍数下达到期望年化{calc['r'] * 100:g}%所需）",
+                   "values": {"result": str(profit.quantize(Decimal("0.01")))}, "exact_values": {"result": str(profit)},
+                   "calculation": common | {"metric": "implied_profit",
+                                            "formula": f"(总市值 × (1 + {calc['r']:g})^持有年数 − 中性两年分红) ÷ 中性退出倍数"}})
+    if implied["vs_peak"] is not None:
+        ratio = Decimal(str(implied["vs_peak"])) * 100
+        result.append({"id": f"C.{n + len(result) + 1}", "unit": "%",
+                       "label": f"现价隐含{implied['year']}年利润 ÷ 表内最高年利润（{implied['history_peak_year']}年）",
+                       "values": {"result": str(ratio.quantize(Decimal("0.01")))}, "exact_values": {"result": str(ratio)},
+                       "calculation": common | {"metric": "implied_vs_peak",
+                                                "formula": f"隐含利润 ÷ T.{calc['basis']}[{implied['history_peak_year']}-12-31] × 100"}})
     return result
 
 

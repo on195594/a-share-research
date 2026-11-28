@@ -90,7 +90,7 @@ def test_scenario_tool_exposes_each_downside_and_matches_existing_pricing(code):
     rows = valuation.program_rows(sample["valuation"], sample["table"], sample["market_date"])
     calc = valuation.compute(sample["valuation"] | {"rationale": [{"text": "复算捕获的工具输入", "cites": []}]},
                              sample["table"], sample["market_date"])
-    assert len(rows) == 8 and len({r["id"] for r in rows}) == 8
+    assert len(rows) == 10 and len({r["id"] for r in rows}) == 10
     assert Decimal(rows[0]["exact_values"]["result"]) == Decimal(str(calc["v2"]["support_below"]))
     for name in valuation.SCENARIOS:
         annual = next(r for r in rows if r["calculation"].get("scenario") == name and r["calculation"]["metric"] == "annual_return")
@@ -178,7 +178,7 @@ def test_identical_pricing_inputs_reuse_rows_and_scenario_returns_come_from_comp
     tools = ResearchTools(m, None)
     rows = tools.run("valuation", {"valuation": sample["valuation"]})
     reworded = sample["valuation"] | {"rationale": [{"text": "改写理由", "cites": []}]}
-    assert tools.run("valuation", {"valuation": reworded}) == rows and len(m.table) == len(sample["table"]) + 8
+    assert tools.run("valuation", {"valuation": reworded}) == rows and len(m.table) == len(sample["table"]) + 10
     calc = valuation.compute(sample["valuation"] | {"rationale": [{"text": "复算", "cites": []}]}, sample["table"], sample["market_date"])
     for name in valuation.SCENARIOS:
         total = next(r for r in rows if r["calculation"].get("scenario") == name and r["calculation"]["metric"] == "total_return")

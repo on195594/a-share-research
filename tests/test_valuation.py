@@ -111,8 +111,10 @@ def test_complete_hand_calculation():
     assert calc['zones']['support_below'] == pytest.approx(28.908543649436677)
     assert calc['zones']['stretched_above'] == pytest.approx(36.91241930826684)
     assert calc['zones']['inverted'] is False and calc['zone'] == '中性区'
-    # Implied: (297.18*1.1^(917/365.25)-.433827)/14.6 = 25.827847994457166.
-    assert calc['implied'] == pytest.approx({'profit': 25.827847994457166, 'cagr': .2666235458671805})
+    # Implied: (297.18*1.1^(917/365.25)-.433827)/14.6 = 25.827847994457166; table peak is 2025's 12.71.
+    assert calc['implied'] == pytest.approx({'profit': 25.827847994457166, 'cagr': .2666235458671805, 'year': 2028,
+                                            'history_peak': 12.71, 'history_peak_year': 2025,
+                                            'vs_peak': 25.827847994457166 / 12.71})
     assert calc['bridge'] == pytest.approx({'profit_change': 22.43/12.71,
                                            'pe_change': 14.6/(297.18/12.71), 'dividend_share': .433827/297.18})
     assert calc['sensitivity']['profit_factors'] == [.8, .9, 1, 1.1, 1.2]
@@ -352,7 +354,11 @@ def test_tool_rows_equal_program_wait_price_and_are_citable():
     rows = ResearchTools(mat, None).run('valuation', {'valuation': assumptions()})
     price, _ = stance.wait_price(assumptions(), BODY['table'], BODY['market_date'])
     calc = valuation.compute(assumptions(), BODY['table'], BODY['market_date'])
-    assert [r['id'] for r in rows] == [f'C.{n}' for n in range(4, 12)] and rows == mat.table[-8:]
+    assert [r['id'] for r in rows] == [f'C.{n}' for n in range(4, 14)] and rows == mat.table[-10:]
+    implied, vs_peak = rows[-2:]
+    assert float(implied['exact_values']['result']) == pytest.approx(calc['implied']['profit'])
+    assert float(vs_peak['exact_values']['result']) == pytest.approx(calc['implied']['vs_peak'] * 100)
+    assert implied['unit'] == '亿元' and '2025年' in vs_peak['label']
     assert float(rows[0]['exact_values']['result']) == pytest.approx(price) == pytest.approx(30.502715198880022)
     assert float(rows[1]['exact_values']['result']) == pytest.approx(calc['v2']['annual_return'] * 100)
     annual = rows[1]['values']['result']

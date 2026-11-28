@@ -15,7 +15,7 @@ services:
       METHOD_CARDS_DIR: /method-cards
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
-      - ${METHOD_CARDS_SOURCE:-/home/lin/wiki/concepts/company-analysis}:/method-cards:ro
+      - ${METHOD_CARDS_SOURCE:-./method-cards}:/method-cards:ro
     networks:
       - nginx-network
     ports: ["127.0.0.1:8620:8620"]
@@ -39,7 +39,7 @@ services:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
       - /home/lin/.pi:/home/lin/.pi
       # Reviewed analysis method cards maintained in the shared wiki; read-only, single-stock runs only.
-      - ${METHOD_CARDS_SOURCE:-/home/lin/wiki/concepts/company-analysis}:/method-cards:ro
+      - ${METHOD_CARDS_SOURCE:-./method-cards}:/method-cards:ro
 
   # Deploy includes tools when its container is present.
   tools:
@@ -61,7 +61,7 @@ services:
       ASHARE_PUBLIC_MCP_URL: ${ASHARE_PUBLIC_MCP_URL:-}
     volumes:
       - ${DATA_DIR:-/home/lin/a-share-research-data}:/data
-      - ${METHOD_CARDS_SOURCE:-/home/lin/wiki/concepts/company-analysis}:/method-cards:ro
+      - ${METHOD_CARDS_SOURCE:-./method-cards}:/method-cards:ro
     networks:
       - nginx-network
     tmpfs:

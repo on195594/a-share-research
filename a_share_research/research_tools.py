@@ -53,7 +53,7 @@ TOOLS = [
     {"name": "financials", "description": "查询本公司或同业的可比财务指标及行情。返回可用于计算和引用的行，缺失不填零。",
      "parameters": {"type": "object", "properties": {"code": {"type": "string", "pattern": stock_codes.KEY_PATTERN}},
                     "required": ["code"], "additionalProperties": False}},
-    {"name": "valuation", "description": "按拟定三情景估值（与报告 valuation 同格式，rationale 可暂缺）生成可引用 C.n：期望回报门槛价、期望年化回报，以及保守/中性/乐观各自的年化和累计回报，后者不是概率加权结果，也不是最坏情景。与报告页 valuation-v2 同源。正文引用时最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动后重算。期限固定并返回实际年数；其他持有期用 calculate annual_return。相同定价输入重复调用返回已有行。",
+    {"name": "valuation", "description": "按拟定三情景估值（与报告 valuation 同格式，rationale 可暂缺）生成可引用 C.n：期望回报门槛价、期望年化回报，保守/中性/乐观各自的年化和累计回报（后者不是概率加权结果，也不是最坏情景），以及现价隐含第三年利润与它占表内最高年利润的比例。与报告页 valuation-v2 同源。正文引用时最终 valuation 的 basis/years/scenarios/payout_pct 须与测算输入一致，改动后重算。期限固定并返回实际年数；其他持有期用 calculate annual_return。相同定价输入重复调用返回已有行。",
      "parameters": {"type": "object", "properties": {"valuation": {"type": "object"}}, "required": ["valuation"], "additionalProperties": False}},
     {"name": "calculate", "description": "精确计算并生成可引用的 C.n 行。事实输入用表格/前序计算 {ref, period}，或已读披露原数 {source, page, quote, value, unit, period(可选), label(可选)}；原数含正负号、小数位必须匹配引文，会计括号表示负数。假设参数单独用 {assumption: 非空说明, value: 数字, unit: 单位}，不得混入事实出处；假设及其链式结果均标为假设测算，不是披露事实。multiply 用于数量乘无量纲系数（单位倍），如利润乘0.8检验下降20%；ratio 可除以倍数，其余比值要求同单位或可换算货币单位。annual_return 的 left 为退出价值加持有期间累计现金分红，right 为买入价值，另传 holding_years（正数，不超过50年），计算总回报的复合年化百分比；分红不再投资，不是IRR。growth_pct 只用于同指标相邻年度同月日同比；跨期、环比或异源变动用 change_pct。label 只记录目的，不证明财务含义。",
      "parameters": {"type": "object", "properties": {

@@ -497,7 +497,7 @@ def deploy(code: str, evidence: Path, allow_config: bool = False, approval_path:
         if (head != run('git', 'rev-parse', 'origin/main') or not revision.startswith(code)
                 or run('git', 'merge-base', revision, head) != revision):
             raise RuntimeError('须在 origin/main 的 HEAD 上按已推送的提交号发布预构建镜像')
-        if run('git', 'status', '--porcelain', '--', 'a_share_research', 'agent-runner', 'Dockerfile', 'compose.yaml',
+        if run('git', 'status', '--porcelain', '--', 'a_share_research', 'agent-runner', 'Dockerfile', 'compose.yaml', 'method-cards',
                'pyproject.toml', 'uv.lock'):
             raise RuntimeError('应用或部署文件有未提交修改')
         has_tools = bool(run('docker', 'ps', '-a', '--filter', 'name=^/a-share-research-tools$', '--format', '{{.ID}}'))
