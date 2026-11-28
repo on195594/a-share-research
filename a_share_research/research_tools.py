@@ -80,6 +80,8 @@ HEADER_UNIT = re.compile(rf"(?:人民币|[（(](?:单位[：:])?|^)[ \t]*({FIGUR
 UNIT_SPACE = r"[ \t]*(?:\n[ \t]*)?"
 TRAILING_UNIT = re.compile(rf"(?:{UNIT_SPACE}[-−－–—～~至到]{UNIT_SPACE}\d[\d,.]*)?"
                            rf"{UNIT_SPACE}(?:[（(][ \t]*)?({FIGURE_UNIT})")
+# A document-wide default stated once before the notes, e.g. "除有特别说明外，均以人民币千元为单位表示".
+DEFAULT_UNIT = re.compile(r"除(?:另有|有)?(?:特别)?(?:说明|注明)外[ \t]*[，,]?[^\n。]{0,16}?以(?:人民币)?(百万元|千元|万元|亿元|元)(?:为单位|列示)")
 UNIT_LOOKBACK_PAGES = 5
 ROW_LOOKAHEAD_LINES = 3
 # Titles that open a new table or section, ending the previous unit's scope unless marked as a continuation.
@@ -256,8 +258,22 @@ def unit_scope(pages: dict[int, str], page: int, end: int) -> dict:
     return {"units": [], "page": first, "stop": "limit", "region": "\n".join(reversed(region))}
 
 
+def default_unit(pages: dict[int, str], page: int, end: int | None = None) -> tuple[str, int] | None:
+    """The nearest document-wide default unit stated on a read page at or before `page` (up to `end` there)."""
+    for number in sorted((n for n in pages if n <= page), reverse=True):
+        if found := DEFAULT_UNIT.findall(pages[number] if number != page or end is None else pages[number][:end]):
+            return found[-1], number
+    return None
+
+
+def default_unit_page(pages: list[str], page: int) -> int | None:
+    """In the whole document, the page of the nearest default-unit statement at or before `page`."""
+    return next((n for n in range(page, 0, -1) if DEFAULT_UNIT.search(pages[n - 1])), None)
+
+
 def unit_hints(pages: dict[int, str], selected: list[int]) -> dict:
-    """Per returned page: its own declarations and the one carried to its top from earlier read pages."""
+    """Per returned page: its own declarations, the one carried to its top from earlier read pages,
+    and the document-wide default that applies where neither reaches."""
     hints = {}
     for number in selected:
         entry = {}
@@ -266,6 +282,8 @@ def unit_hints(pages: dict[int, str], selected: list[int]) -> dict:
         carried = unit_scope(pages, number, 0)
         if carried["units"]:
             entry |= {"carried": carried["units"], "from_page": carried["page"]}
+        if not entry and (default := default_unit(pages, number)):
+            entry = {"default": default[0], "default_page": default[1]}
         if entry:
             hints[str(number)] = entry
     return hints
@@ -326,6 +344,12 @@ def _check_unit(unit: str, cite: dict, registry: dict, value: Decimal) -> None:
             raise ValueError(f"{source_id}第{page}页引文上方未见单位声明，第{scope['page']}页尚未读取，无法确认能否按 {unit} 输入；"
                              f"请先调用 read_disclosure(source={source_id}, page={first}, count={scope['page'] - first + 1}) "
                              "读取前序连续表头页，使单位声明进入已读页面后再计算")
+        # Only where no table declaration reaches does the document-wide default ("除有特别说明外…") apply.
+        if default := default_unit(source["pages"] | {page: text}, page, index):
+            if default[0] != unit:
+                raise ValueError(f"{source_id}第{page}页该数值所在表未声明单位，按第{default[1]}页全文单位声明应为 {default[0]}，"
+                                 f"不能按 {unit} 输入")
+            continue
         raise ValueError(f"所引页面中未见单位 {unit}：{source_id}第{page}页该数值上方及承接的已读页没有“单位：{unit}”声明"
                          f"或（{unit}）、人民币{unit}表头（遇新表标题或回溯超过{UNIT_LOOKBACK_PAGES}页即停止）；"
                          "请核对原表单位，改引写明单位的披露位置或 financials 表行")
@@ -666,6 +690,11 @@ class ResearchTools:
         selected = [p for p in hits if p >= page][:count] if terms else list(range(page, min(page + count, len(doc.pages) + 1)))
         pages = {n: doc.pages[n - 1] for n in selected}
         raw_pages = {n: doc.raw_pages[n - 1] for n in selected}
+        # Store the page with the document-wide unit default so a later calculation can rely on it;
+        # only its declaration line is returned.
+        defaults = {g for n in selected if (g := default_unit_page(doc.pages, n))} - set(pages) - set(existing.get("pages", {}))
+        pages |= {g: doc.pages[g - 1] for g in defaults}
+        raw_pages |= {g: doc.raw_pages[g - 1] for g in defaults}
         for mode, addition in (("pages", pages), ("raw_pages", raw_pages)):
             old = existing.get(mode, {})
             if any(n in old and evidence.normalize_page(old[n]) != evidence.normalize_page(text)
@@ -689,7 +718,8 @@ class ResearchTools:
         else:
             self.material.extra["sources"][source] = candidate[source]
         return {"source": source, "document": doc.info(), "total_pages": len(doc.pages),
-                "matched_pages": hits[:60], "pages": pages,
+                "matched_pages": hits[:60], "pages": {n: pages[n] for n in selected},
+                **({"unit_pages": {g: DEFAULT_UNIT.search(pages[g])[0] for g in sorted(defaults)}} if defaults else {}),
                 "unit_hints": unit_hints(self.material.source_registry()[source]["pages"], selected)}
 
     def financials(self, code: str):

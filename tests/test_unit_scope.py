@@ -223,3 +223,54 @@ def test_multiple_units_on_one_header_line_need_a_matching_column():
     for unit in ("元", "%"):
         with pytest.raises(ValueError, match="同一行声明多个单位"):
             compute(held, INVESTED | {"unit": unit})
+
+
+# 比亚迪半年报：第81页“除有特别说明外，均以人民币千元为单位表示”；第167页“八、研发支出”表无单位声明（运行 229 被误拒）。
+RD_CAPITALIZED = operand(167, "资本化研发支出                                        5,553,806", "5,553,806", "千元")
+
+
+def test_document_default_unit_applies_where_no_table_declaration_reaches():
+    held = material("byd_half", 81, 167)
+    assert compute(held, RD_CAPITALIZED)["unit"] == "千元"
+    with pytest.raises(ValueError, match="按第81页全文单位声明应为 千元，不能按 元 输入"):
+        compute(held, RD_CAPITALIZED | {"unit": "元"})
+    # Without the default page the table still has no unit, as in run 229.
+    with pytest.raises(ValueError, match="未见单位 千元"):
+        compute(material("byd_half", 167), RD_CAPITALIZED)
+    # A default stated after the cited page does not reach back: page 29's table lost its column unit.
+    held = material("byd_half", 29, 81)
+    held.extra["sources"]["D1"]["pages"]["29"] = held.extra["sources"]["D1"]["pages"]["29"].replace("（元）", "")
+    with pytest.raises(ValueError, match="未见单位 元"):
+        compute(held, INVESTED)
+
+
+def test_table_declaration_overrides_the_document_default():
+    held = material("byd_half", 28, 29, 81)
+    assert compute(held, INVESTED)["unit"] == "元"
+    with pytest.raises(ValueError, match="未见单位 千元"):
+        compute(held, INVESTED | {"unit": "千元"})
+    held = material("orient_half", 186)
+    pages = held.extra["sources"]["D1"]["pages"]
+    # Default-statement variant placed above the page's own 元 table.
+    pages["186"] = "除有特别说明外，均以人民币千元为单位表示。\n" + pages["186"]
+    with pytest.raises(ValueError, match="页面声明单位为 元"):
+        compute(held, PAYABLE | {"unit": "千元"})
+
+
+def test_read_disclosure_stores_the_default_page_and_returns_only_its_line():
+    sample = DOCUMENTS["byd_half"]["pages"]
+    held = material("byd_half")
+    doc = Document(**DOCUMENTS["byd_half"]["document"])
+    doc.pages = [sample.get(str(n), "") for n in range(1, 208)]
+    doc.raw_pages = list(doc.pages)
+    held.extra["catalog"] = {"D1": doc.info()}
+    tools = ResearchTools(held, None)
+    tools.documents["D1"] = doc
+    result = tools.run("read_disclosure", {"source": "D1", "page": 167, "count": 1})
+    assert list(result["pages"]) == [167]
+    assert result["unit_pages"] == {81: "除有特别说明外，均以人民币千元为单位"}
+    assert result["unit_hints"]["167"] == {"default": "千元", "default_page": 81}
+    assert held.extra["sources"]["D1"]["pages"][81] == sample["81"]
+    assert compute(held, RD_CAPITALIZED)["unit"] == "千元"
+    # Once held, the default page is not attached again.
+    assert "unit_pages" not in tools.run("read_disclosure", {"source": "D1", "page": 166, "count": 2})
