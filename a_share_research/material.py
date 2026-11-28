@@ -355,7 +355,7 @@ def capital_return_rows(statements: dict[str, pd.DataFrame], periods: list[str],
         ("ebit", "息税前利润（利润总额 + 利息费用 − 利息收入，含投资收益与营业外收支；利息空白项按无发生额计）", "亿元", ebit, periods, Decimal("1e8")),
         ("minority_equity", "少数股东权益", "亿元", minority, periods, Decimal("1e8")),
         ("invested_capital", "投入资本（归母权益 + 少数股东权益 + 四项债务 − 货币资金；少数股东权益空白按无计）", "亿元", invested, periods, Decimal("1e8")),
-        ("roic", "税后投入资本回报率（年度息税前利润 ×（1 − 所得税 ÷ 利润总额）÷ 上年末投入资本；利润总额或上年末投入资本不为正的年度不计算）", "%", roic, annual, Decimal("1")),
+        ("roic", "税后投入资本回报率（年度息税前利润 ×（1 − 所得税 ÷ 利润总额）÷ 上年末投入资本；利润总额或上年末投入资本不为正的年度不计算；货币资金接近权益时分母很小，比率失真）", "%", roic, annual, Decimal("1")),
     ]
     rows = []
     for key, label, unit, compute, dates, divisor in specs:
