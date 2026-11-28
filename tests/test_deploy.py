@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from a_share_research import db, deploy
+from a_share_research import db, deploy, service
 from support.continuation import load
 
 
@@ -89,5 +89,21 @@ def test_closed_batch_is_idle_even_with_old_step(tmp_path):
             deploy.idle(database)
         conn.execute('UPDATE batches SET step=NULL')
         deploy.idle(database)
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize('status, step', [('queued', None), ('screening', 'screen'),
+                                          # Q20 finished and S10 not yet linked: the batch stays researching.
+                                          ('researching', None), ('selecting', None), ('proposed', None),
+                                          ('frozen', None)])
+def test_batch_blocks_release_from_acceptance_until_entry(tmp_path, status, step):
+    database = tmp_path / 'app.db'
+    conn = db.connect(database)
+    try:
+        ident = service.create_batch(conn, 'monthly:release-guard')
+        conn.execute('UPDATE batches SET status=?, step=? WHERE id=?', (status, step, ident))
+        with pytest.raises(RuntimeError, match='尚未空闲'):
+            deploy.idle(database)
     finally:
         conn.close()

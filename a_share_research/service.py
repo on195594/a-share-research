@@ -14,7 +14,7 @@ from requests import RequestException
 from a_share_research import report as report_body
 from a_share_research import api_keys, batches, companies, db, stance as stances
 from a_share_research import stock_codes
-from a_share_research.model_profile import PROFILE, PROFILE_SHA256
+from a_share_research.model_profile import PROFILE, PROFILE_SHA256, judgment_identity
 from a_share_research.evidence import report_source_view, projection
 from a_share_research.reviewing import legacy_issue_view, audit_view, issue_view, binding_view
 
@@ -660,14 +660,18 @@ def research_status(conn, *, requester: str | None = None, request_id: str | Non
 
 
 def create_batch(conn, request_id: str, *, created_at: str | None = None) -> int:
-    """Queue a batch; one live batch per calendar month (failed ones do not count)."""
+    """Queue a batch; one live batch per calendar month (failed ones do not count).
+
+    The judgment identity is frozen in the same insert, so the batch keeps the configuration it was accepted under.
+    """
     created_at = created_at or db.now()
     month = datetime.fromisoformat(created_at).astimezone(db.SHANGHAI).strftime("%Y-%m")
     row = conn.execute(
-        "INSERT INTO batches (request_id, status, created_at, rule) SELECT ?, 'queued', ?, ?"
+        "INSERT INTO batches (request_id, status, created_at, rule, marks) SELECT ?, 'queued', ?, ?, ?"
         " WHERE NOT EXISTS (SELECT 1 FROM batches WHERE strftime('%Y-%m', created_at, '+8 hours') = ? AND status != 'failed')"
         " ON CONFLICT(request_id) DO NOTHING RETURNING id",
-        (request_id, created_at, json.dumps(batches.NEW_RULE, ensure_ascii=False), month),
+        (request_id, created_at, json.dumps(batches.NEW_RULE, ensure_ascii=False),
+         json.dumps({"judgment": judgment_identity()}), month),
     ).fetchone()
     if row:
         return row["id"]

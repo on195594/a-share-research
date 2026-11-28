@@ -354,3 +354,46 @@ def test_tools_ready_trusts_the_running_image_schema_check(monkeypatch):
     monkeypatch.setattr(deploy.time, 'sleep', lambda s: None)
     assert deploy.wait_tools_ready(paused=True)['schema_version'] == 24
     assert not answers
+
+
+REAL_IDLE = deploy.idle
+
+
+def test_batch_accepted_after_first_idle_check_aborts_release_and_keeps_its_identity(operations, monkeypatch):
+    from datetime import datetime
+    from a_share_research import db, service
+
+    state = operations()
+    database = state.data / 'app.db'
+    conn = db.connect(database)
+    month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
+    accepted = []
+    control = deploy.tools_control
+
+    def idle(path):
+        state.events.append(('idle',))
+        REAL_IDLE(path)
+
+    def accept_then_control(action):
+        if action == 'pause':  # a monthly request admitted between the first idle check and the drain
+            accepted.append(service.monthly_batch(conn, month, submit=True))
+        return control(action)
+
+    monkeypatch.setattr(deploy, 'idle', idle)
+    monkeypatch.setattr(deploy, 'tools_control', accept_then_control)
+    try:
+        with pytest.raises(RuntimeError, match='尚未空闲'):
+            deploy.deploy('revision', state.evidence)
+        assert state.events.count(('idle',)) == 2
+        assert ('backup',) not in state.events
+        assert not any(e[:3] == ('run', 'docker', 'tag') for e in state.events)
+        assert state.containers == {'web': 'old-web', 'worker': 'old-worker', 'tools': 'old-worker'}
+        assert all(state.running.values()) and not state.paused
+        assert index(state, ('tools_ready', True)) < index(state, ('control', 'resume'))
+        batch = accepted[0]['batch']
+        row = conn.execute('SELECT id, status, request_id FROM batches').fetchall()
+        assert [tuple(r) for r in row] == [(batch['id'], 'queued', f'monthly:{month}')]
+        again = service.monthly_batch(conn, month, submit=True)
+        assert not again['created'] and again['batch']['id'] == batch['id']
+    finally:
+        conn.close()

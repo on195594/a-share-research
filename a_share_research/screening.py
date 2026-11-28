@@ -392,6 +392,11 @@ class _BatchChanged(Exception):
     """Another writer won the batch while a comparison was running."""
 
 
+def frozen_judgment(batch: dict) -> dict | None:
+    """Identity frozen at acceptance (marks) until a comparison exists, then carried by the selection."""
+    return (batch.get("selection") or {}).get("judgment") or (batch.get("marks") or {}).get("judgment")
+
+
 class ComparisonSession:
     """One batch's model comparisons, served to a single runner over stdio MCP.
 
@@ -403,8 +408,7 @@ class ComparisonSession:
         self.conn, self.batch, self.large_selectable, self.small = conn, batch, large_selectable, small
         self.selection = batch.get("selection") or {}
         self.small_selection = batch.get("small_selection") or {}
-        self.judgment = (self.selection.get("judgment") or (batch.get("marks") or {}).get("judgment")
-                         or model_profile.judgment_identity())
+        self.judgment = frozen_judgment(batch) or model_profile.judgment_identity()
         limits = model_profile.PROFILE.limits
         self.attempt_limit = limits.comparison_attempts_per_task
         # Each attempt is bounded by the runner's model timer; allow for startup and the pipe transfer.
@@ -872,6 +876,21 @@ def recover(conn) -> None:
     conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = '自动月批比较中断，不自动重跑',"
                  " updated_at = ? WHERE status = 'selecting' AND request_id LIKE 'monthly:%'", (db.now(),))
     conn.execute("UPDATE batches SET status = 'researching', step = NULL WHERE status = 'selecting'")
+    # The configuration only changes across a restart. A batch accepted under another one stops here,
+    # before its queued research or comparison spends calls; finished reports and call records stay.
+    current = model_profile.judgment_identity()
+    for row in conn.execute("SELECT id, marks, selection FROM batches WHERE status IN ('queued', 'researching')").fetchall():
+        frozen = frozen_judgment(load(row))
+        if frozen is None or frozen == current:
+            continue
+        error = (f"受理时冻结的判断配置（契约 {frozen['contract']}）与当前（契约 {current['contract']}）不一致，"
+                 "已停止，不自动重跑")
+        with db.transaction(conn):
+            conn.execute("UPDATE runs SET status = 'failed', step = NULL, finished_at = ?, error = ?"
+                         " WHERE batch_id = ? AND status = 'queued'", (db.now(), error, row["id"]))
+            conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = ?, updated_at = ? WHERE id = ?",
+                         (error, db.now(), row["id"]))
+        log.warning("batch %s stopped: %s", row["id"], error)
 
 
 def _marks_through(pro, batch: dict, day: str, stamp: str) -> dict:
@@ -898,8 +917,9 @@ def tick(conn) -> bool:
                 request_id = str(batch.get("request_id") or "")
                 if request_id.startswith("monthly:") and request_id != f"monthly:{now:%Y-%m}":
                     raise ScreenError("自动月批已错过发起月份，不使用后来数据补跑")
-                started = conn.execute("UPDATE batches SET status = 'screening', step = 'screen', marks = ?, updated_at = ?"
-                                       " WHERE id = ? AND status = 'queued' RETURNING id",
+                # Acceptance froze the identity; only a batch saved without one takes the current identity here.
+                started = conn.execute("UPDATE batches SET status = 'screening', step = 'screen', marks = COALESCE(marks, ?),"
+                                       " updated_at = ? WHERE id = ? AND status = 'queued' RETURNING id",
                                        (json.dumps({"judgment": model_profile.judgment_identity()}), db.now(), batch["id"])).fetchone()
                 if started is None:
                     return False
@@ -947,8 +967,7 @@ def tick(conn) -> bool:
                     raise ScreenError("没有研究通过的候选，无法比较；可重新开始本月批次")
                 # Stage the start identity in marks until a comparison actually exists. Readers
                 # treat a nonempty selection during research as an already returned model draft.
-                selection = batch.get("selection") or {"judgment": (batch.get("marks") or {}).get("judgment")
-                                                       or model_profile.judgment_identity()}
+                selection = batch.get("selection") or {"judgment": frozen_judgment(batch) or model_profile.judgment_identity()}
                 batch.update(q20=q20, s10=s10, selection=selection)
                 started = conn.execute("UPDATE batches SET status='selecting', q20=?, s10=?, selection=?, updated_at=?"
                                        " WHERE id=? AND status='researching' AND q20=? RETURNING id",
