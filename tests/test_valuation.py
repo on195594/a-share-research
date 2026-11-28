@@ -349,6 +349,18 @@ def _answer_problems(rep, mat):
     return [p for p in checking.check(rep, mat) if p['where'] == 'answer[0]']
 
 
+def test_nonpositive_historical_peak_keeps_only_the_implied_profit_anchor():
+    mat = _tool_material()
+    row = next(r for r in mat.table if r['id'] == 'T.net_profit')
+    for cells in (row['values'], row.get('exact_values', {})):
+        for period in cells:
+            if period.endswith('-12-31'):
+                cells[period] = '0'
+    rows = ResearchTools(mat, None).run('valuation', {'valuation': assumptions()})
+    metrics = {r['calculation'].get('metric') for r in rows}
+    assert 'implied_profit' in metrics and 'implied_vs_peak' not in metrics
+
+
 def test_tool_rows_equal_program_wait_price_and_are_citable():
     mat = _tool_material()
     rows = ResearchTools(mat, None).run('valuation', {'valuation': assumptions()})

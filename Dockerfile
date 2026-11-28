@@ -7,6 +7,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY a_share_research ./a_share_research
 COPY skill ./skill
+COPY method-cards /method-cards
 RUN chmod -R a+rX a_share_research && chmod -R a=rX skill
 ARG GIT_COMMIT
 ENV GIT_COMMIT=$GIT_COMMIT

@@ -174,9 +174,11 @@ def test_moutai_dividend_unit_on_the_next_line():
 
 def test_moutai_personnel_table_stops_currency_but_keeps_its_own_percentage():
     held = material("moutai_annual", 12)
+    # Cross-fixture variant: a real currency default must not turn this personnel table into money.
+    held.extra["sources"]["D1"]["pages"]["1"] = "除有特别说明外，均以人民币千元为单位"
     for quote, value in [("公司研发人员的数量 806", "806"), ("学历结构人数……博士研究生 88", "88")]:
-        with pytest.raises(ValueError, match="未见单位 元"):
-            compute(held, operand(12, quote, value, "元"))
+        with pytest.raises(ValueError, match="未见单位 千元"):
+            compute(held, operand(12, quote, value, "千元"))
     ratio = operand(12, "研发人员数量占公司总人数的比例（%） 2.30", "2.30", "%")
     assert compute(held, ratio)["unit"] == "%"
     with pytest.raises(ValueError, match="单位"):

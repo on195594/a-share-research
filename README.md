@@ -81,7 +81,7 @@ ashare call research_card --json '{"code":"600519"}'
 
 ## 运行身份与材料重放
 
-运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取仓库 `method-cards/` 运行目录的方法卡。[方法库](docs/research.md#方法库与评估集)
+运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 镜像内的 `METHOD_CARDS_DIR` 读取仓库 `method-cards/` 运行目录的方法卡。[方法库](docs/research.md#方法库与评估集)
 
 `--replay` 按原任务编号复用已保存且哈希匹配的材料，重新成文、核验与复核，生成独立任务。以下命令分别建立评估集基线并重放指定任务。
 
@@ -143,7 +143,7 @@ DATA_DIR="$score_dir" uv run --env-file .env python -m a_share_research.zones --
 
 ## 部署
 
-Web、worker 与 tools 共用 `DATA_DIR`（默认 `/home/lin/a-share-research-data`），并将 `METHOD_CARDS_SOURCE`（默认仓库内 `method-cards/`）只读挂载到 `/method-cards`。生产基线和可用回退范围见[当前部署](docs/implementation-plan.md#当前部署)。
+Web、worker 与 tools 共用 `DATA_DIR`（默认 `/home/lin/a-share-research-data`），均从镜像内的 `/method-cards` 读取构建提交的 `method-cards/`，不读取宿主工作树。生产基线和可用回退范围见[当前部署](docs/implementation-plan.md#当前部署)。
 
 - Web 监听宿主 `127.0.0.1:8620`，从 `.env.web` 读取配置。worker 从 `.env` 读取配置，挂载 `~/.pi`。留空 `PI_RUNTIME` 时使用 pi 托管安装的 `current-version`。
 - tools 复用 worker 镜像，使用 Compose 的 `tools` profile，宿主映射 `127.0.0.1:8621`。行情凭据来自独立的 `.env.tools`（0600，模板为 `.env.tools.example`）。账户工具开关见[工具手册](a_share_research/tools/README.md)。发布自动纳入现有 tools 容器。
@@ -178,6 +178,8 @@ uv run python -m a_share_research.deploy "$release_code" "<新的私有计划目
 完整就绪后，工具保留最近三份发布备份及配套证据包，镜像保留当前与两级回退。发布暂停期间，Hermes 保留待查请求，错过的定时任务不会自动补发。
 
 ### 回退
+
+首次从宿主挂载切换为镜像内方法卡时，发布须加 `--allow-config`。回退到已内置方法卡的镜像无需切换目录。旧镜像本身不含方法卡：回退契约 14/15 时，先用 `git worktree add --detach <新目录> <目标提交>` 取出该提交的目录，再给发布命令设置 `COMPOSE_FILE=compose.yaml:ops/compose.legacy-cards.yaml` 和 `METHOD_CARDS_SOURCE=<新目录的绝对路径>/method-cards`，追加 `--allow-config`。保持该目录不变，直到旧服务退出。契约 13 使用原 Wiki 目录作为 `METHOD_CARDS_SOURCE`。重新发布内置卡版本时不设这两个变量，并加 `--allow-config` 移除旧挂载。
 
 用上一个提交的镜像重新发布，将其提交号作为发布命令的第一个参数。发布带库迁移时，先停服并恢复发布前备份，再重新发布，补回备份之后的新增写入。若回退前 tools 已暂停，发布保留该暂停；确认政策门禁通过后，用 tools 的 `resume` 恢复受理。
 

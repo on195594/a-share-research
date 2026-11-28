@@ -1,0 +1,13 @@
+# Only for images built before method cards were included in the image.
+x-legacy-cards: &legacy-cards
+  volumes:
+    - type: bind
+      source: ${METHOD_CARDS_SOURCE:?set the absolute path to the rollback catalog}
+      target: /method-cards
+      read_only: true
+      bind:
+        create_host_path: false
+services:
+  web: *legacy-cards
+  worker: *legacy-cards
+  tools: *legacy-cards
