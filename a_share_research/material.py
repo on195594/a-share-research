@@ -290,6 +290,7 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict, dividends: pd.Da
                            for p in periods if p in uncertain}:
             row["unavailable"] = unavailable
         table.append(row)
+    table.extend(capital_return_rows(statements, periods, annual))
     ttm = dividend_ttm(dividends, str(market["trade_date"])) if market and dividends is not None else None
     for key, label, unit, divisor in MARKET:
         if pd.notna(market.get(key)):
@@ -305,6 +306,66 @@ def financial_table(fin: dict[str, pd.DataFrame], market: dict, dividends: pd.Da
     if ttm and "value" in ttm:
         table.append(dividend_row(ttm, str(market["trade_date"])))
     return table
+
+
+def capital_return_rows(statements: dict[str, pd.DataFrame], periods: list[str], annual: list[str]) -> list[dict]:
+    """T.ebit, T.minority_equity, T.invested_capital and the annual after-tax T.roic.
+
+    Capital is counted from the financing side (equity incl. minority + four debt items − cash), so the
+    operating profit excludes interest income as well as interest expense. Tax is the year's effective
+    rate applied to EBIT, which keeps the debt tax shield out of the numerator (method card, 11-14).
+    """
+    income, balance = statements.get("income", pd.DataFrame()), statements.get("balance", pd.DataFrame())
+    uncertain = _unreconciled_periods(income)
+
+    def row_of(frame, period):
+        return frame.loc[period] if period in frame.index else None
+
+    def ebit(period):
+        row = row_of(income, period)
+        profit = _financial_value(row, "total_profit") if row is not None and period not in uncertain else None
+        if profit is None:
+            return None
+        # A blank interest line has no amount, as with the debt items (TuShare leaves it null when nil).
+        return profit + (_financial_value(row, "fin_exp_int_exp") or 0) - (_financial_value(row, "fin_exp_int_inc") or 0)
+
+    def minority(period):
+        row = row_of(balance, period)
+        return _financial_value(row, "minority_int") if row is not None else None
+
+    def invested(period):
+        row = row_of(balance, period)
+        if row is None:
+            return None
+        equity, cash = _financial_value(row, "total_hldr_eqy_exc_min_int"), _financial_value(row, "money_cap")
+        debt, _ = _financial_metric(row, "interest_debt", "interest_debt")
+        if None in (equity, cash, debt):
+            return None
+        return equity + (minority(period) or 0) + debt - cash
+
+    def roic(period):
+        operating, base = ebit(period), invested(f"{int(period[:4]) - 1}-12-31")
+        row = row_of(income, period)
+        profit, tax = (_financial_value(row, "total_profit"), _financial_value(row, "income_tax")) if row is not None else (None, None)
+        if None in (operating, base, profit, tax) or profit <= 0 or base <= 0:
+            return None
+        return operating * (1 - tax / profit) / base * 100
+
+    specs = [
+        ("ebit", "息税前利润（利润总额 + 利息费用 − 利息收入，含投资收益与营业外收支；利息空白项按无发生额计）", "亿元", ebit, periods, Decimal("1e8")),
+        ("minority_equity", "少数股东权益", "亿元", minority, periods, Decimal("1e8")),
+        ("invested_capital", "投入资本（归母权益 + 少数股东权益 + 四项债务 − 货币资金；少数股东权益空白按无计）", "亿元", invested, periods, Decimal("1e8")),
+        ("roic", "税后投入资本回报率（年度息税前利润 ×（1 − 所得税 ÷ 利润总额）÷ 上年末投入资本；利润总额或上年末投入资本不为正的年度不计算）", "%", roic, annual, Decimal("1")),
+    ]
+    rows = []
+    for key, label, unit, compute, dates, divisor in specs:
+        values, exact_values = {}, {}
+        for period in dates:
+            if (raw := compute(period)) is not None:
+                values[period] = f"{raw / divisor:.2f}"
+                exact_values[period] = str(raw / divisor)
+        rows.append({"id": f"T.{key}", "label": label, "unit": unit, "values": values, "exact_values": exact_values})
+    return rows
 
 
 def dividend_status(ttm: dict | None, market: dict) -> str:

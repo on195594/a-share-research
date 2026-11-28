@@ -19,6 +19,7 @@ from a_share_research.sources import Document
 from support.financials import FINANCIAL_DATA, frames
 
 BASIS = json.loads((Path(__file__).parent / "data" / "market-ratio-basis.json").read_text())
+CAPITAL = json.loads((Path(__file__).parent / "data" / "capital-return-capture.json").read_text())["companies"]
 
 ROWS = json.loads((Path(__file__).parent / "data/disclosure-checks.json").read_text())["tushare"]
 FORECAST, EXPRESS = "603960.SH", "605016.SH"
@@ -332,3 +333,43 @@ def test_compatible_market_ratio_arithmetic_is_kept():
     with pytest.raises(ValueError) as error:  # Unrelated unit mismatches carry no market guidance.
         calculate(table, "无关", "difference", {"ref": "M.pe_ttm", "period": day}, {"ref": "M.close", "period": day})
     assert "M." not in str(error.value)
+
+
+def capital_rows(captured):
+    return {r["id"]: r for r in financial_table(frames(captured), {}) if r["id"] in
+            ("T.ebit", "T.minority_equity", "T.invested_capital", "T.roic")}
+
+
+def test_capital_return_rows_use_prior_year_end_capital_and_the_effective_tax_rate():
+    captured = CAPITAL["002415"]
+    rows = capital_rows(captured)
+    income = {r["end_date"]: r for r in captured["financials"]["income"]}["2025-12-31"]
+    ebit = Decimal(str(income["total_profit"])) + Decimal(str(income["fin_exp_int_exp"])) - Decimal(str(income["fin_exp_int_inc"]))
+    assert Decimal(rows["T.ebit"]["exact_values"]["2025-12-31"]) == ebit / Decimal("1e8")
+    assert rows["T.minority_equity"]["values"]["2025-12-31"] == "78.69"
+    assert rows["T.invested_capital"]["values"]["2024-12-31"] == "581.47"
+    after_tax = ebit * (1 - Decimal(str(income["income_tax"])) / Decimal(str(income["total_profit"])))
+    assert Decimal(rows["T.roic"]["exact_values"]["2025-12-31"]) == after_tax / Decimal(rows["T.invested_capital"]["exact_values"]["2024-12-31"]) / Decimal("1e8") * 100
+    # Only full years carry a return; the 2023 one reads the 2022 year-end balance outside the shown periods.
+    assert rows["T.roic"]["values"] == {"2023-12-31": "32.63", "2024-12-31": "25.69", "2025-12-31": "26.00"}
+
+
+def test_capital_return_rows_leave_meaningless_returns_blank():
+    def variant(statement, period, **fields):
+        changed = deepcopy(CAPITAL["002415"])
+        for row in changed["financials"][statement]:
+            if row["end_date"] == period:
+                row.update(fields)
+        return capital_rows(changed)
+
+    # Marked variant: cash above equity and debt at the 2024 year end leaves no positive capital base.
+    rows = variant("balance", "2024-12-31", money_cap=1e12)
+    assert "2025-12-31" not in rows["T.roic"]["values"] and "2024-12-31" in rows["T.roic"]["values"]
+    # Marked variant: a pre-tax loss gives no tax-rate basis, while EBIT itself is still reported.
+    rows = variant("income", "2025-12-31", total_profit=-1e9)
+    assert "2025-12-31" not in rows["T.roic"]["values"] and rows["T.ebit"]["values"]["2025-12-31"] == "-13.50"
+    # Marked variant: blank interest and minority lines count as nil, as with the four debt items.
+    rows = variant("income", "2025-12-31", fin_exp_int_exp=None, fin_exp_int_inc=None)
+    assert rows["T.ebit"]["values"]["2025-12-31"] == "170.13"
+    rows = variant("balance", "2024-12-31", minority_int=None)
+    assert "2024-12-31" not in rows["T.minority_equity"]["values"] and rows["T.invested_capital"]["values"]["2024-12-31"] == "513.15"

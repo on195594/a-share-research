@@ -85,7 +85,7 @@ def test_historical_diagnostics_remain_read_only_and_labeled(server):
 def test_report_schema_describes_public_views():
     from a_share_research import report
     from a_share_research.contract import JUDGMENT_CONTRACT
-    assert report.SCHEMA_VERSION == 2 and JUDGMENT_CONTRACT == 14
+    assert report.SCHEMA_VERSION == 2 and JUDGMENT_CONTRACT == 15
     properties = set(report.json_schema()['properties'])
     assert {'summary', 'risks', 'checkpoints'} <= properties and set(report.FAILED_FIELDS) <= properties
     assert set(report.CARD_FIELDS) <= set(report.COMPACT_FIELDS)
