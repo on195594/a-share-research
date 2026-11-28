@@ -359,7 +359,8 @@ def test_tools_ready_trusts_the_running_image_schema_check(monkeypatch):
 REAL_IDLE = deploy.idle
 
 
-def test_batch_accepted_after_first_idle_check_aborts_release_and_keeps_its_identity(operations, monkeypatch):
+@pytest.mark.parametrize('entry', ['mcp_before_drain', 'web_after_pause'])
+def test_batch_accepted_after_first_idle_check_aborts_release_and_keeps_its_identity(operations, monkeypatch, entry):
     from datetime import datetime
     from a_share_research import db, service
 
@@ -368,19 +369,26 @@ def test_batch_accepted_after_first_idle_check_aborts_release_and_keeps_its_iden
     conn = db.connect(database)
     month = datetime.now(db.SHANGHAI).strftime('%Y-%m')
     accepted = []
-    control = deploy.tools_control
+    control, run = deploy.tools_control, deploy.run
 
     def idle(path):
         state.events.append(('idle',))
         REAL_IDLE(path)
 
     def accept_then_control(action):
-        if action == 'pause':  # a monthly request admitted between the first idle check and the drain
+        if action == 'pause' and entry == 'mcp_before_drain':  # admitted after the first idle check
             accepted.append(service.monthly_batch(conn, month, submit=True))
         return control(action)
 
+    def accept_then_run(*args):
+        if args[-1] == 'web' and 'stop' in args and entry == 'web_after_pause':  # MCP paused, web still serving
+            ident = service.create_batch(conn, 'web-manual')
+            accepted.append({'batch': {'id': ident}})
+        return run(*args)
+
     monkeypatch.setattr(deploy, 'idle', idle)
     monkeypatch.setattr(deploy, 'tools_control', accept_then_control)
+    monkeypatch.setattr(deploy, 'run', accept_then_run)
     try:
         with pytest.raises(RuntimeError, match='尚未空闲'):
             deploy.deploy('revision', state.evidence)
@@ -392,7 +400,8 @@ def test_batch_accepted_after_first_idle_check_aborts_release_and_keeps_its_iden
         assert index(state, ('tools_ready', True)) < index(state, ('control', 'resume'))
         batch = accepted[0]['batch']
         row = conn.execute('SELECT id, status, request_id FROM batches').fetchall()
-        assert [tuple(r) for r in row] == [(batch['id'], 'queued', f'monthly:{month}')]
+        request = f'monthly:{month}' if entry == 'mcp_before_drain' else 'web-manual'
+        assert [tuple(r) for r in row] == [(batch['id'], 'queued', request)]
         again = service.monthly_batch(conn, month, submit=True)
         assert not again['created'] and again['batch']['id'] == batch['id']
     finally:

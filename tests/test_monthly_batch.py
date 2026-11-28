@@ -182,7 +182,13 @@ def test_batch_run_limit_is_frozen_before_material_and_reported(tmp_path, reques
     conn.close()
 
 
-def test_acceptance_freezes_the_judgment_identity_that_screening_keeps(tmp_path, monkeypatch):
+
+CHANGES = {'contract': lambda j: j | {'contract': j['contract'] - 1},
+           'profile': lambda j: j | {'profile_sha256': '0' * 64},
+           'reviewer': lambda j: j | {'reviewer': j['reviewer'] | {'reasoning': 'medium'}}}
+
+
+def test_acceptance_freezes_the_judgment_identity_and_screening_checks_it(tmp_path, monkeypatch):
     from a_share_research import model_profile, screening
 
     conn = db.connect(tmp_path / 'monthly.db')
@@ -190,23 +196,18 @@ def test_acceptance_freezes_the_judgment_identity_that_screening_keeps(tmp_path,
     ident = service.monthly_batch(conn, month, submit=True)['batch']['id']
     marks = json.loads(conn.execute('SELECT marks FROM batches WHERE id=?', (ident,)).fetchone()[0])
     assert marks == {'judgment': model_profile.judgment_identity()}
-    # Marked variant: the accepted identity differs from the running one. Starting the screen must not
-    # replace it; the stubbed screen stops before any provider call.
-    accepted = marks['judgment'] | {'contract': marks['judgment']['contract'] - 1}
+    # Marked variant: the worker now runs another identity than the one accepted, without a restart.
+    accepted = CHANGES['contract'](marks['judgment'])
     conn.execute('UPDATE batches SET marks=? WHERE id=?', (json.dumps({'judgment': accepted}), ident))
-    seen = []
-
-    def screen(**_):
-        seen.append(json.loads(conn.execute('SELECT marks FROM batches WHERE id=?', (ident,)).fetchone()[0]))
-        raise screening.ScreenError('stub screen')
-
-    monkeypatch.setattr(screening, 'screen', screen)
+    monkeypatch.setattr(screening, 'screen', lambda **_: pytest.fail('screening started under a changed identity'))
     assert screening.tick(conn)
-    assert seen == [{'judgment': accepted}]
+    row = conn.execute('SELECT status, error, marks FROM batches WHERE id=?', (ident,)).fetchone()
+    assert row['status'] == 'failed' and '契约不一致' in row['error']
+    assert json.loads(row['marks']) == {'judgment': accepted}
     conn.close()
 
 
-def _researching_monthly(conn, *, contract_shift):
+def _researching_monthly(conn, change=None):
     from a_share_research import model_profile
     from support.reports import MATERIAL
 
@@ -217,7 +218,7 @@ def _researching_monthly(conn, *, contract_shift):
                  (done, 'explore', 'captured prompt', 'captured response', db.now()))
     queued = db.create_run(conn, '000858', request_id=f'batch-{batch}-000858')
     current = model_profile.judgment_identity()
-    frozen = current | {'contract': current['contract'] - contract_shift}
+    frozen = CHANGES[change](current) if change else current
     db.update_batch(conn, batch, status='researching', marks=json.dumps({'judgment': frozen}),
                     q20=json.dumps([{'code': MATERIAL.code, 'run_id': done}, {'code': '000858', 'run_id': queued}]))
     return month, batch, done, queued
@@ -227,7 +228,7 @@ def test_restart_under_the_accepted_configuration_keeps_resuming(tmp_path):
     from a_share_research import screening, worker
 
     conn = db.connect(tmp_path / 'monthly.db')
-    _, batch, done, queued = _researching_monthly(conn, contract_shift=0)
+    _, batch, done, queued = _researching_monthly(conn)
     worker.recover(conn)
     screening.recover(conn)
     assert conn.execute('SELECT status FROM batches WHERE id=?', (batch,)).fetchone()[0] == 'researching'
@@ -235,19 +236,21 @@ def test_restart_under_the_accepted_configuration_keeps_resuming(tmp_path):
     conn.close()
 
 
+@pytest.mark.parametrize('change', list(CHANGES))
 @pytest.mark.parametrize('status', ['queued', 'researching'])
-def test_restart_under_another_configuration_stops_before_paid_work(tmp_path, status):
+def test_restart_under_another_configuration_stops_before_paid_work(tmp_path, status, change):
     from a_share_research import screening, worker
 
     conn = db.connect(tmp_path / 'monthly.db')
-    month, batch, done, queued = _researching_monthly(conn, contract_shift=1)
+    month, batch, done, queued = _researching_monthly(conn, change)
     if status == 'queued':
         conn.execute("UPDATE batches SET status='queued', q20=NULL WHERE id=?", (batch,))
     before = conn.execute('SELECT marks, l5, sl3 FROM batches WHERE id=?', (batch,)).fetchone()
     worker.recover(conn)
     screening.recover(conn)
     row = conn.execute('SELECT status, error, marks, l5, sl3 FROM batches WHERE id=?', (batch,)).fetchone()
-    assert row['status'] == 'failed' and '不一致' in row['error'] and '不自动重跑' in row['error']
+    expected = '契约不一致' if change == 'contract' else '模型配置不一致'
+    assert row['status'] == 'failed' and expected in row['error'] and '不自动重跑' in row['error']
     assert (row['marks'], row['l5'], row['sl3']) == tuple(before)
     runs = {r['id']: r for r in conn.execute('SELECT id, status, error FROM runs')}
     assert runs[done]['status'] == 'done'
@@ -258,5 +261,22 @@ def test_restart_under_another_configuration_stops_before_paid_work(tmp_path, st
     assert not screening.tick(conn)
     again = service.monthly_batch(conn, month, submit=True)
     assert not again['created'] and again['batch']['id'] == batch
+    assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 2
+    conn.close()
+
+
+def test_changed_identity_stops_before_s10_research_is_submitted(tmp_path, monkeypatch):
+    """Q20 finished and S10 not yet linked, then the worker identity differs without a restart."""
+    from a_share_research import screening
+
+    conn = db.connect(tmp_path / 'monthly.db')
+    _, batch, done, queued = _researching_monthly(conn, 'profile')
+    conn.execute("UPDATE runs SET status='done' WHERE id=?", (queued,))
+    conn.execute('UPDATE batches SET s10=? WHERE id=?', (json.dumps([{'code': '300750', 'name': '宁德时代'}]), batch))
+    monkeypatch.setattr(screening, 'link_research', lambda *a: pytest.fail('S10 research submitted'))
+    assert screening.tick(conn)
+    row = conn.execute('SELECT status, error, s10 FROM batches WHERE id=?', (batch,)).fetchone()
+    assert row['status'] == 'failed' and '模型配置不一致' in row['error']
+    assert json.loads(row['s10']) == [{'code': '300750', 'name': '宁德时代'}]
     assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 2
     conn.close()

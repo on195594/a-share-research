@@ -876,21 +876,32 @@ def recover(conn) -> None:
     conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = '自动月批比较中断，不自动重跑',"
                  " updated_at = ? WHERE status = 'selecting' AND request_id LIKE 'monthly:%'", (db.now(),))
     conn.execute("UPDATE batches SET status = 'researching', step = NULL WHERE status = 'selecting'")
-    # The configuration only changes across a restart. A batch accepted under another one stops here,
-    # before its queued research or comparison spends calls; finished reports and call records stay.
-    current = model_profile.judgment_identity()
-    for row in conn.execute("SELECT id, marks, selection FROM batches WHERE status IN ('queued', 'researching')").fetchall():
-        frozen = frozen_judgment(load(row))
-        if frozen is None or frozen == current:
-            continue
-        error = (f"受理时冻结的判断配置（契约 {frozen['contract']}）与当前（契约 {current['contract']}）不一致，"
-                 "已停止，不自动重跑")
-        with db.transaction(conn):
+    # Before the run queue resumes: a restart under another configuration must not spend calls on queued research.
+    for row in conn.execute("SELECT id, status, marks, selection FROM batches WHERE status IN ('queued', 'researching')").fetchall():
+        _stop_if_judgment_changed(conn, load(row))
+
+
+def _stop_if_judgment_changed(conn, batch: dict) -> bool:
+    """Fail a queued or researching batch accepted under another judgment identity, with its queued research.
+
+    Finished reports and call records stay; nothing reopens automatically. Frozen and later batches are never passed.
+    """
+    frozen, current = frozen_judgment(batch), model_profile.judgment_identity()
+    if frozen is None or frozen == current:
+        return False
+    changed = "契约" if frozen["contract"] != current["contract"] else "模型配置"
+    error = (f"受理时冻结的判断配置（契约 {frozen['contract']}，配置档 {frozen['profile_sha256'][:8]}）与当前"
+             f"（契约 {current['contract']}，配置档 {current['profile_sha256'][:8]}）的{changed}不一致，已停止，不自动重跑")
+    with db.transaction(conn):
+        stopped = conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = ?, updated_at = ?"
+                               " WHERE id = ? AND status = ? RETURNING id",
+                               (error, db.now(), batch["id"], batch["status"])).fetchone()
+        if stopped:
             conn.execute("UPDATE runs SET status = 'failed', step = NULL, finished_at = ?, error = ?"
-                         " WHERE batch_id = ? AND status = 'queued'", (db.now(), error, row["id"]))
-            conn.execute("UPDATE batches SET status = 'failed', step = NULL, error = ?, updated_at = ? WHERE id = ?",
-                         (error, db.now(), row["id"]))
-        log.warning("batch %s stopped: %s", row["id"], error)
+                         " WHERE batch_id = ? AND status = 'queued'", (db.now(), error, batch["id"]))
+    if stopped:
+        log.warning("batch %s stopped: %s", batch["id"], error)
+    return True  # mismatched either way: never advance this batch
 
 
 def _marks_through(pro, batch: dict, day: str, stamp: str) -> dict:
@@ -913,6 +924,9 @@ def tick(conn) -> bool:
     for r in rows:
         batch = load(r)
         try:
+            # Acceptance and the worker may run different images; check before screening or linking more research.
+            if batch["status"] in ("queued", "researching") and _stop_if_judgment_changed(conn, batch):
+                return True
             if batch["status"] == "queued":
                 request_id = str(batch.get("request_id") or "")
                 if request_id.startswith("monthly:") and request_id != f"monthly:{now:%Y-%m}":

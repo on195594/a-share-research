@@ -42,6 +42,33 @@ def test_sl3_comparison_and_freeze_enforce_one_company_per_industry(tmp_path, mo
     conn.close()
 
 
+
+@pytest.mark.parametrize('status', ['frozen', 'tracking'])
+def test_frozen_picks_entry_and_marks_survive_a_judgment_identity_change(tmp_path, monkeypatch, status):
+    from pathlib import Path
+    from a_share_research import worker
+
+    cache_partial_window(monkeypatch)
+    conn = db.connect(tmp_path / 'c.db')
+    q20, s10 = proposed(conn)
+    service.freeze_batch(conn, 1, [q20[0]['code']], '', small_codes=[s10[0]['code']])
+    # Lifecycle-only variant: captured entry and marks from an earlier tracked batch, checked today so no
+    # market call follows, and a later contract/profile running than the one frozen with the picks.
+    captured = json.loads((Path(__file__).parent / 'data/hypotheses_v3.json').read_text())['batch']
+    today = screening.datetime.now(db.SHANGHAI).strftime('%Y%m%d')
+    selection = batches.load(conn.execute('SELECT * FROM batches').fetchone())['selection']
+    frozen_identity = model_profile.judgment_identity() | {'contract': model_profile.JUDGMENT_CONTRACT - 1}
+    conn.execute('UPDATE batches SET status=?, entry=?, marks=?, selection=? WHERE id=1',
+                 (status, json.dumps(captured['entry']), json.dumps(captured['marks'] | {'checked': today}),
+                  json.dumps(selection | {'judgment': frozen_identity}, ensure_ascii=False)))
+    before = dict(conn.execute('SELECT * FROM batches WHERE id=1').fetchone())
+    worker.recover(conn)
+    screening.recover(conn)
+    assert not screening.tick(conn)
+    assert dict(conn.execute('SELECT * FROM batches WHERE id=1').fetchone()) == before
+    conn.close()
+
+
 def test_empty_small_draft_auto_freezes_with_large_and_partial_coverage(tmp_path, monkeypatch):
     cache_partial_window(monkeypatch)
     conn = db.connect(tmp_path / 'c.db')
