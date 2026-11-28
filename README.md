@@ -81,7 +81,7 @@ ashare call research_card --json '{"code":"600519"}'
 
 ## 运行身份与材料重放
 
-运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取 Wiki 方法卡。[方法库](docs/research.md#方法库与评估集)
+运行身份与调用记录见[系统架构](ARCHITECTURE.md#研究与模型调用)；发布镜像还带有构建所用的完整提交号。普通单股研究可从 worker 只读挂载的 `METHOD_CARDS_DIR` 读取仓库 `method-cards/` 运行目录的方法卡。[方法库](docs/research.md#方法库与评估集)
 
 `--replay` 按原任务编号复用已保存且哈希匹配的材料，重新成文、核验与复核，生成独立任务。以下命令分别建立评估集基线并重放指定任务。
 
